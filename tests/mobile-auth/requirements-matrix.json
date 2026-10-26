@@ -1,0 +1,20 @@
+{
+  "suite": "mobile-auth-canonical-identity-v1",
+  "requirements": [
+    {
+      "id": "MA-CI-01",
+      "requirement": "Canonical service rejects empty and malformed phone values before any identity lookup.",
+      "evidence": "php/canonical-identity-contract.php"
+    },
+    {
+      "id": "MA-CI-02",
+      "requirement": "Canonical migration preserves eb_user and marks historical duplicate phones LEGACY_CONFLICT.",
+      "evidence": "php/canonical-identity-contract.php"
+    },
+    {
+      "id": "MA-CI-03",
+      "requirement": "Identity map and audit table retain MySQL 5.6-safe schema, unique mapping and append-only audit action contract.",
+      "evidence": "php/canonical-identity-contract.php"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+    "status": "PASS",
+    "run_id": "263be182efdc87cbde5f613c3747ee4b8260fbb385964029",
+    "same_run": true,
+    "member_identity_uniquely_bound": true,
+    "metric": "sales_collected_amount",
+    "period": [
+        "2026-09-01",
+        "2026-09-30"
+    ],
+    "model_attempts_before_phone": 2,
+    "model_attempts_after_phone": 2,
+    "successful_reader_calls": 1,
+    "business_facts_modified": false,
+    "phone_exported": false,
+    "scope_store_count": 102
+}

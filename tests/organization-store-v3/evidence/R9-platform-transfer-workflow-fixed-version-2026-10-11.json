@@ -1,0 +1,501 @@
+{
+  "round": "R9",
+  "title": "R9平台登录、库存权限衔接、共享调拨操作与调入方搜索",
+  "date": "2026-10-11",
+  "baseline_head": "1477eb5afa11d500a17a2dce254c5224cb3a3e68",
+  "patch_sha256": "dde8c3bbd9a81c2a760b135287fd380e3b0bdd12efc9e2ee05ac19170585403f",
+  "patch_fingerprint_method": "git diff HEAD for scoped tracked frontend/backend/test files + path/newline/content for scoped untracked files in groups order; evidence hashed separately",
+  "status": "开发与自测完成，待产品经理确认验收",
+  "scope": [
+    "无平台登录入口提示无权登录",
+    "有登录入口允许登录，不以菜单/权限数组非空作为条件",
+    "有菜单沿用原导航，无菜单展示空工作区，刷新保留登录态",
+    "空规则不返回全量权限，搜索菜单不共用 root 空规则缓存，已登记业务 API 无授权拒绝",
+    "对应有效旧菜单仅衔接精确 GET 库存只读路由；源码白名单与菜单共同校验，不要求旧数据库目录完整",
+    "入库、出库、盘点、库存查询、请货、调拨、配方、院装逐页面兼容；统一查询 HTTP 和领域层检查 pageCode",
+    "组织/门店/总部仓/租户范围不扩大；没有门店范围的院装仍拒绝查询",
+    "菜单不补发通用查看、仓库管理、导出或查询设置授权；新建、导入和单据动作由可信后端写能力决定",
+    "已有对应菜单和添加/编辑功能节点按具体功能恢复调拨、请货、入库、出库、盘点新建，以及必要表单查询和盘点草稿保存/恢复；不补发岗位授权，不扩大数据范围或其他单据操作权限",
+    "产品确认平台调入方不控制权限：候选、人员依赖和草稿保存不按操作者门店/组织权限限制接收对象；调出方权限、租户隔离和有效实体检查保留，不授予接收方库存/商品/人员查看权限",
+    "平台调拨草稿编辑/删除/发货、在途目标方收货按对应调拨功能授权精确命令，覆盖此前仅新建阶段限制；源主体、状态、租户和版本校验保留",
+    "新建/编辑及列表调入方支持名称搜索；列表独立接收目录展示全部有效门店，不扩大单据查询权限"
+  ],
+  "groups": {
+    "frontend": [
+      {
+        "path": "前端代码/admin/src/libs/platformLogin.js",
+        "sha256": "c0ed5a665f96bf8d95982971063e0a7b18e856bc8bda7a4e78af5451fc140073"
+      },
+      {
+        "path": "前端代码/admin/src/libs/util.js",
+        "sha256": "e764909ba214a362862367ccf5372b3ab7efd86e166cdd4756f2f1774eaaa523"
+      },
+      {
+        "path": "前端代码/admin/src/main.js",
+        "sha256": "a67aed8d5a149c1f72f7d04c5e831ca259eb50c1af1059f9573b3f2d4e565e8d"
+      },
+      {
+        "path": "前端代码/admin/src/pages/account/login/index.vue",
+        "sha256": "f0fc07a9491cdc55a68429846d4fd1155181879346689442b3617f53cd03daeb"
+      },
+      {
+        "path": "前端代码/admin/src/router/index.js",
+        "sha256": "027216438cc92c107310bcf0d24efc426bf1e934662dbee450ebce0f6270a723"
+      },
+      {
+        "path": "前端代码/admin/src/router/routes.js",
+        "sha256": "404440f93f33310d1e393929eac036fddf1123124f04f82eed9902662c215e45"
+      },
+      {
+        "path": "前端代码/admin/src/store/modules/admin/modules/menus.js",
+        "sha256": "147cd82a9218323ffb3e40d6ee3a698b0abe6d2d935c0078e4174b6185d9e596"
+      },
+      {
+        "path": "前端代码/inventory-vue3/src/App.vue",
+        "sha256": "b9878456f90f53b9c2a24e2a208cd56f9fd47985f4423516a79f3cd1e8c53365"
+      },
+      {
+        "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+        "sha256": "2548001a1bd424ddb181b27b7f167e05ece3b7dceee80fb22a0885684d1c6287"
+      },
+      {
+        "path": "前端代码/inventory-vue3/src/components/InventoryStoreSelector.vue",
+        "sha256": "5f019eeed49ab229c488ac3c37df379fba0765e00ca265d3ca907ce21f85368f"
+      },
+      {
+        "path": "前端代码/inventory-vue3/src/services/inventoryApi.js",
+        "sha256": "a1cb4bc376a667a004d09529a5d8fcfb69f81df5dde0ad451e9c2b69ccefeeb3"
+      }
+    ],
+    "backend": [
+      {
+        "path": "后端代码/app/controller/admin/Common.php",
+        "sha256": "8aa4b24cb1ac4a029270c7a5d873142244ff53b432444a2610a914083e5785b0"
+      },
+      {
+        "path": "后端代码/app/services/employee/EmployeeInternalLoginServices.php",
+        "sha256": "b6453e25e6c250495b7441eb4f9d3915722b745244ab9bb7b0dc3bdfa7c9d0eb"
+      },
+      {
+        "path": "后端代码/app/services/system/admin/SystemAdminServices.php",
+        "sha256": "5ad2bb9435058466467fb4d38b3d8ae5907a00a01a40ce0be765b0b4b54b9dea"
+      },
+      {
+        "path": "后端代码/app/services/system/SystemMenusServices.php",
+        "sha256": "76e4682de964e163f3154a0a04bc95f6b005b36596683e6c1d34e05d184665d9"
+      },
+      {
+        "path": "后端代码/app/services/system/SystemRoleServices.php",
+        "sha256": "0c14dc204b7c2db989b110c6610cdb0498a9ec6898bf7ca3dcca6d64ffb8decb"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php",
+        "sha256": "e6e52b41083c5c636b7a0f717286c7ee941837d49d96262c4751bb8cd4bb2619"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php",
+        "sha256": "afbea1de411c0222b33363df30c51fc8aaf122404dddb18baa0bb7c8970061da"
+      },
+      {
+        "path": "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformWarehouse.php",
+        "sha256": "04a3a0ac2abb47e8dbee19c5fe42fc9d58ea13ac4da8f644537acbacd6cbad69"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php",
+        "sha256": "b4f9b905402275ba9ee2420101acb452ee597021cccac7ffc2e21d1b753b51d4"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryStockRequestServices.php",
+        "sha256": "53b50a583f890e3df7032feef7dda5153310cf487cd73695e31435fae8f0b0c9"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php",
+        "sha256": "836042a99718f52b30d501ed8b6fe8fd5ac886f8f4cd055bba8856006808370d"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryPlatformHqInboundServices.php",
+        "sha256": "e09cfd7c43f90770cfa91006c444235746767d24d403bc08a4e0cd99272d9b7d"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+        "sha256": "6a5d94940cb52762a931baffb2925f95d1d089bff6195e5b7119ccafe503bda7"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventorySalonUsageServices.php",
+        "sha256": "2f783aba047e8ee0d9eb47e322d290a8f16080605b7447f61e987aa8a6b11d8d"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryHqLocationServices.php",
+        "sha256": "fb7933cca45a8d241dbf085d4bc10cb4877e686bfa258ab688079dccdb903598"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+        "sha256": "017bc61b1c10f9ec12d7ea4da62617de1de0361d00983cfc481e98f21b480920"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryStockCountDraftServices.php",
+        "sha256": "06f74c80a4af8adb7e707d2d9704eae4d00d816cc3190f6bbc2761a5ca192edd"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryPlatformHqCatalogServices.php",
+        "sha256": "2dc3ef1dc378c5813e02ca6135a859c627b4d35cb592a8d8fcad56e14c55a182"
+      },
+      {
+        "path": "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqCrossTransfer.php",
+        "sha256": "0df7c05443ae06b051cc0d9819a412dfaef2b1745f6819aefe1f70328ccf95ce"
+      },
+      {
+        "path": "后端代码/route/admin.php",
+        "sha256": "8cf66070fe008834adc6c88d03cb40ee32e7eb5e3799952432e92f5de1d7b3e4"
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/organization-store-v3/js/platform-empty-menu-login.mjs",
+        "sha256": "f804ad127dcda59bd5996a5890ad19d7b7c426a574fc3ab86538687eadd79eee"
+      },
+      {
+        "path": "tests/organization-store-v3/php/platform-empty-menu-login.php",
+        "sha256": "affe4a57b24efaa91282e5dca674d36976239e75fa2f60e7ea953e751991f9d3"
+      },
+      {
+        "path": "tests/inventory/php/r9-platform-transfer-menu-access.php",
+        "sha256": "d29dbccada85364ec587d8853651fa6b5c5426f74d768001bfbfd4a40c3bf9a8"
+      },
+      {
+        "path": "tests/inventory/php/platform-operational-query-contract.php",
+        "sha256": "7dbd61ae392878ab384ba8b2f42828e61dc173d77c0e9c71f422541c2167833c"
+      },
+      {
+        "path": "tests/inventory/php/cross-subject-transfer-contract.php",
+        "sha256": "5f22a7d04ed056ab4d5e59df3d075c18746295e01e22da642cda84496da645a0"
+      },
+      {
+        "path": "tests/inventory/php/r9-platform-transfer-target-directory.php",
+        "sha256": "1bbaae4aca7def266a08f0990d0b13eef8a42672ce919733ecc77998a2270bb4"
+      },
+      {
+        "path": "tests/inventory/php/cross-transfer-draft-edit-contract.php",
+        "sha256": "6d186af7a5858d92423ad3029f919b11889052f58b5a5dbe51707188b5700da5"
+      },
+      {
+        "path": "tests/inventory/js/cross-transfer-draft-edit-contract.mjs",
+        "sha256": "2e657834bd835c1b701107c9703e90a0862a8f33ca4b2437f2a0cfc374f53630"
+      },
+      {
+        "path": "tests/inventory/php/cross-transfer-draft-edit-integration.php",
+        "sha256": "5916133c89616380e0e42c0ddd28ffb6e62ed4dfac096298b01097402916aa65"
+      }
+    ],
+    "evidence": [
+      {
+        "path": "tests/organization-store-v3/evidence/R9-empty-workspace-refresh-2026-10-11.png",
+        "sha256": "10f0a876b87e04224bc16722a5e8e849f69bfc61e8b5111557e8da03228a81b8"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-no-login-permission-2026-10-11.png",
+        "sha256": "2df5a59a5eb38c41a93248d04fe3765f3f2e13a38ec0b4706b2c2650ce5a2efa"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-selftest-2026-10-11.md",
+        "sha256": "44b99712ebbbb8559181889747ccc1e09a63d1443507288000496c52aea3e6ca"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-list-2026-10-11.png",
+        "sha256": "b3c0f3d69ddd2eec5481b4303b4353265763ae10ccdda5e6d760ea955017ef55"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-detail-2026-10-11.png",
+        "sha256": "5db8f6e04e5afcdb35e66ee09d125825f946440178dbf513b2e0b462a34732f3"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-inbound-menu-fixed-2026-10-11.png",
+        "sha256": "79d9f983516361e534f378a858601aec6220eb6526bd0650f95f10b4b42c20cb"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-outbound-menu-fixed-2026-10-11.png",
+        "sha256": "1cde83fa5c82bfd2ebff2d78a0df882e5f9aac4d24c2668feb2ad191798c8371"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-count-menu-fixed-2026-10-11.png",
+        "sha256": "cb7effb87a23c45cfecd541cb177c0ddc1c6fceeda4a31129a9b910563e96af5"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-stock-menu-fixed-2026-10-11.png",
+        "sha256": "52bc1b0a91477b58be38800294fc6ea774e993c585146488128191c773ed4682"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-request-menu-fixed-2026-10-11.png",
+        "sha256": "4040acd0780685cbe44994a99b5326e2ad892b96397425a9496407ab14fd97e8"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-recipe-menu-fixed-2026-10-11.png",
+        "sha256": "c058dbd7c7c015e5ef78f3d8e2672a3a07846ed7e88ce71bfd66748c11dd68e2"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-usage-scope-2026-10-11.png",
+        "sha256": "bb32cf032dc0171b1b78e493f6f0a51a5f0a5121e6d31cd385fd4410752979db"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-inventory-menus-selftest-2026-10-11.md",
+        "sha256": "c93995595cfa0f0f6c44dcbbaad63078e6df89f102afabe784a66545a05a9f18"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-function-transfer-create-2026-10-11.png",
+        "sha256": "d0ac26bfa49a0e57b9c0c9e9e744a0cd148cce799ba7d1a9a65eff23ca8158b1"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-function-inbound-create-2026-10-11.png",
+        "sha256": "ffe292169bd009986676dd7c073d61dc1ea9ed9ef034550f69086394261e4312"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-function-outbound-create-2026-10-11.png",
+        "sha256": "d0193e42a806a8564c0c974bc945971b4545fa4462919a3e86e9bf7650802bc5"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-function-count-create-2026-10-11.png",
+        "sha256": "526e5e62c7705b2cdda936a2137a1fe73c0c04acdba24ae114de6011c1813688"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-function-request-create-2026-10-11.png",
+        "sha256": "57bd5a98597d6a1eb981e35982974e5b94d2fd1f76178bbbeb6a91df89cdeaed"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-inventory-function-create-selftest-2026-10-11.md",
+        "sha256": "33ab5ed34ca60682e0c7b4e36691efe510a0a9897930ec5d1c5353b61ddc7226"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-target-directory-2026-10-11.png",
+        "sha256": "da4854057bda336ae80628479b9a0dc7009d1d53c6a63d817adb008586d82ea3"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-target-selected-2026-10-11.png",
+        "sha256": "07291f20730be0283f642d63a1d12b3a12a31d56ba53cd2ace4e84d9559d3777"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-target-selftest-2026-10-11.md",
+        "sha256": "06c970dc7a4572c057231277691a3ea38d45bca72ab72b51e6c885e4ecb0d36d"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-workflow-selftest-2026-10-11.md",
+        "sha256": "ce1a51be03ac84b5e3148845db2dbeb60b7665cbbee1990c1ce86d24bc34bf27"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-list-search-2026-10-11.png",
+        "sha256": "cc41c09ec7fa65f4bb52e696baefb45b336e4bdf7f6d0dec47ac985121c3a350"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-draft-editor-2026-10-11.png",
+        "sha256": "ab3f76b75b8d6900aeff462527bdbafc8d3d2b16f24d6c81864cb9cb9070bd61"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-form-search-2026-10-11.png",
+        "sha256": "6fbef42a23959ee5ef5a10e23bbef5ae25250c1961e257e807a6cc42377c9e04"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-list-search-desktop-2026-10-11.png",
+        "sha256": "5de2b6f5fc44a6baade39c5815b6b557b77a6e559829e37a04d35e67dd32c66d"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-new-search-2026-10-11.png",
+        "sha256": "7bfdcd7017352c746ab82db28486636d6d44d8e230c891ce5be325566c552ff1"
+      }
+    ]
+  },
+  "migrations": [],
+  "engineering_scripts": [],
+  "build_outputs": [],
+  "comment_updated_files": [
+    "前端代码/admin/src/libs/platformLogin.js",
+    "前端代码/admin/src/libs/util.js",
+    "前端代码/admin/src/main.js",
+    "前端代码/admin/src/pages/account/login/index.vue",
+    "前端代码/admin/src/router/index.js",
+    "前端代码/admin/src/router/routes.js",
+    "前端代码/admin/src/store/modules/admin/modules/menus.js",
+    "后端代码/app/controller/admin/Common.php",
+    "后端代码/app/services/employee/EmployeeInternalLoginServices.php",
+    "后端代码/app/services/system/admin/SystemAdminServices.php",
+    "后端代码/app/services/system/SystemMenusServices.php",
+    "后端代码/app/services/system/SystemRoleServices.php",
+    "前端代码/inventory-vue3/src/App.vue",
+    "后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php",
+    "后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php",
+    "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformWarehouse.php",
+    "后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php",
+    "后端代码/app/services/product/inventory/InventoryStockRequestServices.php",
+    "后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php",
+    "后端代码/app/services/product/inventory/InventoryPlatformHqInboundServices.php",
+    "后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+    "后端代码/app/services/product/inventory/InventorySalonUsageServices.php",
+    "后端代码/app/services/product/inventory/InventoryHqLocationServices.php",
+    "后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+    "后端代码/app/services/product/inventory/InventoryStockCountDraftServices.php",
+    "后端代码/app/services/product/inventory/InventoryPlatformHqCatalogServices.php",
+    "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+    "前端代码/inventory-vue3/src/components/InventoryStoreSelector.vue",
+    "前端代码/inventory-vue3/src/services/inventoryApi.js",
+    "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqCrossTransfer.php",
+    "后端代码/route/admin.php"
+  ],
+  "tests_run": [
+    {
+      "command": "r9-platform-transfer-target-directory.php, local PHP7.4/MySQL guarded rollback",
+      "result": "43 PASS; draft save/update/readback/delete, stale token, failed dispatch, dispatch/receipt and idempotent replay"
+    },
+    {
+      "command": "r9-platform-transfer-menu-access.php, local PHP7.4/MySQL guarded rollback",
+      "result": "218 PASS; precise transfer commands and foreign-function denial"
+    },
+    {
+      "command": "cross-transfer-draft-edit-integration.php, dedicated local test DB, skip schema bootstrap",
+      "result": "25 PASS; unchanged store-terminal regression"
+    },
+    {
+      "command": "PHP draft/cross-subject/platform-query contracts; JS draft contract",
+      "result": "10 / 13 / 12 / 7 PASS"
+    },
+    {
+      "command": "PHP7.4 lint four files; Vue script/template compiler three files; git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "CUA actual local18081 account and APIs, no interception",
+      "result": "PASS new/edit/list receiver search, selected receiver query, four draft buttons and edit readback; no real business write; temporary viewport restored"
+    }
+  ],
+  "data_architecture": {
+    "authority": "有效岗位 use_platform 控制登录资格；岗位规则独立控制菜单/API，无前端补授权",
+    "events": "Login audit/projection unchanged; draft changes do not affect stock; dispatch and receipt create stock facts once",
+    "concurrency": "Shared document/line locks, persisted-field edit token, draft fact guards and existing dispatch/receipt idempotency",
+    "permissions": "后端登录入口判断；既有前端业务路由鉴权不放宽；已登记 API 空授权不放行",
+    "snapshots": "覆盖当前用户菜单与权限，避免继承上一用户状态",
+    "performance": "移除登录入口的菜单规则查询；空规则菜单/搜索提前返回",
+    "reconciliation": "本地事务测试覆盖开关、岗位状态、绑定状态/结束/删除、空规则及有菜单",
+    "transfer_authority": "Receiver directory independent of operator grants; source/tenant/validity checks remain; exact transfer function gates commands, target-only receipt; store-terminal organization boundary unchanged",
+    "transfer_events": "Shared locked draft update/delete, version token from persisted fields, existing authoritative dispatch/receipt facts and idempotency; local synthetic rollback tested; no real business writes or migrations",
+    "inventory_authority": "Corresponding function still gates creation and source scope remains enforced; platform receiving identity is not an operator data grant, per explicit product decision; tenant and active entity checks remain; no real grants mutated"
+  },
+  "limits": [
+    "本机 127.0.0.1:18081 已有 LocalStorage 配额不足，因此页面回归改用独立 localhost:18081；未清空原有业务缓存；仅移除本轮合成登录 Cookie",
+    "未打包8080、未commit、未部署、未push；其余脏工作区及暂存区保持不动",
+    "本次调拨页面使用本地真实账号和接口；此前登录合成响应证据不改写为真实验收",
+    "此前登录 UI 使用合成响应，本次库存 UI 使用当前本地真实账号；不冒充生产或全部真实登录验收",
+    "院装当前账号无门店范围，未执行有门店范围账号的院装真实查询；仅验证精确路由兼容和无门店拒绝",
+    "当前其他菜单多数为空表；不宣称非空全状态业务验收或写操作验收",
+    "配方已有独立写 API 未改动；只读兼容不新增 POST 授权",
+    "浏览器仅打开表单并加载辅助数据，未真实提交库存单据；当前账号无门店数据范围，未扩大范围或验证真实跨门店发货/收货",
+    "历史清单/测试结果保留；旧静态商品目录断言本次因目录鉴权变更同步更新，当前13项通过",
+    "按最新明确口径，平台调入方可选未授权组织/门店；旧清单关于目标范围不扩大的表述已被本条业务确认替代；调出及其他业务范围仍不扩大",
+    "本次浏览器不提交真实单据；保存/回读只使用事务回滚的合成夹具",
+    "Current workflow scope supersedes historical create-only transfer command restrictions; old tests retained only as historical evidence",
+    "Browser did not save/delete/dispatch/receive real draft DB2610110001; full state transitions used local synthetic fixtures under rollback",
+    "Unchanged store integration test included as validation dependency, not new code"
+  ],
+  "supersedes": "tests/organization-store-v3/evidence/R9-platform-transfer-target-fixed-version-2026-10-11.json",
+  "supersedes_reason": "新增共享调拨草稿操作、对应功能命令授权与调入方搜索，重新固定合并范围供产品经理补验",
+  "starting_head": "04cb694310c9abb31d63333b3ae1482c51518bfe",
+  "baseline_change": "Other-task commits advanced HEAD; zero overlap with R9 manifest paths; no R9 commit created",
+  "historical_tests_run": [
+    {
+      "command": "node tests/organization-store-v3/js/platform-empty-menu-login.mjs",
+      "result": "PASS real helper execution + store/cookie adapters; three login branches; default/empty routes and 403 retention"
+    },
+    {
+      "command": "docker exec -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 -i mohe-platform-app php < tests/organization-store-v3/php/platform-empty-menu-login.php",
+      "result": "PASS 25 assertions; local MySQL hostname guarded; synthetic fixtures rolled back and tokens removed"
+    },
+    {
+      "command": "node tests/organization-store-v3/js/store-v3-login-entry-contract.mjs",
+      "result": "PASS 18 assertions; store V3 login contract unchanged"
+    },
+    {
+      "command": "PHP 7.4 lint (5 backend files)",
+      "result": "PASS"
+    },
+    {
+      "command": "Vue template compiler + Babel parse (7 frontend files)",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "CUA localhost:18081 UI with synthetic intercepted API responses",
+      "result": "PASS empty menu/empty permissions login + refresh to workspace; direct business route goes 403; denied login message 无权登录"
+    },
+    {
+      "command": "docker exec -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 -i mohe-platform-app php < tests/inventory/php/r9-platform-transfer-menu-access.php",
+      "result": "PASS 36 assertions, local guarded synthetic transaction rolled back"
+    },
+    {
+      "command": "PHP 7.4 lint (3 transfer backend files), Vue SFC script/template compile, git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "php tests/inventory/php/cross-subject-transfer-contract.php",
+      "result": "12 PASS / 1 existing static FAIL; fixed p.type=0 expectation differs from unchanged dynamic source type filter; details in selftest"
+    },
+    {
+      "command": "CUA local18081 current real account, actual API responses",
+      "result": "PASS 16 monthly transfer records, detail HTTP200/rendered, create disabled and no dispatch/receive action"
+    },
+    {
+      "command": "R9 login PHP regression rerun 2026-10-11",
+      "result": "PASS 26 lines including synthetic fixture rollback; prior manifest count25 excluded rollback"
+    },
+    {
+      "command": "R9 expanded inventory menu permission matrix",
+      "result": "100 PASS; local guarded synthetic fixtures rolled back; supersedes prior 36-assertion result"
+    },
+    {
+      "command": "R9 login regression PHP + JS rerun",
+      "result": "26 PHP PASS including rollback; JS PASS"
+    },
+    {
+      "command": "platform-operational-query-contract.php after corresponding assertion update",
+      "result": "12 PASS; exact page and native write prerequisite covered"
+    },
+    {
+      "command": "PHP7.4 lint 10 affected backend files; Vue SFC script/template; git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "cross-subject-transfer-contract.php rerun",
+      "result": "12 PASS / 1 pre-existing static FAIL in unchanged HQ catalog type predicate; see latest selftest"
+    },
+    {
+      "command": "CUA current real account, actual local APIs, no intercepted responses",
+      "result": "inbound/outbound/count/stock/request/recipe read successfully; usage correctly blocked by missing store scope; no business writes"
+    },
+    {
+      "command": "R9 function-specific create regression (local hostname guarded PHP/MySQL)",
+      "result": "206 PASS including fixture rollback; replaces earlier 100-assertion matrix; foreign create, dispatch/receive/void/import/draft-delete denied; count draft save/readback verified"
+    },
+    {
+      "command": "platform-operational-query-contract.php; cross-subject-transfer-contract.php",
+      "result": "12 PASS; 13 PASS. Catalog assertion aligned with precise create guard and preserved dynamic type/relation scope; supersedes historical 12/1 result"
+    },
+    {
+      "command": "R9 login PHP + JS regression; PHP7.4 lint 11 changed backend files; Vue App SFC script/template; git diff --check",
+      "result": "26 PHP PASS including rollback, JS PASS, lint/compiler/diff PASS"
+    },
+    {
+      "command": "CUA local18081 real account, actual API responses, no interception",
+      "result": "All five new-document forms opened; transfer catalog loaded 573 variants/48 pages; request personnel and departments loaded; no real business submission"
+    },
+    {
+      "command": "docker exec -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 -i mohe-platform-app php < tests/inventory/php/r9-platform-transfer-target-directory.php",
+      "result": "24 PASS including real synthetic draft save/readback/idempotency, unchanged grants/source rights, invalid receivers and tenant checks; all fixtures rolled back"
+    },
+    {
+      "command": "R9 permission matrix; cross-subject-transfer-contract; cross-transfer-draft-edit-contract; PHP7.4 lint; git diff --check",
+      "result": "206 PASS incl rollback; 13 PASS; 10 PASS; lint/diff PASS"
+    },
+    {
+      "command": "CUA local18081 current real account, actual responses",
+      "result": "Receiver directory populated; chose 合肥世纪中心店 and current operator loaded; no actual draft save/dispatch/receipt"
+    }
+  ]
+}

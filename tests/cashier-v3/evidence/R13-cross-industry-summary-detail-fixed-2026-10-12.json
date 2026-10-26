@@ -1,0 +1,109 @@
+{
+  "task": "R13-00001 异业收客汇总补交会员、单据明细与名称闭环",
+  "status": "开发与自测完成，待产品经理确认验收；未提交、未部署、未推送",
+  "fixed_version": "R13-20261012-912dcd54",
+  "generated_at": "2026-10-12T05:24:26+00:00",
+  "baseline_head": "2ecb83fa2b7be69bd4efed786879f43fd3771ceb",
+  "last_observed_head": "68d7f77375605a44a4e8146561f8bf68c7f3e17d",
+  "branch": "release/store-cashier-c14-main",
+  "supersedes_for_acceptance": "R13-cross-industry-repayment-selftest-2026-10-12.json；旧文件为七列业务日期阶段的历史自测，不代表本次九列及汇总改动版本",
+  "approved_scope": [
+    "普通明细入口统计本次来源为 G异业收客 的正常收款与欠款补交；本次补交不按会员历史来源替代。",
+    "汇总也包含本年 G异业收客 补交会员，用户已明确确认李灰芝应进入年度汇总。",
+    "明细会员左侧新增单据号，右侧新增手机号；护理日期改为本次收款业务日期。",
+    "年度会员表命名为异业收客汇总表，逐笔收款表命名为异业收客明细表；原路由代码和位置不互换。",
+    "列名取值来源采用业务语言。"
+  ],
+  "implementation": [
+    "明细本来已从统一收款事实包含补交，没有拼接第二套补交金额。按收款业务日期分行；金额、查询日期、导出一致。",
+    "汇总新增补交会员入口，与正常销售按门店和会员合并；后续收款仍沿用自然年全部来源口径，金额只从收款事实计算一次。",
+    "汇总的月度、年度、门槛、服务和当前权益按门店会员隔离；月度与年度下钻带门店和会员范围。",
+    "首次满500下钻到构成金额的当天，累计满2400下钻到达到门槛的累计日期，修正原来均打开全年流水的问题。",
+    "纯补交会员的既有收客时间、异业店名保存绑定真实补交事实，保留已有版本、幂等、审计和权限检查。已保存补交主题不会因后续销售改换而丢失。",
+    "纯补交且无本年销售时不虚构卡项名和首次卖卡日。",
+    "前端移除已经失效的两端异业表名差异覆盖；后端移除旧护理日期查询及被门店会员日收款聚合替代的 cashByMemberAndMonth。"
+  ],
+  "files": {
+    "frontend_source": [
+      {"path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue", "sha256": "3c58eaecee1feb1606a6af9b87d6f02e864ff7408e6f44c279c9f7f12ef9459b"}
+    ],
+    "backend_source": [
+      {"path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php", "sha256": "3ad5560b0590bd879e83fb801a5c47714a09e6170b553d0ab7e9b7fbccab6966", "boundary": "不含 newCustomerSummaryAddRow 的实例系统名称与对应注释改动；该两处属于其他任务。"},
+      {"path": "后端代码/app/services/report/StoreReportParticipantScopeServices.php", "sha256": "21b8106ea97ae8731775265d75dd7180805cc00a7c74afa6991db1058f3e5678"},
+      {"path": "后端代码/app/services/report/StoreOperationsReportAnnotationServices.php", "sha256": "aadf5efb50f92f33463e25905bb39c6cced2a0facd2290f462c7a1688c892a33"}
+    ],
+    "database_migrations": [],
+    "automated_tests": [
+      {"path": "tests/cashier-v3/php/phase-two-report-projection-contract.php", "sha256": "836f27a35c244f02f5500081c5ee31a4159a758077112f460e63b6c175b140cd"},
+      {"path": "tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php", "sha256": "9d439e243dc882ec303a7ddf89b777d8ecc672bb63499b0886291d1ece644c3a"},
+      {"path": "tests/cashier-v3/php/r13-cross-industry-summary-annotation-rollback.php", "sha256": "53c27b72a27066c43821fa37007d92ac5423abf37d28058e150165acd4ce3d51"}
+    ],
+    "engineering_scripts": [],
+    "generated_artifacts": [
+      {"path": "/tmp/r13-cross-industry-build-20261012/index.html", "sha256": "491d90abfd0a10b2b3a27f9d94e33965fa43b642da0ef4a3a2d375d9abce5b9d"},
+      {"path": "/tmp/r13-cross-industry-build-20261012/assets/index-461b40c9.js", "sha256": "187660584ac27a51e7f579a4c0aa9d517c1f75307ce56ef300b5cbd71b491afb"},
+      {"path": "/tmp/r13-cross-industry-build-20261012/assets/index-a0c26d75.css", "sha256": "a0c26d75d1ce137a8ec168b5262d96d66630a5474fdf920c7e5c62a1d5de0aac"}
+    ],
+    "evidence": [
+      "tests/cashier-v3/evidence/R13-detail-document-phone-2026-10-12.jpg",
+      "tests/cashier-v3/evidence/R13-summary-repayment-2026-10-12.jpg",
+      "tests/cashier-v3/evidence/R13-summary-explanations-2026-10-12.jpg",
+      "tests/cashier-v3/evidence/R13-summary-refreshed-2026-10-12.jpg",
+      "tests/cashier-v3/evidence/R13-cross-industry-summary-detail-fixed-2026-10-12.json"
+    ]
+  },
+  "owned_patch": {
+    "format": "git diff --unified=0 across the five tracked source/test files in files; exclude the two unrelated report-service hunks below. New test files are fixed by their individual SHA-256.",
+    "sha256": "912dcd54065b0a63f1a5fe62611a4b571506da358ab41da21fd0b0350db56901",
+    "excluded_hunks": [
+      {"header": "@@ -1978,0 +2106,4 @@", "sha256": "52e63e750e363e967b6c77ece54b4912cd6170a0f1201f475b9bbd3580b151d3"},
+      {"header": "@@ -1991 +2122,4 @@", "sha256": "35e320566cefaa593a5994c9afdbf1d21cf09af86eb289ca41a1ff7d3d00d9db"}
+    ],
+    "staged_diff_sha256_unchanged": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+    "concurrent_head_change": "开发期间其他任务提交 2ecb83fa（008商家小程序域名隔离），固定后又提交68d7f773（008商家小程序登录文案）；核对均不含本轮文件，源码指纹和暂存区未变。固定验收基线仍保留2ecb83fa，未修改或回退其他提交。"
+  },
+  "verification": {
+    "php_lint": {"files": 6, "failed": 0},
+    "readonly_mysql": {
+      "passed": 143, "failed": 0,
+      "command": "docker exec -i -e R13_LOCAL_TEST=1 -e R13_REPAYMENT_NO=BJ26100200015 -e BACKEND_ROOT=/var/www/html mohe-cashier-app php < tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+      "output_sha256": "c2064785950d91d0c7fbc647091250c9d61687a063420eef515be79bcad54967",
+      "scope": "本地 mohe-cashier-app / ruihao，只读事务回滚；175店补交样本及118店正常消费、补交样本。",
+      "coverage": "业务日期、九列顺序、补交本单号、手机号、实际分金额、查询合计导出、其他来源排除、作废排除、个人/门店权限、补交会员入表、会员去重、全部月度/年度/门槛下钻精确对账、合并两店与逐店金额服务权益一致。"
+    },
+    "annotation_rollback_mysql": {
+      "passed": 21, "failed": 0,
+      "command": "docker exec -i -e R13_LOCAL_TEST=1 -e R13_REPAYMENT_NO=BJ26100200015 -e BACKEND_ROOT=/var/www/html mohe-cashier-app php < tests/cashier-v3/php/r13-cross-industry-summary-annotation-rollback.php",
+      "output_sha256": "29d29c46514c9fccc08fe43e3772f18c532820d6cac561dc75a188331a751dcc",
+      "coverage": "真实补交主题、保存后新查询读回、修改、清空、幂等重放、版本冲突、其他门店/员工/租户及伪造/非G主题拒绝、读取权限、注释与审计记录计数回滚一致。",
+      "persistence": "仅外层事务内验证注释保存，最终全部回滚，不改资金或权益事实。"
+    },
+    "phase_two_projection_contract": "PASS",
+    "store_business_report_js_contract": {"passed": 44, "failed": 0},
+    "store_visit_cross_report_contract": {"passed": 14, "failed": 0},
+    "git_diff_check": "PASS",
+    "frontend_build": {
+      "command": "npm run build -- --outDir /tmp/r13-cross-industry-build-20261012",
+      "cwd": "前端代码/cashier-v3",
+      "result": "PASS, 1999 modules; existing chunk-size warning only",
+      "source": "18091热更新同一规范源码；Vite配置的本地库存与统一查询共享包；未连接远程，未声称8080集成发布包已生成。",
+      "online_instance_migration_backup": "不适用，本次仅本地开发和构建验证"
+    },
+    "browser": {
+      "url": "http://127.0.0.1:18091/view_cashier_v3/#/data/reports/cross_industry_customer_summary",
+      "result": "本地18091：纠正两个页签名称；明细单据号/会员/手机号相邻；汇总李灰芝一行，10月1200、全年1200；全年金额点击下钻带store_ids=175/member_id及全年日期，明细合计1200；编辑按钮显示既有收客时间和异业店名控件（取消未保存）；整页刷新后记录仍存在。",
+      "exports": [
+        {"path": "/Users/xiaojunpeng/Downloads/门店经营报表-异业收客明细表-20261012132226.csv", "result": "九列正确，BJ26100200015，2026-10-02，1200元；导出说明附新口径。"},
+        {"path": "/Users/xiaojunpeng/Downloads/门店经营报表-异业收客汇总表-20261012132333.csv", "result": "李灰芝一行，10月与全年均1200，列名说明及版本正确。"}
+      ]
+    },
+    "comment_updates": "本轮四个前后端源码文件及三个测试均包含职责/输入边界/业务口径或关键约束说明。",
+    "obsolete_code": "移除care_date首次护理查询、cashByMemberAndMonth、PLATFORM_CROSS_INDUSTRY_NAMES；保留其他报表仍调用的cashMonthlyTotals及servicesByMember默认会员投影。"
+  },
+  "limitations": [
+    "本地175店数据副本只有李灰芝该笔补交；线上朱海燕1185元正常购买不在本地副本，不能声称本地已核验线上2385元合计。",
+    "新增充值补交、退款、后续新增销售改变会员入口等场景没有造真实资金单，沿用统一事实与冲销过滤；本次对既有消费/补交样本和权限做回归。",
+    "浏览器编辑控件只打开后取消，数据库持久化由服务事务回滚验证；没有将测试输入长期写入真实会员资料。",
+    "线上仍是原版本，未部署；产品经理尚未验收本固定版本，不进行commit或push。"
+  ]
+}

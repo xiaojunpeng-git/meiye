@@ -1,0 +1,15 @@
+{
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "version": "3.0.14",
+  "acceptedCommit": "1e1296eb0e77b16dda1150deab74ce9a416f524c",
+  "project": "/private/tmp/m008-cube-slides-20261022-release-clean/mini/008-member",
+  "taskId": "confirmation_upload_602a5c00-850f-4e6c-adcb-e0e0a12c5a05",
+  "taskType": "confirmation_upload",
+  "status": "pending",
+  "uploadSucceeded": false,
+  "experienceVersionConfirmed": false,
+  "remainingAction": "User must confirm this upload in WeChat DevTools. On continuation, inspect this task result before any further upload action. Do not re-submit or switch upload channels."
+}

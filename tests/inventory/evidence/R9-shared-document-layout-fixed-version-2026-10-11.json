@@ -1,0 +1,161 @@
+{
+  "task": "R9-shared-document-layout",
+  "created_at": "2026-10-11T06:46:12.307Z",
+  "baseline_head": "2ce93d0fb8a80c5262ce75afa31b35f93762d62c",
+  "files": [
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "52e688892b6b8131f94219f9dfa02349a3a802e92165c1353ceff7325e50b33a"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/groupedDocumentRows.js",
+      "sha256": "db682a336e6b189ddf31ff16cc0f07ffabcbe62e9bf63dad532c59d80f544cab"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/documentDetailReader.js",
+      "sha256": "2536c5580f535b9521158f4cefd7a93d4e04d639a770a158cbd2878f5e58fc5c"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformDocumentReadScope.php",
+      "sha256": "7814b593b2c04959c5293389b574aef488c872432a635e62f440d4beebf2a5c9"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformHqInboundServices.php",
+      "sha256": "45734a9c640a1561665f560836aec1203d057f6a5c3ade420660d1e200c404ec"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+      "sha256": "34760339dd6fe2863912593d54b9416e869f886b2ed340ff18eb6abe1b21245d"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php",
+      "sha256": "349edf6fb5b3c58e91f58e8f339e3c4c1516a07dad00d7512b95baa0009880ea"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqInbound.php",
+      "sha256": "4a019197ebaf5839f49678e7959667100dcbe60ac6dbeda35e7119b531b0adf5"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqOutbound.php",
+      "sha256": "e2717ce5bfda4c26a76561902f2f263338c9ffb4b53cf4323254a2c5e47f5c2d"
+    },
+    {
+      "path": "tests/inventory/js/shared-document-layout-contract.mjs",
+      "sha256": "b3d3f85efa9cc667e19bd193302ccd743fa55e2734ef7d71fa3e91cbc06eb8a1"
+    },
+    {
+      "path": "tests/inventory/js/shared-document-layout-render.mjs",
+      "sha256": "2ad2c3a8da1cd10638ddb4300842355717b8abd20cf719a6b62c875421911953"
+    },
+    {
+      "path": "tests/inventory/php/platform-document-detail-scope-contract.php",
+      "sha256": "67ed3ea7daffd094bcf5ad9e3fc4eed8b4e0ec7b7533a5b31226397b40830e84"
+    }
+  ],
+  "fixed_version_sha256": "7fc2e14a729193749f85c64fe36c4f02e9d44c3da737be8107b4e22d55f9edce",
+  "tracked_patch_sha256": "0045f91995f30ca79c040573c3cc9c39b2ccc23c477d53b80170fd1a033dd4d2",
+  "new_tests": [
+    {
+      "file": "tests/inventory/js/shared-document-layout-contract.mjs",
+      "exit_code": 0,
+      "output": "SHARED_DOCUMENT_LAYOUT_CONTRACT_OK: both terminals, 5 pages, capability actions, no credential fallback, single renderer"
+    },
+    {
+      "file": "tests/inventory/js/shared-document-layout-render.mjs",
+      "exit_code": 0,
+      "output": "SHARED_DOCUMENT_REAL_RENDER_OK: 5 pages, identical rows, cost redaction, capabilities and async states"
+    },
+    {
+      "file": "tests/inventory/php/platform-document-detail-scope-contract.php",
+      "exit_code": 0,
+      "output": "PLATFORM_DOCUMENT_DETAIL_SCOPE_OK: selection, denial, scoped facts, cost, HQ capability, trace, presale"
+    }
+  ],
+  "related_php_checks": [
+    {
+      "file": "tests/inventory/php/manual-inbound-detail-contract.php",
+      "exit_code": 1,
+      "output": "PASS manual inbound detail is derived only from settled immutable inbound facts\nPASS manual inbound detail binds facts to the authenticated store default location\nPASS manual inbound detail includes batch snapshots and actual operation time\nFAIL manual inbound detail applies the server-side cost visibility policy before projection\nPASS store route and inventory client use the protected V3 inbound detail authority\nPASS platform and store inbound detail routes accept UUID source ids\nPASS detail modal consumes the fact operation time with an audit-time fallback\nINVENTORY_MANUAL_INBOUND_DETAIL_CONTRACT_RESULT failed=1\n"
+    },
+    {
+      "file": "tests/inventory/php/manual-document-reversal-contract.php",
+      "exit_code": 0,
+      "output": "PASS store and headquarters commands share one reversal kernel\nPASS only manual inbound and outbound documents can enter the authority\nPASS command requires a bounded reason and an idempotency key\nPASS one original document can be voided only once without deleting history\nPASS inbound reversal refuses unavailable original batch quantity\nPASS outbound reversal restores exact original batch and cost\nPASS ledger and aggregate mismatches abort instead of being hidden\nPASS audit receipt preserves operator reason result and four inventory times\nPASS list projection exposes status and the action flag needed by both clients\nINVENTORY_MANUAL_REVERSAL_CONTRACT failed=0\n"
+    },
+    {
+      "file": "tests/inventory/php/document-lifecycle-route-contract.php",
+      "exit_code": 0,
+      "output": "PASS store routes expose manual void request termination and transfer reversal\nPASS platform routes expose the same lifecycle under the HQ boundary\nPASS manual void controllers inject the authenticated scope and exact source id\nPASS platform manual void strips client scope from the command payload\nINVENTORY_DOCUMENT_LIFECYCLE_ROUTE_RESULT failed=0\n"
+    },
+    {
+      "file": "tests/inventory/php/platform-operational-query-contract.php",
+      "exit_code": 0,
+      "output": "PASS platform operational query only accepts registered inventory pages and server scope\nPASS selected HQ location must belong to the authenticated platform scope\nPASS platform store narrowing keeps the selected store id in the resolved context\nPASS platform HQ inventory does not require a store appointment while STORE remains scope-gated\nPASS platform inventory view grants cost visibility within its existing scope\nPASS legacy menu compatibility keeps page and write capability boundaries\nPASS platform location listing keeps HQ-only accounts on server-derived HQ warehouses\nPASS movement statistics reuse the authenticated location scope without a store staff identity\nPASS movement statistics exclude voided presale claims with a supported null predicate\nPASS expiry query exposes authoritative batch balance quantity\nPASS platform route and middleware permission record are both registered\nPASS platform inventory dashboard route reuses the inventory view capability\nPLATFORM_OPERATIONAL_QUERY_CONTRACT_RESULT failed=0\n"
+    },
+    {
+      "file": "tests/inventory/php/inbound-outbound-trace-contract.php",
+      "exit_code": 0,
+      "output": "PASS store and headquarters expose one protected inbound outbound-trace endpoint\nPASS trace starts from settled manual inbound facts and follows batch origin lineage\nPASS trace only returns effective outbound facts and excludes their settled reversals\nPASS trace enforces the caller location and redacts costs without permission\nPASS trace projects formal business document numbers and never returns internal source ids\nPASS trace dialog labels the inbound document number and does not render source_id\nINVENTORY_INBOUND_OUTBOUND_TRACE_CONTRACT_RESULT failed=0\n"
+    }
+  ],
+  "existing_manual_inbound_failure_inputs": [
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryManualInboundReadServices.php",
+      "unchanged": true
+    },
+    {
+      "path": "后端代码/app/controller/store/product/inventory/InventoryManualInbound.php",
+      "unchanged": true
+    },
+    {
+      "path": "后端代码/route/store.php",
+      "unchanged": true
+    },
+    {
+      "path": "后端代码/route/admin.php",
+      "unchanged": true
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/services/inventoryApi.js",
+      "unchanged": true
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "unchanged": true
+    }
+  ],
+  "build": {
+    "command": "docker exec mohe-inventory-v3-src npm run build",
+    "result": "PASS",
+    "source_root": "前端代码/inventory-vue3",
+    "hot_entries": [
+      "http://127.0.0.1:18081/admin/inbound/manage",
+      "http://127.0.0.1:18091/view_cashier_v3/#/cashier"
+    ],
+    "assets": [
+      {
+        "path": "前端代码/inventory-vue3/dist/index.html",
+        "sha256": "fbe79ae2da0f47b37c846eb75bb4923a0b3b4b9cbeab187a69cf5a41778f2194"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/exceljs.min-a0d233a6.js",
+        "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-92b7c68f.css",
+        "sha256": "92b7c68f761018faf5261c37dce7920fddf560164df780f003aedb149cb7c7a3"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-b0d8fbfc.js",
+        "sha256": "04b9b9f6ecd944a2e1a98852546f7c31acc58caa85c5e152bccec677e4f2b80d"
+      }
+    ],
+    "warning": "existing exceljs chunk exceeds 500 kB",
+    "integrated_8080_package": false
+  },
+  "remote_operations": false,
+  "pm_acceptance": "pending",
+  "commit": false,
+  "deploy": false,
+  "push": false
+}

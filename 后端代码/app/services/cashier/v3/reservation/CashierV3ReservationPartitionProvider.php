@@ -1,0 +1,491 @@
+<?php
+
+namespace app\services\cashier\v3\reservation;
+
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3ResourceVersionServices;
+use app\services\cashier\v3\projection\CashierV3RootPartitionProvider;
+use think\facade\Db;
+
+/** Read model for new C3 reservations only. Old reservation rows are intentionally excluded. */
+final class CashierV3ReservationPartitionProvider implements CashierV3RootPartitionProvider
+{
+    private const BUSINESS_TIMEZONE = 'Asia/Shanghai';
+
+    public function partitionKey(): string { return 'reservation'; }
+
+    public function readPartition(
+        string $stateContextId,
+        string $stateRevision,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        array $hints = []
+    ): array {
+        $tenantId = $dataScope->tenantId();
+        $storeId = $operatorScope->storeId();
+        $now = time();
+        $workflow = strtolower(trim((string)($hints['workflow'] ?? '')));
+        // 仅服务页可跨日期查看；桌面日历与预约确认继续按显式日期或默认当天取数。
+        $allDates = $workflow === 'service' && !empty($hints['allDates']);
+        $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
+        $page = max(1, (int)($hints['page'] ?? 1));
+        $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));
+        $topFilters = (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []);
+        $appointmentDateFilters = self::appointmentDateFilters($topFilters);
+        // 日历默认展示当天，且日历卡片、列表和状态括号必须从同一日期集合取数。
+        // 首次进入页面尚未产生 topFilters 时，不能让括号退化为跨日期的全历史统计。
+        $calendarDate = self::calendarDateFromTopFilters(
+            $topFilters,
+            self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '')
+        );
+        $dueNotArrivedCount = (int)Db::name('cashier_v3_reservation')->alias('r')
+            ->where('r.tenant_id', $tenantId)->where('r.store_id', $storeId)
+            ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->where('r.status', 'UNSTARTED')
+            ->where('r.appointment_start_at', '>', 0)->where('r.appointment_start_at', '<=', $now)
+            ->where('r.actual_service_started_at', 0)
+            ->count();
+        $recordsQuery = Db::name('cashier_v3_reservation')
+            ->where('tenant_id', $tenantId)->where('store_id', $storeId)
+            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+        if ($quickFilter === 'pending_confirmation') {
+            $recordsQuery->where('status', 'PENDING_CONFIRMATION');
+        } elseif ($quickFilter === 'service') {
+            $recordsQuery->whereIn('status', ['UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+        } elseif ($quickFilter === 'unstarted') {
+            $recordsQuery->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED']);
+        } elseif ($quickFilter === 'serving') {
+            $recordsQuery->where('status', 'IN_SERVICE');
+        } elseif ($quickFilter === 'ended') {
+            $recordsQuery->where('status', 'COMPLETED');
+        } elseif ($quickFilter === 'today') {
+            $todayStart = self::businessNow()->setTime(0, 0)->getTimestamp();
+            $recordsQuery->where('appointment_start_at', '>=', $todayStart)
+                ->where('appointment_start_at', '<', $todayStart + 86400);
+        }
+        // 列表和日历共享同一预约主表，但列表的统一查询筛选必须在服务端
+        // 生效。此前预约时间仅停留在工具栏的界面状态，导致选择 9 月 19 日
+        // 后无法精确找到当天的待服务预约。
+        self::applyListTopFilters($recordsQuery, $topFilters);
+        if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($recordsQuery, $calendarDate);
+        $total = (int)(clone $recordsQuery)->count();
+        $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
+        $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+        $ids = [];
+        foreach ($rows as $row) $ids[] = (int)($row['id'] ?? 0);
+        $serviceOrderIds = [];
+        foreach ($rows as $row) {
+            $serviceOrderId = (int)($row['service_order_id'] ?? 0);
+            if ($serviceOrderId > 0) $serviceOrderIds[$serviceOrderId] = $serviceOrderId;
+        }
+        $serviceOrders = $serviceOrderIds
+            ? Db::name('cashier_v3_service_order')
+                ->where('tenant_id', $tenantId)->where('business_store_id', $storeId)
+                ->whereIn('id', array_values($serviceOrderIds))
+                ->field('id,status,service_started_at')->select()
+            : [];
+        $serviceOrders = is_object($serviceOrders) && method_exists($serviceOrders, 'toArray')
+            ? $serviceOrders->toArray()
+            : (array)$serviceOrders;
+        $serviceOrdersById = [];
+        foreach ($serviceOrders as $serviceOrder) {
+            $serviceOrdersById[(int)($serviceOrder['id'] ?? 0)] = $serviceOrder;
+        }
+        $lineRows = $ids ? Db::name('cashier_v3_reservation_line')->where('tenant_id', $tenantId)->whereIn('reservation_id', $ids)->order('id asc')->select() : [];
+        $lineRows = is_object($lineRows) && method_exists($lineRows, 'toArray') ? $lineRows->toArray() : (array)$lineRows;
+        $lines = [];
+        foreach ($lineRows as $line) $lines[(int)($line['reservation_id'] ?? 0)][] = $line;
+        $scheduledRows = $ids ? Db::name('cashier_v3_reservation_staff_schedule')->where('tenant_id', $tenantId)->whereIn('reservation_id', $ids)->order('reservation_id asc,staff_id asc')->select() : [];
+        $scheduledRows = is_object($scheduledRows) && method_exists($scheduledRows, 'toArray') ? $scheduledRows->toArray() : (array)$scheduledRows;
+        $artisanStaffByReservation = [];
+        foreach ($scheduledRows as $scheduled) {
+            $reservationId = (int)($scheduled['reservation_id'] ?? 0);
+            $staffId = (int)($scheduled['staff_id'] ?? 0);
+            if ($reservationId > 0 && $staffId > 0) $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
+        }
+        foreach ($lines as $reservationId => $reservationLines) {
+            if (!empty($artisanStaffByReservation[$reservationId])) continue;
+            foreach ($reservationLines as $line) {
+                $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
+                foreach (is_array($ids) ? $ids : [] as $staffId) {
+                    $staffId = (int)$staffId;
+                    if ($staffId > 0) $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
+                }
+            }
+        }
+        // 已由结账确认完成的预约，在列表与日历中展示实际结账项目及其手艺人。
+        // 这里只替换读模型，原计划项目和排班关系仍保留在权威表中供审计。
+        $reservationIds = array_values(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $rows)));
+        $checkoutLinkRows = $reservationIds ? Db::name('cashier_v3_reservation_checkout_service_link')
+            ->where('tenant_id', $tenantId)->whereIn('reservation_id', $reservationIds)
+            ->order('reservation_id asc,id asc')->select() : [];
+        $checkoutLinkRows = is_object($checkoutLinkRows) && method_exists($checkoutLinkRows, 'toArray')
+            ? $checkoutLinkRows->toArray()
+            : (array)$checkoutLinkRows;
+        $checkoutLinksByReservation = [];
+        $checkoutArtisanNames = [];
+        $checkoutReservationInitialized = [];
+        foreach ($checkoutLinkRows as $link) {
+            $reservationId = (int)($link['reservation_id'] ?? 0);
+            if ($reservationId <= 0) continue;
+            $checkoutLinksByReservation[$reservationId][] = $link;
+            if (!isset($checkoutReservationInitialized[$reservationId])) {
+                // Actual staff replaces planned staff, including the legitimate
+                // case of a checkout project without a selected craftsman.
+                $artisanStaffByReservation[$reservationId] = [];
+                $checkoutReservationInitialized[$reservationId] = true;
+            }
+            foreach ((array)json_decode((string)($link['craftsmen_snapshot_json'] ?? '[]'), true) as $craftsman) {
+                if (!is_array($craftsman)) continue;
+                // 结账服务事实使用 snake_case 快照；兼容驼峰只服务旧夹具。
+                // 日历和列表必须展示本次结账的实际人员，不能退回原预约排班。
+                $staffId = (int)($craftsman['staff_id'] ?? $craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+                $name = trim((string)($craftsman['staff_name_snapshot'] ?? $craftsman['name'] ?? ''));
+                if ($staffId <= 0 || $name === '') continue;
+                $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
+                $checkoutArtisanNames[$staffId] = $name;
+            }
+        }
+        foreach ($checkoutLinksByReservation as $reservationId => $actualLines) $lines[$reservationId] = $actualLines;
+        $artisanIds = [];
+        foreach ($artisanStaffByReservation as $staffIds) foreach ($staffIds as $staffId) $artisanIds[$staffId] = $staffId;
+        $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
+        foreach ($checkoutArtisanNames as $staffId => $name) $artisanNames[(int)$staffId] = $name;
+        $versions = [];
+        $records = [];
+        // 快捷按钮的数量是当前日期范围内、各状态的预约数。它不能沿用
+        // 全历史计数，否则操作员改了顶部日期后会看到列表和括号数字不一致。
+        $countBase = Db::name('cashier_v3_reservation')->where('tenant_id', $tenantId)->where('store_id', $storeId)
+            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+        self::applyListTopFilters($countBase, $appointmentDateFilters);
+        if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($countBase, $calendarDate);
+        $counts = [
+            'all' => (int)(clone $countBase)->count(),
+            'pendingConfirmation' => (int)(clone $countBase)->where('status', 'PENDING_CONFIRMATION')->count(),
+            'unstarted' => (int)(clone $countBase)->where('status', 'UNSTARTED')->count(),
+            'serving' => (int)(clone $countBase)->where('status', 'IN_SERVICE')->count(),
+            'ended' => (int)(clone $countBase)->where('status', 'COMPLETED')->count(),
+            'dueNotArrived' => $dueNotArrivedCount,
+        ];
+        foreach ($rows as $row) {
+            $id = (int)($row['id'] ?? 0);
+            if ($id <= 0) continue;
+            $projectNames = [];
+            $reservationArtisans = [];
+            foreach ((array)($lines[$id] ?? []) as $line) {
+                $projectNames[] = (string)($line['project_name_snapshot'] ?? '');
+            }
+            foreach (array_values($artisanStaffByReservation[$id] ?? []) as $staffId) { $name = trim((string)($artisanNames[(int)$staffId] ?? '')); if ($name !== '') $reservationArtisans[$name] = $name; }
+            $statusCode = (string)($row['status'] ?? '');
+            $status = self::statusLabel($statusCode);
+            $dateTime = (int)($row['appointment_start_at'] ?? 0);
+            $serviceOrderId = (int)($row['service_order_id'] ?? 0);
+            $serviceOrder = (array)($serviceOrdersById[$serviceOrderId] ?? []);
+            $dueNotArrived = $dateTime > 0
+                && $dateTime <= $now
+                && $statusCode === 'UNSTARTED'
+                && (int)($row['actual_service_started_at'] ?? 0) <= 0;
+            // reservation is a domain-owned source version. It is not a
+            // central synthetic row: the V3 reservation header is the only
+            // authority, so list/detail actions receive the header revision.
+            $version = (int)($row['version'] ?? 0);
+            if ($version > 0) $versions[] = ['kind' => 'reservation', 'id' => (string)$id, 'version' => $version];
+            $actualStartedAt = (int)($row['actual_service_started_at'] ?? 0);
+            $totalDurationSeconds = max(60, (int)$row['appointment_end_at'] - (int)$row['appointment_start_at']);
+            $expectedEndAt = $actualStartedAt > 0 ? $actualStartedAt + $totalDurationSeconds : 0;
+            $records[] = [
+                'id' => $id,
+                'reservationId' => $id,
+                'reservationNo' => (string)($row['reservation_no'] ?? ''),
+                'appointmentTime' => $dateTime > 0 ? self::businessTimeFromTimestamp($dateTime) : '',
+                'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                'phone' => (string)($row['member_phone_snapshot'] ?? ''),
+                'projectSummary' => implode('、', array_filter($projectNames)) ?: '未填写项目',
+                'projectSource' => isset($checkoutLinksByReservation[$id]) ? '本次结账' : '本次预约',
+                'craftsmanSummary' => $reservationArtisans ? implode('、', array_values($reservationArtisans)) : '待分配手艺人',
+                'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ((int)($row['room_id'] ?? 0) > 0 ? '房间 ' . (int)$row['room_id'] : ''),
+                'remark' => (string)($row['remark_snapshot'] ?? ''),
+                'source' => '收银 V3',
+                'creator' => (string)($row['creator_name_snapshot'] ?? ''),
+                'status' => $status,
+                'statusCode' => $statusCode,
+                'sourceType' => (string)($row['source_type'] ?? ''),
+                'serviceOrderId' => $serviceOrderId,
+                'actualServiceStartedAt' => $actualStartedAt,
+                'actualStartAt' => $actualStartedAt,
+                'actualServiceEndedAt' => (int)($row['actual_service_ended_at'] ?? 0),
+                'serviceCountdownEndsAt' => $expectedEndAt,
+                'expectedEndAt' => $expectedEndAt,
+                'totalDurationSeconds' => $totalDurationSeconds,
+                'isOvertime' => $actualStartedAt > 0
+                    && (int)($row['actual_service_ended_at'] ?? 0) <= 0
+                    && $now > $expectedEndAt,
+                'dueNotArrived' => $dueNotArrived,
+                'primaryAction' => ['action' => 'open-reservation-detail', 'label' => '查看详情', 'enabled' => true],
+            ];
+        }
+        // 日历只有一个时间轴；当顶部使用日期范围时，按起始日渲染，确保
+        // 操作员修改日期后日历与当前查询处在同一个业务日，而不再依赖已移除的
+        // “上一天 / 今天 / 下一天”按钮。
+        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames);
+        return ['ready' => true, 'payload' => [
+            'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
+            'quickCounts' => $counts, 'records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize,
+            'detail' => null, 'editor' => ['draft' => new \stdClass(), 'catalogOptions' => [], 'craftsmenOptions' => [], 'rooms' => []],
+            'calendar' => $calendar,
+        ], 'public_versions' => $versions];
+    }
+
+    /**
+     * Calendar is a read model over V3 reservations only.  It deliberately
+     * does not try to infer availability from legacy reservation tables.
+     */
+    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames): array
+    {
+        $store = Db::name('system_store')->where('id', $storeId)->field('day_start,day_end')->find();
+        $start = self::timeOfDay((string)($store['day_start'] ?? ''));
+        $end = self::timeOfDay((string)($store['day_end'] ?? ''));
+        $timeSlots = [];
+        $businessHoursReady = $start !== '' && $end !== '' && $start < $end;
+        if ($businessHoursReady) {
+            $zone = self::businessZone();
+            $cursor = new \DateTimeImmutable($date . ' ' . $start, $zone);
+            $closeAt = new \DateTimeImmutable($date . ' ' . $end, $zone);
+            for (; $cursor < $closeAt; $cursor = $cursor->modify('+30 minutes')) {
+                $timeSlots[$cursor->format('H:i')] = $cursor->format('H:i');
+            }
+        }
+
+        // 营业时间只限制新预约的可选时段。历史或已创建预约必须始终
+        // 出现在对应日期的时间轴上，不能因门店后来修改营业时间而消失。
+        foreach ($rows as $row) {
+            $at = (int)($row['appointment_start_at'] ?? 0);
+            if ($at <= 0 || self::businessDateFromTimestamp($at) !== $date) {
+                continue;
+            }
+            $endAt = max($at + 60, (int)($row['appointment_end_at'] ?? 0));
+            $cursor = self::businessTime($at)->setTime(
+                (int)self::businessTime($at)->format('H'),
+                ((int)self::businessTime($at)->format('i') >= 30) ? 30 : 0
+            );
+            $closeAt = self::businessTime($endAt)->modify('+30 minutes')->setTime(
+                (int)self::businessTime($endAt)->modify('+30 minutes')->format('H'),
+                ((int)self::businessTime($endAt)->modify('+30 minutes')->format('i') >= 30) ? 30 : 0
+            );
+            for (; $cursor < $closeAt; $cursor = $cursor->modify('+30 minutes')) {
+                $timeSlots[$cursor->format('H:i')] = $cursor->format('H:i');
+            }
+        }
+        ksort($timeSlots, SORT_STRING);
+
+        $resources = [['id' => 'staff:unassigned', 'type' => 'unassigned_staff', 'name' => '未分配']];
+        $staffRows = Db::name('system_store_staff')
+            ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)
+            ->where('cashier_craftsman_enabled', 1)->field('id,staff_name')->order('id asc')->select();
+        $staffRows = is_object($staffRows) && method_exists($staffRows, 'toArray') ? $staffRows->toArray() : (array)$staffRows;
+        foreach ($staffRows as $staff) {
+            $staffId = (int)($staff['id'] ?? 0);
+            if ($staffId > 0) $resources[] = ['id' => 'staff:' . $staffId, 'type' => 'staff', 'name' => (string)($staff['staff_name'] ?? ('手艺人 ' . $staffId))];
+        }
+
+        $roomResources = [['id' => 'room:unassigned', 'type' => 'unassigned_room', 'name' => '未分配']];
+        $roomRows = Db::name('table_qrcode')->where('store_id', $storeId)->where('is_del', 0)->where('is_using', 1)
+            ->field('id,remarks,table_number')->order('id asc')->select();
+        $roomRows = is_object($roomRows) && method_exists($roomRows, 'toArray') ? $roomRows->toArray() : (array)$roomRows;
+        foreach ($roomRows as $room) {
+            $roomId = (int)($room['id'] ?? 0);
+            if ($roomId > 0) {
+                $name = trim((string)($room['remarks'] ?? $room['table_number'] ?? '')) ?: ('房间 ' . $roomId);
+                $roomResources[] = ['id' => 'room:' . $roomId, 'type' => 'room', 'name' => $name];
+            }
+        }
+        $resources = array_merge($resources, $roomResources);
+
+        $blocks = [];
+        foreach ($rows as $row) {
+            $reservationId = (int)($row['id'] ?? 0);
+            $at = (int)($row['appointment_start_at'] ?? 0);
+            if ($reservationId <= 0 || $at <= 0 || self::businessDateFromTimestamp($at) !== $date) continue;
+            $lineRows = (array)($lines[$reservationId] ?? []);
+            $staffIds = (array)($artisanStaffByReservation[$reservationId] ?? []);
+            $resourceIds = $staffIds ? array_map(static function (int $id): string { return 'staff:' . $id; }, array_values($staffIds)) : ['staff:unassigned'];
+            $roomId = (int)($row['room_id'] ?? 0);
+            $roomResourceId = $roomId > 0 ? 'room:' . $roomId : 'room:unassigned';
+            $projectCount = count($lineRows);
+            $base = [
+                'id' => 'reservation:' . $reservationId,
+                'reservationId' => $reservationId,
+                'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                'start' => self::businessTimeFromTimestamp($at, 'H:i'),
+                'end' => self::businessTimeFromTimestamp(max($at + 60, (int)($row['appointment_end_at'] ?? 0)), 'H:i'),
+                'projectCount' => $projectCount,
+                'status' => self::statusLabel((string)($row['status'] ?? '')),
+                'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ($roomId > 0 ? ('房间 ' . $roomId) : '待分配房间'),
+            ];
+            foreach (array_unique(array_merge($resourceIds, [$roomResourceId])) as $resourceId) {
+                $blocks[] = array_merge($base, ['id' => $base['id'] . ':' . $resourceId, 'resourceId' => $resourceId]);
+            }
+        }
+        return ['date' => $date, 'resources' => $resources, 'blocks' => $blocks, 'timeSlots' => array_values($timeSlots), 'businessHoursReady' => $businessHoursReady];
+    }
+
+    private static function calendarDate($value): string
+    {
+        $value = trim((string)$value);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+        return $date && $date->format('Y-m-d') === $value ? $value : self::businessNow()->format('Y-m-d');
+    }
+
+    /**
+     * Apply the small, explicit subset of the unified toolbar contract that
+     * has a direct reservation-header authority.  Never forward client field
+     * names or operators into SQL; unsupported filters remain unavailable
+     * until their read-model joins are explicitly defined.
+     *
+     * @param mixed $query ThinkPHP query builder
+     */
+    private static function applyListTopFilters($query, array $filters): void
+    {
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) continue;
+            $field = trim((string)($filter['field'] ?? ''));
+            $operator = strtolower(trim((string)($filter['operator'] ?? 'eq')));
+            $value = trim((string)($filter['value'] ?? ''));
+            if ($value === '') continue;
+
+            if ($field === 'appointment_time') {
+                $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+                if (!$date || $date->format('Y-m-d') !== $value) continue;
+                $start = $date->getTimestamp();
+                if (in_array($operator, ['gte', 'gt'], true)) {
+                    $query->where('appointment_start_at', $operator === 'gt' ? '>' : '>=', $start);
+                } elseif (in_array($operator, ['lte', 'lt'], true)) {
+                    // A date upper bound includes the complete business day.
+                    $query->where('appointment_start_at', '<', $operator === 'lt' ? $start : $start + 86400);
+                } elseif (in_array($operator, ['eq', '='], true)) {
+                    $query->where('appointment_start_at', '>=', $start)
+                        ->where('appointment_start_at', '<', $start + 86400);
+                }
+                continue;
+            }
+
+            if ($field === 'status' && in_array($operator, ['eq', '='], true)) {
+                $status = self::statusCode($value);
+                if ($status !== '') $query->where('status', $status);
+                continue;
+            }
+
+            $column = [
+                'reservation_no' => 'reservation_no',
+                'member_name' => 'member_name_snapshot',
+                'phone' => 'member_phone_snapshot',
+                'room' => 'room_name_snapshot',
+                'remark' => 'remark_snapshot',
+                'creator' => 'creator_name_snapshot',
+            ][$field] ?? '';
+            if ($column !== '') {
+                if (in_array($operator, ['contains', 'like'], true)) {
+                    $query->where($column, 'like', '%' . addcslashes($value, '%_\\') . '%');
+                } elseif (in_array($operator, ['eq', '='], true)) {
+                    $query->where($column, $value);
+                }
+            }
+        }
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private static function appointmentDateFilters(array $filters): array
+    {
+        return array_values(array_filter($filters, static function ($filter): bool {
+            return is_array($filter) && trim((string)($filter['field'] ?? '')) === 'appointment_time';
+        }));
+    }
+
+    /** Apply the calendar's single business day when no explicit date filter was submitted. */
+    private static function applyAppointmentDate($query, string $date): void
+    {
+        $businessDate = self::calendarDate($date);
+        $start = (new \DateTimeImmutable($businessDate . ' 00:00:00', self::businessZone()))->getTimestamp();
+        $query->where('appointment_start_at', '>=', $start)
+            ->where('appointment_start_at', '<', $start + 86400);
+    }
+
+    private static function calendarDateFromTopFilters(array $filters, string $fallback): string
+    {
+        foreach (self::appointmentDateFilters($filters) as $filter) {
+            $operator = strtolower(trim((string)($filter['operator'] ?? '')));
+            if (!in_array($operator, ['gte', 'gt', 'eq', '='], true)) continue;
+            $value = trim((string)($filter['value'] ?? ''));
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+            if ($date && $date->format('Y-m-d') === $value) return $value;
+        }
+        return $fallback;
+    }
+
+    private static function statusCode(string $value): string
+    {
+        $normalized = strtoupper(str_replace([' ', '-'], '_', trim($value)));
+        return [
+            '待确认' => 'PENDING_CONFIRMATION',
+            'PENDING_CONFIRMATION' => 'PENDING_CONFIRMATION',
+            '未开始' => 'UNSTARTED',
+            '待服务' => 'UNSTARTED',
+            'UNSTARTED' => 'UNSTARTED',
+            '服务中' => 'IN_SERVICE',
+            'IN_SERVICE' => 'IN_SERVICE',
+            '已结束' => 'COMPLETED',
+            'COMPLETED' => 'COMPLETED',
+        ][$normalized] ?? '';
+    }
+
+    private static function quickFilter($value, string $workflow = ''): string
+    {
+        $value = trim((string)$value);
+        if ($workflow === 'confirmation') return 'pending_confirmation';
+        if ($workflow === 'service' && $value === '') return 'service';
+        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'service'], true) ? $value : 'all';
+    }
+
+    private static function timeOfDay(string $value): string
+    {
+        $value = trim($value);
+        if (!preg_match('/^([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/D', $value)) return '';
+        $parts = explode(':', $value);
+        return str_pad((string)(int)$parts[0], 2, '0', STR_PAD_LEFT) . ':' . $parts[1];
+    }
+
+    private static function businessZone(): \DateTimeZone
+    {
+        return new \DateTimeZone(self::BUSINESS_TIMEZONE);
+    }
+
+    private static function businessNow(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('now', self::businessZone());
+    }
+
+    private static function businessDateFromTimestamp(int $timestamp): string
+    {
+        return self::businessTime($timestamp)->format('Y-m-d');
+    }
+
+    private static function businessTimeFromTimestamp(int $timestamp, string $format = 'Y-m-d H:i'): string
+    {
+        return self::businessTime($timestamp)->format($format);
+    }
+
+    private static function businessTime(int $timestamp): \DateTimeImmutable
+    {
+        return (new \DateTimeImmutable('@' . $timestamp))->setTimezone(self::businessZone());
+    }
+
+    private static function statusLabel(string $status): string
+    {
+        return ['PENDING_CONFIRMATION' => '待确认', 'UNSTARTED' => '待服务', 'IN_SERVICE' => '服务中', 'COMPLETED' => '已结束', 'CANCELLED' => '已取消', 'REJECTED' => '已拒绝'][$status] ?? '状态未知';
+    }
+}

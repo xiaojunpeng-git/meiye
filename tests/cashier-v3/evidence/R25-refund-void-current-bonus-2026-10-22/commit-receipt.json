@@ -1,0 +1,36 @@
+{
+  "commit": "c7440b6b804a5b857dc84d372eb5a6ca49d323cb",
+  "parent": "261617ebdb7e94d1406d395be1c118d381fcaf2e",
+  "files": [
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php",
+    "后端代码/app/services/user/UserBalanceAtomicServices.php",
+    "tests/cashier-v3/php/r33-refund-void-rollback.php",
+    "tests/cashier-v3/php/r25-refund-void-current-bonus-mysql.php",
+    "tests/cashier-v3/php/r25-refund-void-release-readonly.php",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/superseded-gift-only-fixed-files.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/baseline-commit.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/superseded-gift-only-round.patch",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/rh-release-before.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/superseded-gift-only-selftest.log",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/preexisting.patch",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/r46-independent-refund-bonus-rollback.php.log",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/开发与自测交付.md",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/fixed-files.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/tests-after-principal.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/r29-balance-refund-rollback.php.log",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/008-release-before.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/发布授权与准备.md",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/baseline.json",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/round-only.patch",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/r25-refund-void-current-bonus-mysql.php.log",
+    "tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/source-provenance.json"
+  ],
+  "accepted": "产品经理明确测试无问题并授权提交发布",
+  "source_hashes": {
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "e19267c7e4fa681c5bc489c864d8160ec74e59b8e907f15cce562dee6993ba61",
+    "后端代码/app/services/user/UserBalanceAtomicServices.php": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a",
+    "tests/cashier-v3/php/r33-refund-void-rollback.php": "34e446a36692af29d401adb4bb88b78b85e28d0b0d4f674e4fa1b799ea10e791",
+    "tests/cashier-v3/php/r25-refund-void-current-bonus-mysql.php": "c2551bd0da54fb82cc7fbf33da595e8980b658165f73a0b8e65a00ca16732c45"
+  },
+  "preserved_staged_entries": 16
+}

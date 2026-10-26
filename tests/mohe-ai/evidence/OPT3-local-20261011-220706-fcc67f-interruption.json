@@ -1,0 +1,61 @@
+{
+  "batch": "OPT3-local-20261011-220706-fcc67f",
+  "audited_at": "2026-10-11T22:15:28.602311+08:00",
+  "driver_stopped": true,
+  "driver_exit_code": 143,
+  "new_submissions_disabled": true,
+  "recorded_questions": 20,
+  "admitted_runs": 20,
+  "original_report_sha256": "7e54152698af9632790c14fb93b69a815d4e277bb302ff536de4b59462f278c6",
+  "stop_reason": "Known test-driver async protocol defect: clarification can return the same queued WAITING_CLARIFICATION envelope. A repeated submission caused AI_CLARIFICATION_IN_PROGRESS. Parent requested stop at the round boundary before round 3; source report unchanged.",
+  "active_runs": [],
+  "held_runs": [],
+  "own_terminal_counts": {
+    "COMPLETED": 14,
+    "FAILED": 4,
+    "CANCELLED": 2
+  },
+  "raw_passed": 15,
+  "classifications": [
+    {
+      "round": 2,
+      "turn": 1,
+      "run_id": "8d17580695a5a607f1fc71c76c45c1bcfc91c6bc3296cc54",
+      "reason": "AI_MODEL_RESULT_UNKNOWN",
+      "classification": "model_unknown_result",
+      "unverified_upstream_dependency": false
+    },
+    {
+      "round": 2,
+      "turn": 2,
+      "run_id": "cd655285d8ff898097fce1b3bdb5c21342f99318694240e3",
+      "reason": "AI_MODEL_RESULT_UNKNOWN",
+      "classification": "model_unknown_result",
+      "unverified_upstream_dependency": true
+    },
+    {
+      "round": 2,
+      "turn": 3,
+      "run_id": "ad7e5b95087057c02e694deb3b3567357036554e8038e71a",
+      "reason": "AI_CLARIFICATION_IN_PROGRESS",
+      "classification": "test_driver_duplicate_clarification",
+      "unverified_upstream_dependency": true
+    },
+    {
+      "round": 2,
+      "turn": 4,
+      "run_id": "542a2f20da58281f39bf9038b1f92c19434eef726754639d",
+      "reason": "AI_MODEL_RESULT_UNKNOWN",
+      "classification": "model_unknown_result",
+      "unverified_upstream_dependency": true
+    },
+    {
+      "round": 2,
+      "turn": 9,
+      "run_id": "b9e63daa634a5825e2220c8f3a65df88b410cdb5f3f40bfa",
+      "reason": "AI_CLARIFICATION_IN_PROGRESS",
+      "classification": "test_driver_duplicate_clarification",
+      "unverified_upstream_dependency": false
+    }
+  ]
+}

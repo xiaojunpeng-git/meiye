@@ -1,0 +1,17 @@
+Device history / identity / retention / delivery / version ordering / context reference / single removal: PASS
+node:internal/process/esm_loader:97
+    internalBinding('errors').triggerUncaughtException(
+                              ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ ''
+- '例如：今天经营情况如何？'
+    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/mohe-ai/browser-entry-contract.mjs:78:8 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '',
+  expected: '例如：今天经营情况如何？',
+  operator: 'strictEqual'
+}

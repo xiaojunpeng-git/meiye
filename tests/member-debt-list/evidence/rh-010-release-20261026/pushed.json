@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "branch": "release/member-debt-20261026",
+  "commit": "ec3aa9259d191e0c8451440a369c3bb81574678d",
+  "parent": "60f709d25c3d6c9b83812fe3993aea71dcf9faa3",
+  "parentBranch": "release/r65-member-payment-return-20261026",
+  "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+  "files": [
+    "scripts/member-debt-list-008-install.php",
+    "scripts/member-debt-list-008-release.cjs",
+    "tests/member-debt-list/backend.php",
+    "tests/member-debt-list/evidence/backend-restore-20261026/README.md",
+    "tests/member-debt-list/evidence/backend-restore-20261026/after.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/attempt.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/before.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/browser-result.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/installed.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/member-after.png",
+    "tests/member-debt-list/evidence/backend-restore-20261026/release-result.json",
+    "tests/member-debt-list/evidence/backend-restore-20261026/verified.json",
+    "tests/member-debt-list/evidence/backend.txt"
+  ],
+  "controllerAlreadyInPublishedParent": true,
+  "acceptedLiveRepaymentGuardPreserved": true,
+  "unrelatedStagingUnchanged": true
+}

@@ -1,0 +1,49 @@
+{
+  "build": {
+    "result": "PASS",
+    "commit": "0f5ea37e314cb1058daf0c3aac21c4c387b3e108",
+    "sourceFilesVerified": 916,
+    "compared": 1886,
+    "outputFiles": 1886,
+    "scriptsParsed": 423,
+    "stylesRestored": 398,
+    "mutableLoaderOptionsIsolated": true,
+    "nativeComponentMountNotApplication": true,
+    "apiOrigin": "https://008.cc3798.com",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "packages": {
+      "main": 2051361,
+      "pages/users": 1644519,
+      "pages/admin": 1797363,
+      "pages/activity": 470183,
+      "pages/goods": 1956273,
+      "pages/extension": 71304,
+      "pages/behalf": 190158,
+      "pages/annex": 958812,
+      "pages/merchant": 203205,
+      "pages/discover": 206679,
+      "pages/store": 421674,
+      "pages/short_video": 304933,
+      "pages/work": 17444,
+      "pages/columnGoods": 98917
+    },
+    "artifactSha256": "f1c6b0edd3770a21c6bdfe79c277595f67e0d5a7024493f2d3b6251f758b6b80"
+  },
+  "runtime": {
+    "appid": "wx85d4bfd0b4b6aafb",
+    "route": "pages/index/index",
+    "components": [
+      {
+        "name": "homeComb",
+        "images": 3,
+        "gradient": {
+          "background-image": "linear-gradient(to bottom, rgba(245,245,245,0) 0%, rgba(245,245,245,0) 50%, transparent 100%)"
+        },
+        "indicator": {
+          "background": "var(--view-theme)"
+        }
+      }
+    ]
+  },
+  "scope": "local compiled candidate using actual 008 read API; not uploaded or physical-device acceptance"
+}

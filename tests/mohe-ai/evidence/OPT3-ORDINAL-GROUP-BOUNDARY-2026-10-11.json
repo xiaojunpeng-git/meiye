@@ -1,0 +1,55 @@
+{
+  "task": "OPT3-ordinal-group-boundary",
+  "scope": "local source + synthetic fixtures only",
+  "backend": [
+    "后端代码/app/services/ai/context/ResultReferenceResolver.php",
+    "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php",
+    "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php"
+  ],
+  "tests": [
+    "tests/mohe-ai/opt3-ordinal-group-boundary.php",
+    "tests/mohe-ai/object-detail-continuation.php",
+    "tests/mohe-ai/member-detail-continuation.php",
+    "tests/mohe-ai/result-reference.php"
+  ],
+  "sha256": {
+    "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+    "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+    "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+    "tests/mohe-ai/opt3-ordinal-group-boundary.php": "8bc955457784c44ddb28215f2572187ce22daa6596da206688a074f45e2ca427",
+    "tests/mohe-ai/object-detail-continuation.php": "cfa50acb81b6f442c020a32195a77c91329d582e57a4b183a9c466667004b8fc",
+    "tests/mohe-ai/member-detail-continuation.php": "3c3b25f2492aef0d4e4d5ed592f516066bb7c5005a88fa0cae7d1c4c03ebdf68",
+    "tests/mohe-ai/result-reference.php": "dbbff98fc9c81ce7b985d0100dd598a22208a022d560e137958bcbef0a93e432"
+  },
+  "changes": [
+    "Shared single-board ordinal guard in existing ResultReferenceResolver",
+    "Both legacy object and member detail entry points enforce the guard before flattening ranking rows",
+    "Explicit group+ordinal resolver and whole-set presentation unchanged",
+    "Private reflection accessibility fixed in related fixtures for PHP7.4 without changing assertions",
+    "Closed local ordinal now retains typed ordinal meaning for the existing semantic clarification gate; it never invents top/bottom"
+  ],
+  "php74": {
+    "new_boundary": {
+      "checks": 29,
+      "pass": true
+    },
+    "new_pure_result_reference": {
+      "checks": 21,
+      "pass": true
+    },
+    "object_detail": {
+      "checks": 78,
+      "pass": true
+    },
+    "result_reference": {
+      "pass": true
+    },
+    "member_detail": {
+      "pass": false,
+      "failure": "Existing final progressText assertion at line 218 remains failing; all earlier resolver assertions reached. That legacy text branch is unchanged; the new semantic WAITING_CLARIFICATION path is covered separately."
+    }
+  },
+  "no_business_request": true,
+  "no_commit_push_remote": true,
+  "gateway_closure_evidence": "OPT3-ORDINAL-CLARIFICATION-REVIEW-2026-10-11.json"
+}

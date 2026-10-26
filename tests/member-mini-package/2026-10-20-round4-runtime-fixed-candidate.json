@@ -1,0 +1,68 @@
+{
+  "task": "M008-R4-MINI-RUNTIME",
+  "status": "PM_ACCEPTED_LOCAL_COMMIT_PREPARATION_CLOUD_PREVIEW_BLOCKED",
+  "pmAcceptance": {
+    "date": "2026-10-20",
+    "answer": "确认白屏修复，精准本地提交",
+    "acceptedFingerprint": "9a8f9818ee74fd56b55ef35c49fa48e9b2d042fe737249648ff4030a7889784d",
+    "scope": "Only the named build script, regression test and evidence; no deployment, push, review or production release in this step."
+  },
+  "baseline": "2b912bd52b5191d9f3ce73d21292a9c5db5901c9",
+  "fixedFingerprint": "9a8f9818ee74fd56b55ef35c49fa48e9b2d042fe737249648ff4030a7889784d",
+  "files": [
+    {"file": "scripts/build/member-008-round4-mini.cjs", "sha256": "3266a2df18b487215e7aafdb36a411dfdd983d9ba6ec64244c210e400599f814"},
+    {"file": "tests/member-mini-package/round4-runtime-contract.cjs", "sha256": "5c7aa0df4e51a5c6adb17dc1a5b6242faaf78b50f499cc1442822ce08ba7af61"}
+  ],
+  "target": {"customer": "008", "terminal": "Vue2 uniapp member", "appid": "wx85d4bfd0b4b6aafb", "apiOrigin": "https://008.cc3798.com", "proposedVersion": "3.0.3"},
+  "candidate": "/private/tmp/m008-round4-mini-20261020-runtime-fixed/008-member",
+  "artifactSha256": "9e79d836d41162b08ce59a5f307933f4d1fb3bc963c94c8b6b58ecf5ec077b99",
+  "rootCause": "Single-process webpack-4 compilation allowed DCloud's main loader to append the application-only createApp Babel plugin to shared loader options. Native component this.$vm.$mount() became createApp(this.$vm).$mount(), replacing its $scope with getApp().",
+  "fix": "Clone each module's Babel options and plugin tuples in normalModuleLoader before entry-specific mutations. No bundled dependency or emitted business artifact is manually patched.",
+  "verification": {
+    "sourceFilesEqualAcceptedGitBlobs": 914,
+    "compilerArtifactsCompared": 1886,
+    "javascriptFilesParsed": 423,
+    "stylesExactlyPreserved": 398,
+    "loaderIsolationBehaviorTest": "PASS",
+    "packagedNativeMountAstTest": "PASS",
+    "oldBlankCandidateRejectedByNewTest": true,
+    "existingCssDedupeContract": "PASS",
+    "memberCheckoutRouteRetained": true,
+    "round4CatalogTypesRetained": true,
+    "apiAndWebsocketTarget008": true,
+    "mainPackageBytes": 2093611,
+    "goodsPackageBytes": 1943747,
+    "allPackagesAtMost2097152Bytes": true,
+    "nativeSimulator": {
+      "tool": "WeChat DevTools RC 2.02.2607171",
+      "sdk": "3.15.2",
+      "homeVisible": true,
+      "staffStoreAndProductContentVisible": true,
+      "scopeHasData": true,
+      "scopeIsApp": false,
+      "pageVmIsAppVm": false,
+      "webviewIdMountErrorAbsent": true,
+      "projectTabOpensCardPageThenLogin": true,
+      "cancelLoginReturnsHome": true,
+      "productionLoginOrTransactionPerformed": false
+    }
+  },
+  "scope": {"frontendBusinessSource": [], "backendSource": [], "databaseMigrations": [], "engineeringScripts": ["scripts/build/member-008-round4-mini.cjs"], "automatedTests": ["tests/member-mini-package/round4-runtime-contract.cjs"]},
+  "existingFeaturesPreserved": ["R4 product-type filters", "member commerce checkout route and API", "unchanged accepted member business source"],
+  "cleanup": "Removed unneeded lossless-PNG helper/test and restored CSS dedupe and vue.config.js to exact HEAD. No alternate editable business source remains. Immutable diagnostic artifacts retained only as evidence.",
+  "commentsUpdated": ["scripts/build/member-008-round4-mini.cjs", "tests/member-mini-package/round4-runtime-contract.cjs"],
+  "evidence": ["evidence/round4-runtime/home.png", "evidence/round4-runtime/home-ax.txt", "evidence/round4-runtime/login.png", "/private/tmp/m008-round4-mini-20261020-runtime-fixed/input.json", "/private/tmp/m008-round4-mini-20261020-runtime-fixed/verification.json", "/private/tmp/m008-round4-mini-preview-runtime-fixed-20261020.log"],
+  "separateRemainingIssues": [
+    "Official cloud preview still fails with 41002 appid missing despite correct project AppID; no QR/info output was created.",
+    "Existing get_open_adv returns HTTP 500, map-key configuration is missing, and the local icon font is rejected by the simulator; these are not repaired by the mounting fix.",
+    "No real-device verification, payment verification or complete member-app acceptance is claimed."
+  ],
+  "originalStagingPreserved": true,
+  "committed": false,
+  "pushed": false,
+  "uploadedDevelopmentVersion": false,
+  "experienceVersionConfigured": false,
+  "reviewSubmitted": false,
+  "productionReleased": false,
+  "serverOrDatabaseWrites": false
+}

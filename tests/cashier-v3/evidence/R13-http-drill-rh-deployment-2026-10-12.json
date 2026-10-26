@@ -1,0 +1,132 @@
+{
+  "task": "R13-00003 异业汇总HTTP下钻参数补修",
+  "status": "pm_accepted_committed_deployed_online_verification_passed",
+  "accepted_version": "R13-20261012-http-drill-886a3eda",
+  "user_acceptance": "确认补修验收通过，继续发布",
+  "previous_source_commit": "3e1cff74c6d8f4527dd8460bd3225a19dd5a5639",
+  "previous_release_commit": "b9c153eb1b4b68625bbcbde8c7fe66806e6bf77a",
+  "corrective_source_commit": "0767deff4214eefbc515de575664add049d0019e",
+  "corrective_release_commit": "3e2a212036d78e3f4f2611ab8d0a03c2c50e15b2",
+  "installation": {
+    "phase": "installed",
+    "time": "2026-10-12T14:41:25+08:00",
+    "release": "3e2a212036d78e3f4f2611ab8d0a03c2c50e15b2",
+    "source_commit": "0767deff4214eefbc515de575664add049d0019e",
+    "backup": "/www/backups/rh.cc3798.com/20261012-r13-b9c153eb/http-drill-3e2a2120",
+    "files": [
+      {
+        "path": "app/controller/cashier/v3/Report.php",
+        "old_sha256": "e9946445ff35de8ba5594b4f92c649fae644de96c8dca2fd5efd3ac113dac037",
+        "new_sha256": "9910f29ae8f40d6650450c274f5ff400f3593b662fc1e181853916f2abeb9580"
+      },
+      {
+        "path": "app/controller/admin/v1/report/UnifiedReport.php",
+        "old_sha256": "5aba3c70cbf1e3ad18d67f325898a46427889393c619a98a58aed8b50253c632",
+        "new_sha256": "05e0a354e1b84f8bf3b3b14a8bbbf55d3b291eeba402416fd4866c29867df896"
+      }
+    ],
+    "static_unchanged": true,
+    "database_write": false,
+    "restart": "ruihao swoole started pid=3114 port=20800",
+    "health": "manager_count=1\nmanager_pids=3114",
+    "lock_close_on_exec": true
+  },
+  "final_health": {
+    "time": "2026-10-12T14:43:46+08:00",
+    "backend_hashes": 10,
+    "asset_hashes": 10,
+    "release_lock_available": true,
+    "health": "manager_count=1\nmanager_pids=3114",
+    "workers_active": true
+  },
+  "verification": {
+    "online_controller_query_export": {
+      "checks": 15,
+      "writes": 0,
+      "result": "PASS"
+    },
+    "real_cashier_browser": {
+      "entry": "https://rh.cc3798.com/preview-8080/view_cashier_v3/#/data/reports/cross_industry_customer_summary",
+      "year": 2026,
+      "annual_summary": "2385",
+      "members": 2,
+      "action": "Click Li Huizhi October 1200 cell",
+      "detail_rows": 1,
+      "document": "BJ26100200015",
+      "summary": "1200",
+      "member_id": 1093146,
+      "store_ids": [
+        175
+      ],
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-31",
+      "include_followup_cash": 1,
+      "result": "PASS"
+    },
+    "real_cashier_export": {
+      "result": "PASS",
+      "file": "/Users/xiaojunpeng/Downloads/门店经营报表-异业收客明细表-20261012144248.csv",
+      "sha256": "ead9a50cc745ced3a017bd40f871862eaccb9eddc65bf367c47256276075ab94",
+      "headers": 9,
+      "detail_count": 1,
+      "summary": "1200",
+      "document_no": "BJ26100200015",
+      "column_explanation_rows": 9
+    },
+    "screenshot": {
+      "path": "tests/cashier-v3/evidence/R13-http-drill-rh-fixed-2026-10-12.jpg",
+      "sha256": "8b3813103692820cd4b27c286f565534c4de654d651eb0fb0c47cbb493d7adf9"
+    },
+    "previous_round_checks": "Original 171 production read-only service checks and 10 HTTPS asset checks remain valid; installed hashes rechecked after correction.",
+    "limits": "Logged-in real HTTP and downloaded CSV verified in cashier. Admin input whitelist plus real request parsing/query/export verified in read-only transaction; no logged-in admin browser test. No production repayment/payment created."
+  },
+  "retries": [
+    "First backup attempt stopped before any changes: prior deployment PHP lock descriptor was inherited by its own Swoole children. lsof identified only those processes; restarting through existing service script released it. Subsequent automation uses close-on-exec descriptor and explicit unlock; final lock availability PASS.",
+    "First SCP connection closed; package hash guard stopped install before any code changes. Reupload and full package/source checks passed before successful install."
+  ],
+  "boundaries": {
+    "frontend_changed": false,
+    "database_write": false,
+    "other_customers_changed": false,
+    "unrelated_worktree_changes_preserved": true,
+    "real_payment_test": false
+  },
+  "files": {
+    "backend": [
+      "后端代码/app/controller/cashier/v3/Report.php",
+      "后端代码/app/controller/admin/v1/report/UnifiedReport.php"
+    ],
+    "tests": [
+      "tests/cashier-v3/php/r13-cross-industry-http-input-readonly.php"
+    ],
+    "frontend": [],
+    "migrations": [],
+    "engineering_scripts": [],
+    "generated_package": {
+      "entries": [
+        {
+          "path": "app/controller/cashier/v3/Report.php",
+          "old_sha256": "e9946445ff35de8ba5594b4f92c649fae644de96c8dca2fd5efd3ac113dac037",
+          "new_sha256": "9910f29ae8f40d6650450c274f5ff400f3593b662fc1e181853916f2abeb9580"
+        },
+        {
+          "path": "app/controller/admin/v1/report/UnifiedReport.php",
+          "old_sha256": "5aba3c70cbf1e3ad18d67f325898a46427889393c619a98a58aed8b50253c632",
+          "new_sha256": "05e0a354e1b84f8bf3b3b14a8bbbf55d3b291eeba402416fd4866c29867df896"
+        }
+      ],
+      "package": "/tmp/r13-publish-20261012-KsPK9l/r13-http-drill.tar.gz",
+      "package_sha256": "181dcd15769704b5ae0ed860812794d65cf53f48a3d0d5a3073dfcb858cf5762"
+    }
+  },
+  "shared_index_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "rollback": "Use installation.backup/before for exactly two controllers, verify current release hashes, restore atomically and restart ruihao_swoole. Retain database reward columns and business records.",
+  "push_target": {
+    "remote": "origin",
+    "url": "git@gitee.com:mhfz/rh.git",
+    "branch": "release/store-cashier-c14-main",
+    "mode": "fast-forward precise release chain only, never push divergent development HEAD",
+    "authorized": true,
+    "recorded_before_push": true
+  }
+}

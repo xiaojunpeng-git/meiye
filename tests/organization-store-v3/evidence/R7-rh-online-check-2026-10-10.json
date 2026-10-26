@@ -1,0 +1,42 @@
+{
+  "html_sha256": "a238ebd15f6a7e2fd51863f0cb32d8259d264a950decf412d9e8764445ee1dbb",
+  "results": [
+    {
+      "path": "public/view_admin/css/app.b6208b14.css",
+      "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css",
+      "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+    },
+    {
+      "path": "public/view_admin/js/app.1b988d9f.js",
+      "sha256": "b081d18c682a955804ff6f64e093887d1225bc8a31c571541fd749308e5f29a6"
+    },
+    {
+      "path": "public/view_admin/js/chunk-6f094e63.e314e60b.js",
+      "sha256": "9bdd36068ddebef757d2078ee4662accc58b710fcdeda6bff3ab8ff2b6341c1b"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.72e8295d.js",
+      "sha256": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8"
+    }
+  ],
+  "api": [
+    {
+      "method": "GET",
+      "path": "/adminapi/merchant/staff/person_complete/1803",
+      "body": "{\"status\":410000,\"msg\":\"请登录\",\"data\":[]}"
+    },
+    {
+      "method": "POST",
+      "path": "/adminapi/merchant/staff/person_complete/save/1803",
+      "body": "{\"status\":410000,\"msg\":\"请登录\",\"data\":[]}"
+    },
+    {
+      "method": "GET",
+      "path": "/cashierapi/v3/session/stores",
+      "body": "{\"status\":410000,\"msg\":\"请登录\",\"data\":[]}"
+    }
+  ]
+}

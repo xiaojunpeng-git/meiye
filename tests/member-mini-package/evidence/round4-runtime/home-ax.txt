@@ -1,0 +1,289 @@
+Window: "WeChat Web Devtools", App: 微信开发者工具.
+0 标准窗口 WeChat Web Devtools, Secondary Actions: Raise
+	1 HTML 内容 file:///Applications/wechatwebdevtools.app/Contents/Resources/app.asar/html/electron-project.html?projectpath=%2Fprivate%2Ftmp%2Fm008-round4-mini-20261020-runtime-fixed%2F008-member&projectname=uniapp&projectid=&theme=dark&skeletonPath=%2FUsers%2Fxiaojunpeng%2FLibrary%2FApplication%20Support%2F%E5%BE%AE%E4%BF%A1%E5%BC%80%E5%8F%91%E8%80%85%E5%B7%A5%E5%85%B7%2Fd1e8765721a6c23d43b14c95b1843e6b%2FWeappCache%2FskeletonCache%2Fc522c64b8849283bedf8fba3621159fa%2Fpageskeleton.html&appid=wx85d4bfd0b4b6aafb&windowMode=fullMode&frame=0&devid=s26&pureSimulator=1&runtimeid=0&devtype=miniprogram&proxyPort=41073&userDataPath=%2FUsers%2Fxiaojunpeng%2FLibrary%2FApplication%2520Support%2F%25E5%25BE%25AE%25E4%25BF%25A1%25E5%25BC%2580%25E5%258F%2591%25E8%2580%2585%25E5%25B7%25A5%25E5%2585%25B7%2Fd1e8765721a6c23d43b14c95b1843e6b&appVersion=2.02.2607171&appVersionType=1
+		2 container
+			3 文本 uniapp - 微信开发者工具 RC 2.02.2607171
+			4 container
+				5 text 小程序模式
+			6 文本 预览
+			7 文本 真机调试
+			8 文本 上传
+			9 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+			10 container
+				11 container
+					12 container
+						13 text 预览 编辑
+					14 container
+						15 text 普通编译
+					16 container
+						17 container
+							18 text 12 : 22
+						19 container
+							20 链接
+							21 链接
+						22 HTML 内容 Webview: pages/index/index, URL: 127.0.0.1:50942/__pageframe__/pages/index/index
+							23 container
+								24 text 点击添加到我的小程序 
+							25 container
+								26 图像
+								27 container
+									28 text 广州 雅居乐店 
+								29 链接 请输入搜索词 
+									30 文本 请输入搜索词
+									31 文本 
+								32 列表框
+									33 container 可横向滚动
+							34 文本 优惠券
+							35 文本 渼约币
+							36 文本 推广海报
+							37 文本 全部项目
+							38 container
+								39 container
+									40 图像
+									41 container
+										42 text ￥ 0 .00
+									43 文本 库存:undefined
+									44 文本 
+								45 文本 数量
+								46 文本 
+								47 文本栏 (settable)
+
+									48 文本栏 (settable)
+								49 文本 
+								50 文本 已售罄
+								51 container
+									52 文本 选择门店
+								53 container
+									54 text 选择地址 选择其它地址
+							55 文本 明星员工
+							56 文本 查看全部
+							57 文本 
+							58 container
+								59 图像
+								60 文本 杨佳玲
+								61 图像
+								62 文本 何焕春
+								63 图像
+								64 文本 黎云
+							65 图像
+							66 文本 更多
+							67 文本 
+							68 container
+								69 文本 首页推荐
+							70 container
+								71 文本 丰韵翘臀（单次）
+								72 container
+									73 text ￥ 198 .00
+								74 文本 已售0次
+								75 text 晶莹美目（单次） 热卖单品 精品推荐 首发新品 优品推荐
+								76 container
+									77 text ￥ 198 .00
+								78 文本 已售0次
+								79 text 面部卡（单项） 热卖单品 精品推荐 首发新品 优品推荐
+								80 container
+									81 text ￥ 1,580 .00
+								82 文本 已售0次
+							83 container
+								84 文本 肩颈无忧（单次）
+								85 container
+									86 text ￥ 198 .00
+								87 文本 已售0次
+								88 文本 比利时纯姬
+								89 text 八倍水动力（单次） 热卖单品 精品推荐 首发新品 优品推荐
+								90 container
+									91 text ￥ 198 .00
+								92 文本 已售0次
+								93 text 肩颈卡（单项） 热卖单品 精品推荐 首发新品 优品推荐
+								94 container
+									95 text ￥ 1,580 .00
+								96 文本 已售0次
+							97 container
+								98 container
+									99 图像
+									100 container
+										101 text ￥ 0 .00
+									102 文本 库存:undefined
+									103 文本 
+								104 文本 数量
+								105 文本 
+								106 文本栏 (settable)
+
+									107 文本栏 (settable)
+								108 文本 
+								109 文本 已售罄
+								110 container
+									111 文本 选择门店
+								112 container
+									113 text 选择地址 选择其它地址
+							114 container
+								115 container
+									116 文本 恭喜获得
+									117 文本 0张
+									118 文本 优惠券
+								119 文本 立即领取
+								120 文本 
+							121 container
+								122 文本 
+								123 文本 首页
+								124 文本 
+								125 文本 服务
+								126 文本 
+								127 文本 社区
+								128 文本 
+								129 文本 项目
+								130 文本 
+								131 文本 我的
+						132 HTML 内容 小程序逻辑层, URL: 127.0.0.1:50942/appservice/s26/_sessionId/simulator-app-session-s26/mainframe?load
+							133 container
+								134 HTML 内容 小程序逻辑层, URL: 127.0.0.1:50942/appservice/instanceframe?s=1792470141219&autoload#id_1
+								135 HTML 内容 127.0.0.1:50942/appservice/appContext?contextName=app&id=ifr-1_2#id_1
+								136 HTML 内容 127.0.0.1:50942/appservice/app_xrframe_renderContext?contextName=app_xrframe_render&id=ifr-1_3&empty=true#id_1
+								137 HTML 内容 127.0.0.1:50942/appservice/app_sub_debugContext?contextName=app_sub_debug&id=ifr-1_4&empty=true#id_1
+								138 HTML 内容 小程序逻辑层, URL: 127.0.0.1:50942/appservice/instanceframe?s=1792470141219#id_2
+						139 container
+							140 链接
+							141 链接
+					142 container
+						143 文本 iPhone 12/13 (Pro) 81% 17
+					144 container
+						145 文本 页面路径
+					146 文本 pages/index/index
+					147 链接 复制
+				148 container
+					149 container
+						150 container
+							151 文本 008-member
+							152 工具栏
+								153 按钮 Toggle Primary Side Bar (⌘K ⌘B)
+									154 文本 
+								155 按钮 切换面板 (⌘J)
+									156 文本 
+								157 按钮 Toggle Secondary Side Bar (⌥⌘B)
+									158 文本 
+						159 container
+							160 container
+								161 标签组 活动视图切换器
+									162 标签 (selected) Description: 资源管理器 (⌘K ⇧⌘E), Value: 1
+										163 container 资源管理器 (⌘K ⇧⌘E)
+											164 文本 
+									165 标签 (settable, integer) Search (⇧⌘F), Value: 0
+										166 container Search (⇧⌘F)
+											167 文本 
+									168 标签 (settable, integer) 源代码管理 (⌃⇧G), Value: 0
+										169 container 源代码管理 (⌃⇧G)
+											170 文本 
+									171 标签 (settable, integer) Description: Run and Debug, Value: 0
+										172 文本 
+									173 弹出式按钮 其他视图
+										174 文本 
+								175 container
+									176 标题 资源管理器, Help: 资源管理器 (⌘K ⇧⌘E), Value: 2
+										177 文本 资源管理器
+									178 内容列表 资源管理器操作
+										179 弹出式按钮 Views and More Actions...
+									180 container
+										181 container
+											182 按钮 文件资源管理器部分
+												183 文本 
+												184 标题 Description: 文件资源管理器部分, Help: 008-member, Value: 3
+													185 文本 008-MEMBER
+											186 外框 树
+												187 container
+													188 row common
+														189 container
+															190 文本 
+															191 文本 common
+													192 row components
+														193 container
+															194 文本 
+															195 文本 components
+													196 row pages
+														197 container
+															198 文本 
+															199 文本 pages
+													200 row static
+														201 container
+															202 文本 
+															203 文本 static
+													204 row uni_modules
+														205 container
+															206 文本 
+															207 文本 uni_modules
+													208 row app.js
+														209 container
+															210 文本 app.js
+													211 row app.json
+														212 container
+															213 文本 app.json
+													214 row app.wxss
+														215 container
+															216 文本 app.wxss
+													217 row project.config.json
+														218 container
+															219 文本 project.config.json
+													220 row project.private.config.json
+														221 container
+															222 文本 project.private.config.json
+										223 按钮 大纲 Section
+											224 文本 
+											225 标题 大纲, Value: 3
+												226 文本 大纲
+										227 按钮 时间线 Section
+											228 文本 
+											229 标题 时间线, Value: 3
+												230 文本 时间线
+							231 container
+								232 container
+									233 container 第 1 组 (空)
+										234 container
+											235 定义列表
+												236 container 显示所有命令
+													237 文本 显示所有命令
+												238 container Command+K Command+P
+													239 text ⌘ K ⌘ P
+											240 定义列表
+												241 container Go to File
+													242 文本 Go to File
+												243 container Command+P
+													244 text ⌘ P
+											245 定义列表
+												246 container 在文件中查找
+													247 文本 在文件中查找
+												248 container Shift+Command+F
+													249 text ⇧ ⌘ F
+											250 定义列表
+												251 container 开始调试
+													252 文本 开始调试
+												253 文本 F5
+											254 定义列表
+												255 container 切换终端
+													256 文本 切换终端
+												257 文本 未绑定
+						258 container
+							259 container 没有问题
+								260 按钮 没有问题
+									261 文本 
+									262 文本  0
+									263 文本 
+									264 文本  0
+							265 container 进度和简要通知
+							266 container 已为屏幕阅读器优化
+								267 按钮 已为屏幕阅读器优化
+							268 container undefined
+	269 关闭按钮
+	270 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	271 最小化按钮
+272 menu bar
+	273 微信开发者工具
+	274 项目
+	275 文件
+	276 编辑
+	277 工具
+	278 跳转
+	279 选择
+	280 界面
+	281 设置
+	282 插件
+	283 帮助
+
+The focused UI element is 233 container 第 1 组 (空)

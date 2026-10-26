@@ -1,0 +1,364 @@
+<script setup>
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { formatMoney } from '@/services/cashierV3Bridge'
+
+const props = defineProps({
+  title: {
+    type: String,
+    default: '记录详情'
+  },
+  record: {
+    type: Object,
+    default: () => ({})
+  },
+  fields: {
+    type: Array,
+    default: () => []
+  },
+  resolveValue: {
+    type: Function,
+    required: true
+  },
+  lifecycleActions: { type: Array, default: () => [] },
+  initialLifecycleAction: { type: String, default: '' },
+  onLifecycleAction: { type: Function, default: null },
+  fieldActionKeys: { type: Array, default: () => [] },
+  attributionChanges: { type: Array, default: () => [] },
+  showDebtChanges: { type: Boolean, default: false },
+  debtChanges: { type: Array, default: () => [] },
+  debtChangesLoading: { type: Boolean, default: false },
+  debtChangesError: { type: String, default: '' }
+})
+
+const emit = defineEmits(['close', 'field-action'])
+
+// 列表直达作废时先校验本条记录仍具备该操作，避免复用弹窗暴露无权动作。
+const activeForm = ref(props.lifecycleActions.includes(props.initialLifecycleAction) ? props.initialLifecycleAction : '')
+const cashRefundAmount = ref('')
+const principalAmount = ref('0')
+const bonusAmount = ref('0')
+const reason = ref('')
+const pending = ref(false)
+const actionError = ref('')
+const detailBody = ref(null)
+
+onMounted(async () => {
+  if (activeForm.value !== 'replacement-void') return
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = detailBody.value.scrollHeight
+})
+
+const rows = computed(() => props.fields.map((field) => {
+  const value = props.resolveValue(props.record, field.key)
+  return {
+    ...field,
+    value,
+    displayValue: field.type === 'money'
+      ? formatMoney(value)
+      : value === undefined || value === null || value === '' ? '—' : String(value)
+  }
+}))
+
+// 仅补交作废操作置于详情最上方，打开弹窗即可看到表单；
+// 其余业务记录沿用原先先展示详情、再展示操作的顺序。
+const detailSectionOrder = computed(() => activeForm.value === 'supplement-void'
+  ? ['lifecycle', 'fields']
+  : ['fields', 'lifecycle'])
+
+// 补交作废从固定底栏进入；切换内容顺序后同步回到顶部，避免滚动位置仍停在原详情底部。
+async function openSupplementVoidForm() {
+  activeForm.value = 'supplement-void'
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = 0
+}
+
+function validMoney(value, allowZero = false) {
+  const raw = String(value ?? '').trim()
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return false
+  const amount = Number(raw)
+  return Number.isFinite(amount) && (allowZero ? amount >= 0 : amount > 0)
+}
+
+async function submitLifecycleAction() {
+  if (!props.onLifecycleAction || pending.value) return
+  actionError.value = ''
+  if (!reason.value.trim()) {
+    actionError.value = activeForm.value === 'refund' ? '请填写退款原因。' : '请填写作废原因。'
+    return
+  }
+  const payload = {
+    action: activeForm.value === 'refund' ? 'refund-recharge-order'
+      : activeForm.value === 'supplement-void' ? 'void-order-center-supplement'
+        : activeForm.value === 'gift-void' ? 'void-order-center-gift'
+          : activeForm.value === 'replacement-void' ? 'void-order-center-project-replacement'
+            : activeForm.value === 'refund-record-void' ? 'void-order-center-refund' : 'void-recharge-order',
+    reason: reason.value.trim()
+  }
+  if (activeForm.value === 'refund') {
+    if (!validMoney(cashRefundAmount.value, true) || !validMoney(principalAmount.value, true) || !validMoney(bonusAmount.value, true)
+      || Number(cashRefundAmount.value) + Number(principalAmount.value) + Number(bonusAmount.value) <= 0) {
+      actionError.value = '实际退款、扣回本金和扣回赠金至少需要填写一项。'
+      return
+    }
+    Object.assign(payload, { cashRefundAmount: cashRefundAmount.value, principalRefundAmount: principalAmount.value, bonusRefundAmount: bonusAmount.value })
+  }
+  pending.value = true
+  try {
+    const response = await props.onLifecycleAction(payload)
+    const envelope = response?.data?.result ? response.data : response
+    const status = String(envelope?.result?.status || envelope?.status || '')
+    if (!['success', 'succeeded'].includes(status)) {
+      actionError.value = envelope?.result?.message || envelope?.message || '本次操作没有成功，订单状态未改变。'
+      return
+    }
+    activeForm.value = ''
+    reason.value = ''
+  } catch (error) {
+    actionError.value = error?.message || '本次操作没有成功，订单状态未改变。'
+  } finally {
+    pending.value = false
+  }
+}
+</script>
+
+<template>
+  <div class="business-record-detail" role="presentation" @click.self="$emit('close')">
+    <section class="business-record-detail__dialog" role="dialog" aria-modal="true" :aria-label="title">
+      <header class="business-record-detail__header">
+        <div>
+          <span>订单中心</span>
+          <h2>{{ title }}</h2>
+        </div>
+        <button type="button" class="business-record-detail__close" aria-label="关闭详情" @click="$emit('close')">×</button>
+      </header>
+
+      <main ref="detailBody" class="business-record-detail__body">
+        <template v-for="section in detailSectionOrder" :key="section">
+          <dl v-if="section === 'fields'" class="business-record-detail__grid">
+            <div v-for="row in rows" :key="row.key" :class="{ 'business-record-detail__money': row.type === 'money' }">
+              <dt>{{ row.label }}</dt>
+              <dd>
+                <button v-if="fieldActionKeys.includes(row.key)" type="button" class="business-record-detail__field-action" @click="emit('field-action', { key: row.key, record })">{{ row.displayValue }}</button>
+                <template v-else>{{ row.displayValue }}</template>
+              </dd>
+            </div>
+          </dl>
+          <section v-else-if="activeForm" class="business-record-detail__lifecycle"
+            :class="{ 'business-record-detail__lifecycle--top': activeForm === 'supplement-void' }">
+            <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : activeForm === 'replacement-void' ? '作废项目替换' : activeForm === 'refund-record-void' ? '作废退款记录' : '作废充值订单' }}</h3>
+            <template v-if="activeForm === 'refund'">
+              <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
+              <div class="business-record-detail__amount-row">
+                <label>扣回本金<input v-model.trim="principalAmount" inputmode="decimal" /></label>
+                <label>扣回赠金<input v-model.trim="bonusAmount" inputmode="decimal" /></label>
+              </div>
+            </template>
+            <small v-if="activeForm === 'refund'">退款成功后订单只保留查看；已发生的欠款、赠品和权益不会回退。</small>
+            <small v-if="activeForm === 'replacement-void'">目标项目未使用且原项目权益未发生后续变化时，才可恢复原项目次数。</small>
+            <small v-if="activeForm === 'refund-record-void'">误录退款将整笔撤销。余额或权益已发生后续变化而无法安全恢复时，不会作废，并会提示具体原因。</small>
+            <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
+            <p v-if="actionError" role="alert">{{ actionError }}</p>
+            <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
+          </section>
+        </template>
+        <section v-if="attributionChanges.length" class="business-record-detail__changes">
+          <h3>变更记录</h3>
+          <p v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
+            {{ change.recordNo }} · {{ change.field === 'source' ? '来源' : change.field === 'guide' ? '导购' : change.field === 'guide_round' ? '导购轮次' : '业务日期' }}：{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}
+            <small>{{ change.operatorName || change.operatorId }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
+          </p>
+        </section>
+        <section v-if="showDebtChanges" class="business-record-detail__changes">
+          <h3>变更记录</h3>
+          <p v-if="debtChangesLoading">读取中…</p>
+          <p v-else-if="debtChangesError" role="alert">{{ debtChangesError }}</p>
+          <p v-else-if="!debtChanges.length">暂无变更记录</p>
+          <p v-for="change in debtChanges" :key="change.factId">
+            {{ change.type === 'restore' ? '恢复欠款' : '取消欠款' }} {{ formatMoney((Number(change.amountCents) / 100).toFixed(2)) }}
+            <template v-if="change.reason"> · {{ change.reason }}</template>
+            <small>{{ change.operatorName || change.operatorId || '—' }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
+          </p>
+        </section>
+      </main>
+
+      <footer class="business-record-detail__footer">
+        <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
+        <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
+        <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="openSupplementVoidForm">作废</button>
+        <button v-if="lifecycleActions.includes('gift-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'gift-void'">作废</button>
+        <button v-if="lifecycleActions.includes('replacement-void') && activeForm !== 'replacement-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'replacement-void'">作废</button>
+        <button v-if="lifecycleActions.includes('refund-record-void') && activeForm !== 'refund-record-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund-record-void'">作废</button>
+        <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
+      </footer>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.business-record-detail__changes { margin-top: 18px; border-top: 1px solid #e1e8f0; padding-top: 12px; }
+.business-record-detail__changes p { margin: 8px 0; }
+.business-record-detail__changes small { display: block; color: #65758a; margin-top: 3px; }
+.business-record-detail {
+  position: fixed;
+  z-index: 1450;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(21, 29, 43, .38);
+}
+
+.business-record-detail__dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(900px, 100%);
+  max-height: min(760px, calc(100vh - 56px));
+  overflow: hidden;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 22px 60px rgba(31, 42, 55, .22);
+}
+
+.business-record-detail__header,
+.business-record-detail__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+}
+
+.business-record-detail__lifecycle { display:grid; gap:12px; margin-top:18px; padding:16px; border:1px solid #dfe5ec; border-radius:6px; background:#fff; }
+.business-record-detail__lifecycle--top { margin-top:0; margin-bottom:18px; }
+.business-record-detail__lifecycle h3, .business-record-detail__lifecycle p { margin:0; }
+.business-record-detail__lifecycle label { display:grid; gap:6px; color:#475467; font-size:13px; }
+.business-record-detail__lifecycle input, .business-record-detail__lifecycle textarea { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #cfd7e3; border-radius:5px; font:inherit; }
+.business-record-detail__lifecycle > div:last-child { display:flex; justify-content:flex-end; gap:10px; }
+.business-record-detail__lifecycle p { color:#b42318; }
+.business-record-detail__amount-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+
+.business-record-detail__header {
+  border-bottom: 1px solid #e8edf2;
+}
+
+.business-record-detail__header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.business-record-detail__header span {
+  color: #8a94a3;
+  font-size: 12px;
+}
+
+.business-record-detail__header h2 {
+  margin: 0;
+  color: #20252b;
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.business-record-detail__close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #f1f3f5;
+  color: #596574;
+  font-size: 22px;
+}
+
+.business-record-detail__body {
+  min-height: 0;
+  overflow: auto;
+  padding: 22px;
+  background: #f7f9fb;
+}
+
+.business-record-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #e0e6ed;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.business-record-detail__grid > div {
+  min-width: 0;
+  min-height: 76px;
+  padding: 14px 16px;
+  border-right: 1px solid #edf0f4;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.business-record-detail__grid > div:nth-child(3n) {
+  border-right: 0;
+}
+
+.business-record-detail__grid dt {
+  margin-bottom: 7px;
+  color: #8a94a3;
+  font-size: 12px;
+}
+
+.business-record-detail__grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  color: #303640;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.business-record-detail__money dd {
+  color: #1e5ca8;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.business-record-detail__field-action {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #175cd3;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.business-record-detail__footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e8edf2;
+}
+
+@media (max-width: 760px) {
+  .business-record-detail {
+    padding: 12px;
+  }
+
+  .business-record-detail__dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .business-record-detail__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .business-record-detail__grid > div:nth-child(3n) {
+    border-right: 1px solid #edf0f4;
+  }
+
+  .business-record-detail__grid > div:nth-child(2n) {
+    border-right: 0;
+  }
+}
+</style>

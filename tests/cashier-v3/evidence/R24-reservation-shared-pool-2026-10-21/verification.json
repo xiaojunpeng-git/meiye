@@ -1,0 +1,42 @@
+[
+  {
+    "case": "shared-pool",
+    "pass": true,
+    "assertions": 17
+  },
+  {
+    "case": "unpaid",
+    "pass": true,
+    "assertions": 1
+  },
+  {
+    "case": "paid",
+    "pass": true,
+    "assertions": 1
+  },
+  {
+    "case": "debt",
+    "pass": true,
+    "assertions": 4
+  },
+  {
+    "lint": "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php",
+    "pass": true
+  },
+  {
+    "lint": "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php",
+    "pass": true
+  },
+  {
+    "lint": "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php",
+    "pass": true
+  },
+  {
+    "lint": "scripts/r24-reservation-shared-pool-audit.php",
+    "pass": true
+  },
+  {
+    "lint": "tests/cashier-v3/php/r24-reservation-shared-pool-mysql.php",
+    "pass": true
+  }
+]

@@ -1,0 +1,887 @@
+<template>
+  <view v-if="enabled" class="ai-entry" :style="entryPositionStyle" role="button" aria-label="打开魔核 AI 工作台" @tap="onEntryTap" @touchstart="onEntryTouchStart" @touchmove.stop.prevent="onEntryTouchMove" @touchend="onEntryTouchEnd" @touchcancel="onEntryTouchEnd"><image class="ai-entry-icon" src="/static/mohe-ai-entry-orbits.gif" mode="aspectFit" /></view>
+  <view v-if="opened" class="ai-panel" :class="{ 'ai-panel--native-mini': platformUsesNativeCanvas }" :style="platformUsesNativeCanvas ? { paddingTop: nativePanelTop + 'px' } : {}">
+    <view class="ai-workspace-head">
+      <!-- 左右对称避让原生胶囊，让标题相对屏幕居中；退出沿用closePanel，不删除会话或取消任务。 -->
+      <view class="ai-title-row" :style="platformUsesNativeCanvas ? { height: nativeTitleHeight + 'px', paddingLeft: nativeCapsuleSpace + 'px', paddingRight: nativeCapsuleSpace + 'px' } : {}">
+        <view class="ai-back-button" role="button" aria-label="退出魔核 AI" @tap="closePanel"><text class="ai-back-chevron">‹</text></view>
+        <text class="ai-title">魔核AI 1.0</text>
+      </view>
+      <!-- 标语独立放在标题行下方，保留原生胶囊对齐和返回按钮触控区域。 -->
+      <text class="ai-brand-tagline">够智能、够准确、够便捷</text>
+    </view>
+    <scroll-view scroll-y="true" class="ai-messages" :scroll-into-view="messageAnchor">
+      <view v-for="(item,index) in displayed" :key="index" :id="turnAnchor(item,index)" class="ai-message">
+        <view class="ai-user-turn"><text class="ai-turn-label">你问</text><text class="ai-question">{{ item.question }}</text></view>
+        <text v-if="elapsedLabel(item.elapsed_seconds).length > 0" class="ai-run-complete">{{ elapsedLabel(item.elapsed_seconds) }}</text>
+        <view class="ai-answer-turn"><text class="ai-turn-label">魔核 AI</text><view v-if="collectionSections(item.presentation).length > 0" class="ai-answer-presentation"><view v-for="section in collectionSections(item.presentation)" :key="section.id" class="ai-answer-section-group"><text class="ai-answer-section">{{ section.title }}</text><text class="ai-answer">{{ section.answer.summary }}</text><view v-for="(card,ci) in section.answer.cards || []" :key="ci" class="ai-card"><text class="ai-card-label">{{ card.metric_name }}</text><text class="ai-number">{{ card.display_value }}{{ card.unit }}</text><text v-if="card.period_label" class="ai-note">{{ card.period_label }}</text></view><scroll-view v-if="section.answer.table != null" scroll-x="true" class="ai-result-table-scroll"><view class="ai-result-table" :style="{ width: tableWidth(section.answer.table.columns) + 'px' }"><view class="ai-result-table__row ai-result-table__head"><text v-for="column in section.answer.table.columns" :key="column.key" class="ai-result-table__cell">{{ column.label }}</text></view><view v-for="(row,ri) in section.answer.table.rows" :key="ri" class="ai-result-table__row"><text v-for="column in section.answer.table.columns" :key="column.key" class="ai-result-table__cell">{{ row[column.key] }}</text></view></view></scroll-view></view></view><view v-else-if="answerPresentation(item.presentation) != null" class="ai-answer-presentation"><view v-for="presentation in [answerPresentation(item.presentation)]" :key="presentation.version"><text class="ai-answer-headline">{{ presentation.headline }}</text><view v-for="(group,gi) in presentationGroups(presentation.facts)" :key="gi" class="ai-answer-section-group"><text v-if="group.section.length > 0" class="ai-answer-section">{{ group.section }}</text><view class="ai-answer-facts"><view v-for="(fact,fi) in group.facts" :key="fi" class="ai-answer-fact-wrap"><view class="ai-answer-fact"><text class="ai-answer-fact__label">{{ fact.label }}</text><text class="ai-answer-fact__value" :class="{ 'ai-number--count': fact.unit != '元' }">{{ fact.value }}<text class="ai-unit">{{ fact.unit }}</text></text></view></view></view></view><text v-if="presentation.period_label.length > 0" class="ai-note ai-answer-period">{{ presentation.period_label }}</text><text v-for="(note,ni) in presentation.notes" :key="ni" class="ai-note ai-answer-note">{{ note }}</text></view></view><text v-else class="ai-answer">{{ item.answer }}</text></view>
+        <!-- 未形成可信候选时只提供原问补充，不拿指标目录凑三个解释。 -->
+        <view v-for="(card,ci) in item.cards" :key="ci" class="ai-card">
+          <text class="ai-card-label">{{ card.metric_name }}</text>
+          <text class="ai-number">{{ card.display_value }}{{ card.unit }}</text>
+          <text v-if="card.period_label" class="ai-note">{{ card.period_label }}</text>
+          <view v-if="tooltipText(card.tooltip).length > 0" class="ai-card-detail-toggle" role="button" @tap="toggleCardDetail(cardKey(item,ci))"><text class="ai-card-detail-chevron">›</text><text>{{ cardDetailVisible(cardKey(item,ci)) ? '收起统计口径' : '统计口径' }}</text></view>
+          <text v-if="cardDetailVisible(cardKey(item,ci))" class="ai-card-detail">{{ tooltipText(card.tooltip) }}</text>
+        </view>
+        <scroll-view v-if="item.table != null" scroll-x="true" class="ai-result-table-scroll"><view class="ai-result-table" :style="{ width: tableWidth(item.table.columns) + 'px' }"><view class="ai-result-table__row ai-result-table__head"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ column.label }}</text></view><view v-for="(row,ri) in item.table.rows" :key="ri" class="ai-result-table__row"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ row[column.key] }}</text></view></view></scroll-view>
+        <view v-if="item.export_status != null" class="ai-card"><text class="ai-note">{{ exportStatusLabel(item.export_status) }}</text><button v-if="item.export_status == 'succeeded' && exportSource(item) != null" size="mini" @tap="downloadExcel(item)">下载 Excel</button></view>
+        <view v-if="item.feedback_available == true && item.feedback_token != null && item.terminal_status != 'CANCELLED'" class="ai-feedback"><button size="mini" :class="{ 'ai-feedback--selected': item.feedback_rating == 'useful' }" :disabled="item.feedback_busy == true" @tap="rateAnswer(item,'useful')">有用</button><button size="mini" :class="{ 'ai-feedback--selected': item.feedback_rating == 'not_useful' }" :disabled="item.feedback_busy == true" @tap="rateAnswer(item,'not_useful')">没用</button><text v-if="item.feedback_note != null" class="ai-note">{{ item.feedback_note }}</text></view>
+        <view v-if="validFailureGuidance(item.failure_guidance)" class="ai-guidance ai-failure-guidance">
+          <text class="ai-guidance-label">您可以这样继续</text>
+          <button v-for="(option,oi) in item.failure_guidance.options" :key="option.value" class="ai-guidance-option" :disabled="busy || pending != null" @tap="chooseFailureAction(item,option.value)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button>
+          <button class="ai-guidance-option" :disabled="busy || pending != null" @tap="openFailureSupplement(item)"><text class="ai-guidance-number">4</text><text class="ai-guidance-option-label">我来补充描述</text></button>
+          <view v-if="failureSupplementKey == turnAnchor(item,index)"><textarea v-model="failureSupplementText" class="ai-guidance-supplement" aria-label="补充或改写完整问题" :maxlength="4000" placeholder="请补充或改写完整问题"/><button class="ai-guidance-confirm" :disabled="busy || failureSupplementText.trim().length == 0" @tap="sendFailureSupplement(item)">发送补充问题</button></view>
+        </view>
+      </view>
+      <view v-if="activeQuestion.length > 0" :id="activeQuestionAnchor" class="ai-message ai-message--active">
+        <view class="ai-user-turn"><text class="ai-turn-label">你问</text><text class="ai-question">{{ activeQuestion }}</text></view>
+        <view v-if="clarification == null" class="ai-run-status"><text class="ai-run-elapsed">已处理 {{ activeElapsedSeconds }} 秒</text><text class="ai-run-thinking">{{ activeRunState }}</text></view>
+      </view>
+      <!-- 确认卡属于当前提问，必须位于阅读占位之前；不能让用户穿过整屏空白寻找操作。 -->
+      <view v-if="clarification != null" id="ai-guidance-current" class="ai-message ai-guidance">
+        <view class="ai-guidance-head"><text>请确认</text><button class="ai-guidance-cancel" :disabled="guidanceBusy || closeRequestedState" @tap="cancelRun">取消查询</button></view>
+        <text v-if="clarification.schema_version == guidanceSchema" class="ai-note">第 {{ clarification.round_no }} 步</text>
+        <view v-for="(item,si) in clarification.confirmed_summary || []" :key="si"><text class="ai-note">{{ item.label }}：{{ item.value }}</text></view>
+        <text class="ai-guidance-question">{{ currentGuidanceQuestion() }}</text>
+        <view v-for="field in currentGuidanceFields()" :key="field.key">
+          <text class="ai-guidance-label">{{ field.label }}</text>
+          <picker v-if="field.type == 'date'" mode="date" :start="field.min || ''" :end="field.max || ''" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectDate(field.key,$event)"><text class="ai-choice">{{ choices[field.key] || '选择日期' }}</text></picker>
+          <view v-else-if="clarification.schema_version == guidanceSchema && currentGuidanceFields().length == 1 && field.key == 'semantic_reply'" role="radiogroup" :aria-label="field.label"><button v-for="(option,oi) in recommendedOptions(field)" :key="option.value" class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == option.value }" role="radio" :aria-checked="choices[field.key] == option.value" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button><button class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == '__supplement__' }" role="radio" :aria-checked="choices[field.key] == '__supplement__'" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseSupplement(field)"><text class="ai-guidance-number">{{ recommendedOptions(field).length + 1 }}</text><text class="ai-guidance-option-label">我来补充描述</text></button><textarea v-if="choices[field.key] == '__supplement__'" v-model="supplementText" class="ai-guidance-supplement" aria-label="补充描述" :maxlength="1000" placeholder="请补充或改写您的问题" /></view>
+          <view v-else-if="field.options.length <= 3" role="radiogroup" :aria-label="field.label"><button v-for="(option,oi) in field.options" :key="option.value" class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == option.value }" role="radio" :aria-checked="choices[field.key] == option.value" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button></view>
+          <picker v-else :range="field.options" range-key="label" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectOption(field,$event)"><text class="ai-choice">{{ choiceLabels[field.key] || '请选择' }}</text></picker>
+        </view>
+        <text v-if="progress.length > 0" class="ai-guidance-error" role="alert">{{ progress }}</text>
+        <view class="ai-guidance-actions"><button class="ai-guidance-confirm" :disabled="guidanceBusy || closeRequestedState" @tap="confirmChoices">{{ guidanceBusy ? '正在提交' : guidanceUnknown ? '重试确认' : '确认并继续' }}</button></view>
+        <view v-if="clarification.revisable_steps != null && clarification.revisable_steps.length > 0"><text class="ai-note">修改已确认条件</text><button v-for="oldStep in clarification.revisable_steps" :key="oldStep.id" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="editGuidance(oldStep)">{{ oldStep.question }}</button><button v-if="revisingId.length > 0" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="resetGuidanceChoices">返回当前问题</button></view>
+      </view>
+      <view v-if="activeQuestion.length > 0 && clarification == null" class="ai-reading-runway"></view>
+    </scroll-view>
+    <view class="ai-footer">
+      <text v-if="showFooterProgress()" class="ai-note ai-progress">{{ progress }}</text>
+      <view v-if="composerOptionsOpen" class="ai-composer-options">
+        <view class="ai-composer-options__head"><text>{{ historyOpen ? '历史对话' : '更多操作' }}</text><button class="ai-composer-options__close" aria-label="关闭菜单" @tap="closeComposerOptions">×</button></view>
+        <view v-if="!historyOpen" class="ai-composer-options__actions">
+          <button class="ai-composer-option" :class="{ 'ai-composer-option--selected': wantExcel && excelAvailable }" :disabled="!excelAvailable" :aria-pressed="wantExcel && excelAvailable" @tap="toggleExcel">生成Execl<text class="ai-composer-option__state">{{ wantExcel && excelAvailable ? '已选中' : '' }}</text></button>
+          <button class="ai-composer-option" :disabled="busy || pending != null" @tap="createConversationFromMenu">新增对话</button>
+          <button class="ai-composer-option" :disabled="busy || pending != null || displayed.length == 0" @tap="confirmClearConversation">清空对话</button>
+          <button class="ai-composer-option" :disabled="busy || pending != null" @tap="openHistory">历史对话</button>
+        </view>
+        <view v-else class="ai-composer-history"><button class="ai-composer-history__back" @tap="historyOpen = false">‹ 返回</button><scroll-view v-if="recentConversations.length > 0" scroll-y="true" class="ai-composer-history__list"><button v-for="session in recentConversations" :key="session.id" class="ai-composer-history__item" :class="{ 'ai-composer-history__item--current': session.id == conversation }" @tap="selectConversation(session.id)">{{ conversationTitle(session) }}</button></scroll-view><text v-else class="ai-composer-history__empty">暂无历史对话</text></view>
+      </view>
+      <!-- A single line stays between the two actions; wrapped text grows above them. -->
+      <view class="ai-composer" :class="{ 'ai-composer--expanded': composerExpanded }">
+        <button class="ai-composer-more" :class="{ 'ai-composer-more--selected': composerOptionsOpen }" aria-label="更多操作" :aria-expanded="composerOptionsOpen" @tap="toggleComposerOptions"><view class="ai-icon-action"><view class="ai-icon-action__stroke"></view><view class="ai-icon-action__stroke ai-icon-action__stroke--plus"></view></view></button>
+        <!-- 双端不展示默认提示；无障碍名称不填入用户问题。 -->
+        <textarea v-model="question" aria-label="输入问题" :maxlength="4000" :fixed="platformUsesNativeCanvas" :auto-height="false" :style="{ height: composerInputHeight + 'px' }" class="ai-input" @input="onComposerInput" @linechange="onComposerLineChange"/>
+        <button v-if="!busy" class="ai-submit" :disabled="question.trim().length == 0" aria-label="发送问题" @tap="submit"><view class="ai-icon-send"><view class="ai-icon-send__shaft"></view><view class="ai-icon-send__head-left"></view><view class="ai-icon-send__head-right"></view></view></button>
+        <button v-else class="ai-submit ai-submit--stop" aria-label="停止回答" @tap="cancelRun">停止</button>
+      </view>
+    </view>
+  </view>
+</template>
+<script setup lang="uts">
+import { mobileAiRequest, downloadMobileAi } from '../api/mobile-ai-client.uts'
+import { currentMobilePlatform } from '../platform/mobile-platform.uts'
+const enabled = ref(false), opened = ref(false), busy = ref(false)
+// 入口位置只属于当前设备的界面偏好，不能影响会话、权限或问答状态。
+const entryPositionKey = 'mohe-ai:mobile-entry-position:v1'
+const entryPositionStyle = ref('')
+const entrySize = 60, entryMargin = 8
+let entryX = -1, entryY = -1, entryTouchX = 0, entryTouchY = 0, entryStartX = 0, entryStartY = 0
+let entryTouchActive = false, entryDragged = false
+// 保留底部 Tab 与安全区；横竖屏或页面重建时收回越界位置，确保入口始终可触及。
+function entryBounds() : any {
+  const info = uni.getWindowInfo()
+  const safeBottom = Number(info.safeAreaInsets.bottom || 0)
+  return { maxX: Math.max(entryMargin, Number(info.windowWidth) - entrySize - entryMargin), maxY: Math.max(entryMargin, Number(info.windowHeight) - entrySize - 92 - safeBottom) }
+}
+function placeEntry(x : number, y : number) : void {
+  const bounds = entryBounds()
+  entryX = Math.min(bounds.maxX, Math.max(entryMargin, x))
+  entryY = Math.min(bounds.maxY, Math.max(entryMargin, y))
+  entryPositionStyle.value = 'left:' + entryX + 'px;top:' + entryY + 'px;right:auto;bottom:auto;'
+}
+function restoreEntryPosition() : void {
+  try {
+    const saved : any = uni.getStorageSync(entryPositionKey)
+    if (saved != null && Number.isFinite(Number(saved.x)) && Number.isFinite(Number(saved.y))) placeEntry(Number(saved.x), Number(saved.y))
+  } catch (_error) { /* 存储不可用时保持原始 CSS 位置，入口仍可点击。 */ }
+}
+function onEntryTouchStart(event : any) : void {
+  if (event.touches == null || event.touches.length != 1) return
+  const touch = event.touches[0]
+  const info = uni.getWindowInfo()
+  const safeBottom = Number(info.safeAreaInsets.bottom || 0)
+  entryTouchX = Number(touch.clientX); entryTouchY = Number(touch.clientY)
+  entryStartX = entryX >= 0 ? entryX : Number(info.windowWidth) - entrySize - 24
+  entryStartY = entryY >= 0 ? entryY : Number(info.windowHeight) - entrySize - 92 - safeBottom
+  entryTouchActive = Number.isFinite(entryTouchX) && Number.isFinite(entryTouchY)
+  entryDragged = false
+}
+// 超过 5px 才算拖动；移动时只改入口坐标，不能触发打开工作台。
+function onEntryTouchMove(event : any) : void {
+  if (!entryTouchActive || event.touches == null || event.touches.length != 1) return
+  const touch = event.touches[0]
+  const dx = Number(touch.clientX) - entryTouchX, dy = Number(touch.clientY) - entryTouchY
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+  if (!entryDragged && Math.abs(dx) < 5 && Math.abs(dy) < 5) return
+  entryDragged = true
+  placeEntry(entryStartX + dx, entryStartY + dy)
+}
+function onEntryTouchEnd(_event : any) : void {
+  if (!entryTouchActive) return
+  entryTouchActive = false
+  if (!entryDragged) return
+  try { uni.setStorageSync(entryPositionKey, { x: entryX, y: entryY }) } catch (_error) { /* 页面内仍保持拖动后位置。 */ }
+}
+function onEntryTap() : void {
+  if (entryDragged) { entryDragged = false; return }
+  openPanel()
+}
+// 原生胶囊坐标决定单行导航的顶部、高度和对称留白，标题不偏移也不覆盖胶囊。
+const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+const nativePanelTop = ref(0)
+const nativeTitleHeight = ref(32), nativeCapsuleSpace = ref(100)
+// 打开面板时重新测量；坐标不可用时采用状态栏后的标准导航区域。
+function measureNativePanelTop() : void {
+  if (!platformUsesNativeCanvas) return
+  const capsule = uni.getMenuButtonBoundingClientRect()
+  const windowInfo = uni.getWindowInfo()
+  const statusBarHeight = Number(windowInfo.statusBarHeight || 0)
+  const top = Number(capsule.top), height = Number(capsule.height), left = Number(capsule.left)
+  nativePanelTop.value = Number.isFinite(top) && top >= statusBarHeight ? top : statusBarHeight + 6
+  nativeTitleHeight.value = Number.isFinite(height) && height > 0 ? height : 32
+  nativeCapsuleSpace.value = Number.isFinite(left) && left > 0 ? Math.max(0, Number(windowInfo.windowWidth) - left) : 100
+}
+const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([]), activeQuestion = ref(''), activeQuestionAnchor = ref(''), messageAnchor = ref(''), activeElapsedSeconds = ref(0), activeRunState = ref('正在思考'), expandedCardKeys = ref<Array<string>>([])
+const failureSupplementKey = ref(''), failureSupplementText = ref('')
+// 服务端错误码只用于诊断；手机端无论在入队还是确认阶段，都要向用户说明可处理的边界。
+function customerErrorMessage(value : any, fallback : string = '魔核 AI 暂时无法处理这次请求，请联系管理员检查服务状态。') : string {
+  const reason = typeof value == 'string' ? value.trim() : ''
+  if (reason == 'AI_NOT_CONFIGURED' || reason == 'AI_EXTERNAL_AUTHORIZATION_REQUIRED') return '魔核 AI 暂不可用，请管理员检查基础配置中的启用状态和外部处理授权。'
+  if (reason == 'AI_AUTH_REQUIRED') return '登录状态已失效，请重新登录后再试。'
+  if (reason == 'AI_PERMISSION_DENIED') return '当前账号没有使用魔核 AI 的权限，请联系管理员。'
+  if (reason == 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。'
+  return /[\u3400-\u9fff]/.test(reason) ? reason : fallback
+}
+// 表格列宽只决定阅读布局，不截断后端行列或改变 Excel 数据；宽表由自身横向滚动。
+function tableWidth(columns : Array<any>) : number { return Math.max(1, columns.length) * 124 }
+const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({}), supplementText = ref('')
+const guidanceSchema = 'mohe-clarification-v2'
+const guidanceBusy = ref(false), guidanceUnknown = ref(false), closeRequestedState = ref(false), revisingId = ref('')
+let guidanceSubmission : any = null, queuedClarificationId = '', activeGuidanceSchema = ''
+const composerOptionsOpen = ref(false), historyOpen = ref(false), recentConversations = ref<Array<any>>([]), composerExpanded = ref(false)
+const composerInputHeight = ref(38)
+// 原生textarea以真实换行事件驱动显式高度，不依赖模拟器的auto-height布局。
+// 28px行高+10px内边距，与ai-input保持一致；最多144px，超出由原生输入框滚动。
+// 不读取question：真机linechange可能早于v-model更新；输入区宽度不得随展开改变。
+function onComposerLineChange(event : any) : void {
+  const lines = Number(event.detail.lineCount)
+  if (!Number.isFinite(lines) || lines < 1) return
+  composerInputHeight.value = Math.min(144, 28 * lines + 10)
+  composerExpanded.value = lines > 1
+}
+// 清空和发送立即复位，不等待原生控件再次上报行数；不修改输入内容或触发查询。
+function resetComposerSize() : void {
+  composerInputHeight.value = 38
+  composerExpanded.value = false
+}
+function onComposerInput(event : any) : void {
+  if (event.detail.value == '') resetComposerSize()
+}
+const wantExcel = ref(false)
+const excelAvailable = ref(false)
+// The button chooses the existing export format; unavailable exports cannot
+// be selected, and tapping does not start a query or file generation task.
+function toggleExcel() : void {
+  if (!excelAvailable.value) return
+  wantExcel.value = !wantExcel.value
+}
+function closeComposerOptions() : void { composerOptionsOpen.value = false; historyOpen.value = false }
+function toggleComposerOptions() : void { if (composerOptionsOpen.value) closeComposerOptions(); else { historyOpen.value = false; composerOptionsOpen.value = true } }
+// Export proofs stay transient. Feedback keeps only an owner-bound 24-hour
+// proof on its original turn so a reopened answer can still be rated.
+let exportSources : Array<any> = []
+let exportLifecycle = 0
+function exportStatusLabel(status : string) : string { return status == 'succeeded' ? 'Excel 已生成' : status == 'running' ? 'Excel 正在生成…' : status == 'pending' ? 'Excel 正在排队…' : status == 'unavailable' ? 'Excel 状态暂不可用，正在重试…' : status == 'unavailable_final' ? 'Excel 状态暂不可用，请稍后查看。' : 'Excel 生成失败，问答结果不受影响。' }
+function exportSource(item : any) : any { let found : any = null; exportSources.some((source : any) => { if (source.run_id == item.run_id && source.generation == item.generation) { found = source; return true }; return false }); return found }
+function setExportStatus(source : any,status : string) : void {
+  // Keep the receipt on its original turn even if the merchant opens another
+  // conversation while the independent file worker is still running.
+  let all = load()
+  all.forEach((session : any) => { if (session.id == source.export_conversation) session.rounds = session.rounds.map((item : any) => item.run_id == source.run_id && item.generation == source.generation ? {...item,export_status:status} : item) })
+  uni.setStorageSync(storageKey,all)
+  if (conversation == source.export_conversation) displayed.value = displayed.value.map((item : any) => item.run_id == source.run_id && item.generation == source.generation ? {...item,export_status:status} : item)
+}
+// The gateway checks the original question fingerprint and reads successful
+// answers from its own private object; changing a button never reruns a query.
+function rateAnswer(item : any,rating : string) : void {
+  if (item == null || item.feedback_busy == true || (rating != 'useful' && rating != 'not_useful')) return
+  let targetConversation = conversation
+  let updated : any = {...item,feedback_busy:true,feedback_note:''}
+  displayed.value = displayed.value.map((row : any) => row.run_id == item.run_id && row.generation == item.generation ? updated : row)
+  mobileAiRequest('POST','/runs/' + item.run_id + '/feedback',{
+    client_session_id:item.feedback_session_id,run_delivery_token:item.feedback_token,
+    generation:item.generation,rating:rating,question:item.question,displayed_answer:item.answer
+  },(result : any) => {
+    let note = result.ok ? '已记录' : String(result.message || '评价未保存，请稍后重试。')
+    let all = load()
+    all.forEach((session : any) => { if (session.id == targetConversation) session.rounds = session.rounds.map((row : any) => row.run_id == item.run_id && row.generation == item.generation
+      ? {...row,feedback_rating:result.ok ? rating : row.feedback_rating,feedback_note:note,feedback_busy:false} : row) })
+    uni.setStorageSync(storageKey,all)
+    if (conversation == targetConversation) displayed.value = displayed.value.map((row : any) => row.run_id == item.run_id && row.generation == item.generation
+      ? {...row,feedback_rating:result.ok ? rating : row.feedback_rating,feedback_note:note,feedback_busy:false} : row)
+  })
+}
+// A file task starts only after the answer is visible and keeps polling while
+// the next customer question uses the ordinary, independent Run path.
+function startIndependentExport(source : any) : void {
+  source.export_conversation = conversation
+  let expectedLifecycle = exportLifecycle
+  exportSources.push(source)
+  let proof : any = {client_session_id:sessionId,run_delivery_token:source.run_delivery_token,generation:source.generation}
+  let path = '/runs/' + source.run_id
+  let statusFailures = 0
+  // A failed status poll is not evidence that the separate Excel task failed.
+  // Retry its original receipt without resubmitting the answer or file task.
+  let pollStatus = () : void => {
+    if (expectedLifecycle != exportLifecycle) return
+    mobileAiRequest('GET',path + '/export-status',proof,(result : any) => {
+      if (result.ok) { statusFailures = 0; observe(result.data) }
+      else {
+        statusFailures += 1
+        setExportStatus(source,statusFailures <= 10 ? 'unavailable' : 'unavailable_final')
+        if (statusFailures <= 10) setTimeout(pollStatus,3000)
+      }
+    })
+  }
+  let observe = (receipt : any) : void => {
+    if (expectedLifecycle != exportLifecycle) return
+    let status = String(receipt.status || 'failed'); setExportStatus(source,status)
+    if (status != 'pending' && status != 'running') return
+    setTimeout(pollStatus,1500)
+  }
+  setExportStatus(source,'pending')
+  mobileAiRequest('POST',path + '/export',proof,(result : any) => { if (result.ok) observe(result.data); else setExportStatus(source,'failed') })
+}
+let bootstrap : any = null, run : any = null, pending : any = null, compatibilityExecuting = false
+let recoveryDraft : any = null
+let conversation = '', storageKey = '', runtimeKey = '', sessionId = '', entryId = id(), timer : any = null, expiryTimer : any = null, elapsedTimer : any = null, closeRequested = false, lifecycle = 0, clientDeliveryStartedAt = 0
+function id() : string { return 'device-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) }
+function turnAnchor(item : any,index : number) : string { return item != null && typeof item.run_id == 'string' && item.run_id.length > 0 ? 'ai-turn-' + item.run_id + '-' + String(item.generation || 0) : item != null && typeof item.turn_key == 'string' ? 'ai-local-' + item.turn_key : 'ai-history-' + String(index) }
+// Failure actions are advice, never query plans. Only a current authenticated
+// create request can execute their chosen wording under fresh permissions.
+function validFailureGuidance(value : any) : boolean { return value != null && Array.isArray(value.options) && value.options.length == 3 && value.options.every((item : any) => item != null && typeof item.label == 'string' && item.label.length > 0) && value.options[0].value == 'retry_original' && value.options[1].value == 'edit_original' && value.options[2].value == 'new_conversation' }
+// Older server projections may lack the new card. A confirmed failure still
+// receives safe actions locally, while data and permissions remain server-owned.
+// The server owns the semantic distinction. Older projections can still be
+// rendered from their typed reason; neither client guesses from user words.
+function safeFailureGuidance(value : any,reason : string = '') : any {
+  if (value != null && value.kind == 'capability_help' && typeof value.question == 'string' && value.question.trim().length > 0) return value
+  if (reason == 'AI_INTENT_UNRESOLVED') return {kind:'capability_help',question:'我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。'}
+  if (reason == 'AI_CAPABILITY_CHANGED') return {kind:'capability_help',question:'这次暂时没能完成查询。我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接再问一次。'}
+  return validFailureGuidance(value) ? value : {kind:'recovery',question:'这次没能给出可靠结果。请选择一种方式继续。',options:[
+  {value:'retry_original',label:'按原问题再查一次'},
+  {value:'edit_original',label:'修改原问题后查询'},
+  {value:'new_conversation',label:'开启新对话'}],supplement_label:'我来补充描述'}
+}
+function sameBusinessDay(first : number,second : number) : boolean { let a = new Date(first + 28800000), b = new Date(second + 28800000); return a.getUTCFullYear() == b.getUTCFullYear() && a.getUTCMonth() == b.getUTCMonth() && a.getUTCDate() == b.getUTCDate() }
+function chooseFailureAction(item : any,action : string) : void {
+  if (busy.value || pending != null || item == null || !validFailureGuidance(item.failure_guidance)) return
+  if (action == 'new_conversation') { recoveryDraft = null; newConversation(); return }
+  let origin = item.recovery_origin
+  if (origin == null || origin.conversation_id != conversation || !Array.isArray(origin.history)) return
+  recoveryDraft = origin
+  question.value = String(item.question || '')
+  if (action == 'retry_original' && sameBusinessDay(Number(origin.created_at),Date.now())) submit()
+}
+function openFailureSupplement(item : any) : void { if (busy.value || pending != null || !validFailureGuidance(item.failure_guidance)) return; let index = displayed.value.indexOf(item); failureSupplementKey.value = turnAnchor(item,index); failureSupplementText.value = String(item.question || '') }
+function sendFailureSupplement(item : any) : void { let text = failureSupplementText.value.trim(); if (text.length == 0 || busy.value || pending != null) return; let origin = item.recovery_origin; if (origin == null || origin.conversation_id != conversation || !Array.isArray(origin.history)) return; recoveryDraft = origin; question.value = text; failureSupplementKey.value = ''; submit() }
+function refreshActiveElapsed() : void { activeElapsedSeconds.value = Math.max(0,Math.floor((Date.now() - clientDeliveryStartedAt) / 1000)) }
+function startActiveRunStatus() : void {
+  if (activeQuestion.value.length == 0) return
+  // The timer starts from the customer's submit/confirmation action, rather
+  // than from queue admission, so the visible number covers every wait before
+  // the first answer without exposing server internals or query content.
+  activeRunState.value = '正在思考'; refreshActiveElapsed()
+  if (elapsedTimer != null) clearInterval(elapsedTimer)
+  elapsedTimer = setInterval(() => refreshActiveElapsed(),250)
+}
+// 等待用户选择不是模型处理时间；每次确认重新计时，恢复旧会话也不得继续累加等待。
+function pauseForGuidance() : void {
+  if (elapsedTimer != null) clearInterval(elapsedTimer)
+  elapsedTimer = null
+  activeRunState.value = '请确认下方问题'
+  messageAnchor.value = ''
+  nextTick(() => { messageAnchor.value = 'ai-guidance-current' })
+}
+function completedElapsedSeconds() : number { return Number.isSafeInteger(clientDeliveryStartedAt) && clientDeliveryStartedAt > 0 ? Math.max(0,Math.floor((Date.now() - clientDeliveryStartedAt) / 1000)) : 0 }
+// Keep the visible duration customer-centred: it measures send-to-first-answer
+// on this device, not an unverified server duration. Zero-second answers stay
+// quiet so the label only appears when it adds useful reading context.
+function elapsedLabel(value : any) : string { let seconds = Number.isSafeInteger(value) && value > 0 ? Number(value) : 0; if (seconds == 0) return ''; let minutes = Math.floor(seconds / 60), remainder = seconds % 60; return minutes > 0 ? '用时 ' + String(minutes) + ' 分钟' + (remainder > 0 ? ' ' + String(remainder) + ' 秒' : '') : '用时 ' + String(seconds) + ' 秒' }
+function finishActiveRunStatus() : void { if (elapsedTimer != null) clearInterval(elapsedTimer); elapsedTimer = null; activeElapsedSeconds.value = 0; activeRunState.value = '正在思考' }
+// Admission failure is not a running query. Remove only its waiting bubble;
+// retained history and an uncertain request's idempotency key stay untouched.
+function stopQuestionWait() : void {
+  finishActiveRunStatus(); activeQuestion.value = ''; activeQuestionAnchor.value = ''; busy.value = false
+}
+// Authentication loss stops observation, not the server task. Preserve its
+// recovery envelope for the same account after login; never claim cancellation
+// or automatically replay the question with a different login context.
+function pauseForExpiredLogin(result : any) : boolean {
+  if (result == null || result.ok === true || result.reason != 'MERCHANT_SESSION_EXPIRED') return false
+  lifecycle++; if (timer != null) clearTimeout(timer); timer = null
+  if (pending != null && typeof pending.question == 'string') question.value = pending.question
+  stopQuestionWait(); guidanceBusy.value = false; clarification.value = null
+  if (run != null || pending != null) persistActive(true)
+  progress.value = '登录已失效，请退出魔核 AI，重新登录商家端后再试。'
+  return true
+}
+function showActiveQuestion(value : string) : void {
+  activeQuestion.value = value; activeQuestionAnchor.value = 'ai-active-' + id()
+  // Native scroll-view clamps a newest short turn at its lower edge unless
+  // content follows it. The visual runway below this turn makes the active
+  // question reachable at the reading top without becoming transcript data.
+  messageAnchor.value = activeQuestionAnchor.value; startActiveRunStatus()
+}
+// A terminal error already rendered in its turn must not be repeated above the composer.
+function showFooterProgress() : boolean { if (progress.value.length == 0 || activeQuestion.value.length > 0) return false; const last = displayed.value.length > 0 ? displayed.value[displayed.value.length - 1] : null; return last == null || String(last.answer || '').trim() != progress.value.trim() }
+function presentationReady(value : any) : boolean { return value != null && value.version == 1 && typeof value.headline == 'string' && typeof value.period_label == 'string' && Array.isArray(value.facts) && Array.isArray(value.notes) && value.facts.every((item : any) => item != null && typeof item.label == 'string' && typeof item.value == 'string' && typeof item.unit == 'string' && (item.section == null || typeof item.section == 'string')) && value.notes.every((note : any) => typeof note == 'string') }
+function collectionSections(value : any) : Array<any> { if (value == null || !Array.isArray(value.sections) || value.sections.length < 2 || value.sections.length > 4) return []; let seen : Array<string> = [], out : Array<any> = []; value.sections.forEach((section : any) => { if (section != null && typeof section.id == 'string' && /^q[1-4]$/.test(section.id) && seen.indexOf(section.id) < 0 && typeof section.title == 'string' && section.title.length > 0 && section.title.length <= 64 && section.answer != null && typeof section.answer == 'object' && !Array.isArray(section.answer) && !Array.isArray(section.answer.sections)) { seen.push(section.id); out.push(section) } }); return out.length == value.sections.length ? out : [] }
+// Stored turns contain the whole answer, as on desktop. Older flat presentations remain readable.
+function answerPresentation(answer : any) : any { if (answer == null) return null; if (presentationReady(answer.presentation)) return answer.presentation; return presentationReady(answer) ? answer : null }
+// Group only by the server-provided section, preserving fact order and values; never infer metric meaning from labels.
+function presentationGroups(facts : Array<any>) : Array<any> { let groups : Array<any> = []; facts.forEach((fact : any) => { const section = typeof fact.section == 'string' ? fact.section : ''; let group : any = null; groups.forEach((candidate : any) => { if (candidate.section == section) group = candidate }); if (group == null) { group = {section:section,facts:[]}; groups.push(group) }; group.facts.push(fact) }); return groups }
+function tooltipText(value : any) : string { if (value == null) return ''; if (typeof value == 'string') return String(value); let lines : Array<string> = []; ['summary','include','exclude','timing','note'].forEach((key : string) => { if (typeof value[key] == 'string' && String(value[key]).length > 0) { let label = key == 'include' ? '包含：' : key == 'exclude' ? '不包含：' : key == 'timing' ? '统计时间：' : key == 'note' ? '说明：' : ''; lines.push(label + String(value[key])) } }); return lines.join('\n') }
+function cardKey(item : any,index : number) : string { return String(item != null && item.run_id != null ? item.run_id : 'history') + ':' + String(item != null && item.generation != null ? item.generation : 0) + ':' + String(index) }
+function cardDetailVisible(key : string) : boolean { return expandedCardKeys.value.indexOf(key) >= 0 }
+function toggleCardDetail(key : string) : void { let next = expandedCardKeys.value.slice(); let index = next.indexOf(key); if (index >= 0) next.splice(index,1); else next.push(key); expandedCardKeys.value = next }
+function terminal() : boolean { return run != null && ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(run.status)) >= 0 }
+function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now = Date.now(); let all : Array<any> = []; if (Array.isArray(raw)) raw.forEach((s : any) => { if (s != null && typeof s.id == 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + 86400000 > now && Array.isArray(s.rounds)) { s.rounds = s.rounds.filter((r : any) => r != null && typeof r.question == 'string' && typeof r.answer == 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + 86400000 > now); all.push(s) } }); uni.setStorageSync(storageKey,all); return all }
+// A failed turn is still useful conversation evidence: it records what the
+// customer was trying to ask. Its answer and any unverified candidate are not
+// usable query context, so only a completed row may supply context_ref.
+function contextEligible(row : any) : boolean { return row == null || row.context_eligible !== false }
+function appendTranscript(row : any) : void {
+  let all = load(), duplicate = false
+  let hasRunId = typeof row.run_id == 'string' && row.run_id.length > 0 && Number.isSafeInteger(row.generation)
+  all.forEach((s : any) => { if (hasRunId && s.id == conversation && s.rounds.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) duplicate = true })
+  if (!hasRunId || !displayed.value.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) displayed.value.push(row)
+  if (!duplicate) { all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
+  messageAnchor.value = turnAnchor(row,displayed.value.length - 1)
+}
+// A definitive refusal before admission has no Run. Keep the original input
+// and its predecessor for a deliberate retry, but never grant it result context.
+// An uncertain transport response must instead keep its idempotent pending key.
+function recordAdmissionRefusal(submitted : any,explanation : string,guidance : any,reason : string = '') : void {
+  let safeGuidance = safeFailureGuidance(guidance,reason)
+  let customerText = safeGuidance.kind == 'capability_help' ? String(safeGuidance.question) : explanation
+  let now = Date.now(), elapsedSeconds = completedElapsedSeconds()
+  stopQuestionWait(); clearActive()
+  appendTranscript({question:submitted.question,answer:customerText,cards:[],table:null,
+    presentation:{summary:customerText,terminal_status:'FAILED'},context_eligible:false,
+    elapsed_seconds:elapsedSeconds,created_at:now,turn_key:submitted.client_request_id,
+    failure_guidance:safeGuidance,recovery_origin:safeGuidance.kind == 'capability_help' ? null : {conversation_id:conversation,
+      history:submitted.history,context_ref:submitted.context_ref || null,created_at:now}})
+  pending = null; clientDeliveryStartedAt = 0; progress.value = ''
+}
+function validStoredGuidanceSubmission(value : any) : boolean { return value != null && typeof value == 'object' && typeof value.clarification_id == 'string' && value.clarification_id.length > 0 && typeof value.client_submission_id == 'string' && value.client_submission_id.length > 0 && value.choices != null && typeof value.choices == 'object' && !Array.isArray(value.choices) && (value.schema_version == null || value.schema_version == guidanceSchema) && (value.intent_revision == null || Number.isSafeInteger(value.intent_revision)) && (value.step_revision == null || Number.isSafeInteger(value.step_revision)) }
+function validResolvedRun(value : any) : boolean { return value != null && typeof value.run_id == 'string' && value.run_id.length > 0 && Number.isSafeInteger(value.generation) && value.generation >= 1 }
+function activeRecord() : any { let value = uni.getStorageSync(runtimeKey); let now = Date.now(); if (value == null || typeof value.session_id != 'string' || typeof value.conversation_id != 'string' || !Number.isSafeInteger(value.created_at) || value.created_at > now || value.created_at + 86400000 <= now || (value.run == null && value.pending == null && !validResolvedRun(value.resolved_run)) || (value.resolved_run != null && !validResolvedRun(value.resolved_run)) || (value.queued_clarification_id != null && typeof value.queued_clarification_id != 'string') || (value.guidance_submission != null && !validStoredGuidanceSubmission(value.guidance_submission))) { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey); return null }; return value }
+function sameRunRecord(left : any,right : any) : boolean { return left != null && right != null && typeof left.run_id == 'string' && left.run_id == right.run_id && Number.isSafeInteger(left.generation) && left.generation == right.generation }
+function versionIsNewer(left : any,right : any) : boolean { return left != null && right != null && Number.isSafeInteger(left.version) && (!Number.isSafeInteger(right.version) || left.version > right.version) }
+// A retired component may only write the record it still owns.  During a page
+// transition the replacement entry can already have a newer Run projection.
+function ownsActiveRecord() : boolean {
+  let stored = activeRecord()
+  if (stored == null || stored.session_id != sessionId || stored.conversation_id != conversation) return false
+  // A replacement component claims the record before it resumes polling. An
+  // old component may still receive lifecycle cleanup afterwards, but must not
+  // replace newer local-only state such as a queued clarification submission.
+  if (stored.owner_id != null && stored.owner_id != entryId) return false
+  if (run == null) return pending != null && stored.run == null && samePendingRecord(stored,pending)
+  return sameRunRecord(stored.run,run) && !versionIsNewer(stored.run,run)
+}
+function mayWriteActiveRecord(claim : boolean = false,replaceResolved : boolean = false) : boolean { let stored = activeRecord(); return stored == null || stored.owner_id == null || stored.owner_id == entryId || claim || (replaceResolved && validResolvedRun(stored.resolved_run)) }
+function persistActive(retired : boolean = false,claim : boolean = false,replaceResolved : boolean = false) : void { if (runtimeKey.length == 0 || !mayWriteActiveRecord(claim,replaceResolved)) return; if (retired && !ownsActiveRecord()) return; if ((run == null && pending == null) || terminal()) { uni.removeStorageSync(runtimeKey); return }; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,owner_id:entryId,close_requested:closeRequested,queued_clarification_id:queuedClarificationId,guidance_submission:guidanceSubmission,client_delivery_started_at:clientDeliveryStartedAt,run:run,pending:pending}) }
+function clearActive(force : boolean = false) : void { if (runtimeKey.length == 0 || !mayWriteActiveRecord(force)) return; uni.removeStorageSync(runtimeKey) }
+// A completed Run is retained as an owner-scoped tombstone.  This is not a
+// second chat history: it only prevents callbacks from a retired native page
+// from recreating an already-finished request after its replacement rendered it.
+function markResolvedRun(value : any = run,claim : boolean = false) : void { if (!validResolvedRun(value) || !mayWriteActiveRecord(claim)) return; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,owner_id:entryId,resolved_run:{run_id:value.run_id,generation:value.generation,version:value.version || null}}) }
+function samePendingRecord(value : any,submitted : any) : boolean { return value != null && value.pending != null && submitted != null && typeof submitted.client_request_id == 'string' && value.pending.client_request_id == submitted.client_request_id }
+// A create acknowledgement can arrive after this native entry has been
+// recycled.  It may only update the exact persisted request which produced
+// it; a retired page must never overwrite a newer conversation or UI state.
+function retainLateAdmission(accepted : any,submitted : any) : any {
+  if (accepted == null || typeof accepted.run_id != 'string') return null
+  let stored = activeRecord()
+  if (!samePendingRecord(stored,submitted)) return null
+  // A normal page switch is not an instruction to discard a just-completed
+  // result.  Preserve it for the replacement entry; explicit close is the
+  // only path which is allowed to retire it without showing an answer.
+  if (['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(accepted.status || '')) >= 0 && stored.close_requested === true) { clearActive(true); return null }
+  let current = stored.run
+  // Creation replies are normally version 1.  If the replacement entry has
+  // already observed a later version of this exact Run, retain that richer
+  // state.  A different Run with the same request envelope is never replaced.
+  if (current != null && !sameRunRecord(current,accepted)) return null
+  let selected = current != null && !versionIsNewer(accepted,current) ? current : accepted
+  let retained : any = {created_at:Date.now(),session_id:stored.session_id,conversation_id:stored.conversation_id,owner_id:stored.owner_id || null,close_requested:stored.close_requested === true,queued_clarification_id:stored.queued_clarification_id || '',guidance_submission:stored.guidance_submission || null,client_delivery_started_at:stored.client_delivery_started_at,run:selected,pending:stored.pending}
+  uni.setStorageSync(runtimeKey,retained)
+  return retained
+}
+function cancelLateAdmission(submitted : any,retained : any) : void {
+  if (retained == null || retained.close_requested !== true || retained.run == null || typeof retained.run.run_id != 'string') return
+  let source = retained.run, body : any = {client_session_id:submitted.client_session_id,generation:source.generation,run_delivery_token:source.run_delivery_token}
+  mobileAiRequest('POST','/runs/' + source.run_id + '/cancel',body,(r : any) => {
+    // Clear only if this is still the exact admission from the closed page.
+    // A replacement entry may already have started another query meanwhile.
+    if (!r.ok || r.data == null || ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(r.data.status || '')) < 0) return
+    let stored = activeRecord()
+    if (stored != null && stored.close_requested === true && samePendingRecord(stored,submitted) && sameRunRecord(stored.run,source)) clearActive(true)
+  })
+}
+function unavailable(value : any) : boolean { return value != null && value.responseKnown === true && ['AI_RUN_EXPIRED','AI_RUN_NOT_FOUND'].indexOf(String(value.reason || '')) >= 0 }
+function abandonUnavailableRun() : void { if (timer != null) clearTimeout(timer); finishActiveRunStatus(); run = null; pending = null; compatibilityExecuting = false; busy.value = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = 0; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''; clearActive(); progress.value = '上一次任务已失效，请重新提问。' }
+function newConversation() : void {
+  if (busy.value || pending != null) return
+  recoveryDraft = null; failureSupplementKey.value = ''; failureSupplementText.value = ''
+  lifecycle++; finishActiveRunStatus(); queuedClarificationId = ''
+  let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]})
+  uni.setStorageSync(storageKey,all); uni.setStorageSync(storageKey + ':current',conversation)
+  displayed.value = []; expandedCardKeys.value = []; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''
+  run = null; clarification.value = null; clearGuidance()
+  // Retain a completed Run tombstone until it expires: late callbacks from a
+  // recycled page must not repopulate the new conversation.
+  let stored = activeRecord(); if (stored == null || !validResolvedRun(stored.resolved_run)) clearActive()
+}
+// The menu only reads this account's 24-hour local sessions. Empty drafts from
+// other visits are hidden, while the current draft stays selectable.
+function conversationTitle(value : any) : string { let first = value != null && Array.isArray(value.rounds) && value.rounds.length > 0 ? value.rounds[0] : null; return first != null && typeof first.question == 'string' && first.question.trim().length > 0 ? first.question.trim() : '新对话' }
+function openHistory() : void {
+  if (busy.value || pending != null) return
+  recentConversations.value = load().filter((session : any) => session.id == conversation || session.rounds.length > 0).reverse()
+  historyOpen.value = true
+}
+// Switching conversations changes only the visible local transcript; an
+// unfinished Run cannot be silently moved under another conversation ID.
+function selectConversation(targetId : string) : void {
+  if (busy.value || pending != null) return
+  let selected : any = null
+  load().some((session : any) => { if (session.id == targetId) { selected = session; return true }; return false })
+  if (selected == null) { closeComposerOptions(); return }
+  recoveryDraft = null; failureSupplementKey.value = ''; failureSupplementText.value = ''
+  conversation = targetId; uni.setStorageSync(storageKey + ':current',conversation); displayed.value = selected.rounds.slice(); expandedCardKeys.value = []
+  question.value = ''; progress.value = ''; messageAnchor.value = ''; resetComposerSize()
+  closeComposerOptions()
+}
+function createConversationFromMenu() : void {
+  if (busy.value || pending != null) return
+  newConversation(); question.value = ''; progress.value = ''; resetComposerSize(); closeComposerOptions()
+}
+// Clear means deleting only this local conversation after confirmation. Other
+// sessions and independently generated Excel files remain untouched.
+function confirmClearConversation() : void {
+  if (busy.value || pending != null || displayed.value.length == 0) return
+  let targetId = conversation
+  uni.showModal({title:'清空对话',content:'清空当前对话记录？其他历史对话不会删除。',confirmText:'清空',success:(result : any) => {
+    if (!result.confirm || !opened.value || busy.value || pending != null || conversation != targetId) return
+    uni.setStorageSync(storageKey,load().filter((session : any) => session.id != targetId))
+    newConversation(); question.value = ''; progress.value = ''; resetComposerSize(); closeComposerOptions()
+  }})
+}
+function openPanel() : void {
+  measureNativePanelTop(); opened.value = true
+  if (conversation.length > 0 || storageKey.length == 0) return
+  let targetId = String(uni.getStorageSync(storageKey + ':current') || '')
+  let selected : any = null
+  load().some((session : any) => { if (session.id == targetId) { selected = session; return true }; return false })
+  if (selected != null) { conversation = targetId; displayed.value = selected.rounds.slice() }
+  else newConversation()
+}
+function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
+// The device reports only the bounded, user-observed time at which a verified
+// final answer becomes visible.  This best-effort diagnostic never includes
+// the question, answer, identity or a clock timestamp.
+function reportVisibleDelivery(source : any) : void {
+  let startedAt = clientDeliveryStartedAt
+  if (source == null || !Number.isSafeInteger(startedAt) || startedAt <= 0) return
+  clientDeliveryStartedAt = 0
+  let elapsed = Math.min(300000,Math.max(0,Date.now() - startedAt))
+  mobileAiRequest('POST','/runs/' + source.run_id + '/delivery',{client_session_id:sessionId,generation:source.generation,run_delivery_token:source.run_delivery_token,client_elapsed_ms:elapsed},(_: any) => {})
+}
+function reportVisibleDeliveryAfterRender(source : any) : void {
+  let expectedLifecycle = lifecycle
+  // Let the reactive update commit before recording customer-visible delivery.
+  // If this entry was recycled first, its replacement owns the observation.
+  setTimeout(() => { if (expectedLifecycle == lifecycle && run != null && terminal() && sameRunRecord(run,source)) reportVisibleDelivery(source) },0)
+}
+// The Run response decides its own execution path. Bootstrap is just a
+// snapshot and may have changed after this customer request was accepted.
+function needsCompatibilityExecution(value : any) : boolean { return value != null && (value.execution_mode == 'compatibility' || (value.execution_mode == null && (bootstrap == null || bootstrap.async_execution !== true))) }
+function schedulePoll() : void {
+  if (timer != null) clearTimeout(timer)
+  let source = run, expectedLifecycle = lifecycle
+  timer = setTimeout(() => {
+    if (source == null || expectedLifecycle != lifecycle || run == null || terminal() || run.run_id != source.run_id || run.generation != source.generation) return
+    mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
+      if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+      if (pauseForExpiredLogin(r)) return
+      if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value || (run.clarification != null && queuedClarificationId == run.clarification.id))) schedulePoll() }
+      else { if (unavailable(r)) { abandonUnavailableRun(); return }; progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; persistActive(); schedulePoll() }
+    })
+  },1000)
+}
+function accept(value : any) : void {
+  if (value == null || (run != null && (value.run_id != run.run_id || value.generation != run.generation || terminal()))) return
+  if (value.version != null && (!Number.isSafeInteger(value.version) || value.version < 1)) return
+  if (run != null && Number.isSafeInteger(run.version) && (!Number.isSafeInteger(value.version) || value.version <= run.version)) return
+  if (run != null && value.run_delivery_token == null) value.run_delivery_token = run.run_delivery_token
+  run = value
+  // While a first answer is pending, keep the concise in-turn status stable.
+  // Detailed worker progress remains diagnostic only and must not push the
+  // customer-visible answer area back into the composer footer.
+  progress.value = activeQuestion.value.length > 0 ? '' : (typeof run.progress == 'string' ? run.progress : '正在处理')
+  if (terminal()) { busy.value = false; compatibilityExecuting = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
+    // The verified answer owns the long-table decision. Queue its file only
+    // after the mobile answer is visible; a manual request shares the task.
+    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; let elapsedSeconds = completedElapsedSeconds(); let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now(),terminal_status:run.status,feedback_available:run.feedback_available === true,feedback_token:run.run_delivery_token,feedback_session_id:sessionId}; finishActiveRunStatus(); appendTranscript(row); reportVisibleDeliveryAfterRender(run); if ((pending.want_excel === true || answer.auto_export_required === true) && run.status == 'COMPLETED') startIndependentExport({...run}) }
+    else {
+      let failureGuidance = run.status == 'FAILED' ? safeFailureGuidance(run.failure_guidance,String(run.reason || '')) : null
+      let terminalMessage = run.status == 'CANCELLED' ? '已取消' : failureGuidance != null ? String(failureGuidance.question || '这次没能给出可靠结果。请选择一种方式继续。') : customerErrorMessage(run.message,'本次未能完成，请重新提问。')
+      if (pending != null && typeof pending.question == 'string') {
+        let elapsedSeconds = completedElapsedSeconds(); finishActiveRunStatus()
+        appendTranscript({question:pending.question,answer:terminalMessage,cards:[],table:null,
+          presentation:{summary:terminalMessage,terminal_status:run.status},terminal_reason:run.reason,
+          context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,
+          run_id:run.run_id,generation:run.generation,created_at:Date.now(),failure_guidance:failureGuidance,
+          terminal_status:run.status,feedback_available:run.feedback_available === true,feedback_token:run.run_delivery_token,feedback_session_id:sessionId,
+          recovery_origin:failureGuidance == null || failureGuidance.kind == 'capability_help' ? null : {conversation_id:conversation,history:pending.history,context_ref:pending.context_ref || null,created_at:Date.now()}})
+      }
+      progress.value = terminalMessage; clientDeliveryStartedAt = 0
+    }
+    activeQuestion.value = ''; activeQuestionAnchor.value = ''; pending = null; markResolvedRun(); return }
+  if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
+    let c = run.clarification
+    if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
+    if (run.clarification_rejected === true && queuedClarificationId == c.id) {
+      queuedClarificationId = ''
+      progress.value = '所选条件格式不完整，请检查后重新确认。'
+    }
+    // A successful choice is queued while the Run still projects the previous
+    // clarification. Keep observing that Run; do not offer the same controls
+    // again or make the customer manually refresh for the final answer.
+    if (queuedClarificationId == c.id) { clarification.value = null; clearGuidance(); schedulePoll(); persistActive(); return }
+    if (c.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
+    let same = clarification.value != null && clarification.value.id == c.id && clarification.value.step_revision == c.step_revision && clarification.value.intent_revision == c.intent_revision
+    clarification.value = c; if (!same) clearGuidance()
+    pauseForGuidance()
+  } else { queuedClarificationId = ''; clarification.value = null; clearGuidance(); schedulePoll() }
+  persistActive()
+}
+function submit() : void {
+  if (busy.value || (pending == null && question.value.trim().length == 0)) return
+  // Another merchant page can start a Run after this entry bootstrapped.  Join
+  // that request before accepting a new question, while keeping the typed text.
+  let existing = activeRecord()
+  if (existing != null && !validResolvedRun(existing.resolved_run) && !ownsActiveRecord()) { busy.value = true; progress.value = '正在恢复已开始的查询，完成后可继续提问。'; sessionId = existing.session_id; bootstrapSession(true); return }
+  let history : Array<any> = []; let contextRef = ''
+  // Stop at a server-confirmed new-topic boundary even when that turn failed.
+  load().forEach((s : any) => { if (s.id == conversation) { let recent = s.rounds.slice(-20); let boundary = -1; recent.forEach((r : any, i : number) => { if (r.topic_boundary == 'reset') boundary = i }); recent.slice(boundary < 0 ? 0 : boundary).forEach((r : any) => history.push({question:r.question,answer:r.answer})); let last : any = null; s.rounds.slice().reverse().some((r : any) => { if (contextEligible(r)) { last = r; return true }; return r.topic_boundary == 'reset' }); if (last != null && last.presentation != null && typeof last.presentation.context_ref == 'string') contextRef = last.presentation.context_ref } })
+  let isNewRequest = pending == null
+  if (isNewRequest) { let source = recoveryDraft != null && recoveryDraft.conversation_id == conversation ? recoveryDraft : null; activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:source != null ? source.history : history,output_format:'screen',want_excel:wantExcel.value}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; let originalRef = source != null ? source.context_ref : contextRef; if (typeof originalRef == 'string' && originalRef.length > 0) pending.context_ref = originalRef; recoveryDraft = null; closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = Date.now(); showActiveQuestion(pending.question) }
+  let restoringCancelledRequest = !isNewRequest && closeRequested
+  // Retrying an uncertain admission reuses its key, but restores the waiting
+  // bubble that was stopped when transport failed.
+  if (!isNewRequest) showActiveQuestion(pending.question)
+  composerOptionsOpen.value = false; resetComposerSize()
+  busy.value = true; closeRequested = restoringCancelledRequest; closeRequestedState.value = restoringCancelledRequest; run = null; question.value = ''; progress.value = '正在接纳请求'
+  // A new customer question may replace only a completion tombstone.  It must
+  // never take over another still-active page's Run.
+  persistActive(false,false,isNewRequest)
+  let stored = activeRecord()
+  if (stored == null || stored.owner_id != entryId || !samePendingRecord(stored,pending)) { let unsentQuestion = pending.question; pending = null; stopQuestionWait(); busy.value = stored != null; question.value = unsentQuestion; progress.value = stored == null ? '暂未保存请求，请重试发送。' : '正在恢复已开始的查询，完成后可继续提问。'; if (stored != null) { sessionId = stored.session_id; bootstrapSession(true) }; return }
+  let expectedLifecycle = lifecycle, submitted = pending
+  // Local file preference is not part of the AI question schema.
+  let createBody : any = {...submitted}; delete createBody.want_excel
+  mobileAiRequest('POST','/runs',createBody,(r : any) => {
+    if (expectedLifecycle != lifecycle) { if (r.ok && r.data != null && r.data.accepted !== false) { let retained = retainLateAdmission(r.data,submitted); cancelLateAdmission(submitted,retained) }; return }
+    if (!r.ok) { if (pauseForExpiredLogin(r)) return; if (r.responseKnown) recordAdmissionRefusal(submitted,customerErrorMessage(r.message),null,String(r.message || '')); else { question.value = submitted.question; stopQuestionWait(); progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; return }
+    if (r.data.accepted === false) { recordAdmissionRefusal(submitted,customerErrorMessage(r.data.message,'当前使用人数较多，请稍后再问。'),r.data.failure_guidance,String(r.data.reason || '')); return }
+    // New servers accept only after durable queueing.  During a staged rollout
+    // keep the old synchronous trigger for a server that has not enabled its
+    // compatible consumer yet.
+    accept(r.data)
+    if (terminal()) return
+    if (closeRequested) { cancelRun(); return }
+    if (needsCompatibilityExecution(run)) executeCompatibility(run,expectedLifecycle)
+    schedulePoll()
+  })
+}
+function executeCompatibility(source : any,expectedLifecycle : number) : void {
+  if (compatibilityExecuting || pending == null || source == null || terminal() || closeRequested || !needsCompatibilityExecution(source)) return
+  compatibilityExecuting = true
+  let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format
+  if (pending.context_ref != null) body.context_ref = pending.context_ref
+  mobileAiRequest('POST','/runs/' + source.run_id + '/execute',body,(e : any) => {
+    compatibilityExecuting = false
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(e)) return
+    if (e.ok) accept(e.data)
+    else if (unavailable(e)) abandonUnavailableRun()
+    else schedulePoll()
+  })
+}
+function cancelRun(afterCancel : any = null) : void {
+  if (terminal() || (run == null && pending == null)) return
+  closeRequested = true; closeRequestedState.value = true; persistActive(); if (run == null || terminal()) return
+  let source = run, expectedLifecycle = lifecycle
+  progress.value = '正在取消'
+  mobileAiRequest('POST','/runs/' + source.run_id + '/cancel',binding(),(r : any) => {
+    // A page transition keeps the Run alive for the replacement entry.  A
+    // delayed cancellation response from this retired component must not clear
+    // that replacement's durable recovery record.
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
+    if (r.ok) { accept(r.data); if (run != null && run.status == 'CANCELLED' && typeof afterCancel == 'function') afterCancel() }
+    else { progress.value = '暂未确认取消结果。'; schedulePoll() }
+  })
+}
+// 头部“退出”只关闭魔核 AI 工作区；复用既有取消链路，避免留下不可见的运行中任务。
+function closePanel() : void { cancelRun(); opened.value = false; closeComposerOptions() }
+function downloadExcel(item : any) : void { let source = exportSource(item); if (source == null) return; downloadMobileAi(source,sessionId,'经营数据.xlsx',(message : string) => { progress.value = message }) }
+function validGuidance(c : any) : boolean {
+  if (c == null || typeof c.id != 'string' || c.id.length == 0 || !Array.isArray(c.fields) || c.fields.length == 0) return false
+  let modern = c.schema_version == guidanceSchema
+  if ((activeGuidanceSchema == guidanceSchema && !modern) || (c.schema_version != null && !modern)) return false
+  if (modern && (!Number.isSafeInteger(c.step_revision) || c.step_revision < 1 || !Number.isSafeInteger(c.intent_revision) || c.intent_revision < 1 || !Number.isSafeInteger(c.round_no) || c.round_no < 1 || [3,4,5].indexOf(c.max_clarification_rounds) < 0 || c.round_no > c.max_clarification_rounds || !Array.isArray(c.confirmed_summary))) return false
+  if (!validGuidanceFields(c.fields,modern)) return false
+  if (modern) {
+    for (let i = 0; i < c.confirmed_summary.length; i++) { let item = c.confirmed_summary[i]; if (item == null || typeof item.label != 'string' || typeof item.value != 'string') return false }
+    if (c.revisable_steps != null) {
+      if (!Array.isArray(c.revisable_steps) || c.revisable_steps.length > 5) return false
+      let seen : Array<string> = []
+      for (let i = 0; i < c.revisable_steps.length; i++) { let old = c.revisable_steps[i]; if (old == null || typeof old.id != 'string' || seen.indexOf(old.id) >= 0 || typeof old.question != 'string' || old.choices == null || !validGuidanceFields(old.fields,true)) return false; seen.push(old.id) }
+    }
+  }
+  return true
+}
+function validGuidanceFields(fields : any,modern : boolean) : boolean {
+  if (!Array.isArray(fields) || fields.length == 0) return false
+  if (modern && !(fields.length == 1 || (fields.length == 2 && fields.every((field : any) => field != null && field.type == 'date')))) return false
+  let seen : Array<string> = []
+  for (let i = 0; i < fields.length; i++) {
+    let field = fields[i]; if (field == null || typeof field.key != 'string' || field.key.length == 0 || ['__proto__','prototype','constructor'].indexOf(field.key) >= 0 || seen.indexOf(field.key) >= 0 || typeof field.label != 'string') return false; seen.push(field.key)
+    if (field.type == 'date') continue
+    if (field.type != null && ['select','single_choice'].indexOf(field.type) < 0) return false
+    if (!Array.isArray(field.options) || field.options.length == 0) return false
+    let optionKeys : Array<string> = []
+    for (let oi = 0; oi < field.options.length; oi++) { let option = field.options[oi]; if (option == null || typeof option.label != 'string' || typeof option.value != 'string' || optionKeys.indexOf(option.value) >= 0) return false; optionKeys.push(option.value) }
+  }
+  return true
+}
+function clearGuidance() : void { choices.value = {}; choiceLabels.value = {}; supplementText.value = ''; guidanceBusy.value = false; guidanceUnknown.value = false; revisingId.value = ''; guidanceSubmission = null }
+function currentGuidanceFields() : Array<any> { if (clarification.value == null) return []; let c = clarification.value; if (revisingId.value.length > 0 && Array.isArray(c.revisable_steps)) { let old = c.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return old.fields }; return c.fields }
+function currentGuidanceQuestion() : string { if (clarification.value == null) return ''; if (revisingId.value.length > 0) { let old = clarification.value.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return '修改：' + String(old.question) }; return String(clarification.value.question || '请选择本次要查询的内容') }
+function editGuidance(old : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; revisingId.value = old.id; choices.value = {}; choiceLabels.value = {}; old.fields.forEach((field : any) => { if (typeof old.choices[field.key] == 'string') choices.value[field.key] = old.choices[field.key]; if (Array.isArray(field.options)) field.options.forEach((option : any) => { if (option.value == choices.value[field.key]) choiceLabels.value[field.key] = option.label }) }) }
+function resetGuidanceChoices() : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; clearGuidance() }
+function selectDate(key : string,event : any) : void { if (!guidanceBusy.value && !guidanceUnknown.value && !closeRequestedState.value) choices.value[key] = event.detail.value }
+function chooseValue(field : any,option : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; choices.value[field.key] = option.value; choiceLabels.value[field.key] = option.label }
+function chooseSupplement(field : any) : void { chooseValue(field,{value:'__supplement__',label:'我来补充描述'}) }
+// Only semantic_reply renders a free-text correction in the template. Signed
+// period and person cards must show only their server-owned option values;
+// a synthetic supplement would fail server validation. A stop sentinel is
+// replaced by the customer's correction only for semantic guidance.
+function recommendedOptions(field : any) : Array<any> { let executable = field.options.filter((option : any) => option.action != 'stop'); return (executable.length <= 3 ? executable : executable.filter((option : any) => option.recommended == true)).slice(0,3) }
+function selectOption(field : any,event : any) : void { let option = field.options[Number(event.detail.value)]; if (option != null) chooseValue(field,option) }
+function confirmChoices() : void {
+  if (guidanceBusy.value || closeRequestedState.value || run == null || terminal() || run.status != 'WAITING_CLARIFICATION' || clarification.value == null || !mayWriteActiveRecord()) return
+  let c = clarification.value
+  if (guidanceSubmission == null) {
+    let submittedChoices : any = {}; let invalid = false
+    currentGuidanceFields().forEach((field : any) => { let value = choices.value[field.key]; if (typeof value != 'string' || value.length == 0) invalid = true; else submittedChoices[field.key] = value })
+    if (invalid) { progress.value = '请完成当前选择或填写有效日期。'; return }
+    // Continue the same server-owned clarification; only the correction is
+    // sent as text. Never concatenate conditions or recreate the paused Run.
+    if (currentGuidanceFields().length == 1 && submittedChoices[currentGuidanceFields()[0].key] == '__supplement__') {
+      let detail = supplementText.value.trim()
+      if (detail.length == 0) { progress.value = '请补充您想查询的内容。'; return }
+      submittedChoices.supplement_text = detail
+    }
+    let currentFields = currentGuidanceFields()
+    let action = ''
+    if (currentFields.length == 1 && Array.isArray(currentFields[0].options)) {
+      let selected = currentFields[0].options.find((option : any) => option.value == submittedChoices[currentFields[0].key])
+      action = String(selected?.action || '')
+    }
+    if (['edit_original','retry_original','new_conversation'].indexOf(action) >= 0) {
+      // These are recovery actions, never metric values. Preserve the exact
+      // predecessor before cancelling the paused clarification Run.
+      let original = String(pending?.question || activeQuestion.value || '')
+      let origin : any = pending == null ? null : {conversation_id:conversation,
+        history:pending.history,context_ref:pending.context_ref || null,created_at:Date.now()}
+      cancelRun(() => {
+        if (action == 'new_conversation') { newConversation(); return }
+        recoveryDraft = origin; question.value = original
+        if (action == 'retry_original') submit()
+      })
+      return
+    }
+    let body : any = binding(); body.clarification_id = c.id; body.choices = submittedChoices
+    if (c.schema_version == guidanceSchema) { body.schema_version = guidanceSchema; body.step_revision = c.step_revision; body.intent_revision = c.intent_revision; body.client_submission_id = id(); if (revisingId.value.length > 0) body.revise_clarification_id = revisingId.value }
+    guidanceSubmission = body
+  }
+  let submitted = guidanceSubmission; guidanceBusy.value = true
+  // A clarification is a new customer action.  Its latency excludes the time
+  // spent reading the previous guidance, while still measuring the complete
+  // post-confirmation execution until the verified answer is visible.
+  clientDeliveryStartedAt = Date.now()
+  startActiveRunStatus()
+  // Persist before I/O. If the app is interrupted after sending but before a
+  // response arrives, the identical client_submission_id remains available
+  // for a safe idempotent retry after the next status read.
+  persistActive()
+  let source = run, expectedLifecycle = lifecycle
+  mobileAiRequest('POST','/runs/' + source.run_id + '/clarify',submitted,(r : any) => {
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
+    if (r.ok) {
+      queuedClarificationId = c.id
+      guidanceSubmission = null; guidanceUnknown.value = false; guidanceBusy.value = false
+      accept(r.data)
+      // A replay acknowledgement can keep the exact same Run version.  Save
+      // its queued-step marker before the panel is closed or reloaded, then
+      // continue polling until the worker publishes a different state.
+      if (!terminal()) persistActive()
+      if (!terminal()) schedulePoll()
+      return
+    }
+    if (clarification.value == null || clarification.value.id != c.id || clarification.value.intent_revision != c.intent_revision || closeRequestedState.value) return
+    guidanceBusy.value = false
+    if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = customerErrorMessage(r.message); persistActive() }
+    else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。'; persistActive() }
+    pauseForGuidance()
+  })
+}
+function resumeActive(record : any) : void {
+  conversation = record.conversation_id; run = record.run; pending = record.pending; clientDeliveryStartedAt = Number.isSafeInteger(record.client_delivery_started_at) && record.client_delivery_started_at > 0 ? record.client_delivery_started_at : Date.now(); if (pending != null && typeof pending.question == 'string') showActiveQuestion(pending.question); else { finishActiveRunStatus(); activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = '' }; queuedClarificationId = typeof record.queued_clarification_id == 'string' ? record.queued_clarification_id : ''; guidanceSubmission = validStoredGuidanceSubmission(record.guidance_submission) ? record.guidance_submission : null; closeRequested = record.close_requested === true; closeRequestedState.value = closeRequested; busy.value = true
+  if (validResolvedRun(record.resolved_run)) { let all = load(); all.forEach((s : any) => { if (s.id == conversation) displayed.value = s.rounds || [] }); busy.value = false; return }
+  // Only a late create acknowledgement can persist a terminal Run. Hydrate it
+  // through the normal terminal renderer so a page switch never hides a real
+  // result, while an explicit close has already cleared its record above.
+  if (terminal()) { let completed = run; run = null; markResolvedRun(completed,true); accept(completed); return }
+  // Claim the durable projection before I/O. On native route changes the old
+  // entry can unmount after this replacement is already active; ownership is
+  // what prevents its teardown write from discarding this page's local state.
+  persistActive(false,true)
+  if (run == null) { if (pending == null) { busy.value = false; clearActive(); return }; pending.client_session_id = sessionId; pending.window_token = bootstrap.window_token; persistActive(); busy.value = false; submit(); return }
+  let source = run, expectedLifecycle = lifecycle
+  mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
+    if (r.ok) {
+      // A reload often reads exactly the last persisted version.  It still
+      // represents an active Run and must continue polling even when accept
+      // correctly rejects it as a duplicate projection.
+      if (r.data != null && typeof r.data.progress == 'string') progress.value = r.data.progress
+      accept(r.data)
+      if (closeRequested) { cancelRun(); return }
+      // A restored Run can have the same version as the locally persisted
+      // snapshot.  Hydrate its current guidance explicitly because accept()
+      // correctly ignores duplicate versions to protect against stale polls.
+      let restoredClarificationId = run.clarification != null && typeof run.clarification.id == 'string' ? run.clarification.id : ''
+      if (run.status == 'WAITING_CLARIFICATION' && clarification.value == null && queuedClarificationId != restoredClarificationId && validGuidance(run.clarification)) {
+        clarification.value = run.clarification
+        if (run.clarification.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
+        pauseForGuidance()
+      }
+      // Retry only the exact saved submission for the step the server still
+      // presents. A newer guidance step or final answer discards the old
+      // local envelope instead of letting it mutate current intent.
+      if (guidanceSubmission != null) {
+        let c = clarification.value
+        let same = c != null && guidanceSubmission.clarification_id == c.id && (c.schema_version != guidanceSchema || (guidanceSubmission.schema_version == guidanceSchema && guidanceSubmission.intent_revision == c.intent_revision && guidanceSubmission.step_revision == c.step_revision))
+        if (same && queuedClarificationId.length == 0 && run.clarification_rejected !== true) { confirmChoices(); return }
+        guidanceSubmission = null; persistActive()
+      }
+      if (!terminal() && needsCompatibilityExecution(run)) {
+        if (pending != null) executeCompatibility(run,expectedLifecycle)
+        else if (['READY','RECEIVED'].indexOf(String(run.status)) >= 0) { abandonUnavailableRun(); return }
+      }
+      if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value || (run.clarification != null && queuedClarificationId == run.clarification.id))) schedulePoll()
+      return
+    }
+    if (unavailable(r)) { abandonUnavailableRun(); return }
+    if (!r.responseKnown) { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，正在重新确认任务状态。'; persistActive(); schedulePoll(); return }
+    abandonUnavailableRun()
+  })
+}
+// Bootstrap uses the same authentication failure path as active observation;
+// a restore failure must never leave an invisible or endless waiting turn.
+function bootstrapSession(restore : boolean = false) : void {
+  let expectedLifecycle = lifecycle
+  mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => {
+    if (expectedLifecycle != lifecycle || pauseForExpiredLogin(r)) return
+    if (!r.ok || r.data == null || r.data.enabled !== true) { if (restore) { stopQuestionWait(); progress.value = '暂未恢复查询，请重试发送。' }; return }
+    bootstrap = r.data
+    storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key))
+    runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key))
+    let record = activeRecord()
+    if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }
+    excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0
+    enabled.value = true
+    // A completed Run tombstone protects against late callbacks, but must not
+    // reopen a different conversation after the merchant selected history.
+    let selectedId = String(uni.getStorageSync(storageKey + ':current') || '')
+    if (record != null && (!validResolvedRun(record.resolved_run) || selectedId.length == 0 || selectedId == record.conversation_id)) resumeActive(record)
+    else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' }
+  })
+}
+onMounted(() => { restoreEntryPosition(); sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
+// The entry is mounted on each merchant page.  Page navigation and native
+// component recycling are not an instruction to abandon a customer's query;
+// keep the durable run for the next page to resume.  Only the explicit
+// “停止” and “关闭” actions call cancelRun().
+onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer); finishActiveRunStatus() })
+</script>
+<style>
+.ai-brand-tagline{display:block;width:100%;margin-top:4px;font-size:12px;line-height:18px;font-weight:400;color:#667085;text-align:center}
+.ai-entry{position:fixed;right:24px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:9999;width:60px;height:60px;border-radius:50%;box-shadow:0 10px 26px rgba(31,99,199,.32);touch-action:none}.ai-entry-icon{display:block;width:60px;height:60px;border-radius:50%}
+.ai-panel{position:fixed;left:0;right:0;top:0;bottom:0;z-index:10000;box-sizing:border-box;background-color:#fff;display:flex;flex-direction:column;overflow:hidden;color:#111827}
+.ai-workspace-head{flex:0 0 auto;padding:0 14px 8px;border-bottom:1px solid #dde2eb}.ai-title-row{position:relative;height:44px;width:100%;box-sizing:border-box;padding:0 44px;display:flex;flex-direction:row;align-items:center;justify-content:center}.ai-back-button{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center}.ai-back-button:active{background-color:#f2f5fa;border-radius:12px}.ai-back-chevron{font-size:34px;line-height:32px;font-weight:400}.ai-title{min-width:0;white-space:nowrap;font-size:20px;font-weight:700;letter-spacing:.01em;text-align:center}
+/* 底部加号承载会话与导出操作，与顶部单行退出导航相互独立。 */
+.ai-icon-action{position:relative;width:26px;height:26px}.ai-icon-action__stroke{position:absolute;left:4px;top:12px;width:18px;height:2px;border-radius:2px;background-color:#101827}.ai-icon-action__stroke--plus{transform:rotate(90deg)}
+.ai-messages{min-height:0;flex:1;height:0;padding:0 36px}.ai-message{padding:0;margin:38px 0 48px;background-color:#fff}.ai-user-turn{max-width:82%;margin-left:auto;padding:16px 22px;background-color:#17191e;border-radius:27px 27px 6px 27px;color:#fff}.ai-answer-turn{padding:0;margin-top:20px}.ai-turn-label{display:none}.ai-question{display:block;color:#fff;font-size:20px;font-weight:400;line-height:1.55}.ai-message--active .ai-user-turn{margin-bottom:0}.ai-run-status{margin:26px 0 0;color:#98a0aa}.ai-run-elapsed{display:block;font-size:15px;line-height:1.5}.ai-run-thinking{display:block;margin-top:18px;padding-top:18px;border-top:1px solid #edf0f3;font-size:18px;line-height:1.5}.ai-reading-runway{min-height:520px;pointer-events:none}.ai-answer{display:block;color:#101827;font-size:24px;font-weight:400;line-height:1.75;white-space:pre-wrap}.ai-answer-presentation{display:block}.ai-answer-headline{display:block;color:#101827;font-size:25px;font-weight:600;line-height:1.55}.ai-number--count{color:#357a72}.ai-unit{font-size:14px;font-weight:400;margin-left:4px;color:#65758b}.ai-answer-section-group{margin-top:16px}.ai-answer-facts{display:flex;flex-direction:row;flex-wrap:wrap;gap:10px;margin-top:18px}.ai-answer-fact-wrap{min-width:0;width:calc(50% - 5px);flex-grow:0}.ai-answer-section{display:block;margin:4px 0 8px;color:#53647d;font-size:14px;font-weight:600}.ai-answer-fact{box-sizing:border-box;padding:13px 14px;border:1px solid #e2e8f0;border-radius:14px;background-color:#f6f9fd}.ai-answer-fact__label{display:block;color:#62708a;font-size:15px;line-height:1.5}.ai-answer-fact__value{display:block;margin-top:3px;color:#1f5f8b;font-size:24px;font-weight:600;line-height:1.35}.ai-note{font-size:15px;color:#758198;line-height:1.65}.ai-answer-period{display:block;margin-top:14px}.ai-answer-note{display:block;margin-top:4px}
+.ai-card{padding:16px;margin-top:14px;background-color:#f6f9fd;border:1px solid #e2e8f0;border-radius:14px}.ai-card-label{display:block;margin-bottom:5px;color:#111827;font-size:18px;font-weight:500}.ai-number{display:block;font-size:28px;font-weight:600;color:#1f5f8b}.ai-card-detail-toggle{display:flex;flex-direction:row;align-items:center;margin-top:14px;padding:10px 0;color:#6c7890;font-size:16px}.ai-card-detail-chevron{margin-right:8px;font-size:27px;font-weight:300;line-height:16px}.ai-card-detail{display:block;margin-top:8px;white-space:pre-wrap;font-size:14px;line-height:1.8;color:#65758b}
+/* 小程序原生横向滚动只包住单张表，外层会话仍纵向阅读；每列保留最小可读宽度。 */
+.ai-result-table-scroll{display:block;width:100%;margin-top:30px}.ai-result-table{min-width:100%;border-top:1px solid #d9dee7}.ai-result-table__row{display:flex;flex-direction:row;align-items:center;min-height:56px;border-bottom:1px solid #d9dee7}.ai-result-table__head{min-height:48px}.ai-result-table__cell{min-width:0;flex:1;box-sizing:border-box;padding:0 8px;color:#111827;font-size:17px;line-height:1.35;text-align:left}.ai-result-table__cell:last-child{text-align:right}.ai-result-table__head .ai-result-table__cell{color:#758198;font-size:15px}
+.ai-footer{flex:0 0 auto;padding:12px 36px calc(22px + env(safe-area-inset-bottom));background-color:#fff}.ai-progress{display:block;margin-bottom:8px}.ai-composer{position:relative;box-sizing:border-box;min-height:56px;padding:8px 54px;border:1px solid #d4dbe7;border-radius:28px;background-color:#fff;box-shadow:0 4px 16px rgba(22,36,61,.04)}.ai-composer--expanded{padding:12px 54px 56px;border-radius:24px}
+/* 加号菜单沿输入框上缘纵向排列，保留原生键盘和安全区；不另做平行业务入口。 */
+.ai-composer-options{display:flex;flex-direction:column;box-sizing:border-box;width:100%;margin-bottom:10px;padding:14px;border:1px solid #e3e6eb;border-radius:20px;background-color:#fff;box-shadow:0 8px 30px rgba(22,36,61,.1)}
+.ai-composer-options__head{display:flex;flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:8px;color:#687386;font-size:14px}.ai-composer-options__close{width:32px;height:32px;margin:0;padding:0;border:0;background-color:transparent;color:#6b7280;font-size:24px;line-height:32px}.ai-composer-options__actions{display:flex;flex-direction:column;gap:4px}.ai-composer-option{display:flex;flex-direction:row;align-items:center;justify-content:space-between;box-sizing:border-box;width:100%;min-height:48px;margin:0;padding:0 12px;border:0;border-radius:12px;background-color:#fff;color:#111827;font-size:16px;text-align:left}.ai-composer-option--selected{background-color:#17191e;color:#fff}.ai-composer-option[disabled]{color:#a3aab5}.ai-composer-option__state{font-size:13px}.ai-composer-history__back{margin:0 0 6px;padding:6px 10px;border:0;background-color:transparent;color:#53647d;text-align:left;font-size:15px}.ai-composer-history__list{max-height:240px;height:240px}.ai-composer-history__item{display:block;box-sizing:border-box;width:100%;min-height:46px;margin:0;padding:10px 12px;border:0;border-bottom:1px solid #edf0f3;background-color:#fff;color:#111827;text-align:left;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-composer-history__item--current{background-color:#f1f4f8}.ai-composer-history__empty{display:block;padding:12px;color:#8792a2;font-size:14px}.ai-composer-option::after,.ai-composer-options__close::after,.ai-composer-history__back::after,.ai-composer-history__item::after{border:0}
+.ai-composer-more{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:transparent;color:#111}.ai-composer-more--selected{background-color:#eeecff}.ai-composer-more::after,.ai-submit::after{border:0}.ai-input{box-sizing:border-box;min-height:38px;max-height:144px;width:100%;padding:5px 0;background-color:transparent;border:0;font-size:17px;line-height:28px}.ai-submit{position:absolute;right:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:#111;color:#fff;line-height:38px}.ai-submit[disabled]{background-color:#9eabbf;color:#fff}.ai-submit--stop{font-size:12px}.ai-icon-send{position:relative;width:27px;height:27px}.ai-icon-send__shaft{position:absolute;left:12px;top:3px;width:3px;height:21px;border-radius:3px;background-color:#fff}.ai-icon-send__head-left{position:absolute;left:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(45deg)}.ai-icon-send__head-right{position:absolute;right:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(-45deg)}.ai-choice{padding:8px;display:block;color:#1f63c7}
+.ai-run-complete{display:block;margin-top:18px;color:#7a8493;font-size:15px;line-height:1.5}
+/* 小程序问答正文参考同机手机阅读密度：提问、各类摘要及标题统一收敛；指标卡保留数值层级。 */
+.ai-panel--native-mini .ai-messages{padding:0 20px}.ai-panel--native-mini .ai-message{margin:26px 0 34px}.ai-panel--native-mini .ai-answer-turn{margin-top:20px}.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}.ai-panel--native-mini .ai-run-status{margin-top:20px}.ai-panel--native-mini .ai-run-elapsed{font-size:14px}.ai-panel--native-mini .ai-run-thinking{margin-top:14px;padding-top:14px;font-size:16px}.ai-panel--native-mini .ai-reading-runway{min-height:420px}.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}.ai-panel--native-mini .ai-card{padding:14px;margin-top:12px}.ai-panel--native-mini .ai-card-label{font-size:16px}.ai-panel--native-mini .ai-card-detail-toggle{font-size:14px}.ai-panel--native-mini .ai-footer{padding:8px 18px calc(14px + env(safe-area-inset-bottom))}.ai-panel--native-mini .ai-icon-send{width:24px;height:24px}.ai-panel--native-mini .ai-icon-send__shaft{left:11px;top:2px;height:20px}.ai-panel--native-mini .ai-icon-send__head-left{left:7px;top:2px}.ai-panel--native-mini .ai-icon-send__head-right{right:7px;top:2px}
+/* 窄屏优先完整显示数值；只改变排版，不截断或重新计算指标。 */
+@media (max-width:360px){.ai-answer-fact-wrap{width:100%}.ai-title{font-size:17px}}
+/* 确认卡沿用黑白工作台，编号只作选项顺序，提交仍使用后端 option.value。 */
+.ai-message.ai-guidance{padding:18px;border:1px solid #e5e5e7;border-radius:22px;background-color:#fff;margin-top:0}
+.ai-guidance-head{display:flex;flex-direction:row;align-items:center;justify-content:space-between;color:#777;font-size:14px;margin-bottom:8px}
+.ai-guidance-cancel{margin:0;padding:4px 0;background-color:transparent;color:#777;font-size:13px;line-height:24px}
+.ai-guidance-cancel::after,.ai-guidance-option::after,.ai-guidance-confirm::after{border:0}
+.ai-guidance-question{display:block;margin:10px 0 18px;color:#202124;font-size:17px;font-weight:600;line-height:1.65}
+.ai-guidance-label{display:block;margin:12px 0 8px;color:#777;font-size:13px}
+.ai-guidance-option{display:flex;flex-direction:row;align-items:center;box-sizing:border-box;width:100%;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;background-color:#fff;color:#202124;text-align:left;line-height:1.5}
+.ai-guidance-option--selected{background-color:#f3f3f4;border-color:#d9d9dc}
+.ai-guidance-number{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin-right:12px;border:1px solid #dedee1;border-radius:50%;background-color:#f3f3f4;color:#737377;font-size:14px}
+.ai-guidance-option-label{flex:1;min-width:0;font-size:16px;white-space:normal}
+.ai-guidance-supplement{box-sizing:border-box;width:100%;min-height:84px;padding:12px;border:1px solid #d9d9dc;border-radius:12px;background-color:#fff;color:#202124;font-size:15px;line-height:1.5}
+.ai-guidance-actions{display:flex;flex-direction:row;justify-content:flex-end;margin-top:18px}
+.ai-guidance-confirm{margin:0;padding:0 18px;border-radius:24px;background-color:#17191e;color:#fff;font-size:15px;line-height:44px}
+.ai-guidance-confirm[disabled]{background-color:#aaa;color:#fff}
+.ai-guidance-error{display:block;margin-top:12px;color:#b42318;font-size:14px;line-height:1.5}
+.ai-feedback{display:flex;flex-direction:row;align-items:center;gap:8px;margin-top:16px}.ai-feedback button{margin:0;border:1px solid #d8dee7;border-radius:16px;background-color:#fff;color:#43536c;font-size:13px}.ai-feedback .ai-feedback--selected{border-color:#2e86d0;background-color:#eaf3ff;color:#1565a8}.ai-feedback button::after{border:0}
+</style>

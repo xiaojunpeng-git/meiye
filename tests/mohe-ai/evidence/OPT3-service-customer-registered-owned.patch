@@ -1,0 +1,39 @@
+diff --git a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
+index 6becf72f..927dbac5 100644
+--- a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
++++ b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
+@@ -25,9 +25,13 @@ final class RegisteredMetricReadServices
+     private $normalFacts;
+     private $normalServices;
+     private $useRightsIndex;
++    private $cacheServiceCustomers;
++    private $serviceCustomerCache = [];
+ 
+-    public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null, ?bool $useRightsIndex = null)
++    /** Cache opt-in is reserved for readers whose lifetime is one consistent read transaction. */
++    public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null, ?bool $useRightsIndex = null, bool $cacheServiceCustomers = false)
+     {
++        $this->cacheServiceCustomers = $cacheServiceCustomers;
+         $this->useRightsIndex=$useRightsIndex??$queryFactory===null;
+         $this->queryFactory = $queryFactory ?: static function (string $table) { return Db::name($table); };
+         $this->normalFacts = $normalFacts ?: static function ($query, string $tenantField, string $orderField): void {
+@@ -2361,10 +2365,17 @@ final class RegisteredMetricReadServices
+         return $out;
+     }
+ 
+-    /** @return array<string,mixed> */
++    /** Reuse all customer metrics for one exact fact scope; never retain per-service detail. */
+     private function serviceCustomerMetrics(string $tenantId, array $stores, array $range): array
+     {
+-        return (new ServiceCustomerMetricReadServices($this->queryFactory, $this->normalServices))->employeeMetrics($tenantId, $stores, $range);
++        $scopeStores = $stores; sort($scopeStores, SORT_NUMERIC);
++        $key = json_encode([$tenantId, $scopeStores, $range['start'], $range['end']]);
++        if ($this->cacheServiceCustomers && ($this->serviceCustomerCache['key'] ?? null) === $key) return $this->serviceCustomerCache['value'];
++        $value = (new ServiceCustomerMetricReadServices($this->queryFactory, $this->normalServices))->aggregateEmployeeMetrics($tenantId, $stores, $range);
++        // A single entry bounds comparison-period retention; default readers
++        // cannot return stale totals after another transaction commits.
++        if ($this->cacheServiceCustomers) $this->serviceCustomerCache = ['key' => $key, 'value' => $value];
++        return $value;
+     }
+ 
+     private function serviceCustomerField(string $metricCode): string

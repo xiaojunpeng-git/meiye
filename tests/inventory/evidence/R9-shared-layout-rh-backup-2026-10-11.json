@@ -1,0 +1,39 @@
+{
+    "phase": "backup",
+    "time": "2026-10-11T15:01:52+08:00",
+    "migration": {
+        "id": 219,
+        "upgrade_key": "20261011-002-refund-attribution-adjustment",
+        "title": "\u9000\u6b3e\u5bfc\u8d2d\u9500\u552e\u7ecf\u7406\u6539\u6d3e",
+        "task_file": "2026-10-11-\u9000\u6b3e\u5bfc\u8d2d\u9500\u552e\u7ecf\u7406\u6539\u6d3e/02-\u6b63\u5f0f\u5347\u7ea7.sql",
+        "sql_checksum": "179154446655afa79007d6c2557f494c46cb90be3822607ea8d1dd0d869f36a0",
+        "code_version": "0c870d08",
+        "executed_at": "2026-10-11 12:59:33",
+        "executed_by": "Codex",
+        "result_note": "\u745e\u660a\u72ec\u7acb\u5b9e\u4f8b\uff0c\u7248\u672c\u8868\u9a8c\u8bc1\u901a\u8fc7\uff0c\u65e0\u5386\u53f2\u56de\u586b",
+        "created_at": "2026-10-11 12:59:33"
+    },
+    "files": {
+        "backend-before.tar.gz": {
+            "sha256": "2b1fd4d957603a142778d3fa1f0338a567f3efc6724ac3fdd7c85eb2793e3772",
+            "bytes": 7240
+        },
+        "frontend-0-before.tar.gz": {
+            "sha256": "69490ae79cc7e90f824b4065bd1321b36b200f6dc0df229e9aa99b91911152ef",
+            "bytes": 993309
+        },
+        "frontend-1-before.tar.gz": {
+            "sha256": "873f2a35833af9556220f35a19194ad2bfcd26af1f3d6c8770e04f4a5d42aa5f",
+            "bytes": 40684943
+        },
+        "frontend-2-before.tar.gz": {
+            "sha256": "d9f9e16d1ff60f33ac1787f87d4ccedafe2ab0e4befc1ab0af1f8c17a15dcee9",
+            "bytes": 40684944
+        },
+        "ruihao-before.sql.gz": {
+            "sha256": "58dcfa73cc62ad7574b0c351e8b036f556e017adc707fff34222c9966c64b0c1",
+            "bytes": 244441391
+        }
+    },
+    "service": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nmanager_count=1\nmanager_pids=25297"
+}

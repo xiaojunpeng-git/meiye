@@ -1,0 +1,131 @@
+{
+    "result": "PASS",
+    "checks": 71,
+    "samples": [
+        {
+            "stores": 1,
+            "range": {
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-18"
+            },
+            "fact_rows": 177,
+            "baseline_ms": 301,
+            "candidate_ms": 306,
+            "service_top5": [
+                {
+                    "name": "昊美",
+                    "consumption_cents": 500000,
+                    "people": 1,
+                    "average_cents": 500000
+                },
+                {
+                    "name": "贵族",
+                    "consumption_cents": 209800,
+                    "people": 13,
+                    "average_cents": 16138
+                },
+                {
+                    "name": "背部spa",
+                    "consumption_cents": 192200,
+                    "people": 15,
+                    "average_cents": 12813
+                },
+                {
+                    "name": "舒缓灸",
+                    "consumption_cents": 111000,
+                    "people": 6,
+                    "average_cents": 18500
+                },
+                {
+                    "name": "腿部放松",
+                    "consumption_cents": 83000,
+                    "people": 8,
+                    "average_cents": 10375
+                }
+            ]
+        },
+        {
+            "stores": 1,
+            "range": {
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-18"
+            },
+            "fact_rows": 257,
+            "baseline_ms": 247,
+            "candidate_ms": 254,
+            "service_top5": [
+                {
+                    "name": "经络通(背\/腿)",
+                    "consumption_cents": 266200,
+                    "people": 23,
+                    "average_cents": 11574
+                },
+                {
+                    "name": "荷尔蒙青春霜",
+                    "consumption_cents": 200700,
+                    "people": 1,
+                    "average_cents": 200700
+                },
+                {
+                    "name": "透骨草奢享套",
+                    "consumption_cents": 192100,
+                    "people": 4,
+                    "average_cents": 48025
+                },
+                {
+                    "name": "腿部放松",
+                    "consumption_cents": 181100,
+                    "people": 20,
+                    "average_cents": 9055
+                },
+                {
+                    "name": "菁纯霜",
+                    "consumption_cents": 149000,
+                    "people": 2,
+                    "average_cents": 74500
+                }
+            ]
+        },
+        {
+            "stores": 102,
+            "range": {
+                "start_date": "2026-10-17",
+                "end_date": "2026-10-17"
+            },
+            "fact_rows": 6,
+            "baseline_ms": 2719,
+            "candidate_ms": 2752,
+            "service_top5": [
+                {
+                    "name": "贵族名媛(手工)",
+                    "consumption_cents": 19500,
+                    "people": 1,
+                    "average_cents": 19500
+                },
+                {
+                    "name": "贵族名媛",
+                    "consumption_cents": 16400,
+                    "people": 1,
+                    "average_cents": 16400
+                },
+                {
+                    "name": "腿部放松",
+                    "consumption_cents": 6800,
+                    "people": 1,
+                    "average_cents": 6800
+                }
+            ]
+        },
+        {
+            "stores": 1,
+            "range": {
+                "start_date": "2000-01-01",
+                "end_date": "2000-01-01"
+            },
+            "fact_rows": 0,
+            "baseline_ms": 50,
+            "candidate_ms": 62,
+            "service_top5": []
+        }
+    ]
+}

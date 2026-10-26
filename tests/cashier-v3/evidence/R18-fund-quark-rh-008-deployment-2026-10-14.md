@@ -1,0 +1,10 @@
+# 第 18 轮：瑞昊与渼约 008 静态发布记录
+
+- 固定源码：`2f61d279452e719709fb51af1341c6eedc3175f6`，包含费用显示提交 `35a7a56b` 与权益核销构建门禁提交 `2f61d279`。发布构建在临时受控 worktree `/private/tmp/meiye-r18-release-20261014` 从该提交完成；没有使用主工作区含其他未提交修改的 `dist/`。
+- 目标仅瑞昊正式 `/view_cashier_v3/`、瑞昊预览 `/preview-8080/view_cashier_v3/`、两入口对应的费用页，以及渼约 `008` 正式门店/费用页。未触及 `007/012`、后台、后端、配置或数据库；无迁移、服务重启和真实核销。
+- 上线前瑞昊正式与 008 收银入口已引用本次固定构建 `index-e0cb9659.js` / `index-84d39724.css`，磁盘及公网 SHA-256 分别为 `266bc4c0c104def8cca1ae8d5e2382f4e400fb36ecee8d9a27cad28b5866dd7e` / `84d39724ce944a3db85dba386c5de0ad2eedf32802a21b881747e0e710fbb395`，因此保持原状，避免重复覆盖并行发布。
+- 瑞昊预览收银旧入口 HTML SHA-256 `b9e95be385a0d091a7287ee5424f176e3bc094ec4712b7271aabc4725d53de25`，引用报错的 `index-5028c045.js`；备份后只追加新主 JS/CSS、原子切换入口。新入口 SHA-256 `d28ce1949b06847622568f31c0c3d8045e22fd1762d5fd4b1440218e9328a17e`，公网重写后的入口引用 `index-e0cb9659.js` / `index-84d39724.css`，公网资源指纹与固定构建相符。
+- 三处费用页旧入口 HTML SHA-256 均为 `b567c5d6655ce368f81418e7a2ada65e15055fee8d57ccf1258c61a9477abf7d`，旧 JS SHA-256 `f4bee1d673b51df4f24f5d9f7d663b5168c37632d344916576b1bf9c3f187de4`。正式瑞昊与 008 只追加新 JS 并原子切换 HTML；瑞昊预览创建独立版本目录并原子切换符号链接，旧目录保留。新入口 HTML SHA-256 `66f76e25a8151c14482b4b7ec022f87a3f4f515e53b84061950e9ed42aa380`；公网新 JS `index-85f04788.js` 的 SHA-256 `e8c4b463f50b45d728096652963c7a2f6385498f561e62612ad91547a7427895`，CSS `index-9a215dc4.css` 的 SHA-256 `9a215dc4d452ba9746e50a6b9ac44ffbd801d7a5ed1c527d7e79c5f04800aaa3`，三处一致。
+- 独立备份：瑞昊 `/www/backups/rh.cc3798.com/r18-2f61d279-20261014-192950-{preview-cashier,formal-fund,preview-fund}.tgz`；008 `/www/backups/008.cc3798.com/r18-2f61d279-20261014-192950-fund.tgz`。四包 `gzip -t` 均通过；旧静态资源不删除。预览费用旧符号链接目标为 `.local-8080-integration-releases/r49-34adbc61/view_fund_v3`，新目标为 `.local-8080-integration-releases/r18-2f61d279/view_fund_v3`。
+- 线上只读验证：瑞昊正式/预览与 008 的收银及费用六处公网入口均成功返回并引用本轮预期 JS/CSS；逐一下载十二个公网主 JS/CSS 并校验 SHA-256，与对应构建一致。未登录、未发起支付或核销，不将静态和合同验证冒充真实业务交易验收。
+- 远端 Git `origin/release/store-cashier-c14-main` 与本地发布分支分叉，发布前 `git rev-list --left-right --count HEAD...FETCH_HEAD` 为 `157 73`；不得强推或把静态上线当作主发布分支已集成。

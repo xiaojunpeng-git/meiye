@@ -1,0 +1,18 @@
+{
+  "initialErrors": [
+    {
+      "level": "error",
+      "message": "Uncaught TypeError: Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.",
+      "timestamp": "2026-10-21T05:36:09.254Z"
+    }
+  ],
+  "freshTabInitialErrors": [
+    {
+      "level": "error",
+      "message": "Uncaught TypeError: Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.",
+      "timestamp": "2026-10-21T05:42:11.243Z"
+    }
+  ],
+  "afterReloadExceptionEvents": [],
+  "note": "Fixture observation retained; native geometry was independently verified."
+}

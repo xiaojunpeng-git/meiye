@@ -1,0 +1,34 @@
+{
+  "baseline": "494d6098b51ccc53842d037e659aa0ec92911e9b",
+  "currentHead": "494d6098b51ccc53842d037e659aa0ec92911e9b",
+  "patchSha256": "a64e31a54561eb177a2f526493b39c2c7cb1d53ade428f7ff8f57419ba468813",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+      "sha256": "a92f3d0ccef2e1a6878310b9203f75bbf5c84ad38553504bf932eb00282d1294"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "c00d45b9bf69ca65414848862c4e7caf20e26d042837d18b20502ab1f03a9919"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "sha256": "2721a1e95d3c47ef75cafad41d953000edb1c1c28d2180699f12cef162a058ae"
+    },
+    {
+      "path": "tests/report-group-dashboard/php/r89-secondary-categories.php",
+      "sha256": "34aca417fee4e1626f8fe78d2d92924fdb01e275426cef20473b9266155c40c2"
+    }
+  ],
+  "build": [
+    {
+      "path": "assets/index-1270385c.js",
+      "sha256": "db115039129922bc7f9c77a8e75f1c8aea43b222c9d0af8e157801369444af05"
+    },
+    {
+      "path": "assets/index-4349279e.css",
+      "sha256": "4349279eec60288f60e7396acdd490b4b27b920786901ca6e78e6f7433f05467"
+    }
+  ],
+  "remote": "not applicable; local only"
+}

@@ -1,0 +1,31 @@
+-- MySQL 5.7；新增独立取消事实，不回填、不覆盖历史欠款、补交或订单。
+-- status=3 表示独立免除剩余欠款；status=2 仍表示原订单冲销。
+CREATE TABLE IF NOT EXISTS `eb_cashier_v3_debt_cancellation` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `cancellation_id` varchar(48) NOT NULL,
+  `debt_id` int unsigned NOT NULL,
+  `tenant_id` varchar(64) NOT NULL,
+  `store_id` int unsigned NOT NULL,
+  `member_id` int unsigned NOT NULL,
+  `debt_no_snapshot` varchar(100) NOT NULL,
+  `source_order_no_snapshot` varchar(100) NOT NULL,
+  `original_debt_cents` bigint NOT NULL,
+  `repaid_debt_cents` bigint NOT NULL,
+  `cancelled_debt_cents` bigint NOT NULL,
+  `reason_snapshot` varchar(255) NOT NULL,
+  `operator_id` int unsigned NOT NULL,
+  `operator_name_snapshot` varchar(100) NOT NULL,
+  `store_name_snapshot` varchar(100) NOT NULL,
+  `command_idempotency_key` varchar(128) NOT NULL,
+  `business_event_no` varchar(64) NOT NULL,
+  `business_date` date NOT NULL,
+  `occurred_at` int unsigned NOT NULL,
+  `settled_at` int unsigned NOT NULL,
+  `recorded_at` int unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_debt` (`debt_id`),
+  UNIQUE KEY `uq_cancellation` (`cancellation_id`),
+  UNIQUE KEY `uq_command` (`tenant_id`,`command_idempotency_key`),
+  KEY `idx_store_date` (`store_id`,`business_date`),
+  KEY `idx_member` (`member_id`,`debt_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='独立取消剩余欠款的不可变事实';

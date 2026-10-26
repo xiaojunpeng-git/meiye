@@ -1,0 +1,107 @@
+{
+  "target": "rh.cc3798.com",
+  "source_commit": "8daec7d5bb0a97ed43e2f7fa47c49ee92d50aee7",
+  "checked_at": "2026-10-11T07:02:48.986Z",
+  "checks": [
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/assets/exceljs.min-a0d233a6.js",
+      "http_status": 200,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "expected": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/assets/index-92b7c68f.css",
+      "http_status": 200,
+      "sha256": "92b7c68f761018faf5261c37dce7920fddf560164df780f003aedb149cb7c7a3",
+      "expected": "92b7c68f761018faf5261c37dce7920fddf560164df780f003aedb149cb7c7a3",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/assets/index-b0d8fbfc.js",
+      "http_status": 200,
+      "sha256": "04b9b9f6ecd944a2e1a98852546f7c31acc58caa85c5e152bccec677e4f2b80d",
+      "expected": "04b9b9f6ecd944a2e1a98852546f7c31acc58caa85c5e152bccec677e4f2b80d",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/index.html",
+      "http_status": 200,
+      "sha256": "fbe79ae2da0f47b37c846eb75bb4923a0b3b4b9cbeab187a69cf5a41778f2194",
+      "expected": "fbe79ae2da0f47b37c846eb75bb4923a0b3b4b9cbeab187a69cf5a41778f2194",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "http_status": 200,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "expected": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-0430fda6.css",
+      "http_status": 200,
+      "sha256": "0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef",
+      "expected": "0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-068c8998.js",
+      "http_status": 200,
+      "sha256": "162f061f5309d539217f7bb3e354929ab4fd9b85c298d0756e06f084c6f4715e",
+      "expected": "162f061f5309d539217f7bb3e354929ab4fd9b85c298d0756e06f084c6f4715e",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "http_status": 200,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "expected": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "http_status": 200,
+      "sha256": "46a4606cea728fe3671f61fd63f38e559cbde97a8d0ea4ba154e47053fff6fd1",
+      "expected": "46a4606cea728fe3671f61fd63f38e559cbde97a8d0ea4ba154e47053fff6fd1",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "http_status": 200,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "expected": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-0430fda6.css",
+      "http_status": 200,
+      "sha256": "0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef",
+      "expected": "0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-068c8998.js",
+      "http_status": 200,
+      "sha256": "162f061f5309d539217f7bb3e354929ab4fd9b85c298d0756e06f084c6f4715e",
+      "expected": "162f061f5309d539217f7bb3e354929ab4fd9b85c298d0756e06f084c6f4715e",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "http_status": 200,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "expected": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "http_status": 200,
+      "sha256": "46a4606cea728fe3671f61fd63f38e559cbde97a8d0ea4ba154e47053fff6fd1",
+      "expected": "46a4606cea728fe3671f61fd63f38e559cbde97a8d0ea4ba154e47053fff6fd1",
+      "pass": true
+    }
+  ],
+  "pass": true,
+  "business_writes": false
+}

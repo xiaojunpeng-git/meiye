@@ -1,0 +1,43 @@
+{
+  "round": "R52补充",
+  "status": "本地开发与自测完成；产品经理明确验收通过并授权commit、部署瑞昊、push，发布记录另行归档",
+  "acceptance": "我测试没有问题,commit,部署瑞昊,push（R52员工保存权限补充修复固定版本）",
+  "approvedScope": "移除员工编辑人员类型保存时操作者必须在本店任职的重复限制；使用现有功能权限，不新增独立权限开关",
+  "baselineHead": "cc2bcba0a727a68de9b4d298e2bd1b480ff542cf",
+  "sourceFiles": {
+    "frontend": [],
+    "backend": {
+      "后端代码/app/services/employee/EmployeeTypeAuthorityServices.php": "99f6599c21c930954b5ad605d953e21524fea23c2db9588048c41b30e3fc38ce"
+    },
+    "tests": {
+      "tests/employee-type-authority/php/contract.php": "70f36f68cf359a259ce73adf68406809b084d8bdf210a36291a9752945c36399",
+      "tests/employee-type-authority/php/integration.php": "b9ba740b2f50bcc7a7a6dab31103a758308a3bba4392f79a85bd454ba3ecf00a",
+      "tests/employee-type-authority/php/store-feature-permission-regression.php": "9421dca531ebcd46904acfc28d5f19c2424475ed74f45e8f6f227b726a816670"
+    },
+    "databaseMigrations": [],
+    "engineeringScripts": [],
+    "generatedFiles": [],
+    "evidence": ["tests/employee-type-authority/R52-store-feature-permission-selftest-2026-10-02.json"]
+  },
+  "trackedPatchSha256": "b70ee0175a89fa9abb41106fb14b740d45d35788b8bb579259cdf0da42813240",
+  "rootCause": "组织权限会话id47对应员工493，在门店169没有system_store_staff任职；旧服务误把会话id当任职id再查询，阻断已经通过入口编辑权限的操作。完整表单未改变类型也会进入该校验。",
+  "implementation": "删除旧操作者任职查询及对应拒绝分支，保留调用接口、有效身份、目标员工/任职/会话门店关联和版本事务约束；总部独立人员类型权限保持不变。所有既有入口调用引用已扫描。",
+  "architectureReview": {
+    "authorityAndGrain": "employee人员类型及版本仍为唯一权威主档；system_store_staff用于确认目标属于当前门店，不用它要求操作者必须任职本店。",
+    "permission": "现有认证、ForceStoreSessionMiddleware、CashierCheckRoleMiddleware新增/编辑功能门禁、只读会话拦截继续负责授权，不新增类型权限，不放宽目标跨店边界。",
+    "transactionsAndConcurrency": "人员完整保存既有严格幂等和事务不变；人员类型乐观锁、审计和失败回滚不变，不增加写入口或绕过版本。",
+    "eventsAndSnapshots": "不产生新经营事件，不修改金额、业绩算法、统计时点或历史人员类型快照；成功类型修改仍写原employee_change_log。",
+    "migrationAndPerformance": "无迁移、回填、索引或缓存架构变更；移除一条错误的操作者任职SELECT FOR UPDATE。",
+    "reconciliation": "真实本地类型变更和审计在测试事务中校验后回滚；员工全部字段摘要和该员工审计行数均恢复原值。"
+  },
+  "commentUpdates": "业务服务说明组织会话与任职主键区别、统一功能权限及目标边界；测试说明强制门店语义、参数缩进无关断言及本地限定/事务回滚安全边界。",
+  "tests": [
+    "PHP7.4.33：真实本地14项回归通过，包括组织会话无任职同值保存、真实类型变更、审计、旧版本拒绝、跨店目标/伪造员工/缺失身份拒绝、总部权限不变及事务回滚对账。",
+    "本地回归数据库与MySQL主机指纹强制核对；测试目标staff620 employee754，未创建测试员工，未留下人员类型或审计变更。",
+    "员工类型静态合同10/10通过；首次9/10中唯一失败为既有参数缩进硬编码，改为等价参数语义匹配后通过，并新增旧操作者任职查询不存在断言。",
+    "STAFF_UNIFIED_QUERY_FRONTEND合同通过；本次没有修改页面、前端或中间件。",
+    "业务PHP及两份集成/回归PHP语法检查通过；git diff --check通过。"
+  ],
+  "runtime": "仅USR1刷新本地mohe-cashier-app工作进程，容器保持运行；18091编辑页面和用户未保存的消耗业绩+手工费选择保持原样，不替用户提交该业务变更。",
+  "limits": "未执行会删除全表夹具的既有integration.php及完整MySQL矩阵；该脚本仅更新回归场景并检查语法。未点击用户当前表单保存，真实HTTP完整保存待产品经理页面验收；不把服务事务测试冒充真人全流程测试。未连接远程客户、修改生产库、commit、部署或push。其他任务脏改动保留。"
+}

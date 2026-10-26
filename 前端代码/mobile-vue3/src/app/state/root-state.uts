@@ -1,0 +1,8 @@
+export {
+	hasCompleteMerchantRoot,
+	evaluateMerchantRootUpdate,
+	merchantContextSwitchInstallDecision,
+	merchantContextIsComplete,
+	merchantRootInstallDecision,
+	merchantStateIdentifiersAreCleared
+} from './root-state-core.uts'

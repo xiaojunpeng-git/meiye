@@ -1,0 +1,106 @@
+<?php
+namespace think\facade {
+    class Db { public static $rows=[]; public static function name($table){return new Query($table);} }
+    class Query {private $table,$filters=[];function __construct($table){$this->table=$table;}function where($key,$op,$value=null){$this->filters[]=[$key,$value===null?'=':$op,$value===null?$op:$value];return $this;}function filtered(){return array_values(array_filter(Db::$rows[$this->table]??[],function($row){foreach($this->filters as [$key,$op,$value]){if($op==='=' && ($row[$key]??null)!=$value)return false;if($op==='<>' && ($row[$key]??null)==$value)return false;}return true;}));}function find(){return $this->filtered()[0]??null;}function value($field){return $this->filtered()[0][$field]??null;}function column($field){return array_column($this->filtered(),$field);} }
+}
+namespace app\services\system {
+    class SystemRoleServices {
+        // Fixture mirrors live role status and comma-separated rule grants.
+        function getRoleIds(array $roles): array {
+            $ids=[];
+            foreach (\think\facade\Db::$rows['system_role']??[] as $role) {
+                if (!in_array((int)$role['id'],$roles,true) || (int)$role['status']!==1) continue;
+                $ids=array_merge($ids,explode(',',(string)$role['rules']));
+            }
+            return $ids;
+        }
+    }
+}
+namespace app\services\organization {
+    class EmployeeDataScopeServices {const MODE_PERSONAL='personal';public static $scope=[1];public static $mode='store';function resolveEffectiveStoreIds(...$args){return self::$scope;}function resolvePrimaryHqScopeMode(...$args){return self::$mode;}function resolveCurrentActiveStoreIds(...$args){return [1];}}
+    class OrganizationScopeService {function getResolvedStoreIdsByLegacyAgentId($id){return [2];}}
+}
+namespace app\services\mobile\merchant {class MobileMerchantRequestContextResolver {public static $account=9;public static $actions=[];function trustedBusinessPrincipal($employee,$staff,$store,$org){return ['accountId'=>self::$account,'employeeId'=>$employee,'staffId'=>$staff,'storeId'=>$store,'organizationId'=>$org,'availableActions'=>self::$actions];}}}
+namespace app\model\store {class SystemStoreStaff {static function where(...$args){return new self;}function __call($name,$args){if($name==='find')return $this;return $this;}function toArray(){return ['employee_id'=>11,'level'=>1];}}}
+namespace app\services\cashier\v3 {class CashierV3DataScopeContext {const MODE_NONE='none';}}
+namespace app\services\cashier\v3\bootstrap {class CashierV3Bootstrap {static function dispatcher(){return new class {
+ function scopeResolver(){return $this;}function operatorScope(...$a){return $this;}function tenantId(){return '0';}function organizationId(){return '0';}
+ function dataScopeFactory(){return $this;}function build(...$a){return $this;}function isSelfParticipantMode(){return false;}function visibleStoreIds(){return [1];}function authorizationMode(){return 'stores';}function permissionVersion(){return 'fixture';}
+};}}}
+namespace {
+function app(){return new class {function make($class){return new $class;}};}
+$root=dirname(__DIR__,2).'/后端代码/app/services/ai/execution/';require $root.'AiAuthority.php';require $root.'AiPlatformUsePermission.php';require $root.'AiPlatformPrincipalResolver.php';require $root.'AiMerchantPrincipalResolver.php';
+$count=0;function ok($value){global $count;if(!$value)throw new \RuntimeException('principal check failed');$count++;}function denied($call){try{$call();}catch(\RuntimeException $e){ok(true);return;}throw new \RuntimeException('expected deny');}
+\think\facade\Db::$rows=['system_admin'=>[['id'=>7,'status'=>1,'is_del'=>0,'level'=>1,'admin_type'=>0,'roles'=>'1','employee_id'=>11]],'employee'=>[['id'=>11,'status'=>1,'is_del'=>0]],'system_store'=>[['id'=>1,'is_del'=>0,'name'=>'A']],
+    'system_menus'=>[['id'=>50,'type'=>1,'auth_type'=>2,'unique_auth'=>'mohe-ai-entry','is_del'=>0,'is_show'=>1]],
+    'system_role'=>[['id'=>1,'status'=>1,'rules'=>'10,50']]];
+$p=new \app\services\ai\execution\AiPlatformPrincipalResolver();$b=['terminal'=>'platform','principal_kind'=>'platform_admin','account_id'=>7];ok($p->worker($b)['store_ids']===[1]);
+// Configuration remains root-admin-only. The role grant admits AI use, while
+// the person's effective data scope alone determines which facts can be read.
+foreach ([null,'operator','Admin','admin ','admin-other'] as $account) {
+    \think\facade\Db::$rows['system_admin'][0]['account']=$account;
+    \think\facade\Db::$rows['system_admin'][0]['real_name']='admin';
+    ok($p->authenticated(7)['can_configure']===false);
+    ok($p->authenticated(7)['can_use']===true);
+}
+\think\facade\Db::$rows['system_admin'][0]['level']=0;
+ok($p->authenticated(7)['can_configure']===false);
+\think\facade\Db::$rows['system_admin'][0]['level']=1;
+\think\facade\Db::$rows['system_admin'][0]['account']='admin';
+ok($p->authenticated(7)['can_configure']===true);
+ok($p->authenticated(7)['can_configure']===true);
+ok($p->authenticated(7)['can_use']===true);
+// Platform function revocation is immediate, without changing staff data scope
+// or allowing a former AI user to resume a background export.
+\think\facade\Db::$rows['system_role'][0]['rules']='10';
+ok($p->authenticated(7)['can_use']===false);denied(fn()=>$p->worker($b));
+\think\facade\Db::$rows['system_role'][0]['rules']='10,50';
+\think\facade\Db::$rows['system_menus'][0]['is_show']=0;
+ok($p->authenticated(7)['can_use']===false);
+\think\facade\Db::$rows['system_menus'][0]['is_show']=1;
+\think\facade\Db::$rows['system_menus'][0]['is_del']=1;
+ok($p->authenticated(7)['can_use']===false);
+\think\facade\Db::$rows['system_menus'][0]['is_del']=0;
+\think\facade\Db::$rows['system_role'][0]['status']=0;
+ok($p->authenticated(7)['can_use']===false);
+\think\facade\Db::$rows['system_role'][0]['status']=1;
+ok($p->authenticated(7)['can_use']===true);
+\think\facade\Db::$rows['system_admin'][0]['roles']='';
+ok($p->authenticated(7)['can_use']===false);
+\think\facade\Db::$rows['system_admin'][0]['roles']='1';
+\app\services\organization\EmployeeDataScopeServices::$scope=[];
+ok($p->worker($b)['scope_mode']==='self_participant');ok($p->worker($b)['employee_id']===11);ok($p->worker($b)['store_ids']===[1]);
+\app\services\organization\EmployeeDataScopeServices::$scope=[1];
+ok($p->worker($b)['can_use']===true);
+\think\facade\Db::$rows['system_admin'][0]['status']=0;denied(fn()=>$p->worker($b));\think\facade\Db::$rows['system_admin'][0]['status']=1;
+\think\facade\Db::$rows['system_admin'][0]['admin_type']=3;\think\facade\Db::$rows['system_admin'][0]['relation_id']=0;ok($p->authenticated(7)['scope_mode']==='none');ok($p->authenticated(7)['can_use']===false);denied(fn()=>$p->worker($b));
+\think\facade\Db::$rows['system_admin'][0]['relation_id']=4;ok($p->worker($b)['store_ids']===[2]);
+ok($p->authenticated(7)['can_configure']===false);
+$m=new \app\services\ai\execution\AiMerchantPrincipalResolver();$mb=['terminal'=>'merchant','principal_kind'=>'merchant_employee','account_id'=>9,'employee_id'=>11,'staff_id'=>5,'origin_store_id'=>1,'origin_organization_id'=>'3'];ok($m->worker($mb)['employee_id']===11);
+ok($m->worker($mb)['can_configure']===false);
+\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=10;denied(fn()=>$m->worker($mb));\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=9;
+\app\services\organization\EmployeeDataScopeServices::$scope=[];ok($m->worker($mb)['scope_mode']==='self_participant');ok($m->worker($mb)['store_ids']===[1]);
+\app\services\organization\EmployeeDataScopeServices::$scope=[1,2];ok($m->worker($mb)['store_ids']===[1,2]);
+\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$actions=[];ok($m->worker($mb)['can_use']);ok($m->worker($mb)['store_report_authorized']);ok($m->worker($mb)['personnel_data_authorized']);
+$mb['employee_id']='11';denied(fn()=>$m->worker($mb));
+require $root.'AiTrustedPrincipalResolver.php';
+$s=new \app\services\ai\execution\AiTrustedPrincipalResolver();
+\app\services\organization\EmployeeDataScopeServices::$scope=[1,2];
+$sc=$s->storeAuthenticated(1,5,[]);ok($sc['store_ids']===[1,2]);ok($sc['can_use']);ok($sc['store_report_authorized']);
+ok(\app\services\ai\execution\AiAuthority::currentStoreId($sc)===1);
+ok(\app\services\ai\execution\AiAuthority::currentStoreId(array_replace($sc,['origin_store_id'=>9]))===null);
+ok(\app\services\ai\execution\AiAuthority::currentStoreId(array_replace($sc,['origin_store_id'=>'1']))===null);
+\app\services\organization\EmployeeDataScopeServices::$scope=[];
+$sc=$s->storeAuthenticated(1,5,[]);ok($sc['scope_mode']==='self_participant');ok($sc['employee_id']===11);ok($sc['store_ids']===[1]);
+$sc=$s->storeAuthenticated(1,5,[]);ok($sc['can_use']);ok($sc['store_report_authorized']);ok($sc['personnel_data_authorized']);
+ok(\app\services\ai\execution\AiAuthority::canUseDataScope($sc));
+ok(!\app\services\ai\execution\AiAuthority::canUseDataScope(['scope_mode'=>'none','store_ids'=>[]]));
+// Terminal-specific menu/feature switches must not re-enter AI query
+// admission after the three HTTP adapters have normalized the same personnel
+// data scope.
+$merchantSource=file_get_contents($root.'AiMerchantPrincipalResolver.php');
+$storeSource=file_get_contents($root.'AiTrustedPrincipalResolver.php');
+$platformSource=file_get_contents($root.'AiPlatformPrincipalResolver.php');
+ok(strpos($merchantSource,'MOHE_AI_USE')===false&&strpos($storeSource,'cashier.v3.ai')===false&&strpos($platformSource,'AiPlatformUsePermission')!==false);
+echo "Principal adapters: $count checks PASS (authority fixtures; no live DB)\n";
+}

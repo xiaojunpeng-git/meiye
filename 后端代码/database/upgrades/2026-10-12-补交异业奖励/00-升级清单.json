@@ -1,0 +1,10 @@
+{
+  "key": "20261012-repayment-cross-industry-reward",
+  "scope": "消费欠款和充值欠款补交增加本次异业奖励，不改变金额、余额、欠款或原销售奖励。",
+  "schema": "两张补交主表新增 reward_amount_cents BIGINT UNSIGNED NOT NULL DEFAULT 0，无历史回填。",
+  "preflight": "核对目标实例、库名、源码版本及备份；02-执行.php --database=目标库 默认只读检查。",
+  "apply": "02-执行.php --apply --database=目标库；须先迁移再部署应用代码，可重复执行。",
+  "verify": "再次检查两列类型/默认值；验证业务写入与明细奖励合计，不只检查列存在。",
+  "rollback": "回退应用固定版本并保留新增列和奖励数据；不得自动删除已录入奖励。",
+  "authorization": "本轮仅本地开发与验证，远程执行须单独授权。"
+}

@@ -1,0 +1,94 @@
+[
+  {
+    "file": "008-after.json",
+    "sha256": "580b668bf78e861c0cb774fdbe2ddc4322d3b2046230356db291554e0b75f413"
+  },
+  {
+    "file": "008-before.json",
+    "sha256": "0621d3adbf4a56c99f46a745790151bef02a9206ad447f4f136dda3a0951343e"
+  },
+  {
+    "file": "008-checkout-online.png",
+    "sha256": "7ab8cff16a9c29081ada11457cc2db00ef5b5701aa7cdaba8b468febf291ee80"
+  },
+  {
+    "file": "008-product-online.png",
+    "sha256": "cca129cb0dd30207ec6d5d25f891bfca541144c34a22c28beea79231de626912"
+  },
+  {
+    "file": "008-public-after.json",
+    "sha256": "c00e5db3c110fb147b3b31d1060e90200b827d12c322b7dfc83d6068ee369679"
+  },
+  {
+    "file": "008-teacher-129.png",
+    "sha256": "75094092d9fd778347bba5b9aa9fb50ed7b6c27e9a9bdce33a280f66e4368745"
+  },
+  {
+    "file": "008-teacher-130.png",
+    "sha256": "411179d2e6e7b06c020c48d94e5c4707145d2226e08641a54a9d8738e9a1e4d8"
+  },
+  {
+    "file": "008-verified.json",
+    "sha256": "480a8c332846920673ed8322bf360e9ee11986c152ad6742b6288940131051bc"
+  },
+  {
+    "file": "h5-input.json",
+    "sha256": "82051f1a2803f02cdfe80de40553ab6f5f6b526d48b1467c529620e59225b0ab"
+  },
+  {
+    "file": "h5-payload-manifest.json",
+    "sha256": "d50debad8755f243f4825baa20df3081a512f9e2305e661dfe0bc590a29a83cb"
+  },
+  {
+    "file": "mini-input.json",
+    "sha256": "2e5de87c939198c618b5ded1824b92fdecbd698f6fde26a0495b84f286e42ba5"
+  },
+  {
+    "file": "mini-native-product-release.png",
+    "sha256": "8258193e01210be6ecd6cf58533e38b23282789c7293b27766d266f7a4b4de6f"
+  },
+  {
+    "file": "mini-upload-info.json",
+    "sha256": "b5a41295e378e55ff2e9912afc8fdcb7523b3bfb4e8a2766b24b704b1754e931"
+  },
+  {
+    "file": "mini-verification.json",
+    "sha256": "46225014491e7091afab4070f34da7af70aac04d709a114aad1690e3961732d2"
+  },
+  {
+    "file": "payload.json",
+    "sha256": "01ecabd5a3922fa511edd80dfc4555fe07fe1e81a887ac5d6f45e2b18d9acadc"
+  },
+  {
+    "file": "pushed.json",
+    "sha256": "6f1274a8e9e2aa5c106e82091db5c0dd04d7e4ed16772cd42e6c482218cd26e5"
+  },
+  {
+    "file": "release-browser-cases.json",
+    "sha256": "8480dae8a91754010f3978516738027d363afe6aa3e1c72f95828b66f6663a0d"
+  },
+  {
+    "file": "release-result.json",
+    "sha256": "1e42786fda5447f366f8aed4dd55886bf79036f6e30aedd1d740c086b4a5a933"
+  },
+  {
+    "file": "rh-after.json",
+    "sha256": "92e493ec8360ee2b9aa9039dc0b5d7c64b198285f104972c8330958bc9024113"
+  },
+  {
+    "file": "rh-before.json",
+    "sha256": "f778dc6a53076c281be945b58a2b8ac5c6e182dfe9e9b18d1b91439d306a7d36"
+  },
+  {
+    "file": "rh-business-readonly.json",
+    "sha256": "a29aabf0ab295d637fa4647457e7c06b539d2e108f0388dbdf6fa3f7502b0b8b"
+  },
+  {
+    "file": "rh-public-after.json",
+    "sha256": "41fd0f344c01b40f277aea1465dd68aef70d48b0395f8e9310fbf521fbf00a51"
+  },
+  {
+    "file": "rh-verified.json",
+    "sha256": "48b620b28464512fa0784e88ea46951e6c326bde5ed422bb0858b5a08665c7b5"
+  }
+]

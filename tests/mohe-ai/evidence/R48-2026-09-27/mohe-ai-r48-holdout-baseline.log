@@ -1,0 +1,43 @@
+H001 PASS expected=compile actual=compile
+H002 PASS expected=compile actual=compile
+H003 PASS expected=compile actual=compile
+H004 PASS expected=compile actual=compile
+H005 GAP expected=compile actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H006 PASS expected=compile actual=compile
+H007 PASS expected=compile actual=compile
+H008 PASS expected=compile actual=compile
+H009 PASS expected=compile actual=compile
+H010 PASS expected=compile actual=compile
+H011 GAP expected=compile actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H012 PASS expected=compile actual=compile
+H013 PASS expected=ambiguity actual=ambiguity
+H014 GAP expected=ambiguity actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H015 PASS expected=ambiguity actual=ambiguity
+H016 PASS expected=ambiguity actual=ambiguity
+H017 SCOPE_REVIEW expected=ambiguity actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H018 PASS expected=ambiguity actual=ambiguity
+H019 GAP expected=ambiguity actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H020 PASS expected=ambiguity actual=ambiguity
+H021 PASS expected=capability_refusal actual=capability_refusal reason=AI_FUTURE_ACTUALS_UNAVAILABLE
+H022 PASS expected=capability_refusal actual=capability_refusal reason=AI_DATA_COVERAGE_INCOMPLETE
+H023 PASS expected=capability_refusal actual=capability_refusal reason=AI_RANK_LIMIT_NOT_READY
+H024 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H025 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H026 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H027 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H028 SCOPE_REVIEW expected=capability_refusal actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H029 SCOPE_REVIEW expected=capability_refusal actual=compile
+H030 SCOPE_REVIEW expected=capability_refusal actual=compile
+H031 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H032 SCOPE_REVIEW expected=capability_refusal actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H033 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H034 SCOPE_REVIEW expected=capability_refusal actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H035 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H036 SCOPE_REVIEW expected=capability_refusal actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+H037 PASS expected=compile actual=compile
+H038 PASS expected=compile actual=compile
+H039 PASS expected=capability_refusal actual=capability_refusal reason=AI_CAPABILITY_NOT_READY
+H040 SCOPE_REVIEW expected=capability_refusal actual=understanding_failure reason=AI_INTENT_UNRESOLVED
+HOLDOUT_RESULT={"compile":14,"ambiguity":5,"capability_refusal":12,"understanding_failure":9,"wrong_hit":0,"matched":28,"mismatched":12,"scope_adjudicated":8}
+BOUNDARY=Frozen semantic/compiler fixture cases; not live model, data reconciliation or product acceptance. No trusted preceding evidence injected.
+SCOPE_REVIEW=H017/H037 preserve earlier scope decisions. H028/H032/H034/H036/H040 now use bounded semantic analysis without an unavailable-word blacklist. H029/H030 are intentionally executable after round-three registered Reader reconciliation.

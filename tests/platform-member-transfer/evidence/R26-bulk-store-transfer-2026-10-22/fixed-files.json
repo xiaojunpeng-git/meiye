@@ -1,0 +1,43 @@
+{
+  "fixed_at": "2026-10-22T18:22:16.341596+08:00",
+  "baseline_head": "120fea991b7dbe4fe062d9914523a35a677f6819",
+  "start_head": "1e1296eb0e77b16dda1150deab74ce9a416f524c",
+  "entry": "http://127.0.0.1:18081/admin/store/store/index",
+  "scope": "R26 bulk primary member store transfer and local 18081 recovery",
+  "acceptance": "pending product manager",
+  "remote_instances": "not applicable: local only",
+  "files": {
+    "前端代码/admin/src/pages/store/storeList/index.vue": "42c6ec17b22ff83136757f14412040c84ac669ce20f5f53ca8169defdd84e9e6",
+    "前端代码/admin/src/components/member/StoreMemberTransferModal.vue": "3c49ca8b476eac9309bf956000c477dbac859d4ee51aaeb79786df543f29528b",
+    "前端代码/admin/src/api/memberStoreTransfer.js": "79317a4997c926a113699b1a3c91223f1fbb518cb71dd6f8e71ac2bcadf955a0",
+    "前端代码/admin/vue.config.js": "927b994cad9d5f5d4cfc371cd9ca62074eaa9a770c7c4a446f9d88769843a881",
+    "后端代码/app/services/user/UserBelongStoreServices.php": "fd2631eb58c6208fc657d18b1be33e3aeb250e7258f054f7b2689ffb7f0d6708",
+    "后端代码/app/services/user/UserStoreTransferBatchServices.php": "f3ef019759b1de52499a866928ccfce2027a13c2fc013523c8e18d67e6d025a7",
+    "后端代码/app/controller/admin/v1/user/MemberStoreTransfer.php": "c0cfee69904b49f7cda75dfa48a8a0dca8b59bae29184cdf53ab990e58b7188f",
+    "后端代码/app/jobs/user/UserStoreTransferBatchJob.php": "d8e3d38a01113834e43d01fda4d21d3865568d579218be7b478a41c93d2e04c6",
+    "后端代码/route/admin.php": "8514ca8a27a4647aabe8ed3d5a8d2c4cc0959434cc2a5f2d54c3f260d7f9642b",
+    "后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/01-schema.sql": "aa2a51e54ec94286acf01f6d157a7266e65418d306a3e0db937186a8083137d6",
+    "后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/02-member-index.sql": "9f2c660e8063f2e1876c9f673244a9120db81c7e658d05f403efe44d4598c968",
+    "后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/执行说明.md": "22ed4248d8e23e36b90e91d83d136c6b5b6a59bec56fd2c54d1dbdb32a5729e7",
+    "tests/platform-member-transfer/php/r26-bulk-transfer-rollback.php": "23f1c7d35309de585f7f9b75253f56b475fb8510084ef3bdd26b88b5612c4d6d",
+    "tests/platform-member-transfer/php/r26-bulk-transfer-queue-local.php": "6cb618baa72819a78f54a16956fcc69174e4005ffeb685519c7264b94c8283f7",
+    "tests/platform-member-transfer/php/r26-bulk-transfer-ui-fixture-local.php": "e0614b040ba5e2c6695a74560ab863d2cc7d126c4448998cb29995272409f9a2"
+  },
+  "owned_patch_sha256": "7032bfdfb62ad9b1c7679e0caba387830fe8f82f2ad94993c1f643ee122fc5ea",
+  "preexisting_excluded": "vue.config.js all-adminapi proxy; other dirty workspace files untouched",
+  "test_results": {
+    "rollback_checks": 46,
+    "real_queue_members": 55,
+    "duplicate_queue_history": 55,
+    "browser_members": 3,
+    "fixture_cleanup": "PASS",
+    "new_api_component_eslint": "0 errors 0 warnings",
+    "legacy_list_lint": {
+      "baseline": 206,
+      "current": 205,
+      "new": 0
+    },
+    "php_syntax": "PASS",
+    "migration_local_replay": "PASS"
+  }
+}

@@ -1,0 +1,324 @@
+diff --git a/scripts/r91-local-verification.mjs b/scripts/r91-local-verification.mjs
+deleted file mode 100644
+index 0b93b1fc..00000000
+--- a/scripts/r91-local-verification.mjs
++++ /dev/null
+@@ -1,15 +0,0 @@
+-import { execFileSync } from 'node:child_process';
+-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+-
+-// Local Docker mirror only. Compare the new shared calculation with the exact
+-// accepted pre-round reader in memory; never connect to customer servers.
+-const baseline = '83a40179c56bdff8e216ab868b121db339bd8b8e';
+-const source = execFileSync('git', ['show', `${baseline}:后端代码/app/services/query/metric/RegisteredMetricReadServices.php`], { encoding: 'utf8' })
+-  .replace('final class RegisteredMetricReadServices', 'final class R91BaselineMetricReader');
+-const test = readFileSync('tests/report-group-dashboard/php/r91-category-sale-types.php', 'utf8')
+-  .replace('// R91_BASELINE_INJECTION', `eval(substr(base64_decode('${Buffer.from(source).toString('base64')}'), 5));`);
+-const result = JSON.parse(execFileSync('docker', ['exec', '-i', 'mohe-cashier-app', 'php'], { input: test, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }));
+-const directory = 'tests/report-group-dashboard/evidence/r91-2026-10-18';
+-mkdirSync(directory, { recursive: true });
+-writeFileSync(`${directory}/business-test.json`, JSON.stringify({ baseline, ...result }, null, 2) + '\n');
+-console.log(JSON.stringify(result));
+diff --git a/tests/report-group-dashboard/php/r91-category-sale-types.php b/tests/report-group-dashboard/php/r91-category-sale-types.php
+deleted file mode 100644
+index df8cf08a..00000000
+--- a/tests/report-group-dashboard/php/r91-category-sale-types.php
++++ /dev/null
+@@ -1,84 +0,0 @@
+-<?php
+-declare(strict_types=1);
+-
+-// Run through scripts/r91-local-verification.mjs. Baseline is loaded from an
+-// immutable Git blob in memory, never a parallel editable business source tree.
+-require '/var/www/html/vendor/autoload.php';
+-(new think\App('/var/www/html/'))->initialize();
+-use app\services\query\metric\RegisteredMetricReadServices;
+-use app\services\query\metric\R91BaselineMetricReader;
+-use app\services\report\GroupManagementDashboardServices;
+-use think\facade\Db;
+-// R91_BASELINE_INJECTION
+-if (!is_file('/.dockerenv') || config('database.connections.mysql.hostname') !== 'mysql'
+-    || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local mirror only');
+-$checks = 0;
+-function r91Check(bool $ok, string $message): void {
+-    global $checks;
+-    if (!$ok) throw new RuntimeException($message);
+-    $checks++;
+-}
+-$reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
+-$baseline = R91BaselineMetricReader::withCurrentReportProductCategory();
+-$dashboard = new GroupManagementDashboardServices();
+-$treeMethod = new ReflectionMethod($dashboard,'categories');
+-$treeMethod->setAccessible(true);
+-$queryLog = [];
+-Db::listen(static function ($sql) use (&$queryLog): void { $queryLog[] = $sql; });
+-Db::execute('SET TRANSACTION READ ONLY');
+-Db::startTrans();
+-try {
+-    $tree = $treeMethod->invoke($dashboard);
+-    $cases = [];
+-    $range = ['start'=>'2026-10-01','end'=>'2026-10-17'];
+-    foreach ([[23],[68],[23,68],[2147483647]] as $stores) {
+-        $queryLog = [];
+-        $start = microtime(true);
+-        $result = $reader->dashboardSaleTypeBreakdown('0',$stores,$range,$tree['roots'],$tree['children']);
+-        $seconds = round(microtime(true)-$start,3);
+-        $quantityQueries = array_values(array_filter($queryLog,static fn($sql)=>strpos($sql,'SUM(p.quantity)')!==false));
+-        r91Check(count($quantityQueries) === 1, 'Exactly one quantity query for all categories');
+-        r91Check($result['totals'] === $baseline->dashboardSaleTypeTotals('0',$stores,$range), 'Top four types match accepted baseline exactly');
+-        $display = [];
+-        foreach ($tree['roots'] as $root) {
+-            $rootId = (int)$root['id']; $queue = [$rootId]; $ids = [];
+-            while ($queue) {
+-                $id = (int)array_shift($queue);
+-                if (isset($ids[$id])) continue;
+-                $ids[$id] = true;
+-                foreach ($tree['children'][$id] ?? [] as $next) $queue[] = $next;
+-            }
+-            $expected = $baseline->dashboardSaleTypeTotals('0',$stores,$range,array_keys($ids));
+-            unset($expected['project']);
+-            r91Check(array_keys($result['categories'][$rootId]) === ['normal_card','experience_card','product'], 'Three fixed types in stable order, including zeros');
+-            r91Check($result['categories'][$rootId] === $expected, 'Each category exactly equals the original top-card logic with category scope');
+-            $display[$rootId] = $expected;
+-        }
+-        $money = $reader->categoryDashboardCards('actual_performance','0',$stores,$range,$tree['roots'],$tree['children']);
+-        $oldMoney = $baseline->categoryDashboardCards('actual_performance','0',$stores,$range,$tree['roots'],$tree['children']);
+-        $strip = static function(array $cards): array {
+-            foreach ($cards as &$card) { unset($card['secondary_categories'],$card['source_explanation']); }
+-            return $cards;
+-        };
+-        r91Check($strip($money) === $strip($oldMoney), 'Parent amounts, shares, rankings, and drilldown parameters unchanged');
+-        $cases[] = ['stores'=>$stores,'seconds'=>$seconds,'totals'=>$result['totals'],'categories'=>$display];
+-    }
+-    $empty = $reader->dashboardSaleTypeBreakdown('0',[23],['start'=>'2099-01-01','end'=>'2099-01-01'],$tree['roots'],$tree['children']);
+-    foreach ($empty['categories'] as $types) foreach ($types as $type) r91Check($type === ['sales_quantity'=>0,'cash_performance_cents'=>0], 'No-data types remain zero');
+-    $filtered = $reader->dashboardSaleTypeBreakdown('0',[23],$range,$tree['roots'],$tree['children'],[26332]);
+-    r91Check($filtered['totals'] === $baseline->dashboardSaleTypeTotals('0',[23],$range,[26332]), 'Selected category still limits top totals');
+-    try {
+-        $reader->dashboardSaleTypeBreakdown('0',[],$range,$tree['roots'],$tree['children']);
+-        throw new RuntimeException('Empty permission scope accepted');
+-    } catch (\app\services\query\metric\MetricQueryContractException $error) { $checks++; }
+-    // A single-store end-to-end service response validates labels and the shared
+-    // composition used by platform/embedded dashboards without changing data.
+-    $page = $dashboard->dashboard(['tenant_id'=>'0','store_ids'=>[23]],['start_date'=>$range['start'],'end_date'=>$range['end']]);
+-    r91Check(array_column($page['sale_type_cards'],'title') === ['疗程卡','体验卡','单项','产品'], 'Top cards unchanged');
+-    foreach ($page['categories'] as $card) {
+-        if ($card['category_id'] === 0) continue;
+-        r91Check(array_column($card['sale_types'],'title') === ['疗程卡','体验卡','产品'], 'Every first-level category exposes three fixed labels');
+-        r91Check(!isset($card['secondary_categories']), 'Superseded child-category projection removed');
+-    }
+-    echo json_encode(['result'=>'PASS','checks'=>$checks,'cases'=>$cases,'writes'=>0],JSON_UNESCAPED_UNICODE),PHP_EOL;
+-} finally { Db::rollback(); }
+diff --git a/tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs b/tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs
+index 9df2de94..99d41455 100644
+--- a/tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs
++++ b/tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs
+@@ -32,6 +32,7 @@ assert(source.includes('category.sale_types') && !source.includes('secondary_cat
+ assert(source.indexOf('{{ type.title }}') < source.indexOf('Number(type.sales_quantity || 0)')
+   && source.indexOf('Number(type.sales_quantity || 0)') < source.indexOf('formatMoney(type.cash_performance_cents)'), 'sale types show name then quantity then cash amount')
+ assert(source.includes('grid-template-columns:repeat(3,minmax(0,1fr))'), 'each category keeps three stable horizontal tracks')
++assert(source.includes('.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))'), 'top sale types use three equal desktop tracks')
+ assert(!source.includes('categories.value.sort(') && !source.includes('categoryCards.value.sort('), 'category cards preserve the backend configured order')
+ 
+ console.log('group dashboard refresh contract: PASS')
+diff --git a/前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue b/前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue
+index 5256b461..dac38e2f 100644
+--- a/前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue
++++ b/前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue
+@@ -596,11 +596,11 @@ onBeforeUnmount(() => {
+ /* These cards present server totals at one business grain; responsive wrapping
+    keeps both quantity and whole-yuan cash legible without a second scroll. */
+ .group-dashboard__sale-type-section{margin-top:-6px}
+-.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
++/* The shared backend exposes the same three sale types at both display levels. */
++.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+ .dashboard-sale-type-card{min-width:0;border:1px solid #dde5ee;border-top:3px solid #1f5f8b;border-radius:8px;padding:13px 14px;background:#fff}
+-.dashboard-sale-type-card:nth-child(2){border-top-color:#8b6cac}
+-.dashboard-sale-type-card:nth-child(3){border-top-color:#357a72}
+-.dashboard-sale-type-card:nth-child(4){border-top-color:#b7791f}
++.dashboard-sale-type-card:nth-child(2){border-top-color:#357a72}
++.dashboard-sale-type-card:nth-child(3){border-top-color:#b7791f}
+ .dashboard-sale-type-card__heading,.dashboard-sale-type-card__values{display:flex;align-items:center;justify-content:space-between;gap:10px}
+ .dashboard-sale-type-card__heading h3{color:#334b61;font-size:14px}
+ .dashboard-sale-type-card__values{margin-top:12px}
+diff --git a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
+index afb62274..f2beb1cf 100644
+--- a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
++++ b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php
+@@ -72,7 +72,8 @@ final class RegisteredMetricReadServices
+      * The top sale-type cards and each first-level category share these exact
+      * sale/cash populations. Category rows only narrow by the sold item's current
+      * category (including descendants), never by card components or its label.
+-     * Query once for all roots; project sales stay in the top totals only.
++     * Query once for all roots. Both display levels use normal cards, projects
++     * and products; experience cards remain distinct in totals, never reassigned.
+      */
+     public function dashboardSaleTypeBreakdown(string $tenantId, array $stores, array $range, array $roots = [], array $children = [], array $categoryIds = []): array
+     {
+@@ -86,7 +87,7 @@ final class RegisteredMetricReadServices
+         foreach ($roots as $root) {
+             $rootId = $this->integer($root['id'] ?? null);
+             if ($rootId <= 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+-            $categoryTotals[$rootId] = array_intersect_key($totals, array_flip(['normal_card', 'experience_card', 'product']));
++            $categoryTotals[$rootId] = array_intersect_key($totals, array_flip(['normal_card', 'project', 'product']));
+             foreach ($this->categoryDescendants($rootId, $children) as $id) $rootByCategory[$id] = $rootId;
+         }
+ 
+@@ -1953,7 +1954,7 @@ final class RegisteredMetricReadServices
+                     return (string)($row['product_type_snapshot'] ?? '') === 'product';
+                 })), 'item_name', '产品'),
+                 'source_explanation' => $metricCode === 'actual_performance'
+-                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。分类下固定展示疗程卡、体验卡、产品的销售量和现金业绩，按所售商品当前分类归入，与上方同类型卡片口径一致；现金业绩不扣退款，因此三项金额不等同于一级分类实际业绩合计，单项销售也不进入这三项。'
++                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。分类下固定展示疗程卡、单项、产品的销售量和现金业绩，按所售商品当前分类归入，与上方同类型卡片口径一致；体验卡不在三项中展示，也不并入其他类型。现金业绩不扣退款，因此三项金额不等同于一级分类实际业绩合计。'
+                     : '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
+             ];
+         }
+diff --git a/后端代码/app/services/report/GroupManagementDashboardServices.php b/后端代码/app/services/report/GroupManagementDashboardServices.php
+index 30b73e5f..0b2a568f 100644
+--- a/后端代码/app/services/report/GroupManagementDashboardServices.php
++++ b/后端代码/app/services/report/GroupManagementDashboardServices.php
+@@ -120,16 +120,16 @@ final class GroupManagementDashboardServices
+         $monthActual = $goalProgress['month_actual'];
+         $yearActual = $goalProgress['year_actual'];
+         $targetedStoreIds = array_map('intval', array_keys($monthTargets));
+-        // The four sale-mix cards share the dashboard's authorized store/date
++        // The three sale-mix cards share the dashboard's authorized store/date
+         // scope. Their positive sale receipts are narrower than the overall
+         // cash card, which also includes recharge and debt repayments.
+-        // One reader result supplies both the top four types and each category's
+-        // fixed three types. This layer labels values only; it never recalculates them.
++        // One reader result supplies both levels' fixed three types. Experience
++        // cards are omitted, not merged; this layer never recalculates values.
+         $saleTypeBreakdown = $reader->dashboardSaleTypeBreakdown($scope['tenant_id'], $scope['store_ids'], $range,
+             $categoryTree['roots'], $categoryTree['children'], $categoryIds);
+         $saleTypeTotals = $saleTypeBreakdown['totals'];
+         $saleTypeCards = [];
+-        foreach (['normal_card' => '疗程卡', 'experience_card' => '体验卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
++        foreach (['normal_card' => '疗程卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
+             $saleTypeCards[] = [
+                 'code' => $code,
+                 'title' => $title,
+@@ -462,7 +462,7 @@ final class GroupManagementDashboardServices
+             $out[$outputCode] = (string)$definition['summary'];
+         }
+         $out['consumption_unit_price'] = '消耗业绩除以消耗数量；分母为零显示 -。';
+-        $out['sale_type_cards'] = '销售数量来自已完成销售明细；现金业绩来自关联该销售明细的正向实收分摊，不含充值、退款及未关联明细的补交。疗程卡和体验卡按卡项商品当前统计类型区分；单项和产品按销售明细商品类型区分。门店、日期及已选择的商品分类沿用本看板筛选范围。';
++        $out['sale_type_cards'] = '销售数量来自已完成销售明细；现金业绩来自关联该销售明细的正向实收分摊，不含充值、退款及未关联明细的补交。疗程卡按卡项商品当前统计类型识别；单项和产品按销售明细商品类型区分。体验卡不展示，也不并入其他类型，原有经营业绩合计不变。门店、日期及已选择的商品分类沿用本看板筛选范围。';
+         return $out;
+     }
+ }
+diff --git a/tests/report-group-dashboard/php/category-sale-types.php b/tests/report-group-dashboard/php/category-sale-types.php
+new file mode 100644
+index 00000000..9a955a90
+--- /dev/null
++++ b/tests/report-group-dashboard/php/category-sale-types.php
+@@ -0,0 +1,88 @@
++<?php
++declare(strict_types=1);
++
++// Run through scripts/group-dashboard-sale-types-local-verification.mjs. Baseline is loaded from an
++// immutable Git blob in memory, never a parallel editable business source tree.
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++use app\services\query\metric\RegisteredMetricReadServices;
++use app\services\query\metric\SaleTypesBaselineMetricReader;
++use app\services\report\GroupManagementDashboardServices;
++use think\facade\Db;
++// BASELINE_INJECTION
++if (!is_file('/.dockerenv') || config('database.connections.mysql.hostname') !== 'mysql'
++    || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local mirror only');
++$checks = 0;
++function r91Check(bool $ok, string $message): void {
++    global $checks;
++    if (!$ok) throw new RuntimeException($message);
++    $checks++;
++}
++$reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
++$baseline = SaleTypesBaselineMetricReader::withCurrentReportProductCategory();
++$dashboard = new GroupManagementDashboardServices();
++$treeMethod = new ReflectionMethod($dashboard,'categories');
++$treeMethod->setAccessible(true);
++$queryLog = [];
++Db::listen(static function ($sql) use (&$queryLog): void { $queryLog[] = $sql; });
++Db::execute('SET TRANSACTION READ ONLY');
++Db::startTrans();
++try {
++    $tree = $treeMethod->invoke($dashboard);
++    $cases = [];
++    $range = ['start'=>'2026-10-01','end'=>'2026-10-17'];
++    foreach ([[23],[68],[23,68],[2147483647]] as $stores) {
++        $queryLog = [];
++        $start = microtime(true);
++        $result = $reader->dashboardSaleTypeBreakdown('0',$stores,$range,$tree['roots'],$tree['children']);
++        $seconds = round(microtime(true)-$start,3);
++        $quantityQueries = array_values(array_filter($queryLog,static fn($sql)=>strpos($sql,'SUM(p.quantity)')!==false));
++        r91Check(count($quantityQueries) === 1, 'Exactly one quantity query for all categories');
++        r91Check($result['totals'] === $baseline->dashboardSaleTypeTotals('0',$stores,$range), 'Top four types match accepted baseline exactly');
++        $display = [];
++        foreach ($tree['roots'] as $root) {
++            $rootId = (int)$root['id']; $queue = [$rootId]; $ids = [];
++            while ($queue) {
++                $id = (int)array_shift($queue);
++                if (isset($ids[$id])) continue;
++                $ids[$id] = true;
++                foreach ($tree['children'][$id] ?? [] as $next) $queue[] = $next;
++            }
++            $expected = $baseline->dashboardSaleTypeTotals('0',$stores,$range,array_keys($ids));
++            unset($expected['experience_card']);
++            r91Check(array_keys($result['categories'][$rootId]) === ['normal_card','project','product'], 'Three fixed types in stable order, including zeros');
++            r91Check($result['categories'][$rootId] === $expected, 'Each category exactly equals the original top-card logic with category scope');
++            $display[$rootId] = $expected;
++        }
++        $money = $reader->categoryDashboardCards('actual_performance','0',$stores,$range,$tree['roots'],$tree['children']);
++        $oldMoney = $baseline->categoryDashboardCards('actual_performance','0',$stores,$range,$tree['roots'],$tree['children']);
++        $strip = static function(array $cards): array {
++            foreach ($cards as &$card) { unset($card['secondary_categories'],$card['source_explanation']); }
++            return $cards;
++        };
++        r91Check($strip($money) === $strip($oldMoney), 'Parent amounts, shares, rankings, and drilldown parameters unchanged');
++        $cases[] = ['stores'=>$stores,'seconds'=>$seconds,'totals'=>$result['totals'],'categories'=>$display];
++    }
++    $empty = $reader->dashboardSaleTypeBreakdown('0',[23],['start'=>'2099-01-01','end'=>'2099-01-01'],$tree['roots'],$tree['children']);
++    foreach ($empty['categories'] as $types) foreach ($types as $type) r91Check($type === ['sales_quantity'=>0,'cash_performance_cents'=>0], 'No-data types remain zero');
++    $filtered = $reader->dashboardSaleTypeBreakdown('0',[23],$range,$tree['roots'],$tree['children'],[26332]);
++    r91Check($filtered['totals'] === $baseline->dashboardSaleTypeTotals('0',[23],$range,[26332]), 'Selected category still limits top totals');
++    try {
++        $reader->dashboardSaleTypeBreakdown('0',[],$range,$tree['roots'],$tree['children']);
++        throw new RuntimeException('Empty permission scope accepted');
++    } catch (\app\services\query\metric\MetricQueryContractException $error) { $checks++; }
++    // A single-store end-to-end service response validates labels and the shared
++    // composition used by platform/embedded dashboards without changing data.
++    $page = $dashboard->dashboard(['tenant_id'=>'0','store_ids'=>[23]],['start_date'=>$range['start'],'end_date'=>$range['end']]);
++    r91Check(array_column($page['sale_type_cards'],'title') === ['疗程卡','单项','产品'], 'Only experience card display removed');
++    foreach ($page['sale_type_cards'] as $type) {
++        r91Check(['sales_quantity'=>$type['sales_quantity'],'cash_performance_cents'=>$type['cash_performance_cents']]
++            === $baseline->dashboardSaleTypeTotals('0',[23],$range)[$type['code']], 'Visible top values unchanged');
++    }
++    foreach ($page['categories'] as $card) {
++        if ($card['category_id'] === 0) continue;
++        r91Check(array_column($card['sale_types'],'title') === ['疗程卡','单项','产品'], 'Every first-level category exposes the same three labels');
++        r91Check(!isset($card['secondary_categories']), 'Superseded child-category projection removed');
++    }
++    echo json_encode(['result'=>'PASS','checks'=>$checks,'cases'=>$cases,'writes'=>0],JSON_UNESCAPED_UNICODE),PHP_EOL;
++} finally { Db::rollback(); }
+diff --git a/scripts/group-dashboard-sale-types-local-verification.mjs b/scripts/group-dashboard-sale-types-local-verification.mjs
+new file mode 100644
+index 00000000..a0198fc9
+--- /dev/null
++++ b/scripts/group-dashboard-sale-types-local-verification.mjs
+@@ -0,0 +1,15 @@
++import { execFileSync } from 'node:child_process';
++import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
++
++// Local Docker mirror only. Compare the new shared calculation with the exact
++// accepted pre-round reader in memory; never connect to customer servers.
++const baseline = '5ea310add04611f0135804d35cacfbf148f1d6c5';
++const source = execFileSync('git', ['show', `${baseline}:后端代码/app/services/query/metric/RegisteredMetricReadServices.php`], { encoding: 'utf8' })
++  .replace('final class RegisteredMetricReadServices', 'final class SaleTypesBaselineMetricReader');
++const test = readFileSync('tests/report-group-dashboard/php/category-sale-types.php', 'utf8')
++  .replace('// BASELINE_INJECTION', `eval(substr(base64_decode('${Buffer.from(source).toString('base64')}'), 5));`);
++const result = JSON.parse(execFileSync('docker', ['exec', '-i', 'mohe-cashier-app', 'php'], { input: test, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }));
++const directory = 'tests/report-group-dashboard/evidence/r92-2026-10-18';
++mkdirSync(directory, { recursive: true });
++writeFileSync(`${directory}/business-test.json`, JSON.stringify({ baseline, ...result }, null, 2) + '\n');
++console.log(JSON.stringify(result));

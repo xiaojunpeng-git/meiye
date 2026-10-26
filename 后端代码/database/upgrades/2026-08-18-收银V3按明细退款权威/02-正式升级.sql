@@ -1,0 +1,40 @@
+-- upgrade_key: 20260818-001-cashier-v3-line-refund-authority
+-- MySQL 5.6 compatible. New append-only refund-line authority; no historical backfill.
+SET NAMES utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `eb_cashier_v3_order_lifecycle_refund_line` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `refund_line_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `operation_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `financial_reversal_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `tenant_id` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `store_id` bigint(20) unsigned NOT NULL,
+  `member_id` bigint(20) unsigned NOT NULL,
+  `source_order_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `source_order_no_snapshot` varchar(64) NOT NULL,
+  `sales_order_line_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `line_no` int(10) unsigned NOT NULL,
+  `item_type_snapshot` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `item_name_snapshot` varchar(255) NOT NULL,
+  `original_quantity` int(10) unsigned NOT NULL,
+  `selected_sale_amount_cents` bigint(20) unsigned NOT NULL,
+  `cash_refund_cents` bigint(20) unsigned NOT NULL DEFAULT '0',
+  `restored_principal_cents` bigint(20) unsigned NOT NULL DEFAULT '0',
+  `restored_bonus_cents` bigint(20) unsigned NOT NULL DEFAULT '0',
+  `total_refund_cents` bigint(20) unsigned NOT NULL,
+  `allocation_weight_numerator` bigint(20) unsigned NOT NULL,
+  `allocation_weight_denominator` bigint(20) unsigned NOT NULL,
+  `command_idempotency_key` varchar(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `status` varchar(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `business_date` date NOT NULL,
+  `occurred_at` bigint(20) unsigned NOT NULL,
+  `settled_at` bigint(20) unsigned NOT NULL,
+  `recorded_at` bigint(20) unsigned NOT NULL,
+  `immutable_fingerprint` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_refund_line_id` (`refund_line_id`),
+  UNIQUE KEY `uk_operation_source_line` (`operation_id`,`sales_order_line_id`),
+  KEY `idx_source_line` (`tenant_id`,`source_order_id`,`sales_order_line_id`,`id`),
+  KEY `idx_financial_reversal` (`financial_reversal_id`),
+  KEY `idx_scope_time` (`tenant_id`,`store_id`,`occurred_at`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='cashier v3 immutable allocated refund lines';

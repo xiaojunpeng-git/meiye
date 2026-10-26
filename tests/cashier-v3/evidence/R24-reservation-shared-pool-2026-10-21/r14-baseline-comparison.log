@@ -1,0 +1,25 @@
+PASS 真实部分欠款会限制共享卡次数
+PASS 原卡待还欠款时升级提示先补交或取消
+PASS 单卡升级最终来源读取拦截待还欠款
+PASS 项目升级最终来源读取拦截待还欠款
+PASS 多卡升级逐张原卡拦截待还欠款
+PASS 待还时零金额子项目也受整卡次数限制
+PASS 最终锁定核销拒绝超过待还额度的次数
+PASS 取消后可用次数不增，物理余次不变
+PASS 项目操作来源带入整卡债务限制后的可用次数
+PASS 使用权益及预约共用投影展示受限余次且保留物理余次
+PASS 取消原卡欠款后允许升级但识别不可抵扣金额
+PASS 单卡升级最终来源金额扣除已取消欠款
+
+
+                                                
+  [RuntimeException]                            
+  权益选择器升级预览金额与最终单卡抵扣完全一致  
+                                                
+
+
+Exception trace:
+ () at Standard input code:27
+ checkR14Shared() at Standard input code:169
+
+

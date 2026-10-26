@@ -1,0 +1,37 @@
+[
+  {
+    "url": "https://rh.cc3798.com/admin/store/add_store/179",
+    "sha256": "8b95a2c1a303c29df13635b348fcbbdebb10b6caef8c3aa33e0e5aca16d36864",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/css/chunk-vendors.48272356.css",
+    "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/css/app.b6208b14.css",
+    "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/js/chunk-vendors.72e8295d.js",
+    "sha256": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/js/app.91ce1809.js",
+    "sha256": "a7345a133031f15d4df1fa96cb8130a5afff9e0f35f206e6744b769febe96c04",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/js/chunk-06e983f3.5a2c03c7.js",
+    "sha256": "3e3f42d2c6f9f1d1b8c7e57cf8763289fa2ca7a41250a4f8f59a4ed668f946a3",
+    "matches": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_admin/js/chunk-b6679206.913b2b1d.js",
+    "sha256": "7e0bcd9bf6d07779996f484be998e5150fbb4e6c78100333e232d58267ae521b",
+    "matches": true
+  }
+]

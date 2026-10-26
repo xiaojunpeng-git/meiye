@@ -1,0 +1,160 @@
+<?php
+
+declare(strict_types=1);
+
+$root = dirname(__DIR__, 3);
+$service = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php');
+$report = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+$view = (string)file_get_contents($root . '/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue');
+$platformCatalog = (string)file_get_contents($root . '/前端代码/admin/src/libs/storeOperationReports.js');
+
+// 剩余卡项统计必须使用 V3 租户范围常量，避免 PHP 在报表命名空间查找不存在的同名类。
+if (strpos($service, 'use app\\services\\cashier\\v3\\CashierV3ScopeResolver;') === false) {
+    throw new RuntimeException('phase-two report scope resolver import missing');
+}
+
+foreach ([
+    "'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true]",
+    'private function fixedColumns',
+    'private function summaryRow',
+    'private function summaryMetricKind',
+    "'metric_version'=>\$metricVersion",
+    "'new-customer-first-sale-grouped-v6'",
+    "'new-customer-first-sale-v5':'store-operations-phase-two-v1'",
+    "'data_as_of'=>date('Y-m-d H:i:s')",
+    'if(!$columns)return[]',
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('phase-two table projection contract missing: ' . $needle);
+}
+if (strpos($service, 'if(!$records||!$columns)return[]') !== false) {
+    throw new RuntimeException('phase-two reports must keep a summary row when the result set is empty');
+}
+// 地推销售现金按原明细轮次，独立补交按本笔最新归属轮次；都不能按全局订单序号推算。
+foreach ([
+    'sale_line.order_line_id=s.source_line_id',
+    'guide_round.source_line_id=sale_line.checkout_line_id',
+    'MAX(guide_round.guide_round_no) guide_round_no',
+    '$cashSlot=$repaymentOnly?(int)($repaymentRounds[(string)$row[\'repayment_id\']]??0):(int)($row[\'guide_round_no\']??0)',
+    '$cashAmount=$repaymentOnly?(int)$row[\'amount_cents\']',
+    '$row[\'cash_none\'] = $this->money($cashSlot === 0',
+    '$row[\'cash_\'.$round]=$this->money($cashSlot===$round',
+    "'cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩'",
+    "['labor_fee','cash_none','cash_1','cash_2','cash_3']",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('field acquisition guide round contract missing: ' . $needle);
+}
+if (strpos($service, '$saleSlots[') !== false) {
+    throw new RuntimeException('field acquisition cash must not fall back to sale order position without a guide round');
+}
+if (strpos($service, "'本笔 E 地推销售或 E 来源补交选择导购第'") === false
+    || strpos($service, '补交按自身业务日独立成行') === false
+    || strpos($service, "field-acquisition-repayment-v6") === false) {
+    throw new RuntimeException('field acquisition round explanation and metric version must come from the backend');
+}
+// 护理来源与轮次以服务当次结账为准，不能把同会员的其他来源护理顺排进前三轮。
+foreach ([
+    "'none'=>'无轮次',1=>'第一次'",
+    "'visit_'.\$slot.'_date'",
+    "'first_e_visit_date'",
+    "'cashier_v3_checkout_business_source_selection'",
+    "'cashier_v3_customer_guide_round_fact'",
+    'StoreCustomerVisitEligibility::filter($allServices)',
+    "->where('standalone_request.composition','entitlement_only')",
+    "'service:'.(string)\$row['service_fact_id']",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('field acquisition E-source service round contract missing: ' . $needle);
+}
+foreach ([
+    "array_merge(\$input, ['_internal_all' => true, 'page' => 1])",
+    "'summary_row' => \$result['summary_row'] ?? []",
+    "'column_groups' => \$result['column_groups'] ?? []",
+    "'metric_version' => \$result['metric_version'] ?? self::METRIC_VERSION",
+] as $needle) {
+    if (strpos($report, $needle) === false) {
+        throw new RuntimeException('report export contract missing: ' . $needle);
+    }
+}
+foreach ([
+    "'new_customer_analysis' => '新客明细表'",
+    "'new_customer_analysis_summary' => '新客汇总表'",
+    "'report'=>'new_customer_analysis'",
+    "'summary_group_key'=>'summary_group_key'",
+    "'guide'=>'导购'",
+    'newCustomerSummaryGroupKey',
+    "'key' => 'guide_id', 'label' => '导购', 'type' => 'select', 'required' => false",
+    "guideFilterOptions",
+    "'cross_industry_customer_detail' => '异业收客明细表'",
+    "'cross_industry_customer_summary' => '异业收客汇总表'",
+    "'include_followup_cash'=>1",
+    "'report'=>'field_acquisition_detail'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
+}
+// 门店页签回归真实内容命名，与平台目录、导出及共享服务端标题一致，路由代码不互换。
+foreach ([
+    "{ code: 'cross_industry_customer_summary', name: '异业收客汇总表' }",
+    "{ code: 'cross_industry_customer_detail', name: '异业收客明细表' }",
+] as $needle) {
+    if (strpos($view, $needle) === false) throw new RuntimeException('cross-industry report tab name missing: ' . $needle);
+}
+foreach ([
+    "code: 'cross_industry_customer_summary', title: '异业收客汇总表'",
+    "code: 'cross_industry_customer_detail', title: '异业收客明细表'",
+] as $needle) {
+    if (strpos($platformCatalog, $needle) === false) throw new RuntimeException('cross-industry platform report name missing: ' . $needle);
+}
+if (strpos($view, 'PLATFORM_CROSS_INDUSTRY_NAMES') !== false) {
+    throw new RuntimeException('obsolete cross-end name override must be removed after names converge');
+}
+foreach ([
+    "result('异业收客明细表',",
+    "result('异业收客汇总表',",
+    "'异业收客汇总表'=>['editable_fields'",
+    "if(\$title==='异业收客明细表')return in_array(\$key,['full_payment','reward']",
+    "if(\$title==='异业收客汇总表')return \$key==='remaining_service_count'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('cross-industry report title metadata missing: ' . $needle);
+}
+foreach ([
+    'firstCourseOrders',
+    "'course_pending_settlement','first_course_completed'",
+    "whereIn('s.order_id',array_keys(\$firstOrders)",
+    '一笔首次销售事件只记一次新客',
+    '缺少人员归属不影响首次疗程卡顾客身份',
+    'newCustomerColumnExplanations',
+    '未付清也计入',
+] as $needle) {
+    // 只调整两张新客报表；共享的首次付清生命周期资格仍供其他指标复用。
+    $haystack = $needle === '未付清也计入' ? $view : $service;
+    if (strpos($haystack, $needle) === false) throw new RuntimeException('first-course new-customer contract missing: ' . $needle);
+}
+foreach ([
+    "'experience_card_amount_version'",
+    "array_key_exists('value',\$experienceCardAmount)",
+    "'新客明细表'=>['editable_fields'=>[['key'=>'experience_card_amount'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('new-customer manual experience amount contract missing: ' . $needle);
+}
+foreach ([
+    'cashier_v3_sales_manager_fact',
+    'cashier_v3_sales_order_line',
+    'checkout_line_id',
+    'sales_manager_name_snapshot',
+    'p.order_id,p.source_line_id',
+    "'salesperson'=>'销售人/销售经理'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('large-order salesperson/manager contract missing: ' . $needle);
+}
+$managerFact = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/report/CashierV3SalesManagerFactServices.php');
+foreach (['allocation_weight_numerator','allocation_weight_denominator','allocation_base_amount_cents','amount_cents','allocationWeight'] as $needle) {
+    if (strpos($managerFact, $needle) === false) throw new RuntimeException('sales-manager allocation fact contract missing: ' . $needle);
+}
+$annotation = (string)file_get_contents($root . '/后端代码/app/services/report/StoreOperationsReportAnnotationServices.php');
+foreach (["'new_customer_analysis' => ['experience_card_amount', 'care_duration']", "'experience_card_amount' => 'integer_cents'"] as $needle) {
+    if (strpos($annotation, $needle) === false) throw new RuntimeException('new-customer annotation contract missing: ' . $needle);
+}
+if (preg_match('/\.\.\.\(serverCatalogByCode\.value\.get\(tab\.code\) \|\| \{\}\),\s*\.\.\.tab/s', $view) !== 1) {
+    throw new RuntimeException('report navigation must keep the confirmed standard names when historical catalog labels exist');
+}
+
+echo "PASS phase-two report projection contract\n";

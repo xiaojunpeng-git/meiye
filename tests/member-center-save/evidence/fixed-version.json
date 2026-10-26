@@ -1,0 +1,238 @@
+{
+  "task": "M008-R8-001",
+  "status": "SELF_TEST_PASS_AWAITING_PM_ACCEPTANCE",
+  "baseline": "ba6d2f52ae7d3bb1a249c0aa1c2109f30635b3a3",
+  "fingerprint": "9928360a854d01855bc91c241b9e47b0bcd99a74d7a3af7e10672ab15c7c0966",
+  "files": [
+    {
+      "file": "tests/member-center-save/browser.cjs",
+      "sha256": "9cdaeb626559cf29c32df98f7c8bf6e24ab15f4a8bdc1a7a72ee43ec3b9a999c"
+    },
+    {
+      "file": "tests/member-center-save/editor.cjs",
+      "sha256": "bf132f553b03a671b94e5d42ff5d58e8b04229caca756818c46e98cb2447ec6f"
+    },
+    {
+      "file": "tests/member-center-save/evidence/browser-result.json",
+      "sha256": "a80f1a7b4e887064abfc708e795718ebb6eff20f79ef2cad2389c14f608b091c"
+    },
+    {
+      "file": "tests/member-center-save/evidence/h5-services-320.png",
+      "sha256": "4f6fb2ebf4d5ca02f17a078d392359763ac716d114186da2fab0f2b288e97407"
+    },
+    {
+      "file": "tests/member-center-save/evidence/h5-services-375.png",
+      "sha256": "c7b610becd7c0eb919c498e236ebb02baee0631a55a010fea89586087650628b"
+    },
+    {
+      "file": "tests/member-center-save/evidence/mini-result.json",
+      "sha256": "d83c568890858c8692db2ede55768966abeac25f2060dc4db969523ba8c8a182"
+    },
+    {
+      "file": "tests/member-center-save/evidence/round8-fixed-candidate.md",
+      "sha256": "5922be10db444f49a56056ba5591b9d3371d9109807df669ceba04358909f332"
+    },
+    {
+      "file": "tests/member-center-save/fixtures/accepted-service-menu.json",
+      "sha256": "f118f7e7cb57bae411a63c22ec41c9ca05c86f923a5260f960f609d9920ef899"
+    },
+    {
+      "file": "tests/member-center-save/mini.cjs",
+      "sha256": "9a9470e6247f894b1a9374e92848c1dcd50c64075b5a374aebbdd4e0cb77e30f"
+    },
+    {
+      "file": "tests/member-center-save/mysql.php",
+      "sha256": "70230229525f3fb74fb6424993f2737778f09f0ea959fac369b3eeba8230dae9"
+    },
+    {
+      "file": "tests/member-center-save/verify.cjs",
+      "sha256": "323df1a5054a5c2a3b19ebdb017b452096b1091826d0b9857b85fb17d635736e"
+    },
+    {
+      "file": "前端代码/admin/src/pages/setting/devise/users.vue",
+      "sha256": "bcbcfbd89f031b107b2d3f43e365bafda888a7472e8436ff42e03c65d67813d7"
+    },
+    {
+      "file": "前端代码/admin/src/store/modules/admin/modules/userTemplateConfig.js",
+      "sha256": "e3753aee1e692b91440018990a17ddef042ab2614b9659e6a3e54baff0334de7"
+    },
+    {
+      "file": "后端代码/app/controller/api/v1/PublicController.php",
+      "sha256": "78648325eb8bd11c96fdc8a291340e2e141aa190aed1cddfd0f19e4368c0a0b3"
+    },
+    {
+      "file": "后端代码/app/services/diy/DiyServices.php",
+      "sha256": "4323c84c20264e8029a687ce48686a7d6b41e98544eb7c1137fcea4912467d4b"
+    }
+  ],
+  "results": {
+    "editor": "member-center editor PASS: failed load blocks save, icon-only, URL/array compatibility, duplicate click, failed save resets",
+    "mysql": "member-center mysql PASS: missing groups, gid=0 isolation, save/refresh, mirrors, full rollback, explicit empty",
+    "browser": {
+      "status": "PASS",
+      "records": [
+        {
+          "width": 375,
+          "menuCount": 13,
+          "layout": {
+            "width": 355,
+            "height": 410,
+            "viewport": 375,
+            "names": [
+              {
+                "name": "我的预约",
+                "width": 52
+              },
+              {
+                "name": "积分兑换",
+                "width": 52
+              },
+              {
+                "name": "中奖记录",
+                "width": 52
+              },
+              {
+                "name": "付费会员",
+                "width": 52
+              },
+              {
+                "name": "发票管理",
+                "width": 52
+              },
+              {
+                "name": "积分中心",
+                "width": 52
+              },
+              {
+                "name": "联系客服",
+                "width": 52
+              },
+              {
+                "name": "优惠券",
+                "width": 39
+              },
+              {
+                "name": "我的收藏",
+                "width": 52
+              },
+              {
+                "name": "地址信息",
+                "width": 52
+              },
+              {
+                "name": "我的余额",
+                "width": 52
+              },
+              {
+                "name": "我的卡包",
+                "width": 52
+              },
+              {
+                "name": "砍价记录",
+                "width": 52
+              }
+            ]
+          },
+          "refresh": "PASS"
+        },
+        {
+          "width": 320,
+          "menuCount": 13,
+          "layout": {
+            "width": 304,
+            "height": 345,
+            "viewport": 320,
+            "names": [
+              {
+                "name": "我的预约",
+                "width": 44
+              },
+              {
+                "name": "积分兑换",
+                "width": 44
+              },
+              {
+                "name": "中奖记录",
+                "width": 44
+              },
+              {
+                "name": "付费会员",
+                "width": 44
+              },
+              {
+                "name": "发票管理",
+                "width": 44
+              },
+              {
+                "name": "积分中心",
+                "width": 44
+              },
+              {
+                "name": "联系客服",
+                "width": 44
+              },
+              {
+                "name": "优惠券",
+                "width": 33
+              },
+              {
+                "name": "我的收藏",
+                "width": 44
+              },
+              {
+                "name": "地址信息",
+                "width": 44
+              },
+              {
+                "name": "我的余额",
+                "width": 44
+              },
+              {
+                "name": "我的卡包",
+                "width": 44
+              },
+              {
+                "name": "砍价记录",
+                "width": 44
+              }
+            ]
+          },
+          "refresh": "PASS"
+        }
+      ]
+    },
+    "mini": {
+      "status": "PASS",
+      "scope": "Existing 008 package with local service-generated API response; not a production fix or physical-device acceptance",
+      "state": {
+        "route": "pages/user/index",
+        "menuCount": 13,
+        "names": [
+          "我的预约",
+          "积分兑换",
+          "中奖记录",
+          "付费会员",
+          "发票管理",
+          "积分中心",
+          "联系客服",
+          "优惠券",
+          "我的收藏",
+          "地址信息",
+          "我的余额",
+          "我的卡包",
+          "砍价记录"
+        ]
+      },
+      "screenshot": "/private/tmp/member-center-r8-mini.jpg"
+    }
+  },
+  "boundaries": {
+    "commit": false,
+    "deployed": false,
+    "productionDataRestored": false,
+    "miniUploaded": false,
+    "push": false,
+    "memberRightsModified": false
+  },
+  "online": "Read-only 008 UI/public API diagnosis; no remote shell or production write. Release baseline/backup must be captured on authorization."
+}

@@ -1,0 +1,68 @@
+{
+  "task": "D1-00001 first detail optimization: project manual-labor-fee default",
+  "date": "2026-10-08",
+  "status": "implementation and selftest passed; product-manager accepted on 2026-10-08",
+  "acceptance": "Product manager: tested without issues; explicitly requested this round's commit, Ruihao deployment and push. The accepted functional patch remains unchanged.",
+  "baselineHead": "e705c70ecd0802d54d60f61ef7a2596f627270f2",
+  "ownedPatchSha256": "dbe6b499d0380f1c1ced1b69c4f78af2f6110f4d81e9ea20956854bef1f452a0",
+  "rootCauses": [
+    "The local cart set productId to catalog id (SKU). The observed personnel query sent SKU 582480 instead of store project 600534, so it queried an unrelated project with no configured fee.",
+    "The default lookup queried the store-copy rule before the platform master rule. Existing store-copy placeholder rules can hide the platform configuration. Local project 600478 demonstrated a zero placeholder while master 600451 held 500 cents."
+  ],
+  "behavior": [
+    "Preserve SKU as catalogItemId/itemId and checkout intent; carry actual productId and projectId for personnel configuration.",
+    "Resolve a store project's pid before reading the tenant-scoped master rule. Both cart projection and personnel selector use the same read-only resolver.",
+    "Respect an explicitly configured platform zero, default an absent rule to zero, and never rewrite historical personnel or settlement facts."
+  ],
+  "files": {
+    "frontend": {
+      "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "0e91e2bb92899f4de4dc33b709faf5f4612406eb529c070ac4bbdf075cb3bf0a"
+    },
+    "backend": {
+      "后端代码/app/services/cashier/v3/CashierV3ProjectLaborDefault.php": "cbad82a74083bbd95fbe9476e53ff617f73ace506b362e8a90c38d62dd55755f",
+      "后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php": "0793760b6220a7f9110223a14124dce4c5f7eacdd8d48b70437e604d7ae4f28c",
+      "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php": "68044b83756eb505770e403333191ddb08b59ef4686556dc97e034284028d6b1"
+    },
+    "tests": {
+      "tests/cashier-v3/php/project-labor-default-contract.php": "d55218baea9876e99bb63a7abb2c79c38b22fd02d8468a7aa91a3e9a96c61a75",
+      "tests/cashier-v3/js/catalog-project-labor-identity-contract.mjs": "0a3666271ae1bb334ff786ddec3dbc77ace87508f1d3c9cab4db02d7a426ed36",
+      "tests/cashier-v3/js/personnel-performance-overlay-contract.mjs": "2e46b23dab052a465f39244ca559967630d48ad7bf095b19e77dc9b6edbde1c6"
+    },
+    "databaseMigrations": [],
+    "engineeringScripts": [],
+    "generated": ["前端代码/cashier-v3/dist/ (local compilation smoke test only, not an 8080 release package)"],
+    "evidence": [
+      "tests/cashier-v3/evidence/D1-project-labor-default-selftest-2026-10-08.json",
+      "tests/cashier-v3/evidence/D1-project-labor-default-5yuan-2026-10-08.png",
+      "tests/cashier-v3/evidence/D1-project-labor-manual-8yuan-2026-10-08.png"
+    ]
+  },
+  "ownershipBoundary": "CashierWorkbenchView.vue also contains another task's cash-payment-method hunk at localCheckoutPaymentMethods. It is preserved, excluded from this task's patch fingerprint, and not covered by this acceptance. Existing staged files and all other dirty work are untouched. File hashes describe the observed whole-file version; the owned patch includes only appendCatalogItemToDraft in this frontend file.",
+  "commentsUpdated": [
+    "CashierWorkbenchView.vue: SKU versus product/project identity and unchanged checkout key.",
+    "CashierV3ProjectLaborDefault.php: current master-configuration authority, cents and tenant boundaries, zero semantics, no historical writes.",
+    "CashierV3CashierWorkspaceServices.php and CashierV3QueryEntitySelectorServices.php: shared default source, no recomputation of saved per-person amounts."
+  ],
+  "checks": [
+    {"command": "php tests/cashier-v3/php/project-labor-default-contract.php", "result": "10/10 passed: master, store zero/nonzero masking, tenant isolation, absent rule, explicit zero, invalid input"},
+    {"command": "node tests/cashier-v3/js/catalog-project-labor-identity-contract.mjs", "result": "passed: executes production append handler; project/SKU distinction, physical product, card, invalid SKU; checkout identity unchanged"},
+    {"command": "node tests/cashier-v3/js/personnel-performance-overlay-contract.mjs", "result": "passed"},
+    {"command": "php tests/cashier-v3/php/manual-labor-fee-override-contract.php", "result": "16/16 passed"},
+    {"command": "php tests/cashier-v3/php/r44-paid-project-person-labor-fee-contract.php", "result": "passed for quantities 1 and 3: per-person fee does not multiply by purchase quantity"},
+    {"command": "docker exec mohe-cashier-app php -l (three affected backend files)", "result": "all passed"},
+    {"command": "docker exec mohe-cashier-v3-src npm run build", "result": "exit 0; 1991 modules; 1m36s; existing large-chunk warning only; Vite consumes the same source as local 18091"},
+    {"command": "git diff --check", "result": "passed"},
+    {"command": "local ThinkPHP read-only resolver query", "result": "projects 600534 and 600478 both read 500 cents from master 600451"}
+  ],
+  "browserSelftest": {
+    "url": "http://127.0.0.1:18091/view_cashier_v3/#/cashier",
+    "steps": [
+      "Add project 指尖胶原 (platform 600451, store 600534, SKU 582480). Select craftsman 汪永梅 and switch to full allocation: default manual fee is 5 yuan.",
+      "Change fee to 8 yuan and confirm only the local cart allocation. Reopen full allocation: value remains 8 yuan.",
+      "Restore test fee to 5 yuan, then remove only the agent-created local cart line, restoring the previously empty cart."
+    ],
+    "scope": "No collection/checkout submitted, no historical rows changed, no remote operations. Positive manual override is verified; the pre-existing zero-override fallback behavior is not changed by this task."
+  },
+  "legacyRemoval": "Removed both duplicated store-rule-first fallback branches; reference scan shows the two default-entry paths now call the shared resolver. No unrelated old project/module removed.",
+  "deliveryBoundary": "No commit, push, deployment or database migration in this task. Product-manager fixed-version acceptance is required. Remote instance and rollback are not applicable to this local-only scope."
+}

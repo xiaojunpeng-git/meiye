@@ -1,0 +1,1046 @@
+diff --git a/前端代码/admin/src/pages/store/storeList/index.vue b/前端代码/admin/src/pages/store/storeList/index.vue
+index 1dc48161..8168c0f2 100644
+--- a/前端代码/admin/src/pages/store/storeList/index.vue
++++ b/前端代码/admin/src/pages/store/storeList/index.vue
+@@ -150,6 +150,8 @@
+           <template slot-scope="{ row, index }" slot="action">
+             <a @click="gostore(row)">进入门店</a>
+             <Divider type="vertical" />
++            <a @click="$refs.memberTransfer.open(row)">转移所属会员</a>
++            <Divider type="vertical" />
+             <a @click="operation(row)">{{
+               row.is_show == 0 ? "开业" : "停业"
+             }}</a>
+@@ -179,6 +181,7 @@
+         </div>
+       </div>
+     </Card>
++    <StoreMemberTransferModal ref="memberTransfer" @changed="getList" />
+   </div>
+ </template>
+ 
+@@ -187,6 +190,7 @@ import util from "@/libs/util";
+ import Setting from "@/setting";
+ import { mapState } from "vuex";
+ import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
++import StoreMemberTransferModal from '@/components/member/StoreMemberTransferModal.vue';
+ import {
+   storeListApi,
+   storeLogin,
+@@ -196,7 +200,7 @@ import {
+ } from "@/api/store";
+ export default {
+   name: "storeList",
+-  components: { OrganizationResourceSelector },
++  components: { OrganizationResourceSelector, StoreMemberTransferModal },
+   data() {
+     return {
+ 	  routerPre: Setting.roterPre,
+@@ -271,7 +275,7 @@ export default {
+           title: "操作",
+           slot: "action",
+           fixed: "right",
+-          minWidth: 190,
++          minWidth: 300
+         },
+       ],
+       orderList: [],
+diff --git a/前端代码/admin/src/components/member/StoreMemberTransferModal.vue b/前端代码/admin/src/components/member/StoreMemberTransferModal.vue
+new file mode 100644
+index 00000000..f5f02e45
+--- /dev/null
++++ b/前端代码/admin/src/components/member/StoreMemberTransferModal.vue
+@@ -0,0 +1,174 @@
++<template>
++  <Modal v-model="visible" title="转移所属会员" :width="680" :mask-closable="false" class-name="store-member-transfer-modal">
++    <div class="member-transfer-body">
++      <Alert show-icon>仅变更会员资料的所属门店，余额、卡项、订单、业绩、专属服务人及门店服务关系保持原状。</Alert>
++      <Alert v-if="error" type="error" show-icon>{{ error }}</Alert>
++      <Spin v-if="loading" fix />
++      <template v-if="batch">
++        <p><strong>{{ batch.source_store_name }}</strong> → <strong>{{ batch.target_store_name }}</strong></p>
++        <p>批次：{{ batch.batch_no }}</p>
++        <p>原因：{{ batch.reason }}</p>
++        <p>状态：{{ statusLabel(batch.status) }}</p>
++        <Progress :percent="progress" :status="batch.status === 'blocked' ? 'wrong' : 'normal'" />
++        <p>共 {{ batch.total_count }} 人；成功 {{ batch.success_count }} 人，跳过 {{ batch.skipped_count }} 人，失败 {{ batch.failed_count }} 人。</p>
++        <Alert v-if="batch.last_error" type="warning" show-icon>{{ batch.last_error }}</Alert>
++        <Alert v-if="batch.status === 'completed_with_exceptions'" type="warning" show-icon>本批次已处理完毕，存在跳过或失败会员，请核对下方原因。</Alert>
++        <template v-if="Number(batch.exception_total) > 0">
++          <Table size="small" :height="220" :columns="exceptionColumns" :data="batch.exceptions" />
++          <div class="member-transfer-pagination">
++            <span>共 {{ batch.exception_total }} 条 · 每页20条 · 第 {{ batch.exception_page }} / {{ exceptionPages }} 页</span>
++            <Button size="small" :disabled="Number(batch.exception_page) <= 1" @click="loadStatus(Number(batch.exception_page) - 1)">上一页</Button>
++            <Button size="small" :disabled="Number(batch.exception_page) >= exceptionPages" @click="loadStatus(Number(batch.exception_page) + 1)">下一页</Button>
++          </div>
++        </template>
++        <p class="member-transfer-hint">刷新或关闭窗口不影响后台任务；再次打开此门店的转移窗口可查看原批次。</p>
++      </template>
++      <Form v-else :label-width="96">
++        <FormItem label="原门店">{{ source.name }}</FormItem>
++        <FormItem label="所属会员">{{ count }} 人（含停用会员，不含已注销、已删除会员）</FormItem>
++        <FormItem label="目标门店" required>
++          <Select v-model="targetStoreId" filterable :disabled="submitting" placeholder="请选择其他可用门店">
++            <Option v-for="store in stores" :key="store.id" :value="Number(store.id)">{{ store.name }}</Option>
++          </Select>
++        </FormItem>
++        <FormItem label="转移原因" required>
++          <Input v-model.trim="reason" type="textarea" :maxlength="195" :rows="3" :disabled="submitting" placeholder="请输入转移原因（2-195字）" />
++        </FormItem>
++        <p class="member-transfer-hint">转移范围为确认时该门店的全部所属会员，不受门店列表分页影响；确认后归属已变化的会员会跳过。</p>
++      </Form>
++    </div>
++    <div slot="footer">
++      <Button @click="visible = false">关闭</Button>
++      <template v-if="batch">
++        <Button v-if="canResume" type="primary" :loading="submitting" @click="resume">继续执行</Button>
++        <Button v-if="isFinished" @click="newTransfer">发起新转移</Button>
++      </template>
++      <template v-else>
++        <Button :disabled="submitting || loading" @click="loadPreview(true)">刷新人数</Button>
++        <Button type="primary" :loading="submitting" :disabled="loading || count === 0 || !targetStoreId || reason.length < 2" @click="confirmTransfer">确认转移</Button>
++      </template>
++    </div>
++  </Modal>
++</template>
++
++<script>
++import { previewMemberStoreTransfer, createMemberStoreTransfer, memberStoreTransferStatus, resumeMemberStoreTransfer } from '@/api/memberStoreTransfer';
++
++/** 只展示后端批次进度；名单、计数、幂等及归属并发校验全部由后端负责。 */
++export default {
++  name: 'StoreMemberTransferModal',
++  data() {
++    return {
++      visible: false, loading: false, submitting: false, error: '', source: {}, count: 0, stores: [],
++      targetStoreId: '', reason: '', requestKey: '', batch: null, timer: null, generation: 0, statusSequence: 0,
++      exceptionColumns: [
++        { title: '会员ID', key: 'uid', width: 100 },
++        { title: '结果', width: 80, render: (h, { row }) => h('span', row.status === 'skipped' ? '已跳过' : '失败') },
++        { title: '具体原因', key: 'result_reason', minWidth: 220 }
++      ]
++    };
++  },
++  computed: {
++    isFinished() { return this.batch && ['completed', 'completed_with_exceptions'].includes(this.batch.status); },
++    progress() {
++      if (!this.batch || !Number(this.batch.total_count)) return 0;
++      return Math.floor((Number(this.batch.success_count) + Number(this.batch.skipped_count) + Number(this.batch.failed_count)) * 100 / Number(this.batch.total_count));
++    },
++    exceptionPages() { return Math.max(1, Math.ceil(Number(this.batch && this.batch.exception_total) / 20)); },
++    canResume() {
++      return this.batch && (this.batch.status === 'blocked' || Number(this.batch.failed_count) > 0 ||
++        (!this.isFinished && Date.now() / 1000 - Number(this.batch.updated_at) > 60));
++    }
++  },
++  watch: {
++    visible(value) { if (!value) { this.stopPolling(); ++this.generation; } }
++  },
++  beforeDestroy() { this.stopPolling(); ++this.generation; },
++  methods: {
++    /** 每次新窗口生成独立请求键；网络重试沿用同一键，不能重复创建一批会员。 */
++    open(row) {
++      this.stopPolling(); ++this.generation;
++      this.source = { id: Number(row.id), name: row.name };
++      this.targetStoreId = ''; this.reason = ''; this.batch = null; this.error = '';
++      this.submitting = false; this.loading = false; this.count = 0; this.stores = [];
++      this.requestKey = `store-transfer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
++      this.visible = true;
++      this.loadPreview(false);
++    },
++    stopPolling() { if (this.timer) clearTimeout(this.timer); this.timer = null; },
++    statusLabel(value) {
++      return { queued: '等待后台执行', running: '正在执行', blocked: '执行受阻，可继续', completed: '全部转移成功', completed_with_exceptions: '处理完成，存在异常项' }[value] || value;
++    },
++    async loadPreview(ignoreLatest) {
++      const generation = this.generation;
++      this.loading = true; this.error = '';
++      try {
++        const response = await previewMemberStoreTransfer(this.source.id);
++        if (!this.visible || generation !== this.generation) return;
++        this.source = response.data.source; this.count = Number(response.data.count); this.stores = response.data.stores;
++        if (!ignoreLatest && response.data.batch) { this.batch = response.data.batch; this.schedulePoll(); }
++      } catch (error) { if (generation === this.generation) this.error = error.msg || '加载失败，请重试'; } finally { if (generation === this.generation) this.loading = false; }
++    },
++    confirmTransfer() {
++      if (this.submitting || !this.targetStoreId || this.reason.length < 2) return;
++      const target = this.stores.find(store => Number(store.id) === Number(this.targetStoreId));
++      if (!target) return;
++      // 名称作为文本节点渲染，不将门店名称拼成可执行HTML。
++      this.$Modal.confirm({
++        title: '确认转移所属会员',
++        render: h => h('div', [h('p', `将“${this.source.name}”的 ${this.count} 位所属会员转移至“${target.name}”。`), h('p', '仅更改所属门店，其他业务资料保持原状。')]),
++        onOk: () => this.submit()
++      });
++    },
++    async submit() {
++      const generation = this.generation;
++      this.submitting = true; this.error = '';
++      try {
++        const response = await createMemberStoreTransfer({ source_store_id: this.source.id, target_store_id: Number(this.targetStoreId),
++          reason: this.reason, expected_count: this.count, request_key: this.requestKey });
++        if (generation !== this.generation || !this.visible) return;
++        this.batch = response.data; this.schedulePoll(); this.$emit('changed');
++      } catch (error) { if (generation === this.generation) this.error = error.msg || '提交结果未明确，请保留当前窗口并使用同一请求重试'; } finally { if (generation === this.generation) this.submitting = false; }
++    },
++    /** 轮询只读状态；关闭页面不取消队列任务，旧窗口响应不覆盖新窗口。 */
++    schedulePoll() {
++      this.stopPolling();
++      if (this.visible && this.batch && !this.isFinished && this.batch.status !== 'blocked') this.timer = setTimeout(() => this.loadStatus(Number(this.batch.exception_page) || 1), 1500);
++    },
++    async loadStatus(page) {
++      if (!this.batch) return;
++      const sequence = ++this.statusSequence;
++      const generation = this.generation; const batchNo = this.batch.batch_no;
++      try {
++        const response = await memberStoreTransferStatus(batchNo, page);
++        if (!this.visible || generation !== this.generation || sequence !== this.statusSequence || !this.batch || this.batch.batch_no !== batchNo) return;
++        this.batch = response.data; this.error = ''; this.schedulePoll();
++      } catch (error) { if (generation === this.generation) this.error = error.msg || '进度读取失败，可重新打开窗口查看'; }
++    },
++    async resume() {
++      // 恢复操作开始后废弃旧轮询响应，避免旧状态覆盖本次恢复结果。
++      this.stopPolling(); ++this.statusSequence;
++      this.submitting = true; this.error = '';
++      const generation = this.generation;
++      try {
++        const response = await resumeMemberStoreTransfer(this.batch.batch_no);
++        if (!this.visible || generation !== this.generation) return;
++        this.batch = response.data; this.schedulePoll();
++      } catch (error) { if (generation === this.generation) this.error = error.msg || '继续执行失败，请重试'; } finally { if (generation === this.generation) this.submitting = false; }
++    },
++    newTransfer() {
++      this.batch = null; this.targetStoreId = ''; this.reason = ''; this.error = '';
++      this.requestKey = `store-transfer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
++      this.loadPreview(true);
++    }
++  }
++};
++</script>
++
++<style>
++.store-member-transfer-modal .ivu-modal { max-width: calc(100vw - 24px); }
++.member-transfer-body { position: relative; max-height: 65vh; overflow: auto; }
++.member-transfer-body p { margin-bottom: 10px; overflow-wrap: anywhere; }
++.member-transfer-hint { color: #808695; font-size: 12px; }
++.member-transfer-pagination { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 0; border-top: 1px solid #e8eaec; background: white; }
++</style>
+diff --git a/前端代码/admin/src/api/memberStoreTransfer.js b/前端代码/admin/src/api/memberStoreTransfer.js
+new file mode 100644
+index 00000000..6ddc04a3
+--- /dev/null
++++ b/前端代码/admin/src/api/memberStoreTransfer.js
+@@ -0,0 +1,16 @@
++import request from '@/plugins/request';
++
++// 接口位于现有 adminapi/user 路由组，保留组内 user 前缀，与单人调店一致。
++// 批次由后端冻结名单；浏览器只提交门店、原因、确认人数和幂等键，不上传会员UID列表。
++export function previewMemberStoreTransfer(storeId) {
++  return request({ url: `user/user/store_transfer_batch/preview/${storeId}`, method: 'get' });
++}
++export function createMemberStoreTransfer(data) {
++  return request({ url: 'user/user/store_transfer_batch', method: 'post', data });
++}
++export function memberStoreTransferStatus(batchNo, page = 1) {
++  return request({ url: `user/user/store_transfer_batch/${batchNo}`, method: 'get', params: { page }});
++}
++export function resumeMemberStoreTransfer(batchNo) {
++  return request({ url: `user/user/store_transfer_batch/${batchNo}/resume`, method: 'post' });
++}
+--- a/前端代码/admin/vue.config.js
++++ b/前端代码/admin/vue.config.js
+@@ -26,6 +26,9 @@
+   outputDir: Setting.outputDir,
+   assetsDir: Setting.assetsDir,
+   runtimeCompiler: true,
++  // 本地多终端共用Docker内存，开发编译关闭额外Babel进程，避免18081被OOM杀掉。
++  // 正式构建沿用并行编译，业务资源与发布入口不变。
++  parallel: process.env.NODE_ENV === 'production',
+   productionSourceMap: false, //关闭生产环境下的SourceMap映射文件
+   devServer: {
+     publicPath: Setting.publicPath,
+@@ -108,6 +111,14 @@
+   // 默认设置: https://github.com/vuejs/vue-cli/tree/dev/packages/@vue/cli-service/lib/config/base.js
+ 
+   chainWebpack: (config) => {
++    // shared 模块在 Docker 中挂载为 /shared，无法向上找到 /app 的 ESLint 配置。
++    // 所有由平台工程编译的模块统一使用本工程规则，避免共享模块导致整个热更新编译失败。
++    if (config.module.rules.has("eslint")) {
++      config.module.rule("eslint").use("eslint-loader").tap((options) => ({
++        ...options,
++        configFile: resolve(".eslintrc.js")
++      }));
++    }
+     /**
+      * 删除懒加载模块的 prefetch preload，降低带宽压力
+      * https://cli.vuejs.org/zh/guide/html-and-static-assets.html#prefetch
+diff --git a/后端代码/app/services/user/UserBelongStoreServices.php b/后端代码/app/services/user/UserBelongStoreServices.php
+index fa89eb62..b2b7112f 100644
+--- a/后端代码/app/services/user/UserBelongStoreServices.php
++++ b/后端代码/app/services/user/UserBelongStoreServices.php
+@@ -142,7 +142,7 @@ class UserBelongStoreServices extends BaseServices
+      *
+      * @return array{changed:bool,from_store_id:int,to_store_id:int,history_id:int}
+      */
+-    public function transferUserStore(int $uid, int $targetStoreId, string $reason, int $adminId): array
++    public function transferUserStore(int $uid, int $targetStoreId, string $reason, int $adminId, bool $clearCache = true): array
+     {
+         $reason = trim($reason);
+         if ($uid <= 0) {
+@@ -233,7 +233,8 @@ class UserBelongStoreServices extends BaseServices
+             ];
+         });
+ 
+-        if ($result['changed']) {
++        // 批量调用方在每批事务提交后统一清理缓存，避免逐会员重复清空；单人调店保持原行为。
++        if ($result['changed'] && $clearCache) {
+             /** @var UserServices $userServices */
+             $userServices = app()->make(UserServices::class);
+             $userServices->cacheTag()->clear();
+diff --git a/后端代码/app/services/user/UserStoreTransferBatchServices.php b/后端代码/app/services/user/UserStoreTransferBatchServices.php
+new file mode 100644
+index 00000000..ec7d7f35
+--- /dev/null
++++ b/后端代码/app/services/user/UserStoreTransferBatchServices.php
+@@ -0,0 +1,204 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\user;
++
++use think\facade\Db;
++use think\exception\ValidateException;
++use app\jobs\user\UserStoreTransferBatchJob;
++
++/** 冻结确认名单并分批改主归属；每人复用单人调店事务，不写其他业务资料。 */
++class UserStoreTransferBatchServices
++{
++    public const TABLE = 'user_store_transfer_batch';
++    public const ITEMS = 'user_store_transfer_batch_item';
++    public const CHUNK_SIZE = 50;
++
++    /** 全部未注销、未删除会员，包含停用会员；与页面当前分页和筛选无关。 */
++    private function members(int $source)
++    {
++        return Db::name('user')->where('belong_store_id', $source)->where('is_del', 0)->whereNull('delete_time');
++    }
++
++    /** 预览只读；返回当前数量及本人已有批次，刷新页面后仍可查看/继续执行。 */
++    public function preview(int $source, int $adminId): array
++    {
++        $this->assertAdmin($adminId);
++        $store = $this->store($source, false);
++        $latest = Db::name(self::TABLE)->where('source_store_id', $source)->where('admin_id', $adminId)
++            ->order('id', 'desc')->find();
++        return ['source' => $store, 'count' => (int)$this->members($source)->count(),
++            'stores' => array_values(array_filter(app()->make(UserBelongStoreServices::class)->getTransferStoreOptions(),
++                static function (array $row) use ($source): bool { return (int)$row['id'] !== $source; })),
++            'batch' => $latest ? $this->status((string)$latest['batch_no'], $adminId) : null];
++    }
++
++    /** 确认时 INSERT SELECT 冻结全量 UID 和归属历史版本；同请求重复提交只返回原批次。 */
++    public function create(int $source, int $target, string $reason, int $expectedCount, string $key, int $adminId): array
++    {
++        $this->assertAdmin($adminId);
++        $reason = trim($reason);
++        if ($source <= 0 || $target <= 0 || $source === $target) throw new ValidateException('请选择与原门店不同的目标门店');
++        // 预留五个字给单人调店详情中的“批量转移：”，完整原因仍保存在批次内。
++        if (mb_strlen($reason) < 2 || mb_strlen($reason) > 195) throw new ValidateException('转移原因请输入2-195个字符');
++        if (!preg_match('/^[A-Za-z0-9_-]{8,80}$/D', $key)) throw new ValidateException('请求标识无效，请重新打开转移窗口');
++        $fingerprint = hash('sha256', json_encode([$source, $target, $reason, $expectedCount], JSON_UNESCAPED_UNICODE));
++        $batchNo = Db::transaction(function () use ($source, $target, $reason, $expectedCount, $key, $adminId, $fingerprint): string {
++            // 同源门店创建串行化，防止不同请求键同时发起两个覆盖同一名单的批次。
++            $sourceStore = Db::name('system_store')->where('id', $source)->where('is_del', 0)->lock(true)->find();
++            if (!$sourceStore) throw new ValidateException('原门店不存在或已删除');
++            $old = Db::name(self::TABLE)->where('admin_id', $adminId)->where('request_key', $key)->find();
++            if ($old) {
++                if (!hash_equals((string)$old['request_fingerprint'], $fingerprint)) throw new ValidateException('此请求已用于其他转移，请重新打开窗口');
++                return (string)$old['batch_no'];
++            }
++            $targetStore = $this->store($target, true);
++            $active = Db::name(self::TABLE)->where('source_store_id', $source)
++                ->whereIn('status', ['queued', 'running', 'blocked'])->find();
++            if ($active) throw new ValidateException('该门店已有未结束的转移批次，请先查看或继续原批次');
++            $batch = 'BST-' . bin2hex(random_bytes(16));
++            $now = time();
++            Db::name(self::TABLE)->insert(['batch_no' => $batch, 'admin_id' => $adminId, 'request_key' => $key,
++                'request_fingerprint' => $fingerprint, 'source_store_id' => $source, 'target_store_id' => $target,
++                'source_store_name' => (string)$sourceStore['name'], 'target_store_name' => (string)$targetStore['name'],
++                'reason' => $reason, 'status' => 'queued', 'created_at' => $now, 'updated_at' => $now]);
++            // 表名只来自 ORM 配置，不接收客户端 SQL/UID 列表；成员版本排除店员绑定历史。
++            $itemTable = Db::name(self::ITEMS)->getTable();
++            $userTable = Db::name('user')->getTable();
++            $historyTable = Db::name('user_belong_store')->getTable();
++            $count = Db::execute("INSERT INTO {$itemTable} (batch_no,uid,source_history_id,status)
++                SELECT ?,u.uid,COALESCE((SELECT MAX(h.id) FROM {$historyTable} h WHERE h.uid=u.uid AND h.is_store=1),0),'pending'
++                FROM {$userTable} u WHERE u.belong_store_id=? AND u.is_del=0 AND u.delete_time IS NULL ORDER BY u.uid", [$batch, $source]);
++            if ($count <= 0) throw new ValidateException('该门店暂无可转移的所属会员');
++            if ($count !== $expectedCount) throw new ValidateException('所属会员人数已变化，请刷新人数后重新确认');
++            Db::name(self::TABLE)->where('batch_no', $batch)->update(['total_count' => $count]);
++            return $batch;
++        });
++        return $this->status($batchNo, $adminId);
++    }
++
++    /** 只返回本人批次；异常项独立分页，每页20条，避免大批次一次加载全部会员资料。 */
++    public function status(string $batchNo, int $adminId, int $page = 1): array
++    {
++        $this->assertAdmin($adminId);
++        $batch = Db::name(self::TABLE)->where('batch_no', $batchNo)->where('admin_id', $adminId)->find();
++        if (!$batch) throw new ValidateException('转移批次不存在或不属于当前账号');
++        $query = Db::name(self::ITEMS)->where('batch_no', $batchNo)->whereIn('status', ['failed', 'skipped']);
++        $total = (int)(clone $query)->count();
++        $page = min(max(1, $page), max(1, (int)ceil($total / 20)));
++        $batch['exceptions'] = $query->field('uid,status,result_reason')->order('id')->page($page, 20)->select()->toArray();
++        $batch['exception_total'] = $total;
++        $batch['exception_page'] = $page;
++        return $batch;
++    }
++
++    /** 队列投递只在创建事务提交后执行；失败保留批次并显示可恢复状态，不伪报完成。 */
++    public function enqueue(string $batchNo): void
++    {
++        try {
++            if (!UserStoreTransferBatchJob::dispatch([$batchNo])) throw new \RuntimeException('队列暂不可用');
++        } catch (\Throwable $error) {
++            $this->block($batchNo, '任务投递失败，请点击继续执行重试');
++        }
++    }
++
++    /** 继续相同名单；只重试失败和未执行项，不改已成功/已跳过会员，也不重新扫描原门店。 */
++    public function resume(string $batchNo, int $adminId): array
++    {
++        $this->status($batchNo, $adminId);
++        Db::transaction(function () use ($batchNo): void {
++            $batch = Db::name(self::TABLE)->where('batch_no', $batchNo)->lock(true)->find();
++            if ($batch['status'] === 'completed') return;
++            Db::name(self::ITEMS)->where('batch_no', $batchNo)->where('status', 'failed')
++                ->update(['status' => 'pending', 'result_reason' => '']);
++            $this->refreshCounts($batchNo);
++        });
++        $this->enqueue($batchNo);
++        return $this->status($batchNo, $adminId);
++    }
++
++    /** 单批最多50人；批次行锁及逐会员锁保护多worker/重复投递，单人失败使用保存点回滚。 */
++    public function processChunk(string $batchNo): bool
++    {
++        $changed = 0;
++        $pending = Db::transaction(function () use ($batchNo, &$changed): bool {
++            $batch = Db::name(self::TABLE)->where('batch_no', $batchNo)->lock(true)->find();
++            if (!$batch || in_array($batch['status'], ['completed', 'completed_with_exceptions', 'blocked'], true)) return false;
++            $this->assertAdmin((int)$batch['admin_id']);
++            $this->store((int)$batch['target_store_id'], true);
++            Db::name(self::TABLE)->where('batch_no', $batchNo)->update(['status' => 'running', 'last_error' => '', 'updated_at' => time()]);
++            $items = Db::name(self::ITEMS)->where('batch_no', $batchNo)->where('status', 'pending')
++                ->order('id')->limit(self::CHUNK_SIZE)->lock(true)->select()->toArray();
++            foreach ($items as $item) {
++                $user = Db::name('user')->where('uid', (int)$item['uid'])->lock(true)->find();
++                // 用户锁取得前可能等待其他调店事务；历史也必须用当前读，不能使用事务早先的快照。
++                $latestHistory = Db::name('user_belong_store')->where('uid', (int)$item['uid'])->where('is_store', 1)
++                    ->order('id', 'desc')->lock(true)->find();
++                $history = (int)($latestHistory['id'] ?? 0);
++                if (!$user || !empty($user['delete_time']) || (int)$user['is_del'] !== 0) {
++                    $result = ['status' => 'skipped', 'result_reason' => '会员已注销或删除'];
++                } elseif ((int)$user['belong_store_id'] !== (int)$batch['source_store_id'] || $history !== (int)$item['source_history_id']) {
++                    $result = ['status' => 'skipped', 'result_reason' => '确认后会员归属已变化，保留最新归属'];
++                } else {
++                    try {
++                        $transfer = Db::transaction(function () use ($item, $batch): array { return $this->transferMember($item, $batch); });
++                        $result = ['status' => 'success', 'history_id' => (int)$transfer['history_id'], 'result_reason' => ''];
++                        ++$changed;
++                    } catch (ValidateException | \InvalidArgumentException $error) {
++                        $result = ['status' => 'failed', 'result_reason' => mb_substr($error->getMessage(), 0, 255)];
++                    }
++                }
++                Db::name(self::ITEMS)->where('id', (int)$item['id'])->update($result);
++            }
++            return $this->refreshCounts($batchNo);
++        });
++        if ($changed > 0) app()->make(UserServices::class)->cacheTag()->clear();
++        return $pending;
++    }
++
++    /** 批量复用单人调店唯一写路径，原因标识批量来源；UID到批次/历史ID的映射保存在明细。 */
++    protected function transferMember(array $item, array $batch): array
++    {
++        return app()->make(UserBelongStoreServices::class)->transferUserStore((int)$item['uid'],
++            (int)$batch['target_store_id'], '批量转移：' . (string)$batch['reason'], (int)$batch['admin_id'], false);
++    }
++
++    /** 未知故障导致当前批事务回滚，保留已完成批次进度，供同一名单恢复。 */
++    public function block(string $batchNo, string $message): void
++    {
++        Db::name(self::TABLE)->where('batch_no', $batchNo)->whereNotIn('status', ['completed', 'completed_with_exceptions'])
++            ->update(['status' => 'blocked', 'last_error' => mb_substr($message, 0, 500), 'updated_at' => time()]);
++    }
++
++    /** 数量只从持久化明细汇总，不能依赖浏览器累计或把部分成功描述为全部成功。 */
++    private function refreshCounts(string $batchNo): bool
++    {
++        $counts = Db::name(self::ITEMS)->where('batch_no', $batchNo)->fieldRaw('status,COUNT(*) AS n')->group('status')->select()->toArray();
++        $byStatus = array_map('intval', array_column($counts, 'n', 'status'));
++        $pending = ($byStatus['pending'] ?? 0) > 0;
++        $hasExceptions = ($byStatus['failed'] ?? 0) + ($byStatus['skipped'] ?? 0) > 0;
++        Db::name(self::TABLE)->where('batch_no', $batchNo)->update(['success_count' => $byStatus['success'] ?? 0,
++            'skipped_count' => $byStatus['skipped'] ?? 0, 'failed_count' => $byStatus['failed'] ?? 0,
++            'status' => $pending ? 'queued' : ($hasExceptions ? 'completed_with_exceptions' : 'completed'),
++            'last_error' => '', 'updated_at' => time()]);
++        return $pending;
++    }
++
++    /** 批次绑定创建管理员；管理员停用后不继续在后台执行写入。 */
++    private function assertAdmin(int $id): void
++    {
++        if ($id <= 0 || !Db::name('system_admin')->where('id', $id)->where('status', 1)->where('is_del', 0)->find()) {
++            throw new ValidateException('当前管理员已失效，请重新登录后操作');
++        }
++    }
++
++    /** 原门店允许停业后转出，目标门店必须存在且启用，不接受客户端名称快照。 */
++    private function store(int $id, bool $target): array
++    {
++        $query = Db::name('system_store')->where('id', $id)->where('is_del', 0);
++        if ($target) $query->where('is_show', 1);
++        $row = $query->field('id,name')->find();
++        if (!$row) throw new ValidateException($target ? '目标门店不存在或已停用' : '原门店不存在或已删除');
++        return (array)$row;
++    }
++}
+diff --git a/后端代码/app/controller/admin/v1/user/MemberStoreTransfer.php b/后端代码/app/controller/admin/v1/user/MemberStoreTransfer.php
+new file mode 100644
+index 00000000..63433cbe
+--- /dev/null
++++ b/后端代码/app/controller/admin/v1/user/MemberStoreTransfer.php
+@@ -0,0 +1,35 @@
++<?php
++declare(strict_types=1);
++namespace app\controller\admin\v1\user;
++
++use app\controller\admin\AuthController;
++use app\services\user\UserStoreTransferBatchServices;
++
++/** 平台登录态下的所属会员批量转移；操作员身份只取服务端登录态。 */
++class MemberStoreTransfer extends AuthController
++{
++    public function preview($id, UserStoreTransferBatchServices $service)
++    {
++        return $this->success($service->preview((int)$id, (int)$this->adminId));
++    }
++
++    public function create(UserStoreTransferBatchServices $service)
++    {
++        [$source, $target, $reason, $count, $key] = $this->request->postMore([
++            ['source_store_id', 0], ['target_store_id', 0], ['reason', ''], ['expected_count', 0], ['request_key', ''],
++        ], true);
++        $batch = $service->create((int)$source, (int)$target, (string)$reason, (int)$count, (string)$key, (int)$this->adminId);
++        $service->enqueue((string)$batch['batch_no']);
++        return $this->success('转移批次已保存，请查看执行进度', $service->status((string)$batch['batch_no'], (int)$this->adminId));
++    }
++
++    public function status($batchNo, UserStoreTransferBatchServices $service)
++    {
++        return $this->success($service->status((string)$batchNo, (int)$this->adminId, (int)$this->request->get('page', 1)));
++    }
++
++    public function resume($batchNo, UserStoreTransferBatchServices $service)
++    {
++        return $this->success('已继续原转移批次', $service->resume((string)$batchNo, (int)$this->adminId));
++    }
++}
+diff --git a/后端代码/app/jobs/user/UserStoreTransferBatchJob.php b/后端代码/app/jobs/user/UserStoreTransferBatchJob.php
+new file mode 100644
+index 00000000..f3319e2b
+--- /dev/null
++++ b/后端代码/app/jobs/user/UserStoreTransferBatchJob.php
+@@ -0,0 +1,35 @@
++<?php
++declare(strict_types=1);
++namespace app\jobs\user;
++
++use app\services\user\UserStoreTransferBatchServices;
++use mohe\basic\BaseJobs;
++use mohe\traits\QueueTrait;
++use think\facade\Log;
++use think\exception\ValidateException;
++
++/** 每个队列消息只处理一个有限批次；数据库状态负责幂等，页面关闭不影响后台继续执行。 */
++class UserStoreTransferBatchJob extends BaseJobs
++{
++    use QueueTrait;
++
++    protected static function queueName()
++    {
++        return (string)config('queue.connections.' . config('queue.default') . '.batch_queue');
++    }
++
++    public function doJob(string $batchNo): bool
++    {
++        if (!preg_match('/^BST-[a-f0-9]{32}$/D', $batchNo)) return true;
++        $service = new UserStoreTransferBatchServices();
++        try {
++            if ($service->processChunk($batchNo)) $service->enqueue($batchNo);
++        } catch (\Throwable $error) {
++            // BaseJobs会吞掉异常并删除消息，因此必须先持久化受阻状态，不能静默丢失任务。
++            Log::error('member_store_transfer ' . $batchNo . ': ' . $error->getMessage());
++            $reason = $error instanceof ValidateException ? $error->getMessage() : '请继续执行；若仍失败，请联系管理员核对该批次';
++            $service->block($batchNo, '本批执行失败，当前批已回滚。' . $reason);
++        }
++        return true;
++    }
++}
+diff --git a/后端代码/route/admin.php b/后端代码/route/admin.php
+index 1a08a3b6..215d762e 100644
+--- a/后端代码/route/admin.php
++++ b/后端代码/route/admin.php
+@@ -2989,6 +2989,12 @@ Route::group('adminapi', function () {
+         Route::get('user/extend_info/:id', 'v1.user.User/extendInfoForm')->option(['real_name' => '用户补充信息表单']);
+         //用户补充信息保存
+         Route::post('user/extend_info/:id', 'v1.user.User/saveExtendForm')->option(['real_name' => '用户补充信息保存']);
++        // 门店批量转移沿用会员调店的登录态边界；批次读取与继续由服务端绑定创建人。
++        Route::get('user/store_transfer_batch/preview/:id', 'v1.user.MemberStoreTransfer/preview')->option(['real_name' => '所属会员转移预览']);
++        Route::post('user/store_transfer_batch', 'v1.user.MemberStoreTransfer/create')->option(['real_name' => '所属会员转移创建']);
++        // 批号含连字符，显式限定格式，避免框架默认变量规则拒绝合法批次。
++        Route::get('user/store_transfer_batch/:batchNo', 'v1.user.MemberStoreTransfer/status')->pattern(['batchNo' => 'BST-[a-f0-9]{32}'])->option(['real_name' => '所属会员转移进度']);
++        Route::post('user/store_transfer_batch/:batchNo/resume', 'v1.user.MemberStoreTransfer/resume')->pattern(['batchNo' => 'BST-[a-f0-9]{32}'])->option(['real_name' => '所属会员转移继续']);
+         // 第22轮会员调店：保持为登录即用的未登记接口，不附加角色菜单权限。
+         Route::get('user/transfer_store/options', 'v1.user.User/transferStoreOptions')->option(['real_name' => '会员调店门店选项']);
+         Route::post('user/transfer_store/:id', 'v1.user.User/transferStore')->option(['real_name' => '会员调店保存']);
+diff --git a/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/01-schema.sql b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/01-schema.sql
+new file mode 100644
+index 00000000..ef3ca371
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/01-schema.sql
+@@ -0,0 +1,39 @@
++-- 批次与确认时会员名单分别保存；不修改订单、权益、余额或 store_user 关系。
++CREATE TABLE IF NOT EXISTS `eb_user_store_transfer_batch` (
++  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++  `batch_no` varchar(40) NOT NULL,
++  `admin_id` int unsigned NOT NULL,
++  `request_key` varchar(80) NOT NULL,
++  `request_fingerprint` char(64) NOT NULL,
++  `source_store_id` int unsigned NOT NULL,
++  `target_store_id` int unsigned NOT NULL,
++  `source_store_name` varchar(128) NOT NULL,
++  `target_store_name` varchar(128) NOT NULL,
++  `reason` varchar(200) NOT NULL,
++  `status` varchar(32) NOT NULL DEFAULT 'queued',
++  `total_count` int unsigned NOT NULL DEFAULT 0,
++  `success_count` int unsigned NOT NULL DEFAULT 0,
++  `skipped_count` int unsigned NOT NULL DEFAULT 0,
++  `failed_count` int unsigned NOT NULL DEFAULT 0,
++  `last_error` varchar(500) NOT NULL DEFAULT '',
++  `created_at` int unsigned NOT NULL,
++  `updated_at` int unsigned NOT NULL,
++  PRIMARY KEY (`id`),
++  UNIQUE KEY `uq_batch_no` (`batch_no`),
++  UNIQUE KEY `uq_admin_request` (`admin_id`,`request_key`),
++  KEY `idx_source_owner` (`source_store_id`,`admin_id`,`id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='所属会员转移批次及执行进度';
++
++CREATE TABLE IF NOT EXISTS `eb_user_store_transfer_batch_item` (
++  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++  `batch_no` varchar(40) NOT NULL,
++  `uid` int unsigned NOT NULL,
++  `source_history_id` bigint unsigned NOT NULL DEFAULT 0,
++  `status` varchar(16) NOT NULL DEFAULT 'pending',
++  `history_id` bigint unsigned NOT NULL DEFAULT 0,
++  `result_reason` varchar(255) NOT NULL DEFAULT '',
++  PRIMARY KEY (`id`),
++  UNIQUE KEY `uq_batch_member` (`batch_no`,`uid`),
++  KEY `idx_pending` (`batch_no`,`status`,`id`),
++  KEY `idx_history` (`history_id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='确认时冻结的会员及逐人调店结果';
+diff --git a/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/02-member-index.sql b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/02-member-index.sql
+new file mode 100644
+index 00000000..55703185
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/02-member-index.sql
+@@ -0,0 +1,10 @@
++-- 确认名单按主归属门店读取，避免 INSERT SELECT 全表扫描并锁住无关门店会员。
++-- 允许重复执行；既有实例已存在同名索引时不重复创建。
++SET @r26_index_exists = (SELECT COUNT(*) FROM information_schema.statistics
++  WHERE table_schema = DATABASE() AND table_name = 'eb_user' AND index_name = 'idx_belong_active_uid');
++SET @r26_index_sql = IF(@r26_index_exists = 0,
++  'ALTER TABLE `eb_user` ADD INDEX `idx_belong_active_uid` (`belong_store_id`,`is_del`,`delete_time`,`uid`), ALGORITHM=INPLACE, LOCK=NONE',
++  'SELECT 1');
++PREPARE r26_member_index FROM @r26_index_sql;
++EXECUTE r26_member_index;
++DEALLOCATE PREPARE r26_member_index;
+diff --git a/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/执行说明.md b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/执行说明.md
+new file mode 100644
+index 00000000..a4e271ee
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-22-门店所属会员批量转移/执行说明.md
+@@ -0,0 +1,28 @@
++# 门店所属会员批量转移
++
++## 范围与执行顺序
++
++1. `01-schema.sql`：新建批次和冻结名单两张表。
++2. `02-member-index.sql`：为会员主归属筛选增加复合索引，避免扫描其他门店会员；MySQL 5.7在线建索引。
++3. 更新后端服务、队列任务、路由和平台端资源后，确认批量队列 worker 使用新代码。
++
++本轮只在本地 `mysql/ruihao` 执行。未连接、修改或迁移瑞昊及渼约008生产库。客户实例发布需另行授权、逐实例核对现网版本、备份并执行本目录迁移。SQL固定使用项目当前 `eb_` 前缀；实例前缀不同须先按实际配置生成受控执行版本。
++
++## 业务边界
++
++- 权威归属为 `user.belong_store_id`，不使用 `store_user` 服务可见关系推断名单。
++- 含停用会员，不含注销或删除会员。按确认时全量名单执行，不受列表分页影响。
++- 每人仅修改主归属，并沿用单人调店服务记录历史及归属有效期事实；余额、卡项、订单等业务资料保持原状。
++- 批次请求键幂等，同源门店不能同时创建多个未结束批次。每次队列消息最多50人，批次与会员均加锁。
++- 执行前复核最新归属及历史版本；确认后调走或调走再调回者跳过，不覆盖后续操作。
++- 单人业务失败使用保存点回滚；未知故障回滚当前50人批次。已提交的前序批次保留，原名单可恢复。
++- 历史与事实使用真实执行时间，不回填或伪造过去的会员归属。
++- 批次读取和恢复绑定创建管理员，登录状态由现有平台中间件验证；管理员失效后任务受阻。
++
++## 验证与回退
++
++本地已验证55人跨批次、真实队列重复投递、失败恢复、43条异常分页和真实卡项会员的其他业务资料不变。测试夹具均已回滚或精确清理。
++
++上线后检查两表结构、会员索引、队列可用性、预览人数、进度恢复及调店详情。HTTP可达或构建成功不代替产品经理验收。
++
++代码回退前先停止新建任务，等待正在执行的批次提交，并登记未结束批次。已完成调店是可追溯业务事实，不能通过删除表恢复会员归属；反向调店须另行确认名单和原因。两张审计表应保留。新索引通常无需删除，若确需移除须独立评估查询性能和锁影响。
+diff --git a/tests/platform-member-transfer/php/r26-bulk-transfer-rollback.php b/tests/platform-member-transfer/php/r26-bulk-transfer-rollback.php
+new file mode 100644
+index 00000000..8352e8bd
+--- /dev/null
++++ b/tests/platform-member-transfer/php/r26-bulk-transfer-rollback.php
+@@ -0,0 +1,200 @@
++<?php
++declare(strict_types=1);
++
++/** 本地真实MySQL事务测试：名单、单人服务、归属事实和队列故障均回滚，不转移真实会员。 */
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++
++use app\services\user\UserStoreTransferBatchServices;
++use app\services\user\UserBelongStoreServices;
++use app\jobs\user\UserStoreTransferBatchJob;
++use think\facade\Db;
++
++set_exception_handler(static function (Throwable $error): void { fwrite(STDERR, get_class($error) . ': ' . $error->getMessage() . PHP_EOL); exit(1); });
++if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local ruihao only.');
++$checks = 0;
++$assert = static function (bool $okay, string $message) use (&$checks): void { ++$checks; if (!$okay) throw new RuntimeException($message); };
++$reject = static function (callable $call, string $contains) use ($assert): void {
++    try { $call(); throw new RuntimeException('Expected rejection: ' . $contains); }
++    catch (\think\exception\ValidateException $error) { $assert(strpos($error->getMessage(), $contains) !== false, $error->getMessage()); }
++};
++$admin = (int)Db::name('system_admin')->where('status', 1)->where('is_del', 0)->value('id');
++$assert($admin > 0, 'No local admin.');
++$real = (array)Db::name('user')->where('uid', 1030289)->find();
++$assert($real !== [], 'No local card-bearing member fixture.');
++$memberId = (int)$real['uid'];
++$businessSnapshot = static function () use ($memberId): array {
++    $result = [];
++    foreach (['store_user' => 'uid', 'user_card_holder' => 'uid', 'store_order' => 'uid',
++        'store_debt' => 'uid', 'user_money' => 'uid', 'cashier_v3_payment_fact' => 'member_id',
++        'cashier_v3_performance_fact' => 'member_id', 'cashier_v3_entitlement_writeoff_fact' => 'member_id'] as $table => $column) {
++        $result[$table] = Db::name($table)->where($column, $memberId)->order('id')->select()->toArray();
++    }
++    return $result;
++};
++$originalBusiness = $businessSnapshot();
++$tag = 'R26-' . bin2hex(random_bytes(6));
++$batchNos = [];
++$source = 0;
++
++Db::startTrans();
++try {
++    $storeTemplate = (array)Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->find();
++    unset($storeTemplate['id']);
++    $stores = [];
++    foreach (['source', 'target', 'other'] as $name) {
++        $row = $storeTemplate; $row['name'] = $tag . '-' . $name;
++        $stores[$name] = (int)Db::name('system_store')->insertGetId($row);
++    }
++    $source = $stores['source']; $target = $stores['target'];
++    // 所有克隆仅存在于本地回滚事务，不经业务入口发送通知或创建支付。
++    $newMember = static function (int $index, bool $deleted = false) use ($real, $tag, $source): int {
++        $row = $real; unset($row['uid']);
++        $row['real_name'] = $tag . '-' . $index; $row['nickname'] = $row['real_name'];
++        $row['phone'] = '190' . str_pad((string)$index, 8, '0', STR_PAD_LEFT);
++        $row['belong_store_id'] = $source; $row['is_del'] = $deleted ? 1 : 0; $row['delete_time'] = null;
++        $row['status'] = $index === 1 ? 0 : 1;
++        $row['ben_money'] = '100.00'; $row['give_money'] = '50.00'; $row['now_money'] = '150.00';
++        return (int)Db::name('user')->insertGetId($row);
++    };
++    $uids = [];
++    for ($i = 1; $i <= 54; ++$i) $uids[] = $newMember($i);
++    $deleted = $newMember(90, true);
++    $cancelled = $newMember(91);
++    Db::name('user')->where('uid', $cancelled)->update(['delete_time' => date('Y-m-d H:i:s')]);
++    Db::name('user')->where('uid', $memberId)->update(['belong_store_id' => $source]);
++    $beforeMember = (array)Db::name('user')->where('uid', $memberId)->find();
++
++    // 覆盖写后故障保存点；enqueue在测试内不投递，避免其他进程读取未提交夹具。
++    $service = new class extends UserStoreTransferBatchServices {
++        public $failUid = 0;
++        public $scheduled = [];
++        public function enqueue(string $batchNo): void { $this->scheduled[] = $batchNo; }
++        protected function transferMember(array $item, array $batch): array {
++            $result = parent::transferMember($item, $batch);
++            if ((int)$item['uid'] === $this->failUid) throw new InvalidArgumentException('模拟单人写入后失败');
++            return $result;
++        }
++    };
++    $preview = $service->preview($source, $admin);
++    $assert($preview['count'] === 55, 'All members must include inactive and exclude deleted/cancelled.');
++    $assert(!in_array($source, array_map('intval', array_column($preview['stores'], 'id')), true), 'Source appears as target.');
++    $key = 'test-' . $tag;
++    $reject(static function () use ($service, $source, $target, $key, $admin): void { $service->create($source, $target, '人数旧值', 54, $key, $admin); }, '人数已变化');
++    $assert((int)Db::name(UserStoreTransferBatchServices::TABLE)->where('source_store_id', $source)->count() === 0, 'Stale count left a batch.');
++    $reject(static function () use ($service, $source, $key, $admin): void { $service->create($source, $source, '同店测试', 55, $key, $admin); }, '不同的目标');
++    $batch = $service->create($source, $target, '本地批量转移回滚', 55, $key, $admin);
++    $no = $batch['batch_no']; $batchNos[] = $no;
++    $assert((int)$batch['total_count'] === 55 && $batch['status'] === 'queued', 'Batch did not freeze all 55 members.');
++    $assert($batch['exception_total'] === 0 && $batch['exception_page'] === 1 && $batch['exceptions'] === [], 'Empty exception pagination is invalid.');
++    $again = $service->create($source, $target, '本地批量转移回滚', 55, $key, $admin);
++    $assert($again['batch_no'] === $no, 'Creation replay made another batch.');
++    $reject(static function () use ($service, $source, $target, $key, $admin): void { $service->create($source, $target, '不同原因', 55, $key, $admin); }, '已用于其他');
++    $reject(static function () use ($service, $source, $target, $admin): void { $service->create($source, $target, '重复源门店', 55, 'another-key-test', $admin); }, '未结束');
++    $late = $newMember(100);
++    Db::name('user')->where('uid', $uids[1])->update(['belong_store_id' => $stores['other']]);
++    Db::name('user')->where('uid', $uids[2])->update(['is_del' => 1]);
++    // 即便当前又回到源店，只要确认后归属历史变化，也不能覆盖后续业务选择。
++    Db::name('user_belong_store')->insert(['group' => 2, 'type' => 'admin_transfer', 'is_store' => 1,
++        'uid' => $uids[3], 'store_id' => $source, 'from_store_id' => $stores['other'], 'staff_id' => 0,
++        'admin_id' => $admin, 'reason' => '模拟确认后重新调回', 'from_store_name' => 'fixture',
++        'to_store_name' => 'fixture', 'operator_name' => 'fixture', 'add_time' => time()]);
++    $service->failUid = $uids[4];
++    $failedBefore = (array)Db::name('user')->where('uid', $service->failUid)->find();
++    $assert($service->processChunk($no) === true, 'First chunk did not leave remaining work.');
++    $first = $service->status($no, $admin);
++    $assert((int)$first['success_count'] + (int)$first['skipped_count'] + (int)$first['failed_count'] === 50,
++        'Worker must process exactly 50 on the first chunk.');
++    $assert($service->processChunk($no) === false, 'Second chunk should finish the snapshot.');
++    $done = $service->status($no, $admin);
++    $assert((int)$done['success_count'] === 51 && (int)$done['skipped_count'] === 3
++        && (int)$done['failed_count'] === 1 && $done['status'] === 'completed_with_exceptions', 'Partial outcomes or totals are incorrect.');
++    $assert((int)Db::name('user')->where('uid', $late)->value('belong_store_id') === $source, 'Late new member was swept into the batch.');
++    $assert((int)Db::name('user')->where('uid', $uids[0])->value('belong_store_id') === $target, 'Inactive member was omitted.');
++    $assert((int)Db::name('user')->where('uid', $deleted)->value('belong_store_id') === $source, 'Deleted member was transferred.');
++    $assert((int)Db::name('user')->where('uid', $cancelled)->value('belong_store_id') === $source, 'Cancelled member was transferred.');
++    $assert(Db::name('user')->where('uid', $service->failUid)->find() == $failedBefore, 'Failed individual kept partial user writes.');
++    $assert((int)Db::name('user_belong_store')->where('uid', $service->failUid)->where('store_id', $target)->count() === 0,
++        'Failed individual kept an assignment history.');
++    $after = (array)Db::name('user')->where('uid', $memberId)->find();
++    $assert((int)$after['belong_store_id'] === $target, 'Card-bearing member was not transferred.');
++    unset($after['belong_store_id'], $beforeMember['belong_store_id']);
++    $assert($after == $beforeMember, 'Other member profile fields changed.');
++    $assert($businessSnapshot() === $originalBusiness, 'Cards, balance, orders, debt, performance or store visibility changed.');
++    $history = app()->make(UserBelongStoreServices::class)->getTransferHistory($memberId);
++    $assert(strpos((string)$history['list'][0]['reason'], '批量转移：') === 0, 'Existing transfer detail does not show batch origin.');
++    $assert($service->processChunk($no) === false && $service->status($no, $admin)['success_count'] == 51, 'Repeated worker changed finished outcomes.');
++
++    $service->failUid = 0;
++    $resumed = $service->resume($no, $admin);
++    $assert($resumed['status'] === 'queued' && count($service->scheduled) === 1, 'Resume did not requeue the original batch.');
++    $service->processChunk($no);
++    $resumed = $service->status($no, $admin);
++    $assert((int)$resumed['success_count'] === 52 && (int)$resumed['skipped_count'] === 3 && (int)$resumed['failed_count'] === 0,
++        'Resume did not retry only the failed member.');
++    $assert((int)Db::name('user_store_transfer_batch_item')->where('batch_no', $no)->where('uid', $uids[4])->value('history_id') > 0,
++        'Retry lost the history-to-batch link.');
++    $oldHistoryCount = (int)Db::name('user_belong_store')->where('uid', $memberId)->where('store_id', $target)->count();
++    $service->create($source, $target, '本地批量转移回滚', 55, $key, $admin);
++    $assert((int)Db::name('user_belong_store')->where('uid', $memberId)->where('store_id', $target)->count() === $oldHistoryCount, 'Completed creation replay transferred twice.');
++    $assert($service->preview($source, $admin)['batch']['batch_no'] === $no, 'Refresh did not recover the saved batch.');
++    $otherAdmin = (int)Db::name('system_admin')->where('status', 1)->where('is_del', 0)->where('id', '<>', $admin)->value('id');
++    if ($otherAdmin) $reject(static function () use ($service, $no, $otherAdmin): void { $service->status($no, $otherAdmin); }, '不属于');
++
++    // 已完成批次后新确认名单可包含先前被跳过但仍在原店的会员；target停用必须阻止整批并保留恢复点。
++    $remaining = $service->preview($source, $admin)['count'];
++    $next = $service->create($source, $target, '第二批验证后台任务', $remaining, 'second-' . $tag, $admin);
++    $nextNo = $next['batch_no']; $batchNos[] = $nextNo;
++    Db::name('system_store')->where('id', $target)->update(['is_show' => 0]);
++    (new UserStoreTransferBatchJob())->doJob($nextNo);
++    $assert($service->status($nextNo, $admin)['status'] === 'blocked'
++        && (int)$service->status($nextNo, $admin)['success_count'] === 0, 'Unavailable target did not block the queued job.');
++    Db::name('system_store')->where('id', $target)->update(['is_show' => 1]);
++    $service->resume($nextNo, $admin);
++    (new UserStoreTransferBatchJob())->doJob($nextNo);
++    $assert($service->status($nextNo, $admin)['status'] === 'completed', 'Real queue job did not finish the remaining small batch.');
++    $assert($businessSnapshot() === $originalBusiness, 'Retry changed unrelated business data.');
++
++    // 全部43条归属变化时，异常列表必须按20/20/3稳定分页，越界页回落到末页。
++    $pageUids = [];
++    for ($i = 201; $i <= 243; ++$i) $pageUids[] = $newMember($i);
++    $pages = $service->create($source, $target, '分页边界回滚验证', 43, 'pages-' . $tag, $admin);
++    $pageNo = $pages['batch_no']; $batchNos[] = $pageNo;
++    Db::name('user')->whereIn('uid', $pageUids)->update(['belong_store_id' => $stores['other']]);
++    $service->processChunk($pageNo);
++    $page1 = $service->status($pageNo, $admin, 1);
++    $page2 = $service->status($pageNo, $admin, 2);
++    $page3 = $service->status($pageNo, $admin, 99);
++    $assert($page1['exception_total'] === 43 && count($page1['exceptions']) === 20 && count($page2['exceptions']) === 20
++        && count($page3['exceptions']) === 3 && $page3['exception_page'] === 3, 'Exception pagination did not return 20/20/3.');
++    $allPageIds = array_merge(array_column($page1['exceptions'], 'uid'), array_column($page2['exceptions'], 'uid'), array_column($page3['exceptions'], 'uid'));
++    $assert(array_map('intval', $allPageIds) === $pageUids, 'Exception pages lost, duplicated or reordered members.');
++
++    // 未知异常不能留下本批任何写入；标记受阻后仍沿原名单恢复。
++    $crashUid = $newMember(301);
++    $crash = $service->create($source, $target, '未知故障回滚验证', 1, 'crash-' . $tag, $admin);
++    $crashNo = $crash['batch_no']; $batchNos[] = $crashNo;
++    $crashingService = new class extends UserStoreTransferBatchServices {
++        protected function transferMember(array $item, array $batch): array {
++            parent::transferMember($item, $batch);
++            throw new RuntimeException('模拟底层写入后故障');
++        }
++    };
++    try { $crashingService->processChunk($crashNo); throw new LogicException('Missing unknown error'); }
++    catch (RuntimeException $error) { $assert($error->getMessage() === '模拟底层写入后故障', 'Unexpected error did not propagate.'); }
++    $assert((int)Db::name('user')->where('uid', $crashUid)->value('belong_store_id') === $source
++        && (int)Db::name('user_belong_store')->where('uid', $crashUid)->count() === 0, 'Unknown fault retained partial user/history writes.');
++    $assert($service->status($crashNo, $admin)['status'] === 'queued'
++        && (int)$service->status($crashNo, $admin)['success_count'] === 0, 'Unknown fault retained partial batch progress.');
++    $service->block($crashNo, '本地故障模拟');
++    $service->resume($crashNo, $admin);
++    (new UserStoreTransferBatchJob())->doJob($crashNo);
++    $assert($service->status($crashNo, $admin)['status'] === 'completed', 'Unknown fault recovery failed.');
++} finally {
++    Db::rollback();
++}
++$assert(Db::name('user')->where('uid', $memberId)->find() == $real, 'Rollback did not restore real member.');
++$assert($businessSnapshot() === $originalBusiness, 'Rollback left unrelated business changes.');
++$assert((int)Db::name(UserStoreTransferBatchServices::TABLE)->whereIn('batch_no', $batchNos)->count() === 0, 'Rollback left batch fixtures.');
++$assert((int)Db::name('system_store')->where('id', $source)->count() === 0, 'Rollback left store fixtures.');
++echo 'R26_BULK_TRANSFER=PASS checks=' . $checks . PHP_EOL;
+diff --git a/tests/platform-member-transfer/php/r26-bulk-transfer-queue-local.php b/tests/platform-member-transfer/php/r26-bulk-transfer-queue-local.php
+new file mode 100644
+index 00000000..f06d0e14
+--- /dev/null
++++ b/tests/platform-member-transfer/php/r26-bulk-transfer-queue-local.php
+@@ -0,0 +1,68 @@
++<?php
++declare(strict_types=1);
++
++/** 仅本地隔离夹具：真实队列重复投递55人批次，验证跨消息执行与幂等，最后精确清理夹具。 */
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++use think\facade\Db;
++use app\services\user\UserStoreTransferBatchServices;
++
++set_exception_handler(static function (Throwable $error): void { fwrite(STDERR, $error->getMessage() . PHP_EOL); exit(1); });
++if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local ruihao only.');
++$tag = 'R26-QUEUE-' . bin2hex(random_bytes(6));
++$uids = []; $stores = []; $no = '';
++$service = new UserStoreTransferBatchServices();
++$admin = (int)Db::name('system_admin')->where('status', 1)->where('is_del', 0)->value('id');
++$check = static function (bool $okay, string $message): void { if (!$okay) throw new RuntimeException($message); };
++try {
++    Db::transaction(function () use (&$uids, &$stores, $tag): void {
++        $template = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->find();
++        unset($template['id']);
++        foreach (['source', 'target'] as $name) {
++            $row = $template; $row['name'] = $tag . '-' . $name;
++            $stores[] = (int)Db::name('system_store')->insertGetId($row);
++        }
++        $template = Db::name('user')->where('uid', 1030289)->find();
++        unset($template['uid']);
++        for ($i = 0; $i < 55; ++$i) {
++            $row = $template;
++            $row['real_name'] = $tag . '-' . $i; $row['nickname'] = $row['real_name'];
++            $row['phone'] = ''; $row['belong_store_id'] = $stores[0]; $row['is_del'] = 0; $row['delete_time'] = null;
++            $row['now_money'] = 0; $row['ben_money'] = 0; $row['give_money'] = 0;
++            $uids[] = (int)Db::name('user')->insertGetId($row);
++        }
++    });
++    $batch = $service->create($stores[0], $stores[1], '本地队列隔离验证', 55, $tag, $admin);
++    $no = $batch['batch_no'];
++    // 重复消息由真实多个worker竞争同一批次锁，不能重复修改或重复记历史。
++    $service->enqueue($no); $service->enqueue($no);
++    $deadline = microtime(true) + 45;
++    do {
++        usleep(300000);
++        $status = $service->status($no, $admin);
++        if (in_array($status['status'], ['completed', 'completed_with_exceptions', 'blocked'], true)) break;
++    } while (microtime(true) < $deadline);
++    $check($status['status'] === 'completed' && (int)$status['success_count'] === 55, 'Queue did not finish: ' . json_encode($status, JSON_UNESCAPED_UNICODE));
++    $check((int)Db::name('user')->whereIn('uid', $uids)->where('belong_store_id', $stores[1])->count() === 55, 'Queue lost members.');
++    $check((int)Db::name('user_belong_store')->whereIn('uid', $uids)->count() === 55, 'Duplicate jobs created duplicate history.');
++    $check((int)Db::name('cashier_v3_report_member_store_assignment_period')->whereIn('member_id', $uids)->count() === 55, 'Assignment facts lost or duplicated.');
++    echo 'R26_REAL_QUEUE=PASS members=55 messages=duplicate history=55 periods=55' . PHP_EOL;
++} finally {
++    // 先锁批次再清理，若worker尚在运行则等待它提交，避免清理过程中被继续写入。
++    Db::transaction(function () use ($uids, $stores, $no): void {
++        if ($no !== '') {
++            Db::name(UserStoreTransferBatchServices::TABLE)->where('batch_no', $no)->lock(true)->find();
++            Db::name(UserStoreTransferBatchServices::ITEMS)->where('batch_no', $no)->delete();
++            Db::name(UserStoreTransferBatchServices::TABLE)->where('batch_no', $no)->delete();
++        }
++        if ($uids) {
++            Db::name('cashier_v3_report_member_store_assignment_period')->whereIn('member_id', $uids)->delete();
++            Db::name('user_belong_store')->whereIn('uid', $uids)->delete();
++            Db::name('user')->whereIn('uid', $uids)->delete();
++        }
++        if ($stores) Db::name('system_store')->whereIn('id', $stores)->delete();
++    });
++}
++$check((int)Db::name('user')->whereIn('uid', $uids)->count() === 0, 'Synthetic members not cleaned.');
++$check((int)Db::name('system_store')->whereIn('id', $stores)->count() === 0, 'Synthetic stores not cleaned.');
++echo 'R26_QUEUE_FIXTURE_CLEANUP=PASS' . PHP_EOL;
+diff --git a/tests/platform-member-transfer/php/r26-bulk-transfer-ui-fixture-local.php b/tests/platform-member-transfer/php/r26-bulk-transfer-ui-fixture-local.php
+new file mode 100644
+index 00000000..05df664f
+--- /dev/null
++++ b/tests/platform-member-transfer/php/r26-bulk-transfer-ui-fixture-local.php
+@@ -0,0 +1,57 @@
++<?php
++declare(strict_types=1);
++
++/** 本地浏览器联调专用夹具；seed只建合成资料，verify-cleanup严格核验后清理指定UID。 */
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++use think\facade\Db;
++use app\services\user\UserStoreTransferBatchServices;
++set_exception_handler(static function (Throwable $error): void { fwrite(STDERR, $error->getMessage() . PHP_EOL); exit(1); });
++if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local only.');
++$file = '/tmp/r26-member-transfer-ui.json';
++$mode = $argv[1] ?? '';
++if ($mode === 'seed') {
++    if (file_exists($file)) throw new RuntimeException('Previous fixture must be verified and cleaned first.');
++    $fixture = Db::transaction(static function (): array {
++        $store = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->find(); unset($store['id']);
++        $ids = [];
++        foreach (['R26批量调店验收原店', 'R26批量调店验收目标店'] as $name) {
++            $store['name'] = $name; $ids[] = (int)Db::name('system_store')->insertGetId($store);
++        }
++        $template = Db::name('user')->where('uid', 1030289)->find(); unset($template['uid']);
++        $uids = [];
++        for ($i = 0; $i < 3; ++$i) {
++            $row = $template; $row['real_name'] = 'R26浏览器测试会员' . $i; $row['nickname'] = $row['real_name'];
++            $row['phone'] = ''; $row['belong_store_id'] = $ids[0]; $row['is_del'] = 0; $row['delete_time'] = null;
++            $row['ben_money'] = 0; $row['give_money'] = 0; $row['now_money'] = 0;
++            $uids[] = (int)Db::name('user')->insertGetId($row);
++        }
++        return ['stores' => $ids, 'uids' => $uids];
++    });
++    file_put_contents($file, json_encode($fixture));
++    echo 'R26_UI_FIXTURE=READY members=3' . PHP_EOL;
++} elseif ($mode === 'verify-cleanup') {
++    if (!file_exists($file)) throw new RuntimeException('No fixture.');
++    $fixture = json_decode(file_get_contents($file), true);
++    $uids = $fixture['uids']; $stores = $fixture['stores'];
++    $batch = Db::name(UserStoreTransferBatchServices::TABLE)->where('source_store_id', $stores[0])->find();
++    if (!$batch || $batch['status'] !== 'completed' || (int)$batch['success_count'] !== 3) throw new RuntimeException('UI batch not completed; keep fixture for diagnosis.');
++    if ((int)Db::name('user')->whereIn('uid', $uids)->where('belong_store_id', $stores[1])->count() !== 3
++        || (int)Db::name('user_belong_store')->whereIn('uid', $uids)->where('type', 'admin_transfer')->count() !== 3) throw new RuntimeException('UI facts mismatch.');
++    foreach (['store_user' => 'uid', 'user_money' => 'uid', 'user_card_holder' => 'uid', 'store_order' => 'uid'] as $table => $column) {
++        if (Db::name($table)->whereIn($column, $uids)->count()) throw new RuntimeException('Unexpected related business write: ' . $table);
++    }
++    Db::transaction(static function () use ($uids, $stores, $batch): void {
++        Db::name(UserStoreTransferBatchServices::TABLE)->where('batch_no', $batch['batch_no'])->lock(true)->find();
++        Db::name(UserStoreTransferBatchServices::ITEMS)->where('batch_no', $batch['batch_no'])->delete();
++        Db::name(UserStoreTransferBatchServices::TABLE)->where('batch_no', $batch['batch_no'])->delete();
++        Db::name('cashier_v3_report_member_store_assignment_period')->whereIn('member_id', $uids)->delete();
++        Db::name('user_belong_store')->whereIn('uid', $uids)->delete();
++        Db::name('user')->whereIn('uid', $uids)->delete();
++        Db::name('system_store')->whereIn('id', $stores)->delete();
++    });
++    unlink($file);
++    echo 'R26_BROWSER_API_QUEUE=PASS members=3 unrelated_business_writes=0 fixture_cleanup=PASS' . PHP_EOL;
++} else {
++    throw new RuntimeException('Expected seed or verify-cleanup.');
++}

@@ -1,0 +1,4 @@
+PASS: reported partial debt leaves six usable times
+PASS: one reservation use is allowed by the partial-debt limit
+PASS: debt covering the whole remaining amount still blocks use
+RESERVATION_DEBT_LIMITED_WRITEOFF_CONTRACT=PASS

@@ -1,0 +1,85 @@
+{
+  "result": "PASS",
+  "filtered": {
+    "127": {
+      "province": 10845,
+      "city": 11369,
+      "area": 11415,
+      "matchedStore": 127
+    },
+    "129": {
+      "province": 27468,
+      "city": 27469,
+      "area": 27596,
+      "matchedStore": 129
+    },
+    "130": {
+      "province": 12459,
+      "city": 12460,
+      "area": 12553,
+      "matchedStore": 130
+    }
+  },
+  "allSelectableStores": 24,
+  "regionOptions": {
+    "regions": [
+      {
+        "id": 10845,
+        "label": "江苏省",
+        "children": [
+          {
+            "id": 11369,
+            "label": "苏州市",
+            "children": [
+              {
+                "id": 11415,
+                "label": "姑苏区",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 12459,
+        "label": "浙江省",
+        "children": [
+          {
+            "id": 12460,
+            "label": "杭州市",
+            "children": [
+              {
+                "id": 12553,
+                "label": "富阳区",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 27468,
+        "label": "广东省",
+        "children": [
+          {
+            "id": 27469,
+            "label": "广州市",
+            "children": [
+              {
+                "id": 27596,
+                "label": "番禺区",
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "incomplete_count": 21
+  },
+  "transportRetry": {
+    "initialNodeHTTPS": "Timed out; exact endpoint not established",
+    "curlScopeRerun": "PASS",
+    "legacyCityList": "NOT VERIFIED"
+  }
+}

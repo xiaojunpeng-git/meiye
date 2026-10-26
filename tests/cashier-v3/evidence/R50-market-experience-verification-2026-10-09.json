@@ -1,0 +1,82 @@
+{
+  "task": "R50 verify experience exclusion from market report visits",
+  "date": "2026-10-09",
+  "baselineHead": "cdb8fbdf3862381e5540781b5936dea4fa7b4b16",
+  "conclusion": "Existing market performance and detail readers already exclude experience service facts. No additional business code repair is needed after the checkout snapshot persistence fix.",
+  "environment": "Local mohe-cashier-app PHP 7.4, local ruihao database; no production connection or mutation",
+  "scope": {
+    "frontendSourceChanges": [],
+    "backendSourceChanges": [],
+    "migrations": [],
+    "automatedTestChanges": [],
+    "scripts": [],
+    "generatedArtifacts": [],
+    "evidence": ["tests/cashier-v3/evidence/R50-market-experience-verification-2026-10-09.json"]
+  },
+  "rule": {
+    "authority": "Completed, unvoided entitlement service fact frozen is_experience",
+    "experience": "is_experience=1 does not qualify for market visits",
+    "memberDeduplication": "store + business date + primary business source + member",
+    "mixedDay": "Other eligible non-experience services can still make the merged member-day-source row count as one visit",
+    "amountAndEffectivePeople": "Unaffected by experience exclusion; retain existing net payment and threshold rules",
+    "personnelFlag": "friend_counts_as_customer controls personnel statistics, not market visit eligibility",
+    "history": "Previously lost experience flags are not inferred or backfilled"
+  },
+  "verification": [
+    {
+      "test": "market-experience-visits.php via docker exec with MARKET_EXPERIENCE_LOCAL_TEST=1",
+      "result": "PASS",
+      "coverage": "Member/guest experience-only visits zero; detail retained; normal services count; mixed services deduplicate; visits drilldown excludes experience-only rows; all-rows query shares metric version",
+      "fixtureCleanup": "Transaction finally rollback"
+    },
+    {
+      "test": "r51-market-friend-visits.php via docker exec with R51_LOCAL_TEST=1",
+      "result": "PASS",
+      "coverage": "Personnel count flag independent of market visits; experience excludes member/guest; detail/drilldown/summary remain aligned",
+      "fixtureCleanup": "Transaction finally rollback"
+    },
+    {
+      "test": "market-performance-service-visit-contract.php",
+      "result": "18/18 PASS"
+    },
+    {
+      "test": "Actual local checkout and report reconciliation, read-only",
+      "serviceRecordNo": "FW100900005",
+      "isExperience": 1,
+      "eligibleServiceCount": 0,
+      "storeId": 23,
+      "businessDate": "2026-10-09",
+      "sourceId": 17,
+      "detailVisitSum": 1,
+      "detailSummaryVisits": 1,
+      "performanceSourceVisits": 1,
+      "exportMatchesDetailRecordsAndSummary": true,
+      "mergedMemberRowExplanation": "Member 1130058 has other non-experience services on the same business date, including FW100900004. The one visit is not a contribution from the experience service FW100900005.",
+      "result": "PASS"
+    },
+    {
+      "test": "market-detail-summary-row-contract.php",
+      "result": "7/8; pre-existing static explanation assertion fails",
+      "reason": "The assertion expects exact phrase 余额支付、赠金和旧卡录入不计, absent from the baseline report source. It is not an experience visit arithmetic failure. All seven other checks pass.",
+      "sourceAndTestUnmodified": true
+    }
+  ],
+  "inspectedFiles": [
+    {"path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php", "sha256": "bed0e696f035409d76608bbda09a61340541f92fc2ca84e601e4a4267e2add28"},
+    {"path": "后端代码/app/services/query/metric/StoreCustomerVisitEligibility.php", "sha256": "dd75782490c25aebd6aebb8833464677174ca5f4e16eb577b183bcfebd142abd"},
+    {"path": "tests/cashier-v3/php/market-experience-visits.php", "sha256": "a485b6650b89bd2f3a40cfa69bfe94f6208861d60f68eb56cb2faf8c2befdd64"},
+    {"path": "tests/cashier-v3/php/r51-market-friend-visits.php", "sha256": "372c2f3bebbc5ff084eccf85973284cd8fdb74dfab633029c5a5b7be23fab968"}
+  ],
+  "dataArchitecture": {
+    "readModel": "Both reports share marketServiceVisitFacts and marketCountableServiceVisits; no new parallel calculation",
+    "timeAndGrain": "Existing business date, success/void filters, service fact identity and member-day-source or guest-order deduplication retained",
+    "transactionsAndHistory": "No permanent business writes; integration fixtures rolled back; original checkout and historical facts unchanged",
+    "scopeAndPerformance": "Local backend queries explicitly scoped to store 23; existing backend scope logic unchanged; no added business SQL or index changes",
+    "reconciliation": "Actual local detail records, full summary, performance source visits and export checked together"
+  },
+  "preservedStagedDiffSha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "roundStatus": "Checkout fix remains waiting for product manager acceptance; this follow-up adds verification evidence only",
+  "committed": false,
+  "deployed": false,
+  "pushed": false
+}

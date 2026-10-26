@@ -1,0 +1,93 @@
+<template>
+	<view class="category-ranking">
+		<view class="category-ranking__header"><text @tap="goBack">‹ 返回</text><text class="category-ranking__title">{{ category == null ? '分类业绩排行' : category.name }}</text></view>
+		<view class="category-ranking__period"><text>{{ startDate }} 至 {{ endDate }}</text><text>当前授权范围 · 实际业绩</text></view>
+		<view class="category-ranking__tabs"><view :class="{ active: rankType === 'projects' }" @tap="rankType = 'projects'"><text>项目</text></view><view :class="{ active: rankType === 'products' }" @tap="rankType = 'products'"><text>产品</text></view></view>
+		<scroll-view scroll-y="true" class="category-ranking__body">
+			<view v-if="loading" class="category-ranking__state"><text>正在加载排行</text></view>
+			<view v-else-if="message.length > 0" class="category-ranking__state"><text>{{ message }}</text><text class="category-ranking__retry" @tap="reload">重新加载</text></view>
+			<view v-else-if="rows().length === 0" class="category-ranking__state"><text>当前分类暂无{{ rankType === 'projects' ? '项目' : '产品' }}业绩排行</text></view>
+			<view v-else class="category-ranking__list"><text class="category-ranking__note">{{ rankType === 'projects' ? '项目' : '产品' }}实际业绩前五名</text><view v-for="(row, index) in rows()" :key="row.name" class="category-ranking__row" :class="{ 'category-ranking__row--first': index === 0 }"><text class="category-ranking__badge" :class="'category-ranking__badge--' + index.toString()">{{ index + 1 }}</text><text class="category-ranking__name">{{ row.name }}</text><text class="category-ranking__amount">{{ formatDashboardMoney(row.amount_cents) }}</text></view></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
+	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
+	import { currentMerchantRoot, merchantRequestSession, clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+
+	const category = ref<any>(null)
+	const rankType = ref('projects')
+	const startDate = ref('')
+	const endDate = ref('')
+	const loading = ref(false)
+	const message = ref('')
+	let categoryId = 0
+
+	onLoad((options : any) => {
+		categoryId = Number(options.categoryId || 0)
+		startDate.value = String(options.startDate || '')
+		endDate.value = String(options.endDate || '')
+		reload()
+	})
+
+	// 详情仅携带分类身份和精确日期，数据仍由首页共用接口按当前身份重新返回。
+	// 不从路由接受金额、排行、门店范围，也不按分类名称反推查询条件。
+	function reload() : void {
+		if (merchantRequestSession(currentMerchantRoot()) == null) { openMerchantBootstrap(); return }
+		if (categoryId <= 0 || startDate.value.length === 0 || endDate.value.length === 0) { message.value = '分类或日期条件不完整，请返回首页重新进入。'; return }
+		loading.value = true
+		message.value = ''
+		queryMobileMerchantHome({ view: 'category', categoryId: categoryId, periodMode: 'custom', startDate: startDate.value, endDate: endDate.value }, (response : any) => {
+			loading.value = false
+			if (response == null || response.ok !== true || response.body == null) {
+				category.value = null
+				if (response != null && response.body != null && String(response.body.errorCode || response.body.protocolCode || '') === 'MERCHANT_SESSION_EXPIRED') { clearMerchantRoot(); openMerchantBootstrap(); return }
+				message.value = String(response == null ? '排行暂时无法加载。' : (response.message || '排行暂时无法加载。'))
+				return
+			}
+			category.value = null
+			const categories = Array.isArray(response.body.categories) ? response.body.categories : []
+			for (let index = 0; index < categories.length; index++) {
+				const item = categories[index]
+				if (Number(item.category_id) === categoryId && item.visible === true) category.value = item
+			}
+			if (category.value == null) message.value = '当前范围内该分类没有可展示的业绩，或分类统计已关闭。'
+		})
+	}
+	function rows() : Array<any> {
+		if (category.value == null) return []
+		const result = rankType.value === 'products' ? category.value.product_rankings : category.value.project_rankings
+		return Array.isArray(result) ? result : []
+	}
+	function goBack() : void { uni.navigateBack({ fail: () => { uni.redirectTo({ url: '/src/merchant/pages/home/index' }) } }) }
+</script>
+
+<style>
+	.category-ranking { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #2b4358; }
+	.category-ranking__header { display: flex; flex-direction: row; align-items: center; padding: 24px 16px 14px; background-color: #ffffff; font-size: 14px; }
+	.category-ranking__title { flex: 1; margin-left: 18px; font-size: 18px; font-weight: 700; }
+	.category-ranking__period { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; font-size: 11px; color: #718397; }
+	.category-ranking__tabs { display: flex; flex-direction: row; margin: 0 16px 10px; padding: 4px; border-radius: 10px; background-color: #e8eef5; }
+	.category-ranking__tabs > view { flex: 1; padding: 10px; border-radius: 8px; text-align: center; font-size: 14px; }
+	.category-ranking__tabs .active { background-color: #ffffff; color: #1f5f8b; font-weight: 700; }
+	.category-ranking__body { flex: 1; height: 0; min-height: 0; }
+	.category-ranking__list { margin: 0 16px 24px; padding: 12px; border-radius: 12px; background-color: #ffffff; }
+	.category-ranking__note { display: block; margin-bottom: 8px; font-size: 11px; color: #718397; }
+	.category-ranking__row { display: flex; flex-direction: row; align-items: center; gap: 9px; padding: 14px 5px; border-bottom: 1px solid #eef2f5; }
+	.category-ranking__row--first { background-color: #fff8df; }
+	.category-ranking__badge { flex-shrink: 0; width: 23px; height: 23px; border-radius: 12px; background-color: #e1ebf1; text-align: center; line-height: 23px; font-size: 12px; }
+	.category-ranking__badge--0 { background-color: #f2c75c; color: #6e4c00; }
+	.category-ranking__badge--1 { background-color: #d7a078; color: #704123; }
+	.category-ranking__badge--2 { background-color: #f5e19c; color: #755f00; }
+	.category-ranking__name { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+	.category-ranking__amount { flex-shrink: 0; font-size: 14px; font-weight: 700; color: #1f5f8b; }
+	.category-ranking__state { padding: 40px 20px; text-align: center; font-size: 14px; color: #718397; }
+	.category-ranking__retry { display: block; margin-top: 16px; color: #1f5f8b; }
+	/* 小程序预留胶囊区，H5 保留紧凑页头。 */
+	/* #ifdef MP-WEIXIN */
+	.category-ranking__header { padding-top: 94px; }
+	/* #endif */
+</style>

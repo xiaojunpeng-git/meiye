@@ -1,0 +1,183 @@
+<?php
+namespace app\services\ai\context;
+
+use RuntimeException;
+
+/**
+ * Resolves a model-understood member-detail continuation only against the
+ * replayed, permission-checked result set from the preceding answer. It never
+ * searches by a display name and never lets an ordinal escape that frozen set.
+ */
+final class MemberDetailContinuationResolver
+{
+    /** Empty is a valid query outcome, never a substitute for malformed rows. */
+    public function isEmptyPopulation(array $view): bool
+    {
+        return $this->populationRows($view)===[];
+    }
+
+    /** Both the execution guard and detail selection inspect actual members. */
+    private function populationRows(array $view): array
+    {
+        $query=$view['query']??null;
+        if (!is_array($query)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        if (($query['query_shape']??null)==='ranking') return $this->rankingRows($view);
+        if (($query['query_shape']??null)==='breakdown') return $this->breakdownRows($view);
+        if (($query['query_shape']??null)!=='condition_list'
+            || ($query['condition_set']['subject']??null)!=='member'
+            || !is_array($view['results'][0]['rows']??null)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $rows=$view['results'][0]['rows'];
+        foreach ($rows as $row) $this->member($row,[]);
+        return $rows;
+    }
+
+    /** Resolve one ordinal or the complete verified list within the Reader limit. */
+    public function resolve(array $query,array $view,array $request): array
+    {
+        // VerifiedQueryContext has already replayed the stored query and
+        // checked its signed read-view reference. Use the Reader-normalized
+        // query carried by that replay; comparing it byte-for-byte with the
+        // planner input would reject harmless normalization such as ranges.
+        // Legacy member_detail can enter directly, so it owns the same
+        // single-board guard as generic object details before unioning rows.
+        if (($view['query']['query_shape']??null)==='ranking'&&($request['ordinal']??null)!==null) {
+            ResultReferenceResolver::assertSingleOrdinalGroup($view);
+        }
+        $rows=$this->populationRows($view);
+        if ($rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $target=$request['target']??null;$ordinal=$request['ordinal']??null;
+        // A grouped table is not a ranking. Its full displayed cohort is safe
+        // to continue, but an ordinal must not masquerade as a ranked position.
+        if (($view['query']['query_shape']??null)==='breakdown' && $ordinal!==null) {
+            throw new RuntimeException('AI_MEMBER_DETAIL_SELECTION_REQUIRED');
+        }
+        // "This member" is safe only for a singleton result. Explicit plural
+        // requests may read the verified set; an ambiguous singular must not
+        // silently choose its first row.
+        if ($target==='set') {
+            $snapshot=$view['results'][0]['population_snapshot']??null;
+            if ($snapshot!==null) {
+                $total=$view['results'][0]['count']??null;
+                if (!is_array($snapshot)||!is_int($total)||$total<1
+                    ||($snapshot['count']??null)!==$total||count($rows)!==min(20,$total)) {
+                    throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                }
+                $members=[];$position=0;
+                foreach ((new \app\services\query\metric\AiMemberRightsPopulationStore())->rows($snapshot) as $frozen) {
+                    if ($position>=count($rows)) break;
+                    if ($rows[$position]['member_id']!==$frozen['member_id']
+                        ||$rows[$position]['member_name']!==$frozen['member_name']) {
+                        throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                    }
+                    $members[]=$this->member($rows[$position],$request);++$position;
+                }
+                if ($position!==count($rows)) throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                return ['members'=>$members,'view'=>$request['view']??'summary',
+                    'population_snapshot'=>$snapshot];
+            }
+            // Detail and export may use the Reader's full verified list, even
+            // when the screen previews 20 rows. A truncated source still fails.
+            $total=$view['results'][0]['count']??count($rows);
+            if (!empty($view['results'][0]['has_more'])||(int)$total>count($rows)
+                ||count($rows)>\app\services\query\metric\RegisteredMetricReadServices::rightsDetailLimit()) {
+                throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            }
+            $members=[];$seen=[];
+            foreach ($rows as $row) {
+                $member=$this->member($row,$request);
+                if (isset($seen[$member['selection_ref']])) continue;
+                $seen[$member['selection_ref']]=true;$members[]=$member;
+            }
+            return ['members'=>$members,'view'=>$request['view']??'summary'];
+        }
+        if ($target!=='single') throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        if ($ordinal===null) {
+            if (count($rows)!==1) throw new RuntimeException('AI_MEMBER_DETAIL_SELECTION_REQUIRED');
+            $index=0;
+        } else {
+            $snapshot=$view['results'][0]['population_snapshot']??null;
+            if (is_array($snapshot) && is_int($ordinal) && $ordinal>count($rows)
+                && $ordinal<=($snapshot['count']??0)) {
+                $position=0;
+                foreach ((new \app\services\query\metric\AiMemberRightsPopulationStore())->rows($snapshot) as $frozen) {
+                    if (++$position===$ordinal) return $this->member([
+                        'member_id'=>$frozen['member_id'],'member_name'=>$frozen['member_name']],$request);
+                }
+                throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            }
+            if (!is_int($ordinal)||$ordinal<1||$ordinal>count($rows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $index=$ordinal-1;
+        }
+        return $this->member($rows[$index]??null,$request);
+    }
+
+    /** Identity is always a validated source row, never a model-generated ID. */
+    private function member($row,array $request): array
+    {
+        $memberId=$row['member_id']??null;$label=$row['member_name']??null;
+        if (!is_array($row)||!is_int($memberId)||$memberId<1||!is_string($label)||trim($label)==='') {
+            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        }
+        return ['selection_ref'=>'member:'.$memberId,'label'=>trim($label),'view'=>$request['view']??'summary'];
+    }
+
+    /**
+     * Reuse the answer's full projection to identify the exact displayed cohort,
+     * including its zero-row policy and metric unions. Never use its 20-row
+     * preview or re-query a new population. Identities remain server-owned.
+     */
+    private function breakdownRows(array $view): array
+    {
+        if (($view['results']??[])===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        foreach ($view['results'] as $result) {
+            if (($result['object_kind']??null)!=='member'||!is_array($result['rows']??null)) {
+                throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            }
+            if (($result['has_more']??null)!==false||!is_int($result['object_count']??null)
+                ||$result['object_count']!==count($result['rows'])) {
+                throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            }
+        }
+        $answer=(new \app\services\ai\presentation\AiAnswerRenderer())->render($view,false);
+        $rows=[];$seen=[];
+        foreach (($answer['table']['rows']??[]) as $row) {
+            $member=['member_id'=>$row['entity_id']??null,'member_name'=>$row['label']??null];
+            $this->member($member,[]);
+            $id=$member['member_id'];
+            if (isset($seen[$id])) {
+                if ($seen[$id]!==$member['member_name']) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                continue;
+            }
+            $seen[$id]=$member['member_name'];$rows[]=$member;
+        }
+        return $rows;
+    }
+
+    /** Ranking groups may repeat one tied member; keep first display order and one identity. */
+    private function rankingRows(array $view): array
+    {
+        $rows=[];$seen=[];$matched=false;
+        foreach ((array)($view['results']??[]) as $result) {
+            if (($result['object_kind']??null)!=='member') continue;
+            $groups=$result['rows']??null;
+            if (!is_array($groups) || array_intersect(array_keys($groups),['top','bottom'])===[]
+                || array_diff(array_keys($groups),['top','bottom'])!==[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $matched=true;
+            foreach ($groups as $groupRows) {
+                if (!is_array($groupRows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                foreach ($groupRows as $row) {
+                    if (!is_array($row)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                    $memberId=$row['member_id']??($row['entity_id']??null);
+                    $label=$row['member_name']??($row['entity_name']??null);
+                    // Validate before deduplicating: a damaged row cannot become
+                    // an empty success or silently shrink the requested member set.
+                    $this->member(['member_id'=>$memberId,'member_name'=>$label],[]);
+                    if (isset($seen[$memberId])) continue;
+                    $seen[$memberId]=true;$rows[]=['member_id'=>$memberId,'member_name'=>trim($label)];
+                }
+            }
+        }
+        if (!$matched) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        return $rows;
+    }
+}

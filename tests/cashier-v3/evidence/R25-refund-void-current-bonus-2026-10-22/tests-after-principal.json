@@ -1,0 +1,20 @@
+[
+  {
+    "test": "r25-refund-void-current-bonus-mysql.php",
+    "exit": 0,
+    "pass": true,
+    "output": "R25 unchanged PASS\nR25 principal_credit PASS\nR25 gift_credit PASS\nR25 gift_spent PASS\nR25 spent_then_refilled PASS\nR25 principal_only PASS\nR25 mixed PASS\nR25 combined_exact PASS\nR25 insufficient PASS\nR25 late_failure PASS\nR25_CURRENT_BONUS_VOID=PASS checks=100\n"
+  },
+  {
+    "test": "r46-independent-refund-bonus-rollback.php",
+    "exit": 0,
+    "pass": true,
+    "output": "R46_INDEPENDENT_REFUND_BONUS=PASS assertions=34\n"
+  },
+  {
+    "test": "r29-balance-refund-rollback.php",
+    "exit": 0,
+    "pass": true,
+    "output": "R29 balance refund, split, replay, stale version and void PASS\n"
+  }
+]

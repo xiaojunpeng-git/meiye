@@ -1,0 +1,1 @@
+PASS: legacy, add/edit/reorder/delete, no resurrection, independent regions, asynchronous picker guard, JSON roundtrip, current-frame links, custom-grid geometry, shared navigation editor regression, 7 SFC templates.

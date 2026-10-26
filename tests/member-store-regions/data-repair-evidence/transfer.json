@@ -1,0 +1,10 @@
+{
+  "commit": "de4128786921fb26bfa7780458d91ea2e67f5666",
+  "files": {
+    "plan.json": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d",
+    "standard-city.json.gz": "fb56e5df97e186db4f3c18a712a8967d725a0fb4ed31c2cd3bebaa9aea991a4c",
+    "repair.php": "d8c5977be5706ab11bda57c28524c005bcc9e2e788f2474829f55f811b133eac",
+    "run.php": "85b2b96cd50df0d39e2bda0e6c0cd1dd31fd6c4923252b75431dfca9e34a9765"
+  },
+  "directory": "/www/backups/008.cc3798.com/20261024-region-data-1760affd"
+}

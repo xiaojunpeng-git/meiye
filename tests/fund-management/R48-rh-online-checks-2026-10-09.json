@@ -1,0 +1,165 @@
+{
+  "target": "rh.cc3798.com",
+  "source_commit": "8dcd17708a083e0ea31933ad968cb5eb24346373",
+  "functional_parent": "5f596a3143def18ceadbe3fedbcbee4f4ee182cf",
+  "accepted_version": "R48-store-draft-delete-20261009",
+  "deployed_at": "2026-10-09T17:52:06+08:00",
+  "candidate_sha256": "427badba68fd611fdbb9c1471800e6671af9867640da5f3e98d0bd8d3f4b0401",
+  "backup": {
+    "path": "/www/backups/rh.cc3798.com/20261009-r48-8dcd1770/",
+    "archive": "backend-before.tar.gz",
+    "sha256": "44bcd3a4c8f2e87f658654f7b797935ad150641ee646528e5dfc60c6c535fc95",
+    "gzip_verified": true
+  },
+  "before": {
+    "checked_at": "2026-10-09T17:51:38+08:00",
+    "database": "ruihao",
+    "readonly": true,
+    "files": {
+      "app/controller/store/fund/StoreFund.php": "81f361e461fa40c38dcb6f2ca60084ea6f7e953ce29ec6091eb05130149e1554",
+      "app/services/fund/StoreFundServices.php": "dd98185f573c29a6a4f61247bd341bb1194297ff190b8e9da4ed94694eccc2ce",
+      "app/services/cashier/v3/permission/CashierV3FeatureResolver.php": "c1fbd05fe9812501a5aee8c240da52eacac46a699926a67e74840d85f3127de3"
+    },
+    "migration_latest_id": 215,
+    "tables": {
+      "store_fund_document": {
+        "count": 1358,
+        "sha256": "8cadc91816aed7c25026a09a17712cfe4d1bdb3ff64ce2dddb3b4671db07f4ac"
+      },
+      "store_fund_document_line": {
+        "count": 1877,
+        "sha256": "9ef6ffbef28f2762abc5f425bbabde3b7429bc26fa649146e158969ae2a54cbe"
+      },
+      "store_fund_subject": {
+        "count": 12,
+        "sha256": "1e5b3375c4fd9240ca85f9dc04d239fc85244c993075f061c7a4b28eff38a368"
+      }
+    },
+    "store_id": 23,
+    "document_count": 2,
+    "deleted_filter_count": 0,
+    "report_summary": {
+      "income_amount_cents": 36415,
+      "expense_amount_cents": 125233,
+      "net_amount_cents": -88818,
+      "income_amount": "364.15",
+      "expense_amount": "1252.33",
+      "net_amount": "-888.18",
+      "line_count": 33
+    },
+    "ledger_balance_cents": 61182,
+    "permissions": {
+      "employee_id": 490,
+      "fee_feature_granted": true,
+      "authorized_guard_passed": true,
+      "denials": {
+        "readonly": true,
+        "no_permission": true
+      }
+    },
+    "delete_controller_loaded": true,
+    "production_business_writes": false
+  },
+  "after": {
+    "checked_at": "2026-10-09T17:52:28+08:00",
+    "database": "ruihao",
+    "readonly": true,
+    "files": {
+      "app/controller/store/fund/StoreFund.php": "536adc29e431292fcca76edf0eafc3419376af721160e6c10c3a1ae8f8372050",
+      "app/services/fund/StoreFundServices.php": "d0b8dd323388d9c445e1c39d8c71f17581787c3e881b34de4d8c93d2df498271",
+      "app/services/cashier/v3/permission/CashierV3FeatureResolver.php": "c1fbd05fe9812501a5aee8c240da52eacac46a699926a67e74840d85f3127de3"
+    },
+    "migration_latest_id": 215,
+    "tables": {
+      "store_fund_document": {
+        "count": 1358,
+        "sha256": "8cadc91816aed7c25026a09a17712cfe4d1bdb3ff64ce2dddb3b4671db07f4ac"
+      },
+      "store_fund_document_line": {
+        "count": 1877,
+        "sha256": "9ef6ffbef28f2762abc5f425bbabde3b7429bc26fa649146e158969ae2a54cbe"
+      },
+      "store_fund_subject": {
+        "count": 12,
+        "sha256": "1e5b3375c4fd9240ca85f9dc04d239fc85244c993075f061c7a4b28eff38a368"
+      }
+    },
+    "store_id": 23,
+    "document_count": 2,
+    "deleted_filter_count": 0,
+    "report_summary": {
+      "income_amount_cents": 36415,
+      "expense_amount_cents": 125233,
+      "net_amount_cents": -88818,
+      "income_amount": "364.15",
+      "expense_amount": "1252.33",
+      "net_amount": "-888.18",
+      "line_count": 33
+    },
+    "ledger_balance_cents": 61182,
+    "permissions": {
+      "employee_id": 490,
+      "fee_feature_granted": true,
+      "authorized_guard_passed": true,
+      "denials": {
+        "readonly": true,
+        "no_permission": true
+      }
+    },
+    "delete_controller_loaded": true,
+    "production_business_writes": false
+  },
+  "public_https": {
+    "result": "PASS",
+    "results": [
+      {
+        "url": "https://rh.cc3798.com/view_fund_v3/",
+        "status": 200,
+        "sha256": "6e3708c37857664f08337b28f1d5b9b5b4506da7ae80b23db2ff1ec8640a030f"
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_fund_v3/",
+        "status": 200,
+        "sha256": "41809769dab5f7aa4f2a6c4ec3292d1058095b79264b64e060e36e89271a14cc"
+      },
+      {
+        "url": "https://rh.cc3798.com/view_fund_v3/assets/index-228d4b8a.js",
+        "status": 200,
+        "sha256": "d937a94eab534adbac9111ceb52fa93895d904249d171a3f9f261410910bd6ea"
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_fund_v3/assets/index-228d4b8a.js",
+        "status": 200,
+        "sha256": "d937a94eab534adbac9111ceb52fa93895d904249d171a3f9f261410910bd6ea"
+      }
+    ]
+  },
+  "runtime": {
+    "manager_count": 1,
+    "manager_pid": 24155,
+    "port": 20800,
+    "recent_100_log_lines_fatal_parse_uncaught": 0
+  },
+  "comparison": {
+    "fund_tables_unchanged": true,
+    "report_unchanged": true,
+    "ledger_unchanged": true,
+    "migration_unchanged": true
+  },
+  "limitations": {
+    "production_business_writes": false,
+    "authenticated_http_delete": false,
+    "concurrent_load_test": false
+  },
+  "push": {
+    "status": "PASS",
+    "remote": "origin",
+    "branch": "release/store-cashier-c14-main",
+    "functional_commit": "8dcd17708a083e0ea31933ad968cb5eb24346373",
+    "verified_published_tip": "b8c83466",
+    "prior_remote_tip": "68911c81",
+    "pushed_scope": "R48 deployment evidence only; functional commit was already an ancestor of the fetched remote tip",
+    "github_pushed": false,
+    "force_push": false
+  }
+}

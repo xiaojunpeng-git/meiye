@@ -1,0 +1,51 @@
+{
+  "recorded_at": "2026-10-11T14:32:37.134777+00:00",
+  "original_task_baseline": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "current_head": "be821109147b046734c27fcf69472af44289e1b1",
+  "scope": "local verified mysql/ruihao only; no live query submitted during reload",
+  "preflight": {
+    "phase": "preflight",
+    "audited_at": "2026-10-11T22:30:43+08:00",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0,
+    "gateway_sha256": "b6a4c8a8cba0b4ba2d5be9a1543f794e0e45b8a935cfe25b0a609423ffeeafa6"
+  },
+  "postflight": {
+    "phase": "postflight",
+    "audited_at": "2026-10-11T22:32:21+08:00",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0,
+    "gateway_sha256": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728"
+  },
+  "reload_command": "docker restart --time 35 mohe-ai-execution-worker mohe-ai-supervisor",
+  "reload_exit_code": 0,
+  "execution_worker_started_at": "2026-10-11T14:31:25.909765036Z",
+  "supervisor_started_at": "2026-10-11T14:32:01.112560026Z",
+  "gateway_final_mtime": "2026-10-11T14:31:09.378194+00:00",
+  "worker_started_after_final_gateway_write": true,
+  "source_sha256": {
+    "app/services/ai/AiGatewayServices.php": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+    "app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "app/services/ai/execution/AiRuntimeFactory.php": "2eb1dff747832b392a506113db91f54c17a99202aec83dd18f2a8e2433668302",
+    "app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+    "app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+    "app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+    "app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "app/services/query/metric/MetricReadViewServices.php": "b77940267ce3c2351488152570b7e2eb5a74dcae72205cd7b4e76307fd78f020",
+    "app/services/metric/MetricDictionaryServices.php": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7",
+    "app/services/query/metric/MetricDefinitionRegistry.php": "b107d93ad729bf6b8a5eeadddafc9e409c7e58c43c7e1aa68a6f4fe0ae967c59"
+  },
+  "driver_sha256": "66ae4f0e6f298a0ad0fc3f9241a25505b474a1b25816d6f55538560672019e6d",
+  "production_changed": false,
+  "slot_or_config_changed_directly": false
+}

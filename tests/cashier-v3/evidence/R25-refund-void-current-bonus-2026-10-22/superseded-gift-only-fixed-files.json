@@ -1,0 +1,21 @@
+{
+  "baseline_head": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "fixed_head": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "files": {
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "1c088a7e82d7aa8b352102077b449c85fd00c0d1a8f51916c17ca9b12b633a39",
+    "tests/cashier-v3/php/r33-refund-void-rollback.php": "45c1a95132288d194cbf28c0eeeb210d60b709564744a1cb371520c528b8a194",
+    "tests/cashier-v3/php/r25-refund-void-current-bonus-mysql.php": "71b95bdfc8618a726b5bbccb296963b980f936dfba7a98c23e09248fa67e2ae5"
+  },
+  "patch_sha256": "5062e574a5b5ccf3e27f6a8e8b88cdd423fd085ad7357baf2b75daf4433e9e8e",
+  "scope": "后续收支不再阻止退款转入赠金的作废；扣回当前赠金并追加冲销事实",
+  "preexisting": "余额退款类型与返还拆分分支在本轮前已有，原样保留，不作为本轮优化",
+  "tests": {
+    "R25": "PASS 65 checks，含真实并发连接与事务失败回滚",
+    "R46": "PASS 34 assertions",
+    "R29": "PASS",
+    "R33": "未通过：旧固定操作员夹具被当前权限拒绝；未计入通过项目，同类赠金不足行为已由 R25 真实授权命令链验证"
+  },
+  "remote": "不适用；未连接、未部署、未改线上数据",
+  "acceptance": "待产品经理确认验收",
+  "commit": "未提交"
+}

@@ -1,0 +1,127 @@
+<?php
+
+declare(strict_types=1);
+
+namespace app\services\mobile\merchant;
+
+use app\services\mobile\protocol\MobileApiException;
+use think\facade\Db;
+
+/** Transactional authority for every new mobile merchant-session revocation. */
+final class MobileAuthRevocationServices
+{
+    /**
+     * Ensures the security state required by a merchant session exists.
+     *
+     * This is deliberately separate from revocation: historical employees may
+     * already have a valid mobile authorization projection but predate the
+     * session-state migration. Bootstrapping their state must not be reported
+     * as a permission change or revoke an otherwise valid session.
+     *
+     * @return array{state:array,lease:array}
+     */
+    public function ensureStateAndLeaseInCurrentTransaction(int $employeeId): array
+    {
+        if ($employeeId <= 0) {
+            throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '员工认证状态不存在。');
+        }
+        $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
+        if (!$employee) {
+            throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '员工认证状态不存在。');
+        }
+        if (!$this->tableExists('employee_mobile_auth_state')) {
+            throw MobileApiException::business('AUTH_REQUIRED', '员工认证状态表不可用。');
+        }
+
+        $now = time();
+        $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
+        if (!$state) {
+            try {
+                Db::name('employee_mobile_auth_state')->insert([
+                    'employee_id' => $employeeId,
+                    'phone_binding_version' => 1,
+                    'auth_version' => max(1, (int)($employee['auth_version'] ?? 1)),
+                    'merchant_session_epoch' => 1,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            } catch (\Throwable $exception) {
+                // A concurrent bootstrap may already have inserted the state.
+            }
+            $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
+        }
+        if (!$state) {
+            throw MobileApiException::business('AUTH_REQUIRED', '员工认证状态初始化失败。');
+        }
+
+        $lease = Db::name('mobile_merchant_lease')->where('employee_id', $employeeId)->lock(true)->find();
+        if (!$lease) {
+            try {
+                Db::name('mobile_merchant_lease')->insert([
+                    'employee_id' => $employeeId,
+                    'current_session_id' => null,
+                    'current_epoch' => 1,
+                    'state' => 'EMPTY',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            } catch (\Throwable $exception) {
+                // A concurrent session issuer may already have created it.
+            }
+            $lease = Db::name('mobile_merchant_lease')->where('employee_id', $employeeId)->lock(true)->find();
+        }
+        if (!$lease) {
+            throw MobileApiException::business('AUTH_REQUIRED', '商家会话租约不可用。');
+        }
+        return ['state' => $state, 'lease' => $lease];
+    }
+
+    /**
+     * The caller may run inside an existing personnel/authorization transaction.
+     * A failure is deliberately rethrown so the original change rolls back too.
+     */
+    public function revokeAllInCurrentTransaction(int $employeeId, string $reason, int $actorEmployeeId = 0, string $requestId = ''): void
+    {
+        if ($employeeId <= 0 || !in_array($reason, ['AUTH_CHANGED', 'EMPLOYEE_DISABLED', 'ADMIN_SIGN_OUT_ALL', 'SIGNED_OUT'], true)) {
+            throw MobileApiException::business('AUTH_REQUIRED', '商家会话撤销参数无效。');
+        }
+        $now = time();
+        $bootstrapped = $this->ensureStateAndLeaseInCurrentTransaction($employeeId);
+        $state = $bootstrapped['state'];
+        $lease = $bootstrapped['lease'];
+        $endState = $reason === 'EMPLOYEE_DISABLED' ? 'EMPLOYEE_DISABLED' : ($reason === 'ADMIN_SIGN_OUT_ALL' ? 'ADMIN_SIGNED_OUT' : 'AUTH_REVOKED');
+        $endCause = $reason === 'ADMIN_SIGN_OUT_ALL' ? 'ADMIN_SIGN_OUT_ALL' : ($reason === 'EMPLOYEE_DISABLED' ? 'EMPLOYEE_DISABLED' : 'AUTH_CHANGED');
+        Db::name('mobile_merchant_session')->where('employee_id', $employeeId)->where('state', 'ACTIVE')->lock(true)->select();
+        Db::name('mobile_merchant_session')->where('employee_id', $employeeId)->where('state', 'ACTIVE')->update([
+            'state' => $endState, 'revoked_at' => $now, 'session_end_cause' => $endCause, 'updated_at' => $now,
+        ]);
+        Db::name('mobile_merchant_session_projection')->whereIn('session_id', Db::name('mobile_merchant_session')->where('employee_id', $employeeId)->column('session_id'))
+            ->where('state', 'ACTIVE')->update(['state' => 'CLOSED', 'updated_at' => $now]);
+        $authVersion = (int)$state['auth_version'] + 1;
+        $epoch = (int)$state['merchant_session_epoch'] + 1;
+        Db::name('employee_mobile_auth_state')->where('id', (int)$state['id'])->update([
+            'auth_version' => $authVersion, 'merchant_session_epoch' => $epoch, 'updated_at' => $now,
+        ]);
+        Db::name('mobile_merchant_lease')->where('id', (int)$lease['id'])->update([
+            'current_session_id' => null, 'current_epoch' => max((int)$lease['current_epoch'] + 1, $epoch), 'state' => 'REVOKED', 'updated_at' => $now,
+        ]);
+        Db::name('mobile_merchant_security_audit')->insert([
+            'employee_id' => $employeeId, 'actor_employee_id' => $actorEmployeeId,
+            'event_code' => $reason === 'EMPLOYEE_DISABLED' ? 'MERCHANT_SESSION_EMPLOYEE_DISABLED' : ($reason === 'ADMIN_SIGN_OUT_ALL' ? 'MERCHANT_SESSION_ADMIN_SIGNED_OUT' : 'MERCHANT_SESSION_AUTH_REVOKED'),
+            'session_id' => null, 'lease_epoch_before' => (int)$lease['current_epoch'], 'lease_epoch_after' => max((int)$lease['current_epoch'] + 1, $epoch),
+            'auth_version_before' => (int)$state['auth_version'], 'auth_version_after' => $authVersion, 'installation_digest' => null,
+            'request_id' => $requestId, 'reason_code' => $reason, 'payload' => '{}', 'occurred_at' => $now, 'recorded_at' => $now,
+        ]);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $connection = Db::connect();
+        $prefixedTable = (string)$connection->getConfig('prefix') . $table;
+        $row = Db::query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+            [$prefixedTable]
+        );
+        return (int)($row[0]['c'] ?? 0) > 0;
+    }
+}

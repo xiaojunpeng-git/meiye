@@ -1,0 +1,130 @@
+{
+  "install": {
+    "phase": "installed",
+    "source_commit": "725e1bfe8dfc5077383289a658db00df40255c65",
+    "release_commit": "2994f9dbc5fe44156301ddbe71afbcc27643aabe",
+    "backup": "/www/backups/rh.cc3798.com/20261011-jp-save-725e1bfe",
+    "time": "2026-10-11T18:11:42+08:00",
+    "restart": [
+      "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+      "ruihao swoole started pid=30798 port=20800"
+    ],
+    "health": [
+      "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+      "manager_count=1",
+      "manager_pids=30798"
+    ],
+    "anonymous_api_status": 410000,
+    "installed_files": 1171,
+    "migration": null,
+    "business_writes": false,
+    "html_sha256": "0d4101cd72bf58b9618ccb27d1307b5cd2004b4b7fa7d3c4270fa302e8f6cf6d"
+  },
+  "backup": {
+    "target": "rh.cc3798.com",
+    "database": "ruihao",
+    "source_commit": "725e1bfe8dfc5077383289a658db00df40255c65",
+    "backup": "/www/backups/rh.cc3798.com/20261011-jp-save-725e1bfe",
+    "artifacts": [
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-jp-save-725e1bfe/backend-before.tar.gz",
+        "bytes": 13515,
+        "sha256": "50eeae5b945646a4578722d5c31e52dc8f66dad4addf4538a39bc8c89d65b556"
+      },
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-jp-save-725e1bfe/static-before.tar.gz",
+        "bytes": 113303276,
+        "sha256": "4b6453c0593d2f3b512a02dea91ee7395a51ee8ede3218f1acc32da2a3f10cab"
+      },
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-jp-save-725e1bfe/ruihao-before.sql.gz",
+        "bytes": 250814649,
+        "sha256": "5341c3d20a64365322a2f1560675cd1944cc177ea2a90fd6a33d2bdb845529c3"
+      }
+    ],
+    "before": {
+      "backend": {
+        "app/services/organization/JobPositionPolicyServices.php": "42498c967de76bd90680333c9870e0eb84abea0386278425d325a9f2c43a0972",
+        "app/services/organization/OrganizationWorkspaceWriteGate.php": "0f8b8b3077fb02bb613aeba28bbeccc84e5e035f3be6a410306149ca1709edb6",
+        "public/system.html": "73faffc42481a8553f273f57e4fcdb0f1484e8b8a5df74e5f962e34b2331d554"
+      },
+      "latest_upgrade": [
+        {
+          "id": 221,
+          "upgrade_key": "20261011-003-inventory-no-expiry",
+          "code_version": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf"
+        }
+      ]
+    },
+    "completed_at": "2026-10-11T18:07:05+08:00"
+  },
+  "checks": [
+    {
+      "url": "https://rh.cc3798.com/system.html",
+      "expected_sha256": "0d4101cd72bf58b9618ccb27d1307b5cd2004b4b7fa7d3c4270fa302e8f6cf6d",
+      "actual_sha256": "0d4101cd72bf58b9618ccb27d1307b5cd2004b4b7fa7d3c4270fa302e8f6cf6d",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-vendors.256a48e4.js",
+      "expected_sha256": "78174425a121f4bc04f0a221f0aa11f65b16dd5216b98b7faf5a02170a7e4969",
+      "actual_sha256": "78174425a121f4bc04f0a221f0aa11f65b16dd5216b98b7faf5a02170a7e4969",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/app.c3fc7898.js",
+      "expected_sha256": "e25576b35e714c436ebf66964b82e8c4a3f177862b9fc5b0a10d01c6aad523ac",
+      "actual_sha256": "e25576b35e714c436ebf66964b82e8c4a3f177862b9fc5b0a10d01c6aad523ac",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/css/chunk-vendors.48272356.css",
+      "expected_sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "actual_sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/css/app.b6208b14.css",
+      "expected_sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+      "actual_sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-92fd36b6.6115ecef.js",
+      "expected_sha256": "5bb909fccd5bdcf80cb18905ed9176eb67591b2e77834b9d4017261d6d3b9fb5",
+      "actual_sha256": "5bb909fccd5bdcf80cb18905ed9176eb67591b2e77834b9d4017261d6d3b9fb5",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-e5c79f56.c80e99e9.js",
+      "expected_sha256": "48495e1bb6c22a414ae2a59ec1597ad11fbd6e4399b9316ae4d402e7c28084c3",
+      "actual_sha256": "48495e1bb6c22a414ae2a59ec1597ad11fbd6e4399b9316ae4d402e7c28084c3",
+      "pass": true
+    }
+  ],
+  "readonly_permission_checks": {
+    "active_accounts": 179,
+    "allowed": 107,
+    "ordinary_allowed": 106,
+    "denied": 72,
+    "missing_identity_denied": true,
+    "write_enabled": true
+  },
+  "latest_upgrade": {
+    "id": 221,
+    "upgrade_key": "20261011-003-inventory-no-expiry"
+  },
+  "browser": {
+    "url": "https://rh.cc3798.com/admin/store/region/job-positions?release=jp-725e1bfe",
+    "account": "existing admin session",
+    "list_loaded": true,
+    "front_desk_editor_loaded": true,
+    "save_button_enabled": true,
+    "console_errors": 0,
+    "save_clicked": false,
+    "screenshot": "job-position-save-authority-rh-online-2026-10-11.png"
+  },
+  "validation_boundary": "Production checks are read-only; actual create/edit/replay/denial tested locally with rollback and PM accepted. No production permission/role writes.",
+  "verified_at": "2026-10-11T10:13:52.337Z",
+  "archive_sha256": "f038f23283104f8b4ecdff1861fd9a425d160b687763fbc7628842a45d6c8685"
+}

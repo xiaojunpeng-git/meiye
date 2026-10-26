@@ -1,0 +1,13 @@
+{
+  "terminal": "admin",
+  "variant": "baseline",
+  "commit": "120fea991b7dbe4fe062d9914523a35a677f6819",
+  "tree": "0791eae71f589a8cc3322fb0a15a1be0fbc21176",
+  "canonical": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "input": "/private/tmp/mohe-r26-member-transfer-20261022/baseline-readonly/前端代码/admin",
+  "output": "/private/tmp/mohe-r26-member-transfer-20261022/admin-baseline",
+  "inputFiles": 1478,
+  "readonly": true,
+  "node": "v16.20.2",
+  "runtimeConfig": null
+}

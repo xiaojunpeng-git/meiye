@@ -1,0 +1,1305 @@
+{
+    "target_database": "mohe_008",
+    "target_port": 3307,
+    "group": {
+        "id": "1",
+        "pid": "0",
+        "name": "集团",
+        "status": "1",
+        "is_del": "0"
+    },
+    "geni": {
+        "id": "2",
+        "pid": "1",
+        "name": "歌妮",
+        "status": "1",
+        "is_del": "0"
+    },
+    "organizations": [
+        {
+            "id": "2",
+            "pid": "1",
+            "name": "歌妮",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "4",
+            "pid": "2",
+            "name": "云南",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "5",
+            "pid": "2",
+            "name": "安徽",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "6",
+            "pid": "2",
+            "name": "广东",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "7",
+            "pid": "2",
+            "name": "成都",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "8",
+            "pid": "2",
+            "name": "江苏",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "9",
+            "pid": "2",
+            "name": "浙江",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "10",
+            "pid": "2",
+            "name": "重庆",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "15",
+            "pid": "4",
+            "name": "云南区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "16",
+            "pid": "5",
+            "name": "合肥",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "17",
+            "pid": "5",
+            "name": "合肥一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "18",
+            "pid": "5",
+            "name": "阜阳",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "19",
+            "pid": "6",
+            "name": "广州一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "20",
+            "pid": "6",
+            "name": "广州三区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "21",
+            "pid": "6",
+            "name": "广州直营",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "22",
+            "pid": "7",
+            "name": "成都区域",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "23",
+            "pid": "8",
+            "name": "一一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "24",
+            "pid": "8",
+            "name": "一三区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "25",
+            "pid": "8",
+            "name": "一二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "26",
+            "pid": "8",
+            "name": "一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "27",
+            "pid": "8",
+            "name": "一四区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "28",
+            "pid": "8",
+            "name": "七一一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "29",
+            "pid": "8",
+            "name": "七一二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "30",
+            "pid": "8",
+            "name": "七一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "31",
+            "pid": "8",
+            "name": "七区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "32",
+            "pid": "8",
+            "name": "三一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "33",
+            "pid": "8",
+            "name": "三二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "34",
+            "pid": "8",
+            "name": "三区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "35",
+            "pid": "8",
+            "name": "二一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "36",
+            "pid": "8",
+            "name": "二二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "37",
+            "pid": "8",
+            "name": "二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "38",
+            "pid": "8",
+            "name": "五一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "39",
+            "pid": "8",
+            "name": "五二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "40",
+            "pid": "8",
+            "name": "五区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "41",
+            "pid": "8",
+            "name": "八区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "42",
+            "pid": "8",
+            "name": "六一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "43",
+            "pid": "8",
+            "name": "六三区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "44",
+            "pid": "8",
+            "name": "六二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "45",
+            "pid": "8",
+            "name": "四一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "46",
+            "pid": "8",
+            "name": "四区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "47",
+            "pid": "9",
+            "name": "宁波",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "48",
+            "pid": "9",
+            "name": "浙江",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "49",
+            "pid": "10",
+            "name": "一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "50",
+            "pid": "10",
+            "name": "三区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "51",
+            "pid": "10",
+            "name": "二一区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "52",
+            "pid": "10",
+            "name": "二二区",
+            "status": "1",
+            "is_del": "0"
+        },
+        {
+            "id": "53",
+            "pid": "10",
+            "name": "二区",
+            "status": "1",
+            "is_del": "0"
+        }
+    ],
+    "stores": [
+        {
+            "id": "1",
+            "name": "盛高店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "15"
+        },
+        {
+            "id": "2",
+            "name": "空港店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "15"
+        },
+        {
+            "id": "3",
+            "name": "翡翠店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "15"
+        },
+        {
+            "id": "4",
+            "name": "西城店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "15"
+        },
+        {
+            "id": "5",
+            "name": "雄宝店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "15"
+        },
+        {
+            "id": "6",
+            "name": "亳州店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "16"
+        },
+        {
+            "id": "7",
+            "name": "桐城店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "16"
+        },
+        {
+            "id": "8",
+            "name": "百脑汇店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "16"
+        },
+        {
+            "id": "9",
+            "name": "保利店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "17"
+        },
+        {
+            "id": "10",
+            "name": "滨湖店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "17"
+        },
+        {
+            "id": "11",
+            "name": "西环店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "17"
+        },
+        {
+            "id": "12",
+            "name": "YUE SPA",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "18"
+        },
+        {
+            "id": "13",
+            "name": "嘉颜嘉色",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "19"
+        },
+        {
+            "id": "14",
+            "name": "萱雅和合店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "19"
+        },
+        {
+            "id": "15",
+            "name": "帝景店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "20"
+        },
+        {
+            "id": "16",
+            "name": "花都一店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "20"
+        },
+        {
+            "id": "17",
+            "name": "天河店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "21"
+        },
+        {
+            "id": "18",
+            "name": "成都店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "22"
+        },
+        {
+            "id": "19",
+            "name": "吴江",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "23"
+        },
+        {
+            "id": "20",
+            "name": "吴江2",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "23"
+        },
+        {
+            "id": "21",
+            "name": "盛泽",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "23"
+        },
+        {
+            "id": "22",
+            "name": "盛泽2",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "23"
+        },
+        {
+            "id": "23",
+            "name": "上海",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "24"
+        },
+        {
+            "id": "24",
+            "name": "东山",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "25"
+        },
+        {
+            "id": "25",
+            "name": "城邦",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "25"
+        },
+        {
+            "id": "26",
+            "name": "总店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "26"
+        },
+        {
+            "id": "27",
+            "name": "雅姿",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "26"
+        },
+        {
+            "id": "28",
+            "name": "科技城",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "27"
+        },
+        {
+            "id": "29",
+            "name": "南京1",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "28"
+        },
+        {
+            "id": "30",
+            "name": "金坛",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "28"
+        },
+        {
+            "id": "31",
+            "name": "丹阳1",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "29"
+        },
+        {
+            "id": "32",
+            "name": "丹阳2",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "29"
+        },
+        {
+            "id": "33",
+            "name": "太仓",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "29"
+        },
+        {
+            "id": "34",
+            "name": "镇江",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "29"
+        },
+        {
+            "id": "35",
+            "name": "南京2",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "30"
+        },
+        {
+            "id": "36",
+            "name": "大港",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "30"
+        },
+        {
+            "id": "37",
+            "name": "巨涛",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "30"
+        },
+        {
+            "id": "38",
+            "name": "吴中",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "31"
+        },
+        {
+            "id": "39",
+            "name": "小石湖",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "31"
+        },
+        {
+            "id": "40",
+            "name": "滨河",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "31"
+        },
+        {
+            "id": "41",
+            "name": "石路天虹",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "32"
+        },
+        {
+            "id": "42",
+            "name": "金匙望湖",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "32"
+        },
+        {
+            "id": "43",
+            "name": "万科",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "44",
+            "name": "常熟店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "45",
+            "name": "昆山2店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "46",
+            "name": "昆山3店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "47",
+            "name": "昆山一店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "48",
+            "name": "木渎",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "33"
+        },
+        {
+            "id": "49",
+            "name": "养育巷",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "34"
+        },
+        {
+            "id": "50",
+            "name": "山水",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "35"
+        },
+        {
+            "id": "51",
+            "name": "莫邪",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "35"
+        },
+        {
+            "id": "52",
+            "name": "高港",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "36"
+        },
+        {
+            "id": "53",
+            "name": "星湖街",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "37"
+        },
+        {
+            "id": "54",
+            "name": "泰州",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "37"
+        },
+        {
+            "id": "55",
+            "name": "湖东",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "37"
+        },
+        {
+            "id": "56",
+            "name": "青剑湖",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "37"
+        },
+        {
+            "id": "57",
+            "name": "周庄店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "38"
+        },
+        {
+            "id": "58",
+            "name": "江阴店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "38"
+        },
+        {
+            "id": "59",
+            "name": "祝塘",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "38"
+        },
+        {
+            "id": "60",
+            "name": "佐登店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "39"
+        },
+        {
+            "id": "61",
+            "name": "桐泾店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "40"
+        },
+        {
+            "id": "62",
+            "name": "汇融",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "41"
+        },
+        {
+            "id": "63",
+            "name": "相城",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "41"
+        },
+        {
+            "id": "64",
+            "name": "繁花",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "41"
+        },
+        {
+            "id": "65",
+            "name": "黄桥",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "41"
+        },
+        {
+            "id": "66",
+            "name": "女人缘",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "42"
+        },
+        {
+            "id": "67",
+            "name": "朝晖",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "42"
+        },
+        {
+            "id": "68",
+            "name": "超颜",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "42"
+        },
+        {
+            "id": "69",
+            "name": "名园万达",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "43"
+        },
+        {
+            "id": "70",
+            "name": "名园九洲",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "43"
+        },
+        {
+            "id": "71",
+            "name": "时间海",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "43"
+        },
+        {
+            "id": "72",
+            "name": "亿丰",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "73",
+            "name": "威莎",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "74",
+            "name": "康桥",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "75",
+            "name": "梵韵宫",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "76",
+            "name": "泰悦",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "77",
+            "name": "玉兰",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "78",
+            "name": "龙湖",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "44"
+        },
+        {
+            "id": "79",
+            "name": "东方名媛",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "80",
+            "name": "四月天",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "81",
+            "name": "星颜荟",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "82",
+            "name": "爱肤",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "83",
+            "name": "米莱",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "84",
+            "name": "纯spa",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "45"
+        },
+        {
+            "id": "85",
+            "name": "奥林",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "46"
+        },
+        {
+            "id": "86",
+            "name": "摩天",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "46"
+        },
+        {
+            "id": "87",
+            "name": "真研",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "46"
+        },
+        {
+            "id": "88",
+            "name": "萱韵",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "46"
+        },
+        {
+            "id": "89",
+            "name": "慈溪",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "47"
+        },
+        {
+            "id": "90",
+            "name": "海曙",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "47"
+        },
+        {
+            "id": "91",
+            "name": "鄞州店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "47"
+        },
+        {
+            "id": "92",
+            "name": "富阳",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "48"
+        },
+        {
+            "id": "93",
+            "name": "桐乡",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "48"
+        },
+        {
+            "id": "94",
+            "name": "人和店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "49"
+        },
+        {
+            "id": "95",
+            "name": "安杰玛店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "49"
+        },
+        {
+            "id": "96",
+            "name": "融创店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "49"
+        },
+        {
+            "id": "97",
+            "name": "中央店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "50"
+        },
+        {
+            "id": "98",
+            "name": "南坪店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "50"
+        },
+        {
+            "id": "99",
+            "name": "大学城店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "50"
+        },
+        {
+            "id": "100",
+            "name": "两江店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "51"
+        },
+        {
+            "id": "101",
+            "name": "汽博店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "51"
+        },
+        {
+            "id": "102",
+            "name": "沙坪坝店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "51"
+        },
+        {
+            "id": "103",
+            "name": "松树桥店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "52"
+        },
+        {
+            "id": "104",
+            "name": "源著店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "52"
+        },
+        {
+            "id": "105",
+            "name": "大坪店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "53"
+        },
+        {
+            "id": "106",
+            "name": "水晶店",
+            "is_show": "1",
+            "business_status": "1",
+            "business_status_reason": "",
+            "is_del": "0",
+            "org_id": "53"
+        }
+    ]
+}

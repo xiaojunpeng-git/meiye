@@ -1,0 +1,40 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "cases": [
+    {
+      "page": "checkout",
+      "guestAuthGuard": true,
+      "url": "https://rh.cc3798.com/pages/users/login/index"
+    }
+  ],
+  "blockedNonGet": [],
+  "errors": [],
+  "calls": [
+    {
+      "method": "GET",
+      "url": "/api/wechat/get_logo"
+    },
+    {
+      "method": "GET",
+      "url": "/api/get_copyright"
+    },
+    {
+      "method": "GET",
+      "url": "/api/v2/diy/color_change/color_change"
+    },
+    {
+      "method": "GET",
+      "url": "/api/v2/diy/product_detail"
+    },
+    {
+      "method": "GET",
+      "url": "/api/agent/brokerage"
+    },
+    {
+      "method": "GET",
+      "url": "/api/get_script"
+    }
+  ],
+  "noOrderOrPayment": true
+}

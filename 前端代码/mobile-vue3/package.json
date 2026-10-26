@@ -1,0 +1,12 @@
+{
+	"name": "mobile-vue3",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Vue 3 uni-app x mobile application root",
+	"engines": {
+		"node": ">=22.22.0"
+	},
+	"scripts": {
+		"check": "sh ../../tests/mobile-vue3/run-all.sh"
+	}
+}

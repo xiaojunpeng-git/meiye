@@ -1,0 +1,8 @@
+R25 unchanged PASS
+R25 principal_credit PASS
+R25 gift_credit PASS
+R25 gift_spent PASS
+R25 spent_then_refilled PASS
+R25 insufficient PASS
+R25 late_failure PASS
+R25_CURRENT_BONUS_VOID=PASS checks=65

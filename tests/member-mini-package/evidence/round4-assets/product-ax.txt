@@ -1,0 +1,523 @@
+Window: "WeChat Web Devtools", App: 微信开发者工具.
+0 标准窗口 WeChat Web Devtools, Secondary Actions: Raise
+	1 HTML 内容 file:///Applications/wechatwebdevtools.app/Contents/Resources/app.asar/html/electron-project.html?projectpath=%2Fprivate%2Ftmp%2Fm008-round4-mini-20261020-assets-final%2F008-member&projectname=uniapp&projectid=&theme=dark&skeletonPath=%2FUsers%2Fxiaojunpeng%2FLibrary%2FApplication%20Support%2F%E5%BE%AE%E4%BF%A1%E5%BC%80%E5%8F%91%E8%80%85%E5%B7%A5%E5%85%B7%2Fd1e8765721a6c23d43b14c95b1843e6b%2FWeappCache%2FskeletonCache%2F08a43f236dec648a5eb9d84228894749%2Fpageskeleton.html&appid=wx85d4bfd0b4b6aafb&windowMode=fullMode&frame=0&devid=s28&pureSimulator=1&runtimeid=2&devtype=miniprogram&proxyPort=41073&userDataPath=%2FUsers%2Fxiaojunpeng%2FLibrary%2FApplication%2520Support%2F%25E5%25BE%25AE%25E4%25BF%25A1%25E5%25BC%2580%25E5%258F%2591%25E8%2580%2585%25E5%25B7%25A5%25E5%2585%25B7%2Fd1e8765721a6c23d43b14c95b1843e6b&appVersion=2.02.2607171&appVersionType=1
+		2 container
+			3 文本 uniapp - 微信开发者工具 RC 2.02.2607171
+			4 container
+				5 text 小程序模式
+			6 文本 预览
+			7 文本 真机调试
+			8 文本 上传
+			9 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+			10 container
+				11 container
+					12 container
+						13 text 预览 编辑
+					14 container
+						15 text 普通编译
+					16 container
+						17 container
+							18 text 13 : 30
+						19 container
+							20 链接
+							21 链接
+						22 HTML 内容 Webview: pages/index/index, URL: 127.0.0.1:53232/__pageframe__/pages/index/index
+							23 container
+								24 text 点击添加到我的小程序 
+							25 container
+								26 图像
+								27 container
+									28 text 广州 雅居乐店 
+								29 链接 请输入搜索词 
+									30 文本 请输入搜索词
+									31 文本 
+								32 列表框
+									33 container 可横向滚动
+							34 文本 优惠券
+							35 文本 渼约币
+							36 文本 推广海报
+							37 文本 全部项目
+							38 container
+								39 container
+									40 图像
+									41 container
+										42 text ￥ 0 .00
+									43 文本 库存:undefined
+									44 文本 
+								45 文本 数量
+								46 文本 
+								47 文本栏 (settable) 
+
+									48 文本栏 (settable)
+								49 文本 
+								50 文本 已售罄
+								51 container
+									52 文本 选择门店
+								53 container
+									54 text 选择地址 选择其它地址
+							55 文本 明星员工
+							56 文本 查看全部
+							57 文本 
+							58 container
+								59 图像
+								60 文本 杨佳玲
+								61 图像
+								62 文本 何焕春
+								63 图像
+								64 文本 黎云
+							65 图像
+							66 文本 更多
+							67 文本 
+							68 container
+								69 文本 首页推荐
+							70 container
+								71 文本 丰韵翘臀（单次）
+								72 container
+									73 text ￥ 198 .00
+								74 文本 已售0次
+								75 text 晶莹美目（单次） 热卖单品 精品推荐 首发新品 优品推荐
+								76 container
+									77 text ￥ 198 .00
+								78 文本 已售0次
+								79 text 面部卡（单项） 热卖单品 精品推荐 首发新品 优品推荐
+								80 container
+									81 text ￥ 1,580 .00
+								82 文本 已售0次
+							83 container
+								84 文本 肩颈无忧（单次）
+								85 container
+									86 text ￥ 198 .00
+								87 文本 已售0次
+								88 文本 比利时纯姬
+								89 text 八倍水动力（单次） 热卖单品 精品推荐 首发新品 优品推荐
+								90 container
+									91 text ￥ 198 .00
+								92 文本 已售0次
+								93 text 肩颈卡（单项） 热卖单品 精品推荐 首发新品 优品推荐
+								94 container
+									95 text ￥ 1,580 .00
+								96 文本 已售0次
+							97 container
+								98 container
+									99 图像
+									100 container
+										101 text ￥ 0 .00
+									102 文本 库存:undefined
+									103 文本 
+								104 文本 数量
+								105 文本 
+								106 文本栏 (settable) 
+
+									107 文本栏 (settable)
+								108 文本 
+								109 文本 已售罄
+								110 container
+									111 文本 选择门店
+								112 container
+									113 text 选择地址 选择其它地址
+							114 container
+								115 container
+									116 文本 恭喜获得
+									117 文本 0张
+									118 文本 优惠券
+								119 文本 立即领取
+								120 文本 
+							121 container
+								122 文本 
+								123 文本 首页
+								124 文本 
+								125 文本 服务
+								126 文本 
+								127 文本 社区
+								128 文本 
+								129 文本 项目
+								130 文本 
+								131 文本 我的
+						132 container
+							133 链接
+							134 链接
+						135 HTML 内容 Webview: pages/goods_details/index, URL: 127.0.0.1:53232/__pageframe__/pages/goods_details/index
+							136 container
+								137 container
+									138 text  
+								139 文本 
+								140 列表框
+									141 container 可横向滚动
+								142 图像
+								143 container
+									144 text ￥ 198 .00
+								145 文本 丰韵翘臀（单次）
+								146 文本 ￥0.00
+								147 文本 销量：0次
+								148 图像
+								149 图像
+								150 文本 销量排行榜·第1名
+								151 文本 
+								152 文本 优品推荐
+								153 图像
+								154 text 古法筋疗（单次） ¥980.00
+								155 图像
+								156 text 八倍水动力（单次） ¥198.00
+								157 图像
+								158 text 晶莹美目（单次） ¥198.00
+								159 图像
+								160 text 粉红丝带（单次） ¥980.00
+								161 按钮  客服
+									162 文本 
+									163 文本 客服
+								164 文本 
+								165 文本 收藏
+								166 container
+									167 text  购物车
+								168 text 立即购买 商品详情
+								169 container
+									170 未加标签的图片 要获取缺失的图片说明，请打开上下文菜单。
+									171 未加标签的图片 /4ccbf202405181617425902.jpg
+									172 未加标签的图片 /48e42202405182232078057.jpg
+								173 container
+									174 text 服务 确定
+								175 container
+									176 文本 优惠
+									177 文本 
+								178 container
+									179 文本 赠品
+									180 文本 
+								181 container
+									182 container
+										183 图像
+										184 文本 
+										185 container
+											186 text ￥ 198 .00
+										187 text 预估到手  ¥198 库存:0.00
+										188 文本 
+									189 文本 数量
+									190 文本 
+									191 文本栏 (settable) 1
+										192 文本栏 (settable) 1
+									193 文本 
+									194 文本 已售罄
+									195 container
+										196 文本 选择门店
+									197 container
+										198 text 选择地址 选择其它地址
+								199 container
+									200 文本 参数
+									201 文本 确定
+								202 按钮 分享给好友
+									203 文本 分享给好友
+								204 文本 预览发图
+								205 按钮 保存海报
+									206 文本 保存海报
+								207 文本 取消
+						208 HTML 内容 小程序逻辑层, URL: 127.0.0.1:53232/appservice/s28/_sessionId/simulator-app-session-s28/mainframe?load
+							209 container
+								210 HTML 内容 小程序逻辑层, URL: 127.0.0.1:53232/appservice/instanceframe?s=1792473767865&autoload#id_1
+								211 HTML 内容 127.0.0.1:53232/appservice/appContext?contextName=app&id=ifr-1_2#id_1
+								212 HTML 内容 127.0.0.1:53232/appservice/app_xrframe_renderContext?contextName=app_xrframe_render&id=ifr-1_3&empty=true#id_1
+								213 HTML 内容 127.0.0.1:53232/appservice/app_sub_debugContext?contextName=app_sub_debug&id=ifr-1_4&empty=true#id_1
+								214 HTML 内容 小程序逻辑层, URL: 127.0.0.1:53232/appservice/instanceframe?s=1792473767865#id_2
+						215 container
+							216 链接
+							217 链接
+					218 container
+						219 文本 iPhone 12/13 (Pro) 81% 17
+					220 container
+						221 文本 页面路径
+					222 文本 pages/goods_details/index
+					223 链接 复制
+				224 container
+					225 container
+						226 container
+							227 文本 008-member
+							228 工具栏
+								229 按钮 Toggle Primary Side Bar (⌘K ⌘B)
+									230 文本 
+								231 按钮 切换面板 (⌘J)
+									232 文本 
+								233 按钮 Toggle Secondary Side Bar (⌥⌘B)
+									234 文本 
+						235 container
+							236 container
+								237 标签组 活动视图切换器
+									238 标签 (selected) Description: 资源管理器 (⌘K ⇧⌘E), Value: 1
+										239 container 资源管理器 (⌘K ⇧⌘E)
+											240 文本 
+									241 标签 (settable, integer) Search (⇧⌘F), Value: 0
+										242 container Search (⇧⌘F)
+											243 文本 
+									244 标签 (settable, integer) 源代码管理 (⌃⇧G), Value: 0
+										245 container 源代码管理 (⌃⇧G)
+											246 文本 
+									247 标签 (settable, integer) Description: Run and Debug, Value: 0
+										248 文本 
+									249 弹出式按钮 其他视图
+										250 文本 
+								251 container
+									252 标题 资源管理器, Help: 资源管理器 (⌘K ⇧⌘E), Value: 2
+										253 文本 资源管理器
+									254 内容列表 资源管理器操作
+										255 弹出式按钮 Views and More Actions...
+									256 container
+										257 container
+											258 按钮 文件资源管理器部分
+												259 文本 
+												260 标题 Description: 文件资源管理器部分, Help: 008-member, Value: 3
+													261 文本 008-MEMBER
+											262 外框 树
+												263 container
+													264 row common
+														265 container
+															266 文本 
+															267 文本 common
+													268 row components
+														269 container
+															270 文本 
+															271 文本 components
+													272 row pages
+														273 container
+															274 文本 
+															275 文本 pages
+													276 row static
+														277 container
+															278 文本 
+															279 文本 static
+													280 row uni_modules
+														281 container
+															282 文本 
+															283 文本 uni_modules
+													284 row app.js
+														285 container
+															286 文本 app.js
+													287 row app.json
+														288 container
+															289 文本 app.json
+													290 row app.wxss
+														291 container
+															292 文本 app.wxss
+													293 row project.config.json
+														294 container
+															295 文本 project.config.json
+													296 row project.private.config.json
+														297 container
+															298 文本 project.private.config.json
+										299 按钮 大纲 Section
+											300 文本 
+											301 标题 大纲, Value: 3
+												302 文本 大纲
+										303 按钮 时间线 Section
+											304 文本 
+											305 标题 时间线, Value: 3
+												306 文本 时间线
+							307 container
+								308 container
+									309 container 第 1 组 (空)
+										310 container
+											311 定义列表
+												312 container 显示所有命令
+													313 文本 显示所有命令
+												314 container Command+K Command+P
+													315 text ⌘ K ⌘ P
+											316 定义列表
+												317 container Go to File
+													318 文本 Go to File
+												319 container Command+P
+													320 text ⌘ P
+											321 定义列表
+												322 container 在文件中查找
+													323 文本 在文件中查找
+												324 container Shift+Command+F
+													325 text ⇧ ⌘ F
+											326 定义列表
+												327 container 开始调试
+													328 文本 开始调试
+												329 文本 F5
+											330 定义列表
+												331 container 切换终端
+													332 文本 切换终端
+												333 文本 未绑定
+								334 container
+									335 标签组 活动视图切换器
+										336 标签 (settable, integer) 构建, Value: 0
+											337 container 构建
+												338 文本 构建
+										339 标签 (selected) 调试器, Value: 1
+											340 container 调试器
+												341 文本 调试器
+										342 标签 (settable, integer) Description: 问题 (⌘K ⇧⌘M) - 总计 0 个问题, Value: 0
+											343 文本 问题
+										344 标签 (settable, integer) Description: 输出, Value: 0
+											345 文本 输出
+										346 标签 (settable, integer) Description: 调试控制台 (⇧⌘Y), Value: 0
+											347 文本 调试控制台
+										348 标签 (settable, integer) Description: 终端, Value: 0
+											349 文本 终端
+										350 标签 (settable, integer) 代码质量, Value: 0
+											351 container 代码质量
+												352 文本 代码质量
+									353 工具栏 调试器操作
+									354 工具栏
+										355 按钮 最大化面板大小
+											356 文本 
+										357 按钮 关闭面板
+											358 文本 
+									359 container
+										360 container
+											361 HTML 内容 devtools://devtools/bundled/devtools_app.html?remoteBase=https://chrome-devtools-frontend.appspot.com/serve_file/@61dafe6541432a46304ba3c84a0a6135b7cddd69/&can_dock=&toolbarColor=rgba(223,223,223,1)&textColor=rgba(0,0,0,1)&experiments=true
+												362 container
+													363 container
+														364 切换按钮 Description: Select an element in the page to inspect it, Value: 0
+														365 标签组 Panels
+															366 标签 (settable, integer) Description: Wxml, Value: 0
+															367 标签 (selected) Description: Console, Value: 1
+															368 标签 (settable, integer) Description: Sources, Value: 0
+															369 标签 (settable, integer) Description: Network, Value: 0
+															370 标签 (settable, integer) Description: Performance, Value: 0
+														371 弹出式按钮 More tabs
+														372 container
+															373 container 8 errors, 79 warnings
+														374 按钮 Settings
+														375 弹出式按钮 Customize and control DevTools
+														376 container Undock into separate window
+														377 container Console panel
+															378 container console
+																379 container
+																	380 按钮 Show console sidebar
+																	381 按钮 Clear console
+																	382 按钮 JavaScript context: top
+																	383 按钮 Create live expression
+																	384 弹出式按钮 Log level: Default levels
+																		385 文本 Default levels
+																	386 切换按钮 Description: Console settings, Value: 0
+																	387 container
+																		388 container
+																			389 row Warning WAWorker.js:1 [worker] reportRealtimeAction:fail not support
+																				390 container
+																					391 container Warning
+																					392 链接 WAWorker.js:1
+																						393 文本 WAWorker.js:1
+																					394 text [worker] reportRealtimeAction:fail not support
+																			395 row Warning WASubContext.js?t=wechat&v=3.15.2:1 [Component] property "openNavList" of "components/homeList/index" received type-uncompatible value: expected <Array> but got non-array value. Used empty array instead.
+																				396 container
+																					397 container Warning
+																					398 链接 WASubContext.js?t=wechat&v=3.15.2:1
+																						399 文本 WASubContext.js?t=wechat&v=3.15.2:1
+																					400 text [Component] property "openNavList" of "components/homeList/index" received type-uncompatible value: expected <Array> but got non-array value. Used empty array instead.
+																			401 row Warning WASubContext.js?t=wechat&v=3.15.2:1 [Component] property "autoHeight" of "components/productConSwiper/index" received type-uncompatible value: expected <Number> but got non-number value. Used 0 instead.
+																				402 container
+																					403 container Warning
+																					404 链接 WASubContext.js?t=wechat&v=3.15.2:1
+																						405 文本 WASubContext.js?t=wechat&v=3.15.2:1
+																					406 text [Component] property "autoHeight" of "components/productConSwiper/index" received type-uncompatible value: expected <Number> but got non-number value. Used 0 instead.
+																			407 row Warning WASubContext.js?t=wechat&v=3.15.2:1 [Component] property "showDot" of "components/productConSwiper/index" received type-uncompatible value: expected <Number> but got non-number value. Used 0 instead.
+																				408 container
+																					409 container Warning
+																					410 链接 WASubContext.js?t=wechat&v=3.15.2:1
+																						411 文本 WASubContext.js?t=wechat&v=3.15.2:1
+																					412 text [Component] property "showDot" of "components/productConSwiper/index" received type-uncompatible value: expected <Number> but got non-number value. Used 0 instead.
+																			413 row Warning WASubContext.js?t=wechat&v=3.15.2:1 [Component] property "sku" of "components/productConSwiper/index" received type-uncompatible value: expected <String> but get null value. Use empty string instead.
+																				414 container
+																					415 container Warning
+																					416 链接 WASubContext.js?t=wechat&v=3.15.2:1
+																						417 文本 WASubContext.js?t=wechat&v=3.15.2:1
+																					418 text [Component] property "sku" of "components/productConSwiper/index" received type-uncompatible value: expected <String> but get null value. Use empty string instead.
+																			419 row Warning WAServiceMainContext…t=wechat&v=3.15.2:1 wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																				420 container
+																					421 container Warning
+																					422 链接 WAServiceMainContext…t=wechat&v=3.15.2:1
+																						423 文本 WAServiceMainContext
+																						424 文本 …
+																						425 文本 t=wechat&v=3.15.2:1
+																					426 text wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																			427 row Warning WAServiceMainContext…t=wechat&v=3.15.2:1 wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																				428 container
+																					429 container Warning
+																					430 链接 WAServiceMainContext…t=wechat&v=3.15.2:1
+																						431 文本 WAServiceMainContext
+																						432 文本 …
+																						433 文本 t=wechat&v=3.15.2:1
+																					434 text wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																			435 container
+																				436 container Warning
+																				437 文本 [pages/goods_details/index] Some selectors are not allowed in component wxss, including tag name selectors, ID selectors, and attribute selectors.(.
+																				438 链接 /components/homeList/index.wxss:1
+																					439 文本 /components/homeList/index.wxss:1
+																				440 文本 :786)
+																			441 container
+																				442 container Warning
+																				443 文本 [pages/goods_details/index] Some selectors are not allowed in component wxss, including tag name selectors, ID selectors, and attribute selectors.(.
+																				444 链接 /components/productWindow/index.wxss:1
+																					445 文本 /components/productWindow/index.wxss:1
+																				446 文本 :7169)
+																			447 container
+																				448 container Warning
+																				449 文本 [pages/goods_details/index] Some selectors are not allowed in component wxss, including tag name selectors, ID selectors, and attribute selectors.(.
+																				450 链接 /components/productConSwiper/index.wxss:1
+																					451 文本 /components/productConSwiper/index.wxss:1
+																				452 文本 :443)
+																			453 container
+																				454 container Warning
+																				455 文本 [pages/goods_details/index] Some selectors are not allowed in component wxss, including tag name selectors, ID selectors, and attribute selectors.(.
+																				456 链接 /components/easy-loadimage/easy-loadimage.wxss:1
+																					457 文本 /components/easy-loadimage/easy-loadimage.wxss:1
+																				458 文本 :532)
+																			459 container
+																				460 container Warning
+																				461 文本 [pages/goods_details/index] Some selectors are not allowed in component wxss, including tag name selectors, ID selectors, and attribute selectors.(.
+																				462 链接 /components/BaseTag.wxss:1
+																					463 文本 /components/BaseTag.wxss:1
+																				464 文本 :490)
+																			465 row Warning WAServiceMainContext…t=wechat&v=3.15.2:1 wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																				466 container
+																					467 container Warning
+																					468 链接 WAServiceMainContext…t=wechat&v=3.15.2:1
+																						469 文本 WAServiceMainContext
+																						470 文本 …
+																						471 文本 t=wechat&v=3.15.2:1
+																					472 text wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																			473 row Warning WAServiceMainContext…t=wechat&v=3.15.2:1 wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																				474 container
+																					475 container Warning
+																					476 链接 WAServiceMainContext…t=wechat&v=3.15.2:1
+																						477 文本 WAServiceMainContext
+																						478 文本 …
+																						479 文本 t=wechat&v=3.15.2:1
+																					480 text wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																			481 row Warning WAServiceMainContext…t=wechat&v=3.15.2:1 wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																				482 container
+																					483 container Warning
+																					484 链接 WAServiceMainContext…t=wechat&v=3.15.2:1
+																						485 文本 WAServiceMainContext
+																						486 文本 …
+																						487 文本 t=wechat&v=3.15.2:1
+																					488 text wx.getSystemInfoSync is deprecated.Please use wx.getSystemSetting/wx.getAppAuthorizeSetting/wx.getDeviceInfo/wx.getWindowInfo/wx.getAppBaseInfo instead.
+																		489 container
+																			490 container
+																				491 文本输入区 (settable) Console prompt
+						492 container
+							493 container 没有问题
+								494 按钮 没有问题
+									495 文本 
+									496 文本  0 
+									497 文本 
+									498 文本  0
+							499 container 进度和简要通知
+							500 container 已为屏幕阅读器优化
+								501 按钮 已为屏幕阅读器优化
+							502 container undefined
+	503 关闭按钮
+	504 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	505 最小化按钮
+506 menu bar
+	507 微信开发者工具
+	508 项目
+	509 文件
+	510 编辑
+	511 工具
+	512 跳转
+	513 选择
+	514 界面
+	515 设置
+	516 插件
+	517 帮助
+
+The focused UI element is 22 HTML 内容 Webview: pages/index/index, URL: 127.0.0.1:53232/__pageframe__/pages/index/index

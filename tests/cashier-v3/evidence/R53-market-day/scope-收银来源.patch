@@ -1,0 +1,273 @@
+diff --git a/前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue b/前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue
+index ea23a7e9..632e4c4d 100644
+--- a/前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue
++++ b/前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue
+@@ -15,15 +15,16 @@ const secondaryId = ref(0)
+ const validationMessage = ref('')
+ const rewardAmount = ref('0')
+ 
+-const roots = computed(() => Array.isArray(props.sources) ? props.sources.filter((item) => Number(item?.id) > 0) : [])
++// 后端目录已过滤 K；这里同步排除旧页面缓存，不允许旧选中值继续确认。
++const roots = computed(() => Array.isArray(props.sources) ? props.sources.filter((item) => Number(item?.id) > 0 && !/^K(?:\s|退款|$)/u.test(String(item?.name || '').trim())) : [])
+ const selectedPrimary = computed(() => roots.value.find((item) => Number(item.id) === Number(primaryId.value)) || null)
+ const children = computed(() => Array.isArray(selectedPrimary.value?.children) ? selectedPrimary.value.children.filter((item) => Number(item?.id) > 0) : [])
+ const requiresSecondary = computed(() => selectedPrimary.value?.requireSecondary === true || Number(selectedPrimary.value?.requireSecondary) === 1)
+ const isCrossIndustry = computed(() => /^G(?:\s|异业|$)/u.test(String(selectedPrimary.value?.name || '').trim()))
+ 
+ watch(() => [props.primarySourceId, props.secondarySourceId, props.rewardAmountCents, props.sources], () => {
+-  primaryId.value = Number(props.primarySourceId) || 0
+-  secondaryId.value = Number(props.secondarySourceId) || 0
++  primaryId.value = roots.value.some((item) => Number(item.id) === Number(props.primarySourceId)) ? Number(props.primarySourceId) : 0
++  secondaryId.value = primaryId.value ? Number(props.secondarySourceId) || 0 : 0
+   validationMessage.value = ''
+   rewardAmount.value = (Number(props.rewardAmountCents || 0) / 100).toFixed(2).replace(/\.00$/, '')
+ }, { immediate: true, deep: true })
+@@ -35,7 +36,7 @@ function choosePrimary(id) {
+ }
+ 
+ function confirm() {
+-  if (!primaryId.value) {
++  if (!selectedPrimary.value) {
+     validationMessage.value = '请选择一级来源。'
+     return
+   }
+diff --git a/后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php b/后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php
+index ba0f6fe0..43a72048 100644
+--- a/后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php
++++ b/后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php
+@@ -189,13 +189,35 @@ final class CashierV3BusinessConfigServices extends BaseServices
+     public function checkoutCatalog(): array
+     {
+         return [
+-            'sources' => $this->sourceTree(true),
++            // K 是退款统计来源，不是收银可选来源；保留平台目录及历史引用。
++            'sources' => array_values(array_filter($this->sourceTree(true), static function (array $source): bool {
++                return !self::isRefundSourceName((string)$source['name']);
++            })),
+             'accountingMethods' => $this->accountingMethods(true),
+             'sourceMaxLevel' => 2,
+             'configVersion' => $this->configVersion(),
+         ];
+     }
+ 
++    /**
++     * 收银写入只禁止退款专用来源，不重新校验普通历史快照的启停、改名或删除。
++     * 既按权威 ID 查目录，也检查旧快照名称，防止客户端伪造名称或旧挂单绕过。
++     */
++    public function assertCheckoutSourceAllowed(int $primaryId, string $snapshotName = ''): void
++    {
++        $name = $primaryId > 0
++            ? (string)Db::name('cashier_v3_business_source')->where('id', $primaryId)->value('name') : '';
++        if (self::isRefundSourceName($name) || self::isRefundSourceName($snapshotName)) {
++            throw new ValidateException('K退款顾客仅用于退款统计，请重新选择客户来源。');
++        }
++    }
++
++    /** 沿用既有一级来源字母标识，不绑定某个客户库的来源 ID。 */
++    private static function isRefundSourceName(string $name): bool
++    {
++        return preg_match('/^K(?:\s|退款|$)/u', trim($name)) === 1;
++    }
++
+     public function createSource(array $input, int $adminId): array
+     {
+         $name = $this->normalizeName($input['name'] ?? '');
+diff --git a/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php b/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php
+index 1ba3f5a0..f4a67b4f 100644
+--- a/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php
++++ b/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php
+@@ -57,7 +57,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
+      * otherwise valid checkout fail when an administrator renamed, disabled,
+      * or removed a source after the cashier selected it.  The selection row
+      * is already tenant/store scoped and locked by the final transaction, so
+-     * settlement must persist that snapshot as-is.  Payment, entitlement,
++     * settlement must persist that snapshot as-is, except that K is reserved
++     * for refunds and may not be carried into a new checkout. Payment, entitlement,
+      * balance, and inventory authorities remain separately rechecked by the
+      * settlement pipeline.
+      */
+@@ -85,6 +86,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
+                 true
+             );
+         }
++        $this->config->assertCheckoutSourceAllowed((int)$row['primary_source_id'], (string)$row['primary_source_name_snapshot']);
+         return self::rowProjection($row);
+     }
+ 
+@@ -132,6 +134,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
+             return self::emptySelection();
+         }
+         $primaryName = trim((string)($source['primarySourceNameSnapshot'] ?? ''));
++        // 最终快照也必须拒绝 K；普通来源继续保留发生时名称，不反查重建快照。
++        $this->config->assertCheckoutSourceAllowed($primaryId, $primaryName);
+         $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
+         $label = trim((string)($source['displayNameSnapshot'] ?? ''));
+         if ($label === '') {
+@@ -210,6 +214,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
+             return self::emptySelection();
+         }
+         try {
++            // 默认继承不得重新带入历史 K 选择，原销售记录仍保留不改。
++            $this->config->assertCheckoutSourceAllowed((int)$order['business_source_primary_id'], (string)$order['business_source_primary_name_snapshot']);
+             $source = $this->config->resolveSourceSnapshot(
+                 (int)$order['business_source_primary_id'],
+                 (int)($order['business_source_secondary_id'] ?? 0),
+@@ -229,6 +235,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
+         if ($expected < 0 || $primaryId <= 0 || $secondaryId < 0) {
+             throw self::invalid('business_source_payload_invalid', '请选择有效的业务来源。');
+         }
++        // 即使旧客户端仍提交 K，也不能写入本次来源选择。
++        $this->config->assertCheckoutSourceAllowed($primaryId);
+         $snapshot = $this->config->resolveSourceSnapshot($primaryId, $secondaryId, true);
+         $rewardAmountCents = (int)($payload['rewardAmountCents'] ?? 0);
+         if ($rewardAmountCents < 0 || $rewardAmountCents > 100000000000) {
+diff --git a/后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php b/后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php
+index 5baf0fea..d5863285 100644
+--- a/后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php
++++ b/后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php
+@@ -78,7 +78,10 @@ final class CashierV3RechargeCheckoutModule
+         $balance = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx($input['memberId'], $operator, $data);
+         $balanceVersion = (int)($balance['accountVersion'] ?? 0);
+         if ($balanceVersion <= 0) throw self::invalid('recharge_checkout_balance_unavailable', '会员余额资料无效，请重新选择会员后重试。');
+-        $source = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
++        // 充值复用顶部来源选择；旧页面或挂单快照同样不得提交退款专用 K 来源。
++        $sourceConfig = new CashierV3BusinessConfigServices();
++        $sourceConfig->assertCheckoutSourceAllowed((int)$input['businessSource']['primarySourceId']);
++        $source = $sourceConfig->resolveSourceSnapshot(
+             (int)$input['businessSource']['primarySourceId'],
+             (int)$input['businessSource']['secondarySourceId'],
+             true
+diff --git a/tests/cashier-v3/js/checkout-refund-source-render.mjs b/tests/cashier-v3/js/checkout-refund-source-render.mjs
+new file mode 100644
+index 00000000..544a268d
+--- /dev/null
++++ b/tests/cashier-v3/js/checkout-refund-source-render.mjs
+@@ -0,0 +1,55 @@
++import assert from 'node:assert/strict'
++import { readFileSync } from 'node:fs'
++import { createRequire } from 'node:module'
++import { runInNewContext } from 'node:vm'
++
++const require = createRequire(new URL('../../../前端代码/cashier-v3/package.json', import.meta.url))
++const Vue = require('vue')
++const { parse } = require('@vue/compiler-sfc')
++const { compile } = require('@vue/compiler-dom')
++const { renderToString } = require('@vue/server-renderer')
++const { descriptor } = parse(readFileSync(new URL('../../../前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue', import.meta.url), 'utf8'))
++const script = descriptor.scriptSetup.content.replace("import { computed, ref, watch } from 'vue'", '')
++const render = runInNewContext(`(function () { ${compile(descriptor.template.content, { mode: 'function', prefixIdentifiers: true }).code} })()`, { Vue })
++
++// 执行实际组件脚本和模板，验证旧目录缓存、已选 K 和确认事件，而不是只搜文案。
++async function selector(sources, primarySourceId) {
++  const props = { sources, primarySourceId, secondarySourceId: 0, rewardAmountCents: 0, saving: false, loadError: '' }
++  const events = []
++  let state
++  const component = { setup() {
++    state = runInNewContext(`(function () { ${script}; return { roots, primaryId, secondaryId, selectedPrimary, children, requiresSecondary, isCrossIndustry, rewardAmount, validationMessage, choosePrimary, confirm, emit } })()`, {
++      ...Vue, defineProps: () => props, defineEmits: () => (...event) => events.push(event)
++    })
++    return { ...props, ...state }
++  }, render }
++  const context = {}
++  await renderToString(Vue.createSSRApp(component), context)
++  return { state, events, html: context.teleports.body }
++}
++const sources = [{ id: 17, name: 'A老客首护' }, { id: 9, name: 'K退款顾客' }, { id: 18, name: 'B导购引流' }]
++const old = await selector(sources, 9)
++assert.doesNotMatch(old.html, />K退款顾客<\/button>/)
++assert.match(old.html, /disabled[^>]*>确认<\/button>/)
++assert.equal(old.state.primaryId.value, 0)
++old.state.confirm()
++assert.equal(old.events.length, 0)
++assert.equal(old.state.validationMessage.value, '请选择一级来源。')
++// 即使程序传入隐藏的 ID，confirm 仍只接受实际可选目录中的来源。
++old.state.choosePrimary(9)
++old.state.confirm()
++assert.equal(old.events.length, 0)
++const ordinary = await selector(sources, 17)
++assert.match(ordinary.html, />A老客首护<\/button>/)
++assert.match(ordinary.html, />B导购引流<\/button>/)
++ordinary.state.confirm()
++assert.equal(ordinary.events[0][0], 'confirm')
++assert.equal(ordinary.events[0][1].primarySourceId, 17)
++assert.equal(ordinary.events[0][1].secondarySourceId, 0)
++assert.equal(ordinary.events[0][1].rewardAmountCents, 0)
++const filtered = await selector(sources.filter(item => item.id !== 9), 9)
++assert.equal(filtered.state.primaryId.value, 0)
++const empty = await selector([sources[1]], 9)
++assert.equal(empty.state.roots.value.length, 0)
++assert.match(empty.html, /disabled[^>]*>确认<\/button>/)
++console.log('checkout refund source real setup/template: PASS')
+diff --git a/tests/cashier-v3/php/checkout-refund-source-mysql-integration.php b/tests/cashier-v3/php/checkout-refund-source-mysql-integration.php
+new file mode 100644
+index 00000000..ee54926e
+--- /dev/null
++++ b/tests/cashier-v3/php/checkout-refund-source-mysql-integration.php
+@@ -0,0 +1,67 @@
++<?php
++declare(strict_types=1);
++
++/** 只在本地事务测试来源门禁，不触发收款/结账，不修改历史订单。 */
++$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require rtrim($backend, '/\\') . '/vendor/autoload.php';
++use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
++use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
++use think\facade\Db;
++use think\exception\ValidateException;
++(new \think\App(rtrim($backend, '/\\') . '/'))->initialize();
++if (getenv('CHECKOUT_REFUND_SOURCE_LOCAL_TEST') !== '1'
++    || config('database.connections.mysql.hostname') !== 'mysql'
++    || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local Docker test only');
++$config = new CashierV3BusinessConfigServices();
++$service = new CashierV3CheckoutBusinessSourceSelectionServices();
++$k = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('name', 'like', 'K%')->find();
++$a = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->where('name', 'like', 'A%')->find();
++$seed = Db::name('cashier_v3_checkout_business_source_selection')->where('id', '>', 0)->find();
++if (!$k || !$a || !$seed) throw new RuntimeException('Local source fixtures required');
++$checks = 0;
++function checkCheckoutRefund(bool $ok, string $message): void {
++    global $checks;
++    if (!$ok) throw new RuntimeException($message);
++    $checks++; echo 'PASS ' . $message . PHP_EOL;
++}
++/** 必须由明确的退款来源提示拒绝，不把任意程序异常当作门禁通过。 */
++function rejectsCheckoutRefund(callable $action, string $message): void {
++    try { $action(); } catch (ValidateException $error) {
++        checkCheckoutRefund(strpos($error->getMessage(), 'K退款顾客仅用于退款统计') !== false, $message); return;
++    }
++    throw new RuntimeException('Expected rejection: ' . $message);
++}
++$request = 'CKR-' . bin2hex(random_bytes(20));
++$tenant = (string)$seed['tenant_id']; $store = (int)$seed['store_id'];
++$source = ['primarySourceId' => (int)$k['id'], 'primarySourceNameSnapshot' => 'A伪造名称'];
++checkCheckoutRefund(!in_array((int)$k['id'], array_column($config->checkoutCatalog()['sources'], 'id'), true), 'Checkout catalog excludes K');
++checkCheckoutRefund(in_array((int)$k['id'], array_column($config->sourceTree(true), 'id'), true), 'Platform/report source catalog retains K');
++rejectsCheckoutRefund(function () use ($config, $k) { $config->assertCheckoutSourceAllowed((int)$k['id'], 'A伪造名称'); }, 'Canonical K ID rejects forged label');
++rejectsCheckoutRefund(function () use ($config) { $config->assertCheckoutSourceAllowed(999999999, 'K退款顾客'); }, 'Old K snapshot rejects even if catalog row is missing');
++Db::startTrans();
++try {
++    rejectsCheckoutRefund(function () use ($service, $request, $tenant, $store, $source) {
++        $service->captureSaleSnapshotInTx($request, $tenant, $store, 1, $source);
++    }, 'Final sale snapshot cannot capture K');
++    checkCheckoutRefund(Db::name('cashier_v3_checkout_business_source_selection')->where('checkout_request_id', $request)->count() === 0, 'Rejected snapshot writes nothing');
++    $save = new ReflectionMethod($service, 'saveSelectionInTx'); $save->setAccessible(true);
++    rejectsCheckoutRefund(function () use ($save, $service, $request, $tenant, $store, $k) {
++        $save->invoke($service, 'sale', $request, $tenant, $store, 1, ['primarySourceId' => (int)$k['id']], false);
++    }, 'Old selection command rejects K');
++    // 普通来源的历史名称照常保存，不扩展成来源全量实时配置校验。
++    $ordinary = $service->captureSaleSnapshotInTx($request, $tenant, $store, 1,
++        ['primarySourceId' => (int)$a['id'], 'primarySourceNameSnapshot' => 'A历史快照名称']);
++    checkCheckoutRefund($ordinary['primarySourceNameSnapshot'] === 'A历史快照名称', 'Ordinary historical snapshot stays intact');
++    $locked = $service->lockResolvedForSettlementInTx('sale', $request, $tenant, $store);
++    checkCheckoutRefund($locked['primarySourceId'] === (int)$a['id'], 'Ordinary settlement source still resolves');
++    // 模拟本次尚未结账的旧选择行，确认最终锁定不会绕过新门禁；读回仍不改历史。
++    Db::name('cashier_v3_checkout_business_source_selection')->where('checkout_request_id', $request)
++        ->update(['primary_source_id' => (int)$k['id'], 'primary_source_name_snapshot' => $k['name']]);
++    rejectsCheckoutRefund(function () use ($service, $request, $tenant, $store) {
++        $service->lockResolvedForSettlementInTx('sale', $request, $tenant, $store);
++    }, 'Final settlement rejects stale K selection');
++    checkCheckoutRefund($service->read('sale', $request, $tenant, $store)['primarySourceId'] === (int)$k['id'], 'Read-only historical projection is not rewritten');
++    checkCheckoutRefund($service->read('sale', $request, $tenant, $store + 999999)['primarySourceId'] === 0, 'Source remains scoped to authorized store');
++} finally { Db::rollback(); }
++checkCheckoutRefund(Db::name('cashier_v3_checkout_business_source_selection')->where('checkout_request_id', $request)->count() === 0, 'All test selection rows rolled back');
++echo 'checkout refund source integration: ' . $checks . " PASS\n";

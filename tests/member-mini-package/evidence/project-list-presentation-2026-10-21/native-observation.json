@@ -1,0 +1,45 @@
+{
+  "observation": {
+    "ok": true,
+    "tool": "automation_evaluate",
+    "clientName": "Codex",
+    "result": {
+      "success": true,
+      "result": {
+        "result": {
+          "route": "pages/users/user_card_list/index",
+          "cardCount": 15,
+          "visibleCount": 14,
+          "loading": false,
+          "loadend": true,
+          "contentHeight": 1335,
+          "hasDisplayContent": true,
+          "system": {
+            "width": 390,
+            "height": 844
+          },
+          "appid": "wx85d4bfd0b4b6aafb"
+        }
+      }
+    }
+  },
+  "otherVerifiedActions": {
+    "allCount": 15,
+    "firstDetailRoute": "pages/users/user_card/index",
+    "lastProjectBottom": 655,
+    "lastScrollTop": 859,
+    "footerTop": 759,
+    "windowHeight": 844,
+    "paymentSwitches": [
+      "fuyou",
+      "combined"
+    ],
+    "rechargeIconCount": 1,
+    "rechargeMode": "fuyou",
+    "createdOrder": false
+  },
+  "limitations": [
+    "The reported iPhone blank was not reproduced in devtools.",
+    "No claim of actual-device verification or upload."
+  ]
+}

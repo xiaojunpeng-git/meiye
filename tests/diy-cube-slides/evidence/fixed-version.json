@@ -1,0 +1,84 @@
+{
+  "task": "M008-EMERG-R2-CUBE",
+  "startedHead": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "baselineHead": "b99e8bd78c3f4709320c5c8674c942a0d636172d",
+  "concurrentBaselineNote": "R25 commits advanced HEAD; admin/member/shared tracked baseline trees unchanged. No R25 changes included in this task patch.",
+  "patchSha256": "80fc2467ee3c3548495f7885d3ae535450a494ac756592f009f4525afdbd22af",
+  "patchTree": "e5ab06fd407261cb2df4104e3b47effe3677217c",
+  "source": [
+    {
+      "file": "前端代码/shared/diyCubeSlides.js",
+      "sha256": "81ef54349f0048e1018801c44b52555267f4977408c36a63fe23b0d3bd201c69"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfig/c_picture_cube.vue",
+      "sha256": "ad81ba5634f55d5eb05ccf716c10e5612cc429f015b9335fdb7c1932964a1427"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue",
+      "sha256": "53a97b5a68024a5ad388380a26503d1c5541ac3fb39cea2c9f421ba35ec256be"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue",
+      "sha256": "6a6cf0dc7613cbfd8f31b233900f3dbff1877f00cd795b3dc561b8f6d8b8ac51"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue",
+      "sha256": "854ebdbd6921e1d47b265c79256cf1e8764e2f79f57daf0727d4a7b4ee30cca4"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobilePage/cubePreviewImage.vue",
+      "sha256": "c4b8c4663e8ba804604efb3f3ff306d445bcabba165cd2527fc0b1f60e75cecf"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobilePage/picture_cube.vue",
+      "sha256": "88cddf488d8ae33eee729bf143ba141538fe7b050ee4bcd62cede35b9d66d56f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/cubeRegionImage.vue",
+      "sha256": "f8fe7c99d6afba13e1750e2a6ee1f635a41291eec5a54a5e128f1a73b8a608bc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/pictureCube.vue",
+      "sha256": "810edf6abb77500a5e5daa87b0609d3195e0b01332eb6f777e8958d54474d799"
+    }
+  ],
+  "tests": [
+    {
+      "file": "tests/diy-cube-slides/browser.cjs",
+      "sha256": "9f0f18f2ca28e29062ce8c791ce0089901b91ddb0abb7fdf4f99ea93088054fc"
+    },
+    {
+      "file": "tests/diy-cube-slides/build.cjs",
+      "sha256": "3528e05b931ae6d44422e66c4b3771335594b361866ded52688328b3ea4fad21"
+    },
+    {
+      "file": "tests/diy-cube-slides/contract.cjs",
+      "sha256": "ebbf31d2899e05129d30dc11b967f0735dac94542a4cb15579921862748e634f"
+    },
+    {
+      "file": "tests/diy-cube-slides/editor-browser.cjs",
+      "sha256": "0e23b306ed6a0ecfcdeac71f1f0e65439a1addc89f7a1461f67a5fc34af2e189"
+    },
+    {
+      "file": "tests/diy-cube-slides/mini-motion.cjs",
+      "sha256": "07226c6047df7835ce13c464edb9485e9ff1b8ff42bacc4d21e86c899a2022aa"
+    },
+    {
+      "file": "tests/diy-cube-slides/mini.cjs",
+      "sha256": "f3f293983a56af26b95c99915425c639d59875083aad64c424db1dc63013520d"
+    },
+    {
+      "file": "tests/diy-cube-slides/save-mysql.php",
+      "sha256": "b07aae0c019fd66af1b7065533998e85c76882bc25305e16a9d147818f645acc"
+    }
+  ],
+  "backend": [],
+  "migrations": [],
+  "productionOperations": "Not applicable: local development/tests only",
+  "status": "selftested-awaiting-product-manager-acceptance",
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "uploaded": false
+}

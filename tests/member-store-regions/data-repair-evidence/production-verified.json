@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "instance": "008",
+  "commit": "de4128786921fb26bfa7780458d91ea2e67f5666",
+  "dictionaryRows": 44707,
+  "updatedStores": [
+    127,
+    129,
+    130
+  ],
+  "other127StoreRowsUnchanged": true,
+  "protectedApplicationFilesUnchanged": true,
+  "configurationAndDecorationUnchanged": true,
+  "upgradeLedgerUnchanged": true,
+  "backup": "/www/backups/008.cc3798.com/20261024-region-data-1760affd"
+}

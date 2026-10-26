@@ -1,0 +1,5 @@
+PASS final submit checks card-operation settlement schema before business writes
+PASS unexpected submit exceptions become deterministic failed envelopes
+PASS missing schema errors are operator-safe and classified as dependency failures
+PASS command controller catches non-domain exceptions at the HTTP boundary
+checkout-submit-failure-envelope-contract: 4 passed, 0 failed

@@ -1,0 +1,14 @@
+{
+  "batch_key": "008-morestore-balance-history-r1",
+  "target_instance": "008.cc3798.com",
+  "source_database": "morestore",
+  "target_database": "mohe_008",
+  "source_cutoff_policy": "consistent_snapshot_at_apply",
+  "minimum_source_rows": 10106,
+  "minimum_imported_rows": 10094,
+  "maximum_skipped_rows": 12,
+  "required_sample_source_uid": 421,
+  "required_sample_target_uid": 421,
+  "required_sample_min_rows": 47,
+  "read_only_projection": true
+}

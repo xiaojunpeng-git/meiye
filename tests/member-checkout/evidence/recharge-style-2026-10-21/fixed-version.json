@@ -1,0 +1,43 @@
+{
+  "task": "M008-R9-RECHARGE-STYLE-001",
+  "baselineHead": "c474daea5a56eaf5d87cdc276317313491bbf1a4",
+  "currentHead": "c474daea5a56eaf5d87cdc276317313491bbf1a4",
+  "patchSha256": "24ab9f58f32193c4883487d108c0467f14524d3b1cf8ba890a081eea6e87d035",
+  "files": [
+    {
+      "file": "前端代码/uniapp/pages/users/user_payment/index.vue",
+      "sha256": "55718f1ee9b935332345e8c42342d02020adc773e6f498826da513738694d0c7"
+    },
+    {
+      "file": "tests/member-checkout/recharge-style-contract.cjs",
+      "sha256": "a4a3cc7b38ac95b4e21eaac3fa9f5fbce1860a4c96b3ea46d27d3f70f7cd1f18"
+    },
+    {
+      "file": "tests/member-checkout/recharge-style-fixture.cjs",
+      "sha256": "30eabd95dd935cca0cb6383c9cb1c96881b04024493b690b383fb87f5981305c"
+    }
+  ],
+  "scriptSha256": "698b532558c8904072627f99f5979cdf5580b5243994187cc57a2f4a079e9f84",
+  "businessScriptByteIdentical": true,
+  "sourceFiles": 1,
+  "testFiles": 2,
+  "browserLayoutCases": 8,
+  "originalStagingSha256": "67ed95909d90c15de9f0d1b8e291ff6f42ce3a2cd4bb9195047c0de4063caf80",
+  "scope": "Restore original recharge template/style only; current API, validation, defaults, package/custom selection, checkout/store/Fuyou logic preserved",
+  "status": "self-test-pass-awaiting-product-manager-acceptance",
+  "boundaries": {
+    "committed": false,
+    "deployed": false,
+    "pushed": false,
+    "miniUploaded": false,
+    "databaseWrites": 0,
+    "realPayments": 0
+  },
+  "evidence": [
+    "browser-cases.json",
+    "h5-320.png",
+    "h5-375.png",
+    "mini-recharge.png",
+    "mini-verification.json"
+  ]
+}

@@ -1,0 +1,372 @@
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2021 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+// Vue
+import '@babel/polyfill';
+import Vue from 'vue';
+import App from './App';
+import Auth from '@/libs/wechat';
+
+// 配置
+import Setting from './setting';
+
+// 混合
+import mixinApp from '@/mixins/app';
+
+// 插件
+import plugins from '@/plugins';
+
+// store
+import store from '@/store/index';
+
+// 懒加载
+import VueLazyload from 'vue-lazyload';
+
+// iView 和 iView Pro
+import ViewUI, { Message, Modal } from 'view-design';
+import iViewPro from '@/libs/iview-pro/iview-pro.min.js';
+
+import {
+  Tag,
+  Tooltip,
+  Popover,
+  Input,
+  Cascader,
+  CascaderPanel,
+  Tree,
+  Carousel,
+  CarouselItem,
+  Select,
+  Option,
+  Table,
+  TableColumn
+} from 'element-ui';
+Vue.use(Cascader);
+Vue.use(Tag);
+Vue.use(Tooltip);
+Vue.use(Popover);
+Vue.use(Input);
+Vue.use(CascaderPanel);
+Vue.use(Tree);
+Vue.use(Carousel);
+Vue.use(CarouselItem);
+Vue.use(Select);
+Vue.use(Option);
+Vue.use(Table);
+Vue.use(TableColumn);
+// 菜单和路由
+import router from './router';
+// import menuHeader from '@/menu/header';
+// import menuSider from '@/menu/sider';
+
+import { frameInRoutes } from '@/router/routes';
+
+// 全局过滤
+import * as filters from './filters'; // global filters modalTemplates
+
+// 多语言
+import i18n from '@/i18n';
+
+// 方法
+import {
+  getHeaderName,
+  getHeaderSider,
+  getMenuSider,
+  getSiderSubmenu
+} from '@/libs/system';
+
+// 缓存方法
+import cache from '@/plugins/cache/index';
+
+// swiper
+import VueAwesomeSwiper from 'vue-awesome-swiper';
+
+import AuthManager from './utils/auth';
+
+// 直接挂载到Vue原型上
+Vue.prototype.__getToken = AuthManager.getToken;
+Vue.prototype.__setToken = AuthManager.setToken;
+Vue.prototype.__clearToken = AuthManager.clearToken;
+
+import { isAgentPath } from './utils/pathUtils';
+Vue.prototype.__isAgentPath = isAgentPath;
+
+// 内置组件
+import iLink from '@/components/link';
+import UploadImg from '@/components/uploadImg/index.js';
+import dialog from '@/libs/dialog';
+import scroll from '@/libs/loading';
+import schema from 'async-validator';
+import VueCodeMirror from 'vue-codemirror';
+
+// 复制到粘贴板插件
+import VueClipboard from 'vue-clipboard2';
+// 使用样式，修改主题可以在 styles 目录下创建新的主题包并修改 iView 默认的 less 变量
+// 参考 https://www.iviewui.com/docs/guide/theme
+import './styles/index.less';
+import './libs/iview-pro/iview-pro.css';
+import 'swiper/dist/css/swiper.css';
+import './assets/fonts/font.css';
+import './assets/iconfont/iconfont.css';
+import './assets/iconfont/iconfont.js';
+import './assets/iconfont/iconfontMobal.css';
+import './assets/iconfontYI/iconfontYI.css';
+import 'vue-happy-scroll/docs/happy-scroll.css';
+import './plugins/emoji-awesome/css/google.min.css';
+
+// 引入外部表格；
+import 'xe-utils';
+import VXETable from 'vxe-table';
+import 'vxe-table/lib/index.css';
+
+import Viewer from 'v-viewer';
+import 'viewerjs/dist/viewer.css';
+import 'codemirror/lib/codemirror.css';
+
+import formCreate from '@form-create/iview';
+import modalForm from '@/utils/modalForm';
+import videoCloud from '@/utils/videoCloud';
+import {
+  modalSure,
+  getFileType,
+  HandlePrice,
+  splitTimeRange,
+  hasIntersection,
+  isTimeRangesIncreasing,
+  getLastSegmentPosition
+} from '@/utils/public';
+import { authLapse } from '@/utils/authLapse';
+import VueDND from 'awe-dnd';
+import preventReClick from './utils/plugins.js';
+import computes from '@/utils/computes';
+import { VueJsonp } from 'vue-jsonp';
+
+import * as tools from '@/libs/tools';
+Vue.prototype.$tools = tools;
+
+// 移动端滚动插件
+import vuescroll from 'vuescroll';
+Vue.prototype.bus = new Vue();
+
+Vue.use(vuescroll);
+
+VueClipboard.config.autoSetContainer = true;
+Vue.use(VueClipboard);
+window.Promise = Promise;
+Vue.prototype.$modalForm = modalForm;
+Vue.prototype.$modalSure = modalSure;
+Vue.prototype.$getFileType = getFileType;
+Vue.prototype.$HandlePrice = HandlePrice;
+Vue.prototype.$splitTimeRange = splitTimeRange;
+Vue.prototype.$hasIntersection = hasIntersection;
+Vue.prototype.$isTimeRangesIncreasing = isTimeRangesIncreasing;
+Vue.prototype.$getLastSegmentPosition = getLastSegmentPosition;
+Vue.prototype.$videoCloud = videoCloud;
+Vue.prototype.$authLapse = authLapse;
+Vue.prototype.$dialog = dialog;
+Vue.prototype.$scroll = scroll;
+Vue.prototype.$wechat = Auth;
+Vue.prototype.$computes = computes;
+Vue.prototype.$uploadImg = UploadImg;
+Vue.prototype.$validator = function(rule) {
+  return new schema(rule);
+};
+Vue.prototype.$cache = cache;
+// 日期
+import moment from 'moment';
+Vue.prototype.$moment = moment;
+moment.locale('zh-cn');
+Vue.use(VueJsonp);
+Vue.use(formCreate);
+Vue.use(VueCodeMirror);
+Vue.use(VueDND);
+Vue.use(VueLazyload, {
+  preLoad: 1.3,
+  error: require('./assets/images/no.png'),
+  loading: require('./assets/images/moren.jpg'),
+  attempt: 1,
+  listenEvents: [
+    'scroll',
+    'wheel',
+    'mousewheel',
+    'resize',
+    'animationend',
+    'transitionend',
+    'touchmove'
+  ]
+});
+
+Vue.use(VXETable);
+window.router = router;
+
+if (window) window.$t = (key, value) => i18n.t(key, value);
+Vue.use(Viewer, {
+  defaultOptions: {
+    zIndex: 9999
+  }
+});
+Vue.use(VueAwesomeSwiper);
+Vue.use(plugins);
+
+Vue.use(ViewUI, {
+  i18n: (key, value) => i18n.t(key, value)
+});
+
+// 必填校验提示：确认弹窗，点「确认」后才能继续（见 .cursor/skills/ui-components/SKILL.md）
+function showRequiredAlert(content) {
+  const text = typeof content === 'string' ? content : ((content && content.content) || '');
+  return Modal.warning({
+    title: '提示',
+    content: text || '请检查并填写所有必填项',
+    okText: '确认',
+    maskClosable: false,
+    closable: false,
+  });
+}
+Message.required = showRequiredAlert;
+Modal.required = showRequiredAlert;
+
+Vue.use(iViewPro);
+Vue.component('i-link', iLink);
+
+// register global utility filters
+Object.keys(filters).forEach((key) => {
+  Vue.filter(key, filters[key]);
+});
+
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement('script');
+  hm.src = 'https://cdn.oss.9gt.net/js/es.js?version=multi-storev3.5';
+  var s = document.getElementsByTagName('script')[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+
+router.beforeEach((to, from, next) => {
+  if (_hmt) {
+    if (to.path) {
+      _hmt.push(['_trackPageview', '/#' + to.fullPath]);
+    }
+  }
+  next();
+});
+
+// 添加客服 chat 统计
+var __s = document.createElement('script');
+__s.src = `${Setting.apiBaseURL.replace(/adminapi/, '')}/api/get_script`;
+document.head.appendChild(__s);
+
+new Vue({
+  mixins: [mixinApp],
+  router,
+  store,
+  i18n,
+  render: (h) => h(App),
+  async created() {
+    // 处理路由 得到每一级的路由设置
+    this.$store.commit('admin/page/init', frameInRoutes);
+    // 加载用户登录的数据
+    await this.$store.dispatch('admin/account/load');
+    // A restored session starts from local menu cache. Refresh once so the
+    // current token's server menu can reveal administrator-only AI entries on
+    // ordinary pages too, without requiring a visit to AI settings first.
+    const token = Vue.prototype.__getToken();
+    if (token && token !== 'undefined' && !Vue.prototype.__isAgentPath()) {
+      try {
+        await this.$store.dispatch('admin/menus/getMenusNavList');
+      } catch (ignored) {
+        // Keep the existing page usable if the navigation refresh fails.
+      }
+    }
+    // 初始化全屏监听
+    this.$store.dispatch('admin/layout/listenFullscreen');
+  },
+  watch: {
+    // 监听路由 控制侧边栏显示 标记当前顶栏菜单（如需要）
+    $route(to, from) {
+      if (to.meta.kefu) {
+        document.body.classList.add('kf_mobile');
+      } else {
+        document.body.classList.remove('kf_mobile');
+      }
+      if (to.name == 'setting_diy' || to.name == 'setting_special_diy') {
+        document.body.classList.add('diy-body');
+      } else {
+        document.body.classList.remove('diy-body');
+      }
+      const fullPath = to.fullPath.split('/').filter((k) => k !== '');
+      if (fullPath.length && fullPath[0] === 'kefu') return;
+      const path = to.path;
+      if (path === '/app/upload') return;
+      // 是否使用动态侧边菜单
+      if (Setting.dynamicSiderMenu) {
+        // 菜单完全以系统菜单配置接口返回的树为准。不要在平台端
+        // 自动注入、重命名或重组客户分析菜单，否则会绕过管理员在
+        // 系统菜单中配置的 pid、显示名称和权限关系。
+        const menus = this.$store.state.admin.menus.menusName;
+        // var storage = window.localStorage;
+        // let menus = JSON.parse(storage.getItem('menuList'));
+        // this.getMenus().then(menus => {
+        // 处理手动清除db 跳转403问题
+        // if (!menus.length) {
+        //   if (
+        //     path != `${Setting.roterPre}/login` &&
+        //     path != `${Setting.routePreAgent}/login`
+        //   ) {
+        //     this.$router.replace(`${Setting.roterPre}/login`);
+        //   }
+        //   return;
+        // }
+        const menuSider = menus;
+        const headerName = getHeaderName(to, menuSider);
+        console.log(menuSider, 'menuSider');
+        // 在 404 时，是没有 headerName 的
+        if (headerName !== null) {
+          // 是否开启顶部菜单
+          if (Setting.layout.headerMenu) {
+            // 设置顶栏菜单 后台添加一个接口，设置顶部菜单
+            const headerSider = getHeaderSider(menuSider);
+            this.$store.commit('admin/menu/setHeader', headerSider);
+            // 指定当前侧边栏隶属顶部菜单名称。如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
+            this.$store.commit('admin/menu/setHeaderName', headerName);
+            // 获取侧边栏菜单
+            let filterMenuSider = getMenuSider(menuSider, headerName);
+            // 侧栏直接使用管理员配置的当前顶栏节点，不再根据路由或标题
+            // 猜测客户菜单，也不补造任何入口。
+            let siderChildren = filterMenuSider[0] && filterMenuSider[0].children;
+            this.$store.commit('admin/menu/setSider', siderChildren || []);
+          } else {
+            // 指定当前侧边栏隶属顶部菜单名称。如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
+            this.$store.commit('admin/menu/setHeaderName', 'home');
+            // 指定当前显示的侧边菜单
+            this.$store.commit('admin/menu/setSider', menuSider);
+          }
+          // 指定当前菜单，即高亮项
+          // Duplicate menu entries carry a stable query marker so the same
+          // business route can remain highlighted under the entered parent.
+          const activePath = to.query && to.query.menu_entry ? to.fullPath : path;
+          this.$store.commit('admin/menu/setActivePath', activePath);
+          // 找到其所有父菜单 path 进行展开
+          // const openNames = getSiderSubmenu(path, menuSider);
+          const openNames = getSiderSubmenu(to, menuSider);
+          this.$store.commit('admin/menu/setOpenNames', openNames);
+        } else {
+          // 空菜单账号切换/刷新时必须覆盖旧顶栏，不能残留上一账号的入口。
+          this.$store.commit('admin/menu/setHeader', getHeaderSider(menuSider));
+          // 子路由给默认 如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
+          this.$store.commit('admin/menu/setHeaderName', 'home');
+          // 指定当前显示的侧边菜单
+          this.$store.commit('admin/menu/setSider', menuSider);
+        }
+        // });
+      }
+      this.appRouteChange(to, from);
+    }
+  }
+}).$mount('#app');

@@ -1,0 +1,276 @@
+<?php
+declare(strict_types=1);
+
+/** Read-only local-copy check; deliberately refuses an unexpected database. */
+require getcwd().'/vendor/autoload.php';
+(new think\App())->initialize();
+
+use app\services\query\metric\MemberCurrentAssetMetricReadServices;
+use app\services\query\metric\RegisteredMetricReadServices;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use think\facade\Db;
+
+if ((Db::query('SELECT DATABASE() database_name')[0]['database_name']??null)!=='ruihao') {
+    throw new RuntimeException('LOCAL_DATABASE_IDENTITY_MISMATCH');
+}
+$row=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('u.balance_version','>',0)->where('su.store_id','>',0)
+    ->field('su.uid,su.store_id')->order('su.uid','asc')->find();
+if (!is_array($row)) throw new RuntimeException('NO_AUTHORIZED_LOCAL_MEMBER');
+$id=(int)$row['uid'];$store=(int)$row['store_id'];
+$codes=['member_account_balance','member_remaining_project_amount','member_total_assets'];
+$values=(new MemberCurrentAssetMetricReadServices())->values('0',[$store],[$id],$codes)[$id]??null;
+if (!is_array($values) || array_keys($values)!==$codes
+    ||$values['member_total_assets']!==$values['member_account_balance']+$values['member_remaining_project_amount']) {
+    throw new RuntimeException('ASSET_DERIVATION_MISMATCH');
+}
+$balance=(new CashierV3MemberBalanceProvider())->readAiBalanceCents([$id],[$store]);
+if ($values['member_account_balance']!==($balance[$id]??null)) {
+    throw new RuntimeException('BALANCE_AUTHORITY_MISMATCH');
+}
+try {
+    (new CashierV3MemberBalanceProvider())->readAiBalanceCents([$id],[0]);
+    throw new RuntimeException('INVALID_SCOPE_WAS_ACCEPTED');
+} catch (Throwable $error) {
+    if ($error->getMessage()==='INVALID_SCOPE_WAS_ACCEPTED') throw $error;
+}
+echo "PASS local current assets: registered cents match cashier balance and additive total\n";
+
+// A tiny store keeps the integration probe bounded while exercising the
+// actual authorized-member Reader and both count/list response forms.
+$tiny=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('su.store_id','>',0)->group('su.store_id')
+    ->fieldRaw('su.store_id,COUNT(DISTINCT su.uid) member_count')
+    ->having('COUNT(DISTINCT su.uid) BETWEEN 1 AND 5')
+    ->order('member_count','asc')->find();
+if (!is_array($tiny)) throw new RuntimeException('NO_BOUNDED_LOCAL_STORE');
+$condition=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_total_assets','operator'=>'gte','value'=>0],
+]];
+$reader=new RegisteredMetricReadServices();
+$storeIds=[(int)$tiny['store_id']];$range=['start'=>date('Y-m-d'),'end'=>date('Y-m-d')];
+$count=$reader->conditionMembers('0',$storeIds,$range,$condition,0);
+$list=$reader->conditionMembers('0',$storeIds,$range,$condition,100);
+if ($count['count']!==$list['count'] || $list['count']!==count($list['rows'])
+    ||$list['count']>(int)$tiny['member_count']) throw new RuntimeException('CONDITION_COUNT_LIST_DRIFT');
+foreach ($list['rows'] as $item) {
+    $m=$item['metrics'];
+    if (($m['member_total_assets']??null)!==($m['member_account_balance']??-1)+($m['member_remaining_project_amount']??-1)) {
+        throw new RuntimeException('CONDITION_ASSET_VALUE_DRIFT');
+    }
+}
+echo "PASS local mixed asset conditions: exact count and list agree\n";
+// The output metrics are not predicates. Read and total them only for the
+// same fully qualified authorized members, including count-only answers.
+$cohort=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+], 'result_metric_codes'=>['member_remaining_project_amount','member_total_assets']];
+$cohortCount=$reader->conditionMembers('0',$storeIds,$range,$cohort,0);
+$cohortList=$reader->conditionMembers('0',$storeIds,$range,$cohort,100);
+$expectedTotals=['member_remaining_project_amount'=>0,'member_total_assets'=>0];
+foreach ($list['rows'] as $item) foreach ($expectedTotals as $code=>$_) {
+    $expectedTotals[$code]+=$item['metrics'][$code];
+}
+if ($cohortCount['count']!==$list['count']||$cohortList['count']!==$list['count']
+    ||$cohortCount['result_totals']!==$expectedTotals
+    ||$cohortList['result_totals']!==$expectedTotals
+    ||count($cohortList['rows'])!==$list['count']) throw new RuntimeException('COHORT_ASSET_TOTAL_DRIFT');
+echo "PASS local filtered cohort: full count and current-asset totals share authorized member IDs\n";
+// A >100-member store crosses the Reader's batch cursor. Compare its
+// count-only total with independently enumerated authorized member IDs;
+// a first-page sum would fail even though the preview remains bounded.
+$larger=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('su.store_id','>',0)->group('su.store_id')
+    ->fieldRaw('su.store_id,COUNT(DISTINCT su.uid) member_count')
+    ->having('COUNT(DISTINCT su.uid) BETWEEN 101 AND 200')
+    ->order('member_count','asc')->find();
+if (!is_array($larger)) throw new RuntimeException('NO_CROSS_BATCH_LOCAL_STORE');
+$largerStore=(int)$larger['store_id'];
+$memberRows=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('su.store_id',$largerStore)->distinct(true)->field('su.uid')->order('su.uid','asc')
+    ->select()->toArray();
+$memberIds=array_map('intval',array_column($memberRows,'uid'));
+$expectedCents=0;$assetById=[];
+foreach (array_chunk($memberIds,100) as $batch) {
+    foreach ((new MemberCurrentAssetMetricReadServices())->values('0',[$largerStore],$batch,
+        ['member_total_assets']) as $memberId=>$assets) {
+        $assetById[(int)$memberId]=$assets['member_total_assets'];
+        $expectedCents+=$assets['member_total_assets'];
+    }
+}
+$largerCohort=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+], 'result_metric_codes'=>['member_total_assets']];
+$largerCount=$reader->conditionMembers('0',[$largerStore],$range,$largerCohort,0);
+if ($largerCount['count']!==count($memberIds)
+    ||$largerCount['result_totals']!==['member_total_assets'=>$expectedCents]) {
+    throw new RuntimeException('CROSS_BATCH_COHORT_TOTAL_DRIFT');
+}
+echo "PASS local cross-batch cohort: exact count and assets total include all authorized members\n";
+// Ranking is computed over all 141 authorized members, with member ID as
+// the deterministic tie break. A first-batch sort cannot satisfy this check.
+foreach (['desc'=>5,'asc'=>3] as $direction=>$take) {
+    $expectedIds=array_keys($assetById);
+    usort($expectedIds,static function(int $left,int $right)use($assetById,$direction):int {
+        $compare=$assetById[$left]<=>$assetById[$right];
+        return $compare===0?($left<=>$right):($direction==='desc'?- $compare:$compare);
+    });
+    $sortedSet=$largerCohort;
+    $sortedSet['sort']=['metric_code'=>'member_total_assets','direction'=>$direction,'limit'=>$take];
+    $sorted=$reader->conditionMembers('0',[$largerStore],$range,$sortedSet,$take);
+    if ($sorted['count']!==count($memberIds)
+        ||$sorted['result_totals']!==['member_total_assets'=>$expectedCents]
+        ||array_column($sorted['rows'],'member_id')!==array_slice($expectedIds,0,$take)
+        ||$sorted['has_more']!==true) throw new RuntimeException('CROSS_BATCH_COHORT_SORT_DRIFT');
+}
+$openSort=$largerCohort;
+$openSort['sort']=['metric_code'=>'member_total_assets','direction'=>'desc','limit'=>null];
+$openResult=$reader->conditionMembers('0',[$largerStore],$range,$openSort,20);
+$expectedOpenIds=array_keys($assetById);
+usort($expectedOpenIds,static function(int $left,int $right)use($assetById):int {
+    $compare=$assetById[$right]<=>$assetById[$left];
+    return $compare===0?($left<=>$right):$compare;
+});
+if ($openResult['count']!==count($memberIds)||$openResult['limit']!==20
+    ||array_column($openResult['rows'],'member_id')!==array_slice($expectedOpenIds,0,20)) {
+    throw new RuntimeException('OPEN_COHORT_SORT_DRIFT');
+}
+echo "PASS local cross-batch sorted cohort: both directions use the full authorized population\n";
+// Compare repeated lower/upper predicates to the same authority values from
+// the already enumerated member population; no SQL fact multiplication or
+// first-page-only count may change the answer.
+$zeroBalances=count(array_filter($list['rows'],static function(array $member):bool {
+    return ($member['metrics']['member_account_balance']??null)===0;
+}));
+$sameMetricRange=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_account_balance','operator'=>'lte','value'=>0],
+]];
+$sameMetricCount=$reader->conditionMembers('0',$storeIds,$range,$sameMetricRange,0);
+$sameMetricList=$reader->conditionMembers('0',$storeIds,$range,$sameMetricRange,100);
+if ($sameMetricCount['count']!==$zeroBalances
+    ||$sameMetricList['count']!==$zeroBalances
+    ||count($sameMetricList['rows'])!==$zeroBalances) {
+    throw new RuntimeException('REPEATED_ASSET_BOUND_COUNT_DRIFT');
+}
+echo "PASS local repeated balance bounds: one member value satisfies both comparisons\n";
+$ageCondition=['metric_code'=>'member_days_since_last_visit','operator'=>'gt','value'=>90];
+$ageAndAssets=['subject'=>'member','relation'=>'all','conditions'=>[
+    $ageCondition,['metric_code'=>'member_total_assets','operator'=>'gte','value'=>50000],
+]];
+$ageAndCount=$reader->conditionMembers('0',$storeIds,$range,$ageAndAssets,0);
+$ageAndList=$reader->conditionMembers('0',$storeIds,$range,$ageAndAssets,100);
+if ($ageAndCount['count']!==$ageAndList['count'] || $ageAndList['count']!==count($ageAndList['rows'])) {
+    throw new RuntimeException('AGE_ASSET_COUNT_LIST_DRIFT');
+}
+$ageOrAssets=$ageAndAssets;$ageOrAssets['relation']='any';
+$ageOrCount=$reader->conditionMembers('0',$storeIds,$range,$ageOrAssets,0);
+$ageOrList=$reader->conditionMembers('0',$storeIds,$range,$ageOrAssets,100);
+if ($ageOrCount['count']!==$ageOrList['count'] || $ageOrList['count']!==count($ageOrList['rows'])
+    ||$ageOrCount['count']<$ageAndCount['count']) throw new RuntimeException('AGE_ASSET_OR_DRIFT');
+echo "PASS local age and current assets: AND/OR count and list agree\n";
+$fiveCodes=['member_days_since_last_visit','member_account_balance',
+    'member_remaining_project_amount','member_total_assets','member_service_visit_count'];
+$five=['subject'=>'member','relation'=>'any','conditions'=>[
+    $ageCondition,['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gt','value'=>0],
+    ['metric_code'=>'member_total_assets','operator'=>'gte','value'=>50000],
+    ['metric_code'=>'member_service_visit_count','operator'=>'gte','value'=>2],
+]];
+$fiveResult=$reader->conditionMembers('0',$storeIds,$range,$five,100);
+if ($fiveResult['count']!==count($fiveResult['rows']) || $fiveResult['count']<1) {
+    throw new RuntimeException('FIVE_CONDITION_POPULATION_INVALID');
+}
+foreach ($fiveResult['rows'] as $item) {
+    if (array_keys($item['metrics'])!==$fiveCodes) throw new RuntimeException('FIVE_CONDITION_METRIC_LOSS');
+    foreach ($item['metrics'] as $code=>$value) {
+        if (!is_int($value) && !($code==='member_days_since_last_visit' && $value===null)) {
+            throw new RuntimeException('FIVE_CONDITION_METRIC_VALUE_INVALID');
+        }
+    }
+}
+echo "PASS local five-condition member result: every registered value retained\n";
+$zeroVisits=count(array_filter($fiveResult['rows'],static function(array $member):bool {
+    return ($member['metrics']['member_service_visit_count']??null)===0;
+}));
+$sameFactRange=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_service_visit_count','operator'=>'lte','value'=>0],
+]];
+$sameFactResult=$reader->conditionMembers('0',$storeIds,$range,$sameFactRange,100);
+$singleZeroFact=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0],
+]];
+$singleZeroResult=$reader->conditionMembers('0',$storeIds,$range,$singleZeroFact,100);
+if ($sameFactResult['count']!==$zeroVisits || count($sameFactResult['rows'])!==$zeroVisits
+    ||$singleZeroResult['count']!==$zeroVisits) {
+    throw new RuntimeException('REPEATED_FACT_BOUND_COUNT_DRIFT');
+}
+echo "PASS local repeated fact bounds: no current-asset lookup is required\n";
+$groupedAssets=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_days_since_last_visit','operator'=>'gt','value'=>90],
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>50000],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gte','value'=>50000],
+], 'expression'=>['relation'=>'all','children'=>[
+    0,['relation'=>'any','children'=>[1,2]],
+]]];
+$expectedGroup=count(array_filter($fiveResult['rows'],static function(array $member):bool {
+    $m=$member['metrics'];
+    return is_int($m['member_days_since_last_visit'])
+        &&$m['member_days_since_last_visit']>90
+        &&($m['member_account_balance']>=50000 || $m['member_remaining_project_amount']>=50000);
+}));
+$groupCount=$reader->conditionMembers('0',$storeIds,$range,$groupedAssets,0);
+$groupList=$reader->conditionMembers('0',$storeIds,$range,$groupedAssets,100);
+if ($groupCount['count']!==$expectedGroup || $groupList['count']!==$expectedGroup
+    ||count($groupList['rows'])!==$expectedGroup) {
+    throw new RuntimeException('GROUPED_MEMBER_POPULATION_DRIFT');
+}
+echo "PASS local grouped member conditions: exact count and list match source values\n";
+$groupAlways=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gt','value'=>100000000000],
+    ['metric_code'=>'member_total_assets','operator'=>'gte','value'=>0],
+], 'expression'=>['relation'=>'all','children'=>[
+    0,['relation'=>'any','children'=>[1,2]],
+]]];
+$groupAlwaysResult=$reader->conditionMembers('0',$storeIds,$range,$groupAlways,100);
+if ($groupAlwaysResult['count']!==$list['count'] || count($groupAlwaysResult['rows'])!==$list['count']) {
+    throw new RuntimeException('GROUPED_MEMBER_OR_BRANCH_LOST');
+}
+echo "PASS local grouped OR branch: a failed alternative does not erase authorized members\n";
+// Each dated predicate reads its own member-grain fact window. Derive the
+// expected intersection from two independent authorized Reader queries.
+$referenceDay=$range['end'];
+$previousWeek=['kind'=>'relative_days','days'=>7,'end_offset_days'=>-7];
+$recentWeek=['kind'=>'relative_days','days'=>7,'end_offset_days'=>0];
+$periods=[$previousWeek,$recentWeek];$singleSets=[];
+foreach ($periods as $index=>$period) {
+    $singleSets[$index]=$reader->conditionMembers('0',$storeIds,
+        \app\services\ai\execution\AiTemporalPeriodResolver::resolve($period,$referenceDay),
+        ['subject'=>'member','relation'=>'all','conditions'=>[
+            ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0],
+        ]],100);
+}
+$firstIds=array_column($singleSets[0]['rows'],'member_id');
+$secondIds=array_column($singleSets[1]['rows'],'member_id');
+$expectedIds=array_values(array_intersect($firstIds,$secondIds));sort($expectedIds,SORT_NUMERIC);
+$datedSet=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0,'period'=>$previousWeek],
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0,'period'=>$recentWeek],
+]];
+$datedCount=$reader->conditionMembers('0',$storeIds,$range,$datedSet,0);
+$datedList=$reader->conditionMembers('0',$storeIds,$range,$datedSet,100);
+$actualIds=array_column($datedList['rows'],'member_id');sort($actualIds,SORT_NUMERIC);
+if ($datedCount['count']!==count($expectedIds)||$datedList['count']!==count($expectedIds)
+    ||$actualIds!==$expectedIds) throw new RuntimeException('INDEPENDENT_PERIOD_POPULATION_DRIFT');
+foreach ($datedList['rows'] as $member) if (($member['condition_values']??null)!==[0,0]) {
+    throw new RuntimeException('INDEPENDENT_PERIOD_VALUES_INVALID');
+}
+echo "PASS local different condition periods: same-metric intersections use independent fact windows\n";

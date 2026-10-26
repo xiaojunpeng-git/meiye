@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Platform AI entry drag fixture</title>
+<main style="height:140vh;padding:24px;font:16px system-ui">平台 AI 入口拖动测试</main>
+<script type="module">
+  import { mountMoheAi } from '../../前端代码/shared/mohe-ai/browser-entry.mjs';
+  mountMoheAi({
+    presentation: 'workspace',
+    entryIconUrl: '../../前端代码/admin/src/assets/images/mohe-ai-entry-orbits.gif',
+    draggableEntry: true,
+    request: async (_method, path) => {
+      if (path === '/bootstrap') return { enabled: true, async_execution: true, identity_key: 'drag-browser-fixture', capabilities: { metric_codes: [], output_formats: ['screen'] } };
+      throw new Error(`Unexpected request: ${path}`);
+    }
+  });
+</script>

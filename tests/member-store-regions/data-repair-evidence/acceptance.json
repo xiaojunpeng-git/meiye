@@ -1,0 +1,12 @@
+{
+  "task": "M008-EMERG-R3-REGION-DATA",
+  "planSha256": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d",
+  "decision": "按此范围修复",
+  "approvedScope": "Only 008: populate its empty standard region dictionary and fill province/city/area for stores 127,129,130; preserve 21 unresolved stores, original address text, street and all unrelated business data.",
+  "fixedVersion": "fixed-version.json",
+  "localTests": "PASS",
+  "deploymentAuthorization": "008 data repair only",
+  "pushAuthorization": false,
+  "applicationDeployment": false,
+  "miniProgramUpload": false
+}

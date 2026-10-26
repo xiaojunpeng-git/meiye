@@ -1,0 +1,45 @@
+[
+  {
+    "path": "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php",
+    "online": "bb8350ab3b4281cc11fa885cc3bc2c33fd07b4f737436dd6f2a90e85059b09d3",
+    "working": "e19267c7e4fa681c5bc489c864d8160ec74e59b8e907f15cce562dee6993ba61",
+    "head": "2bf777bf0b8975876e416e1cc97c306ceb50a188c4b656f9a4b3aa6c1423b077",
+    "online_source_commit": "92a02ef1"
+  },
+  {
+    "path": "后端代码/app/services/user/UserBalanceAtomicServices.php",
+    "online": "6be7ee5b7a1343e6e86f2713a8602b0c10892663fb25e56c42b6111a99299ca5",
+    "working": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a",
+    "head": "6be7ee5b7a1343e6e86f2713a8602b0c10892663fb25e56c42b6111a99299ca5"
+  },
+  {
+    "path": "后端代码/app/services/cashier/v3/order/CashierV3UnifiedRefundServices.php",
+    "online": "e689726f396c18395d796bad08af49e228761cd5d255f41917a3054ec2b5721f",
+    "working": "e689726f396c18395d796bad08af49e228761cd5d255f41917a3054ec2b5721f",
+    "head": "6fbdcd1d067c3fb59bbb8e336ed515ab34f67320582f710c8a74795da31b3a4a",
+    "online_source_commit": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "source_subject": "R47-00001 销售欠款本金赠金余额补交及作废闭环"
+  },
+  {
+    "path": "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterVoidServices.php",
+    "online": "1ec813c6dc9883842b1a2f5bdd17a3d52890982e07189e6f1204ea5bf7695ef3",
+    "working": "1ec813c6dc9883842b1a2f5bdd17a3d52890982e07189e6f1204ea5bf7695ef3",
+    "head": "d15f158edb84256c94416871e44e51048f12eeb0a472cdfdd00336c70a143466",
+    "online_source_commit": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "source_subject": "R47-00001 销售欠款本金赠金余额补交及作废闭环"
+  },
+  {
+    "path": "后端代码/app/services/cashier/v3/checkout/provider/CashierV3MemberBalanceProvider.php",
+    "online": "0d2fd33fd59cd99e1769a24edd61aca52fcf613dda6931882b7b9037bc956bd7",
+    "working": "0d2fd33fd59cd99e1769a24edd61aca52fcf613dda6931882b7b9037bc956bd7",
+    "head": "0d2fd33fd59cd99e1769a24edd61aca52fcf613dda6931882b7b9037bc956bd7",
+    "online_source_commit": "f50eaa8e"
+  },
+  {
+    "path": "后端代码/app/services/query/metric/MetricMoneyFormatter.php",
+    "online": "b9bbfb79cc96545ace388d4f9f13073962d3a4dc242e2ac4cf0ec7b9bf1d125a",
+    "working": "b9bbfb79cc96545ace388d4f9f13073962d3a4dc242e2ac4cf0ec7b9bf1d125a",
+    "head": "b9bbfb79cc96545ace388d4f9f13073962d3a4dc242e2ac4cf0ec7b9bf1d125a",
+    "online_source_commit": "f50eaa8e"
+  }
+]

@@ -1,0 +1,203 @@
+{
+  "task": "M008-R4-001",
+  "status": "SELF_TEST_PASS_AWAITING_PM_ACCEPTANCE",
+  "baseline": "5ba5da5526cbd23afb0ec4983fd04a3d7cdc80e9",
+  "fingerprint": "708a3c82b47042071d8f3bd7e8649aef2d2f1a3bfeccc72ec6617c6eec79ac20",
+  "files": [
+    {
+      "file": "tests/diy-product-types/README.md",
+      "sha256": "57142fdc68379d9ccffd7120edba7e5fe984709fb0d1723c3dc0495179630cd4"
+    },
+    {
+      "file": "tests/diy-product-types/api-contract.php",
+      "sha256": "bdb5c1a4a6b6270168f42a324eebc3fac58caf80dc130b0cb0a86ad200f77f2b"
+    },
+    {
+      "file": "tests/diy-product-types/contract.cjs",
+      "sha256": "ace7b118e4fa4b2b871c3729a393ade994bed8566509ff513d751569e7d8b62a"
+    },
+    {
+      "file": "tests/diy-product-types/mysql.php",
+      "sha256": "343768ce5d798c11b43ea2429c756e0999f438aaec189d2cb6924fe87aba0e7f"
+    },
+    {
+      "file": "tests/diy-product-types/serve.cjs",
+      "sha256": "c50eef1c11e396fff4ba01913264f758082b66bad83f539738ed78efb3e0329a"
+    },
+    {
+      "file": "tests/diy-product-types/source-harness.cjs",
+      "sha256": "4d2ac67c7bbdb163b1e91c2777b0649f1a130ed7d06dd07204ad71d2bd0b4e66"
+    },
+    {
+      "file": "tests/diy-product-types/verify.cjs",
+      "sha256": "783c4b8013c6868bd9f24eeff9b3dcb6b6b9341a35b3226e6a426d48ef155b6b"
+    },
+    {
+      "file": "前端代码/admin/src/components/goodsList/index.vue",
+      "sha256": "53360af9ca2502788af30a34548980d4ef2efebf81c5308ee3efdf4aa0eeb395"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfig/c_home_goods_list.vue",
+      "sha256": "7639359d39c753b5352af4f64f78b02c01d0e40cfff0d4586658a0ec4c9e2893"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfig/c_home_product.vue",
+      "sha256": "057d624d5f8e18cc162181479476753650ab44a18984b88631b8df3860e9d191"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_catalog_types.vue",
+      "sha256": "e0c046314d157ed0e5bdba2ae4bfd542c5c6a8a79afaf9ff32c155463b998747"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_goods.vue",
+      "sha256": "509a142378cee9cf834ffcc87f5d1783df7177b430800ac22abb66ac4d80f29c"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobileConfigRight/c_promotion.vue",
+      "sha256": "048e8892019b9cb7543d08291a4ce15368f3382fce5fcbc1bfe9de6b605c16b8"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobilePage/home_goods_list.vue",
+      "sha256": "72ba07d24d66c05c41d13490d5260b548ca22dc6d2de876a8c871c3248d5726f"
+    },
+    {
+      "file": "前端代码/admin/src/components/mobilePage/home_product.vue",
+      "sha256": "9b2658779bdce988ecb1af64890305b0d7b99a4c16881b7a790dd0cfb9368559"
+    },
+    {
+      "file": "前端代码/admin/src/utils/diyProductTypes.js",
+      "sha256": "ec449f4e2b254e352a209ca4adac960ce60977ec44b980d323bd1f2b7dcfa29e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/goodList.vue",
+      "sha256": "4626e1e0a2a7b466ca3e1b73e9b7d90415015895fe21b512a5a633d5c9209f73"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/promotionList.vue",
+      "sha256": "8c609fe72fa801ebab302cad4b8cfa2311a2b913f88de7fbf496aa522aa7dcda"
+    },
+    {
+      "file": "后端代码/app/controller/admin/v1/diy/Diy.php",
+      "sha256": "0f6d4d8971c9a4cd6277992b85f934f44bcd5c5d65d13e68528a530b74720c28"
+    },
+    {
+      "file": "后端代码/app/controller/admin/v1/product/StoreProduct.php",
+      "sha256": "e76caa4ecb9923cd5fd156aa64db1b00f3cbcdb95280b49c3bc0f0ea824a6f7d"
+    },
+    {
+      "file": "后端代码/app/controller/api/v1/product/StoreProduct.php",
+      "sha256": "72d8e439859c8f30cceb61555fbf3e321b054dd1f79b412fa963849505039b8a"
+    },
+    {
+      "file": "后端代码/app/services/diy/DiyProductTypeFilter.php",
+      "sha256": "e2dd23b38721f926ec1c9b4a06fce57f888710b42d20dc1ec1c9295ef5a1c139"
+    }
+  ],
+  "businessFiles": 15,
+  "testAndRecordFiles": 7,
+  "dependencies": [
+    {
+      "file": "后端代码/app/services/product/product/StoreProductServices.php",
+      "sha256": "f2235d44ec375d9605772b347c570b8c707f2ea959ed1072d8b0a5bb3fab49b8",
+      "headSha256": "f2235d44ec375d9605772b347c570b8c707f2ea959ed1072d8b0a5bb3fab49b8"
+    },
+    {
+      "file": "后端代码/app/dao/product/product/StoreProductDao.php",
+      "sha256": "eae746f47ca5efd9144ca25821c47dd7568dfd98fcd0a92b1e438a0293d79eaa",
+      "headSha256": "eae746f47ca5efd9144ca25821c47dd7568dfd98fcd0a92b1e438a0293d79eaa"
+    },
+    {
+      "file": "后端代码/app/model/product/product/StoreProduct.php",
+      "sha256": "28188b925989f5381a288fc82fb0062c07b1def4ef37fe19961caf69f86f5fb6",
+      "headSha256": "28188b925989f5381a288fc82fb0062c07b1def4ef37fe19961caf69f86f5fb6"
+    }
+  ],
+  "results": {
+    "phpLint": "4 files PASS",
+    "components": {
+      "status": "PASS",
+      "cases": [
+        "10-SFC-template-script-compilation",
+        "8-combinations",
+        "legacy-no-mutation",
+        "explicit-empty",
+        "new-defaults",
+        "late-query-isolation",
+        "brand-intersection",
+        "tab-count-stable",
+        "member-filter-transport",
+        "manual-empty",
+        "tab-projection",
+        "purchase-route-preserved"
+      ]
+    },
+    "api": {
+      "status": "PASS",
+      "cases": [
+        "public-route-missing-empty-single-multiple",
+        "ids-brand-label-show-scope-preserved"
+      ]
+    },
+    "mysql": {
+      "status": "PASS",
+      "database": "5.7.44",
+      "cases": [
+        "8-real-controller-combinations",
+        "real-picker-empty-all-count",
+        "hidden-status",
+        "filter-before-pagination",
+        "brand-category-label-intersection",
+        "legacy-store-scope",
+        "invalid-input",
+        "actual-controller-service-save",
+        "db-refresh-manual",
+        "db-refresh-independent-tabs",
+        "db-refresh-brand",
+        "empty-tab"
+      ],
+      "rollback": "all decoration rows unchanged"
+    },
+    "browser": {
+      "status": "PASS",
+      "scope": "Canonical Vue SFC fixture; transport/uni-app adapters; backend real MySQL tested separately",
+      "cases": [
+        "list-single-project",
+        "list-multiple-card-project",
+        "list-save-refresh",
+        "375-and-320-component-widths",
+        "independent-tab-types",
+        "explicit-empty",
+        "tab-empty-save-refresh"
+      ],
+      "layout": {
+        "images": true,
+        "pageWidth": 1280,
+        "phones": [
+          {
+            "scrollWidth": 375,
+            "width": 375
+          },
+          {
+            "scrollWidth": 375,
+            "width": 375
+          }
+        ],
+        "scrollWidth": 1265,
+        "selected": [
+          false,
+          false,
+          true
+        ]
+      }
+    }
+  },
+  "online": "Not applicable: local only; no remote connection, deployment or saved online decoration",
+  "boundaries": {
+    "commit": false,
+    "push": false,
+    "deployed": false,
+    "miniProgramUploaded": false,
+    "unrelatedChangesPreserved": true,
+    "fullBundleBuilt": false
+  }
+}

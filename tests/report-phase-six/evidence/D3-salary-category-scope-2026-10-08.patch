@@ -1,0 +1,11 @@
+diff --git a/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php b/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php
+index e8a52ec2..4ed1d8eb 100644
+--- a/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php
++++ b/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php
+@@ -792 +800,2 @@ final class StoreUnifiedReportPhaseSixServices
+-        // Salary detail displays the sale's historical category path, never its numeric category ID.
++        // Sales classification requires the frozen category ID as well as its path: the ID selects
++        // the salary bucket; the path preserves historical display. Never infer an ID from a name.
+@@ -800 +809 @@ final class StoreUnifiedReportPhaseSixServices
+-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_path_snapshot category_path')
++            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')

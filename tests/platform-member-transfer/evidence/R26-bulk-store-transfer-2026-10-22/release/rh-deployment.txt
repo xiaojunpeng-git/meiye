@@ -1,0 +1,12 @@
+{"result":"PREPARED","instance":"rh","files":1180,"schemaBackup":true}
+644823c0f0d08ae1c05e09b461f28b6adcee0e6c14c9b0b2bf050fb79d0ee33b  /www/backups/rh/20261022-r26-bulk-802490dc/before.tar.gz
+No syntax errors detected in /www/backups/rh/20261022-r26-bulk-802490dc/payload/app/jobs/user/UserStoreTransferBatchJob.php
+No syntax errors detected in /www/backups/rh/20261022-r26-bulk-802490dc/payload/app/services/user/UserBelongStoreServices.php
+No syntax errors detected in /www/backups/rh/20261022-r26-bulk-802490dc/payload/app/services/user/UserStoreTransferBatchServices.php
+No syntax errors detected in /www/backups/rh/20261022-r26-bulk-802490dc/payload/app/controller/admin/v1/user/MemberStoreTransfer.php
+No syntax errors detected in /www/backups/rh/20261022-r26-bulk-802490dc/payload/route/admin.php
+{"instance":"rh","result":"PASS","files":1180,"businessTransfersExecuted":0}
+ruihao swoole started pid=8941 port=20800
+{"instance":"rh","result":"PASS","files":1180,"businessTransfersExecuted":0}
+{"instance":"rh","result":"PASS","previewCountMatches":true,"targetExcludesSource":true,"queueClassLoaded":true,"queue":"MOHE_PRO_BATCH","writes":0}
+R26_INSTANCE_RELEASE_PASS

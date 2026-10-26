@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import { DeviceSessions, RETENTION_MS, acceptRun, safeDownloadUrl } from '../../前端代码/shared/mohe-ai/device-session.mjs';
+const items = new Map(); const storage = { getItem: k => items.get(k), setItem: (k,v) => items.set(k,v), removeItem: k => items.delete(k) };
+let now = 100; const sessions = new DeviceSessions(storage, 'instance-A:person-1', () => now);
+sessions.create('a');
+for (let i = 0; i < 25; i++) sessions.append('a', 'q'+i, 'a'+i, {summary:'a'+i});
+assert.equal(sessions.history('a').length,20); assert.equal(sessions.history('a')[0].question,'q5');
+assert.deepEqual(Object.keys(sessions.history('a')[0]),['question','answer']);
+assert.equal(new DeviceSessions(storage,'instance-A:person-2',()=>now).load().length,0);
+assert.equal(new DeviceSessions(storage,'instance-B:person-1',()=>now).load().length,0);
+sessions.create('b'); assert.equal(sessions.history('b').length,0);
+now += RETENTION_MS; assert.equal(sessions.load().length,0); assert.throws(()=>sessions.append('a','q','a'));
+storage.setItem(sessions.key,'broken'); assert.deepEqual(sessions.load(),[]);
+storage.setItem(sessions.key,JSON.stringify([{id:'future',created_at:now+1,rounds:[]} ])); assert.deepEqual(sessions.load(),[]);
+const current = {run_id:'a',generation:1,status:'RUNNING'};
+assert.equal(acceptRun(current,{run_id:'b',generation:1,status:'COMPLETED'}),current);
+assert.equal(acceptRun(current,{run_id:'a',generation:2,status:'COMPLETED'}),current);
+const cancelled = {run_id:'a',generation:1,status:'CANCELLED'};
+assert.equal(acceptRun(cancelled,{...current,status:'COMPLETED'}),cancelled);
+assert.equal(acceptRun(current,{...current,status:'COMPLETED'}).status,'COMPLETED');
+const guided = {...current,version:4,status:'WAITING_CLARIFICATION',clarification:{id:'step-2'}};
+assert.equal(acceptRun(guided,{...current,version:3,clarification:{id:'step-1'}}),guided);
+assert.equal(acceptRun(guided,{...guided,clarification:{id:'stale-duplicate'}}),guided);
+assert.equal(acceptRun(guided,{...current,status:'COMPLETED'}),guided);
+assert.equal(acceptRun(guided,{...guided,version:0}),guided);
+assert.equal(acceptRun(guided,{...guided,version:'5'}),guided);
+assert.equal(acceptRun(guided,{...current,version:5,status:'RUNNING'}).version,5);
+assert.equal(acceptRun(guided,{...current,version:6,status:'COMPLETED'}).status,'COMPLETED');
+assert.equal(acceptRun(current,{...current,version:1}).version,1);
+assert.equal(safeDownloadUrl('javascript:alert(1)','https://example.test'),null);
+assert.equal(safeDownloadUrl('https://other.test/x','https://example.test'),null);
+assert.equal(safeDownloadUrl('/download','https://example.test'),'https://example.test/download');
+sessions.create('context-a'); sessions.create('context-b');
+sessions.append('context-a','q-a','a-a',{context_ref:'fixture-context-a'});
+sessions.append('context-b','q-b','a-b',{context_ref:'fixture-context-b'});
+assert.equal(sessions.contextRef('context-a'),'fixture-context-a');
+assert.equal(sessions.contextRef('context-b'),'fixture-context-b');
+assert.equal(sessions.contextRef('missing'),null);
+assert.deepEqual(sessions.history('context-a'),[{question:'q-a',answer:'a-a'}]);
+sessions.append('context-a','new-q','new-a',{});
+assert.equal(sessions.contextRef('context-a'),null); // never search older answers
+sessions.append('context-a','new-q2','new-a2',{context_ref:{forged:true}});
+assert.equal(sessions.contextRef('context-a'),null);
+sessions.append('context-b','failed-product-question','本次未能完成',{summary:'本次未能完成',terminal_status:'FAILED'},null,{contextEligible:false});
+assert.equal(sessions.contextRef('context-b'),'fixture-context-b');
+assert.deepEqual(sessions.history('context-b'),[
+  {question:'q-b',answer:'a-b'},
+  {question:'failed-product-question',answer:'本次未能完成'}
+]);
+sessions.append('context-b','failed-new-topic','本次未能完成',
+  {summary:'本次未能完成',terminal_status:'FAILED'},null,
+  {contextEligible:false,topicBoundary:'reset'});
+assert.equal(sessions.contextRef('context-b'),null);
+assert.deepEqual(sessions.history('context-b'),[
+  {question:'failed-new-topic',answer:'本次未能完成'}
+]);
+sessions.append('context-b','elapsed-question','elapsed-answer',{summary:'elapsed-answer'},null,{elapsedSeconds:65});
+assert.deepEqual(sessions.history('context-b').map(row => row.question),
+  ['failed-new-topic','elapsed-question']);
+assert.equal(sessions.load().find(session => session.id === 'context-b').rounds.at(-1).elapsed_seconds,65);
+assert.equal(new DeviceSessions(storage,'instance-B:person-1',()=>now).contextRef('context-b'),null);
+now += RETENTION_MS;
+assert.equal(sessions.contextRef('context-b'),null);
+sessions.create('remove-me'); sessions.append('remove-me','待删除问题','待删除回答',{});
+sessions.saveRuntime({created_at:now,session_id:'session-remove',conversation_id:'remove-me',run:{run_id:'run-remove'}});
+assert.equal(sessions.remove('remove-me'),true);
+assert.equal(sessions.history('remove-me').length,0);
+assert.equal(sessions.loadRuntime(),null);
+assert.equal(sessions.remove('remove-me'),false);
+sessions.saveRuntime({created_at:now,session_id:'session-a',conversation_id:'context-a',run:{run_id:'run-a'}});
+sessions.clear(); assert.equal(items.has(sessions.key),false); assert.equal(items.has(sessions.runtimeKey),false);
+console.log('Device history / identity / retention / delivery / version ordering / context reference / single removal: PASS');

@@ -1,0 +1,2183 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+namespace app\services\store;
+
+use app\dao\store\SystemStoreStaffDao;
+use app\jobs\user\UserBelongStoreJob;
+use app\model\position\Position;
+use app\model\position\PositionLevel;
+use app\services\BaseServices;
+use app\services\order\OtherOrderServices;
+use app\services\order\store\BranchOrderServices;
+use app\services\order\StoreOrderRefundServices;
+use app\services\product\product\StoreProductServices;
+use app\services\user\UserBelongStoreServices;
+use app\services\store\finance\StaffFlowingWaterServices;
+use app\services\store\finance\StoreFinanceFlowServices;
+use app\services\user\UserServices;
+use app\services\work\WorkMemberServices;
+use app\services\work\WorkClientServices;
+use app\services\system\SystemRoleServices;
+use app\services\user\UserCardServices;
+use app\services\user\UserRechargeServices;
+use app\services\user\UserSpreadServices;
+use mohe\exceptions\AdminException;
+use mohe\services\FormBuilder as Form;
+use think\exception\ValidateException;
+use think\facade\Db;
+
+/**
+ * 门店店员
+ * Class SystemStoreStaffServices
+ * @package app\services\system\store
+ * @mixin SystemStoreStaffDao
+ */
+class SystemStoreStaffServices extends BaseServices
+{
+
+    /**
+     * 构造方法
+     * SystemStoreStaffServices constructor.
+     * @param SystemStoreStaffDao $dao
+     */
+    public function __construct(SystemStoreStaffDao $dao)
+    {
+        $this->dao = $dao;
+    }
+
+    /**
+     * 获取低于等级的店员名称和id
+     * @param string $field
+     * @param int $level
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getOrdAdmin(string $field = 'real_name,id', int $storeId = 0, int $level = 0)
+    {
+        return $this->dao->getWhere()->where('store_id', $storeId)->where('level', '>=', $level)->field($field)->select()->toArray();
+    }
+
+    /**
+     * 获取门店客服列表
+     * @param int $store_id
+     * @param string $field
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getCustomerList(int $store_id, string $field = '*')
+    {
+        return $this->dao->getWhere()->where('store_id', $store_id)->where('status', 1)->where('is_del', 0)->where('is_customer', 1)->field($field)->select()->toArray();
+    }
+
+    /**
+     * 获取店员详情
+     * @param int $id
+     * @param string $field
+     * @return array|\think\Model|null
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStaffInfo(int $id, string $field = '*')
+    {
+        $info = $this->dao->getOne(['id' => $id, 'is_del' => 0], $field);
+        if (!$info) {
+            throw new ValidateException('店员不存在');
+        }
+        return $info;
+    }
+
+    /**
+     * 根据uid获取门店店员信息
+     * @param int $uid
+     * @param int $store_id
+     * @param string $field
+     * @return array|\think\Model
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStaffInfoByUid(int $uid, int $store_id = 0, string $field = '*')
+    {
+        $where = ['uid' => $uid, 'is_del' => 0, 'status' => 1];
+        if ($store_id) $where['store_id'] = $store_id;
+        $info = $this->dao->getOne($where, $field);
+//        if (!$info) {
+//            throw new ValidateException('店员不存在');
+//        }
+        return $info;
+    }
+
+    /**
+     * 检查用户是否是店员
+     * @param int $uid
+     * @return array|\think\Model
+     */
+    public function isStaff(int $uid, string $field = '*')
+    {
+        $where = ['uid' => $uid, 'is_del' => 0, 'status' => 1];
+        $info = $this->dao->getOne($where, $field);
+        if (!$info) {
+            return null;
+        }
+        return $info;
+    }
+
+    /**
+     * 校验门店店员查看客户卡包权限（含普通员工）
+     * @param array $staffInfo
+     */
+    public function assertViewCustomerCardPermission(array $staffInfo): void
+    {
+        if (!$staffInfo || empty($staffInfo['id'])) {
+            throw new ValidateException('无操作权限');
+        }
+    }
+
+    /**
+     * 临期解绑店员
+     * @return bool
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function systemOperateUnbind()
+    {
+        $period_of_validity = sys_config('period_of_validity', 1);
+        if (in_array($period_of_validity, [1, 3])) return true;
+        $period_validity_day = sys_config('period_validity_day', 1);
+        /** @var UserServices $userServices */
+        $userServices = app()->make(UserServices::class);
+        $expire_time = time() - $period_validity_day * 86400;
+        $where['salesmanTime'] = $expire_time;
+        $userList = $userServices->getUserInfoList($where);
+        if (!count($userList)) return true;
+        foreach ($userList as $key => $item) {
+            if (!$item['salesman_id']) continue;
+            $info = $this->dao->get($item['salesman_id']);
+            if (!$info) continue;
+            /** @var UserBelongStoreServices $belongServices */
+            $belongServices = app()->make(UserBelongStoreServices::class);
+            $belongServices->setUserBelongStoreStaff((int)$item['uid'], (int)$item['salesman_id'], (int)$info['store_id'], 6);
+        }
+        return true;
+    }
+
+    /**
+     * 企业微信绑定
+     * @return bool
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function systemOperateWeComBelong()
+    {
+        $where['is_work_member'] = 1;
+        $where['status'] = 1;
+        $where['is_del'] = 0;
+        $where['is_customer'] = 1;
+        $list = $this->dao->getStoreStaffList($where);
+        if (!count($list)) return true;
+        foreach ($list as $item) {
+            /** @var WorkMemberServices $workMemberService */
+            $workMemberService = app()->make(WorkMemberServices::class);
+            $userid = $workMemberService->value(['id' => $item['work_member_id']], 'userid');
+            if (!$userid) continue;
+            /** @var WorkClientServices $clientService */
+            $clientService = app()->make(WorkClientServices::class);
+            $where['external_userid'] = $userid;
+            $where['is_uid'] = 1;
+            $clientUsers = $clientService->getClientUserList($where);
+            if (!count($clientUsers)) continue;
+            foreach ($clientUsers as $client) {
+                UserBelongStoreJob::dispatchDo('belongStoreStaff', [$client['uid'], 0, 3, $item['id'], $item['store_id']]);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 工作台
+     * @param int $uid
+     * @param array $countWhere
+     * @param int $plat_type
+     * @return array
+     * @throws \think\db\exception\DbException
+     */
+    public function getStagingData(int $store_id, int $staff_id = 0, string $time = 'today')
+    {
+        $where = ['store_id' => $store_id, 'time' => $time];
+		$todayWhere = [];
+        if ($staff_id) {
+			$where['staff_id'] = $staff_id;
+        }
+        $data = [];
+        $order_where = ['pid' => 0, 'paid' => 1, 'refund_status' => [0, 3], 'is_system_del' => 0];
+        /** @var BranchOrderServices $orderServices */
+        $orderServices = app()->make(BranchOrderServices::class);
+        $cashier_price = $orderServices->sum($where + $order_where + ['type' => 106], 'pay_price', true);
+        $writeoff_price = $orderServices->sum($where + $order_where + ['type' => 105], 'pay_price', true);
+        $send_price = $orderServices->sum($where + $order_where + ['type' => 107], 'pay_price', true);
+		$reservation_price = $orderServices->sum($where + $order_where + ['type' => 12], 'pay_price', true);
+		$card_price = $orderServices->sum($where + $order_where + ['type' => 11], 'pay_price', true);
+        $refund_price = $orderServices->sum($where + ['status' => -3], 'pay_price', true);
+        /** @var OtherOrderServices $otherOrder */
+        $otherOrder = app()->make(OtherOrderServices::class);
+        $svip_price = $otherOrder->sum($where + ['paid' => 1, 'type' => [0, 1, 2, 4]], 'pay_price', true);
+        /** @var UserRechargeServices $userRecharge */
+        $userRecharge = app()->make(UserRechargeServices::class);
+        $recharge_price = $userRecharge->getWhereSumField($where + ['paid' => 1], 'price');
+
+        $todayPrice = $orderServices->sum($where + $order_where + $todayWhere, 'pay_price', true);
+
+        $pid_where = ['pid' => 0, 'paid' => 1, 'is_del' => 0, 'is_system_del' => 0];
+
+        unset($where['time']);
+        //待发货
+        $staging['unshipped_count'] = (string)$orderServices->count($where + ['status' => 1] + $pid_where);
+
+        /** @var StoreOrderRefundServices $storeOrderRefundServices */
+        $storeOrderRefundServices = app()->make(StoreOrderRefundServices::class);
+        $refund_where = ['is_cancel' => 0];
+        $staging['refunding_count'] = (string)$storeOrderRefundServices->count($where + $refund_where + ['refund_type' => [0, 1, 2, 4, 5]]);
+        $staging['refunded_count'] = (string)$storeOrderRefundServices->count($where + $refund_where + ['refund_type' => [3, 6]]);
+        $staging['refund_count'] = (string)bcadd($staging['refunding_count'], $staging['refunded_count'], 0);
+		$staging['recharge_price'] = $recharge_price;
+		$staging['svip_price'] = $svip_price;
+        /** @var StoreFinanceFlowServices $flowServices */
+        $flowServices = app()->make(StoreFinanceFlowServices::class);
+        $staging['rate_price'] = $flowServices->sum(['store_id' => $store_id, 'pm'=>1, 'type' => [5, 6]],'number');
+        /** @var StoreProductServices $StoreProductServices */
+        $StoreProductServices = app()->make(StoreProductServices::class);
+        //已经售馨商品
+        $staging['outofstock'] = $StoreProductServices->getCount(['status' => 4, 'type' => 1, 'relation_id' => $store_id]);
+        //警戒库存商品
+        $store_stock = sys_config('store_stock', 0);
+        $staging['policeforce'] = $StoreProductServices->getCount(['status' => 5, 'type' => 1, 'relation_id' => $store_id, 'store_stock' => $store_stock > 0 ? $store_stock : 2]);
+        $result['statistics'] = [
+            ['title' => '收银订单额', 'value' => $cashier_price, 'key' => '元',],
+            ['title' => '核销订单额', 'value' => $writeoff_price, 'key' => '元',],
+            ['title' => '配送订单额', 'value' => $send_price, 'key' => '元',],
+            ['title' => '退款订单额', 'value' => $refund_price, 'key' => '元',],
+			['title' => '预约订单额', 'value' => $reservation_price, 'key' => '元',],
+			['title' => '卡项订单额', 'value' => $card_price, 'key' => '元',],
+        ];
+        $result['staging'] = $staging;
+        $result['todayPrice'] = $todayPrice;
+        return $result;
+    }
+
+    /**
+     * 获取门店｜店员统计
+     * @param int $store_id
+     * @param int $staff_id
+     * @param string $time
+     * @return array
+     */
+    public function getStoreData(int $uid, int $store_id, int $staff_id = 0, string $time = 'today')
+    {
+        $where = ['store_id' => $store_id, 'time' => $time];
+        if ($staff_id) {
+            $where['staff_id'] = $staff_id;
+        }
+        $data = [];
+        $order_where = ['pid' => 0, 'paid' => 1, 'refund_status' => [0, 3], 'is_system_del' => 0];
+        /** @var BranchOrderServices $orderServices */
+        $orderServices = app()->make(BranchOrderServices::class);
+        $data['price'] = $orderServices->sum($where + $order_where, 'pay_price', true);
+        $data['send_price'] = $orderServices->sum($where + $order_where + ['type' => 107], 'pay_price', true);
+        $data['send_count'] = $orderServices->count($where + $order_where + ['type' => 107]);
+        $data['refund_price'] = $orderServices->sum($where + ['pid' => 0, 'status' => -3], 'pay_price', true);
+        $data['cashier_price'] = $orderServices->sum($where + $order_where + ['type' => 106], 'pay_price', true);
+        $data['writeoff_price'] = $orderServices->sum($where + $order_where + ['type' => 105], 'pay_price', true);
+        /** @var OtherOrderServices $otherOrder */
+        $otherOrder = app()->make(OtherOrderServices::class);
+        $data['svip_price'] = $otherOrder->sum($where + ['paid' => 1, 'type' => [0, 1, 2, 4]], 'pay_price', true);
+        /** @var UserRechargeServices $userRecharge */
+        $userRecharge = app()->make(UserRechargeServices::class);
+        $data['recharge_price'] = $userRecharge->getWhereSumField($where + ['paid' => 1], 'price');
+        /** @var UserSpreadServices $userSpread */
+        $userSpread = app()->make(UserSpreadServices::class);
+        $data['spread_count'] = $userSpread->count($where + ['timeKey' => 'spread_time']);
+        /** @var UserCardServices $userCard */
+        $userCard = app()->make(UserCardServices::class);
+        $data['card_count'] = $userCard->count($where + ['is_submit' => 1]);
+        return $data;
+    }
+
+    /**
+     * 判断是否是有权限核销的店员
+     * @param $uid
+     * @return bool
+     */
+    public function verifyStatus($uid)
+    {
+        return (bool)$this->dao->getOne(['uid' => $uid, 'status' => 1, 'is_del' => 0, 'verify_status' => 1]);
+    }
+
+    /**
+     * 获取店员列表
+     * @param array $where
+     * @param array $with
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStoreStaffList(array $where, array $with = [], bool $hideFencheng = false)
+    {
+        // 平台人员列表的清空任职行按员工主档筛选在职状态；其余历史任职维持原口径。
+        if (isset($where['status']) && $where['status'] !== '') {
+            $where['person_status'] = (int)$where['status'];
+            unset($where['status']);
+        }
+        $organizationId = (int)($where['organization_id'] ?? 0);
+        unset($where['organization_id']);
+        if ($organizationId > 0) {
+            return $this->getStoreStaffListWithOrganizationMembers($where, $organizationId, $with, $hideFencheng);
+        }
+        $with = array_merge($with, [
+            'workMember' => function ($query) {
+                $query->field(['id', 'uid', 'name', 'position', 'qr_code', 'external_position']);
+            }
+        ]);
+        [$page, $limit] = $this->getPageValue();
+        $list = $this->dao->getStoreStaffList($where, '*', $page, $limit, $with);
+        if ($list) {
+            $allRole = $this->loadRoleMapForStaffList($list);
+            /** @var UserServices $userService */
+            $userService = app()->make(UserServices::class);
+            foreach ($list as &$item) {
+                $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
+            }
+            unset($item);
+            $this->projectClearedCurrentStoreRows($list);
+            $this->projectNoStoreCraftsmanSettings($list);
+            $this->enrichStaffPositionLabels($list);
+            $this->enrichMobileEnabled($list);
+        }
+        $count = $this->dao->count($where);
+        return compact('list', 'count');
+    }
+
+    /**
+     * 平台“店员列表”同时展示门店任职和组织直属人员。
+     * 直属人员没有 system_store_staff，不能编辑、调店、收银或产生任何门店权限。
+     */
+    protected function getStoreStaffListWithOrganizationMembers(array $where, int $organizationId, array $with, bool $hideFencheng): array
+    {
+        $selectedStoreId = (int)($where['organization_selected_store_id'] ?? 0);
+        unset($where['organization_selected_store_id']);
+        $with = array_merge($with, [
+            'workMember' => function ($query) {
+                $query->field(['id', 'uid', 'name', 'position', 'qr_code', 'external_position']);
+            }
+        ]);
+        [$page, $limit] = $this->getPageValue();
+        // 合并和去重仍覆盖整个授权组织，但候选只读主键；角色、用户、岗位等明细仅处理当前页。
+        $storeRows = $this->dao->getStoreStaffList($where, 'id,employee_id,store_id', 0, 0, []);
+        $byEmployee = [];
+        foreach ($storeRows as $row) {
+            $row['is_organization_direct'] = 0;
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            $byEmployee[$employeeId > 0 ? $employeeId : ('staff:' . (int)$row['id'])] = $row;
+        }
+
+        // 组织树选择范围默认包含下级，和门店列表的 org_id 语义保持一致。
+        $orgIds = $this->collectOrganizationIds($organizationId);
+        $directQuery = Db::name('organization_employee')->alias('oe')
+            ->join('employee e', 'e.id = oe.employee_id')
+            ->leftJoin('organization o', 'o.id = oe.org_id')
+            ->leftJoin('user u', 'u.uid = e.uid AND u.is_del=0')
+            ->whereIn('oe.org_id', $orgIds)
+            ->where('oe.is_del', 0)
+            ->where('e.is_del', 0);
+        if (isset($where['person_status']) && $where['person_status'] !== '') {
+            $directQuery->where('e.status', (int)$where['person_status']);
+        }
+        $keyword = trim((string)($where['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $like = '%' . $keyword . '%';
+            $directQuery->where(function ($query) use ($keyword, $like) {
+                $query->where('e.id', $keyword)
+                    ->whereOr('e.uid', $keyword)
+                    ->whereOr('e.name', 'like', $like)
+                    ->whereOr('e.phone', 'like', $like);
+            });
+        }
+        // 选择具体门店时仅查看该店任职，直属人员不应伪装为门店员工。
+        if ($selectedStoreId > 0) {
+            $directRows = [];
+        } else {
+            $directRows = $directQuery
+                ->field('oe.org_id,oe.employee_id,oe.job_title,oe.source,e.id,e.uid,e.name,e.phone,e.avatar,e.status,e.employment_type_code,u.nickname,o.name as org_name')
+                ->order('e.id', 'asc')
+                ->select()
+                ->toArray();
+        }
+
+        $directRowsByEmployee = [];
+        foreach ($directRows as $row) {
+            $employeeId = (int)$row['employee_id'];
+            // 同一人员已有当前组织内门店任职时保留真实门店行，避免重复；其直属关系仍保存在组织工作台。
+            if (isset($byEmployee[$employeeId])) {
+                continue;
+            }
+            $byEmployee[$employeeId] = ['id' => -$employeeId, 'employee_id' => $employeeId, 'is_organization_direct' => 1];
+            $directRowsByEmployee[$employeeId] = $row;
+        }
+        $list = array_values($byEmployee);
+        usort($list, static function (array $left, array $right): int {
+            return ((int)($left['is_organization_direct'] ?? 0) <=> (int)($right['is_organization_direct'] ?? 0))
+                ?: ((int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0));
+        });
+        $count = count($list);
+        $list = array_slice($list, ($page - 1) * $limit, $limit);
+        $pageStoreIds = array_values(array_filter(array_map(static function ($row) {
+            return (int)($row['is_organization_direct'] ?? 0) === 0 ? (int)$row['id'] : 0;
+        }, $list)));
+        $pageStoreRows = $this->dao->getStoreStaffRowsByIds($where, $pageStoreIds, $with);
+        $staffById = [];
+        $allRole = $pageStoreRows ? $this->loadRoleMapForStaffList($pageStoreRows) : [];
+        /** @var UserServices $userService */
+        $userService = app()->make(UserServices::class);
+        $bulkLookups = $this->loadStaffListLookups($pageStoreRows);
+        $pageEmployeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $pageStoreRows))));
+        $employmentTypeByEmployee = $pageEmployeeIds
+            ? Db::name('employee')->whereIn('id', $pageEmployeeIds)->column('employment_type_code', 'id') : [];
+        $pageStoreIdsForOrg = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['store_id'] ?? 0);
+        }, $pageStoreRows))));
+        $organizationNameByStore = [];
+        if ($pageStoreIdsForOrg) {
+            $organizationNameRows = Db::name('organization_store')->alias('os')
+                ->leftJoin('organization o', 'o.id = os.org_id')
+                ->whereIn('os.store_id', $pageStoreIdsForOrg)->where('o.is_del', 0)
+                ->field('os.store_id,os.org_id,o.name as org_name')->select()->toArray();
+            foreach ($organizationNameRows as $organizationNameRow) {
+                $sid = (int)($organizationNameRow['store_id'] ?? 0);
+                if ($sid <= 0 || isset($organizationNameByStore[$sid])) continue;
+                $organizationNameByStore[$sid] = [
+                    'id' => (int)($organizationNameRow['org_id'] ?? 0),
+                    'name' => (string)($organizationNameRow['org_name'] ?? ''),
+                ];
+            }
+        }
+        foreach ($pageStoreRows as $row) {
+            // 类型来自员工主档；历史空值必须原样显示为未分类，不能伪装成已保存的内部员工。
+            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? '');
+            $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng, $bulkLookups);
+            $row['is_organization_direct'] = 0;
+            // 组织与任职门店是独立关系；名称来自当前门店绑定组织。
+            $storeOrganization = $organizationNameByStore[(int)($row['store_id'] ?? 0)] ?? null;
+            $row['organization_id'] = (int)($storeOrganization['id'] ?? 0);
+            $row['organization_name'] = (string)($storeOrganization['name'] ?? '');
+            $row['organization_names'] = $row['organization_name'] !== '' ? [$row['organization_name']] : [];
+            $staffById[(int)$row['id']] = $row;
+        }
+        $pageDirectIds = array_values(array_filter(array_map(static function ($row) {
+            return (int)($row['is_organization_direct'] ?? 0) === 1 ? (int)$row['employee_id'] : 0;
+        }, $list)));
+        $organizationNamesByEmployee = [];
+        if ($pageDirectIds) {
+            // 直属人员可属于多个组织，只有进入当前页时才补全其所有有效组织名称。
+            $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
+                ->leftJoin('organization o', 'o.id = oe.org_id')
+                ->whereIn('oe.employee_id', $pageDirectIds)
+                ->where('oe.is_del', 0)->where('o.is_del', 0)
+                ->field('oe.employee_id,oe.org_id,o.name as org_name')
+                ->order('oe.id', 'asc')->select()->toArray();
+            foreach ($organizationMembershipRows as $organizationMembershipRow) {
+                $eid = (int)($organizationMembershipRow['employee_id'] ?? 0);
+                $name = trim((string)($organizationMembershipRow['org_name'] ?? ''));
+                if ($eid > 0 && $name !== '') $organizationNamesByEmployee[$eid][(int)($organizationMembershipRow['org_id'] ?? 0)] = $name;
+            }
+        }
+        foreach ($list as &$row) {
+            if ((int)($row['is_organization_direct'] ?? 0) !== 1) {
+                $row = $staffById[(int)$row['id']] ?? $row;
+                continue;
+            }
+            $employeeId = (int)$row['employee_id'];
+            $direct = $directRowsByEmployee[$employeeId];
+            $names = array_values($organizationNamesByEmployee[$employeeId] ?? []);
+            $row = [
+                // 负 ID 保留只读占位语义，防止编辑/调店接口误认为门店员工。
+                'id' => -$employeeId, 'employee_id' => $employeeId, 'store_id' => 0, 'store_name' => '',
+                'organization_id' => (int)($direct['org_id'] ?? 0),
+                'organization_name' => $names ? implode('、', $names) : (string)($direct['org_name'] ?? ''),
+                'organization_names' => $names ?: array_values(array_filter([(string)($direct['org_name'] ?? '')])),
+                'department' => (string)($direct['org_name'] ?? ''),
+                'staff_name' => (string)($direct['name'] ?? ''),
+                'nickname' => (string)($direct['nickname'] ?? ''),
+                'phone' => (string)($direct['phone'] ?? ''),
+                'avatar' => (string)($direct['avatar'] ?? ''),
+                'roles' => '组织直属（无门店权限）',
+                'position_label' => (string)($direct['job_title'] ?? '未设职位'),
+                'position_level_label' => '-', 'status' => (int)($direct['status'] ?? 0),
+                'is_manager' => 0, 'can_choose' => 0, 'cashier_salesperson_enabled' => 0,
+                'cashier_craftsman_enabled' => 0, 'craftsman_performance_type' => 'commission',
+                'employment_type_code' => (string)($direct['employment_type_code'] ?? ''),
+                'mobile_enabled' => 0, 'is_fencheng' => 0, 'has_pwd' => 0,
+                'is_customer' => 0, 'is_reservable' => 0, 'customer_num' => 0,
+                'is_organization_direct' => 1,
+            ];
+        }
+        unset($row);
+        $this->projectClearedCurrentStoreRows($list);
+        $this->projectNoStoreCraftsmanSettings($list);
+        $this->enrichStaffPositionLabels($list);
+        $this->enrichMobileEnabled($list);
+        return compact('list', 'count');
+    }
+
+    /**
+     * 清空后的 staff 仍保留历史门店身份；人员列表须投影为无店员工，不能冒充当前任职/全局离职。
+     * 只处理本页已有权限范围内的明确 clear 事实，不新增人员、不扩大查询范围、不修改历史行。
+     */
+    protected function projectClearedCurrentStoreRows(array &$list): void
+    {
+        $ids = [];
+        foreach ($list as $row) {
+            if ((int)($row['id'] ?? 0) > 0 && (int)($row['status'] ?? 0) === 0) {
+                $ids[] = (int)$row['id'];
+            }
+        }
+        if (!$ids) return;
+        $clearedIds = Db::name('staff_tenure_period')->whereIn('staff_id', $ids)
+            ->where('is_del', 0)->where('action', 'clear')->column('staff_id');
+        if (!$clearedIds) return;
+        $clearedSet = array_fill_keys(array_map('intval', $clearedIds), true);
+        $employeeIds = [];
+        foreach ($list as $row) {
+            if (isset($clearedSet[(int)($row['id'] ?? 0)])) {
+                $employeeIds[] = (int)($row['employee_id'] ?? 0);
+            }
+        }
+        $employees = Db::name('employee')->whereIn('id', $employeeIds)->where('is_del', 0)
+            ->column('id,name,phone,avatar,status,employment_type_code', 'id');
+        foreach ($list as &$row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if (!isset($clearedSet[(int)($row['id'] ?? 0)])
+                || !isset($employees[$employeeId])) continue;
+            $employee = $employees[$employeeId];
+            $row = array_merge($row, [
+                'id' => -$employeeId, 'store_id' => 0, 'store_name' => '',
+                'is_organization_direct' => 1, 'is_manager' => 0,
+                'position_label' => '-', 'position_ids' => [],
+                'staff_name' => $employee['name'], 'phone' => $employee['phone'], 'avatar' => $employee['avatar'],
+                'status' => (int)$employee['status'], 'employment_type_code' => (string)$employee['employment_type_code'],
+                'can_choose' => 0, 'cashier_salesperson_enabled' => 0, 'cashier_craftsman_enabled' => 0,
+            ]);
+        }
+        unset($row);
+    }
+
+    /** 仅批量补齐本页已授权无店员工的设置，不改变人员范围或历史任职配置。 */
+    protected function projectNoStoreCraftsmanSettings(array &$list): void
+    {
+        $ids = [];
+        foreach ($list as $row) {
+            if ((int)($row['is_organization_direct'] ?? 0) === 1) $ids[] = (int)$row['employee_id'];
+        }
+        if (!$ids) return;
+        $types = Db::name('employee')->whereIn('id', $ids)->where('is_del', 0)
+            ->column('default_craftsman_performance_type', 'id');
+        $service = app()->make(\app\services\employee\EmployeeCraftsmanPerformanceTypeServices::class);
+        foreach ($list as &$row) {
+            if ((int)($row['is_organization_direct'] ?? 0) === 1) {
+                $row = array_merge($row, $service->project((string)($types[(int)$row['employee_id']] ?? 'commission')));
+            }
+        }
+        unset($row);
+    }
+
+    /** @return int[] */
+    protected function collectOrganizationIds(int $organizationId): array
+    {
+        $rows = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
+        $children = [];
+        foreach ($rows as $row) $children[(int)$row['pid']][] = (int)$row['id'];
+        $ids = [];
+        $stack = [$organizationId];
+        while ($stack) {
+            $id = (int)array_pop($stack);
+            if ($id <= 0 || isset($ids[$id])) continue;
+            $ids[$id] = true;
+            foreach ($children[$id] ?? [] as $childId) $stack[] = $childId;
+        }
+        return array_keys($ids);
+    }
+
+    /**
+     * 店员列表
+     * @param array $where
+     * @param array $with
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStoreStaffListData(array $where, array $with = [], bool $hideFencheng = false)
+    {
+        [$page, $limit] = $this->getPageValue();
+        $list = $this->dao->getStoreStaffList($where, '*', $page, $limit, $with);
+        if ($list) {
+            $allRole = $this->loadRoleMapForStaffList($list);
+            /** @var StaffFlowingWaterServices $waterService */
+            $waterService = app()->make(StaffFlowingWaterServices::class);
+            /** @var UserServices $userService */
+            $userService = app()->make(UserServices::class);
+            foreach ($list as &$item) {
+                $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
+                $orderData = $waterService->getStaffData($item['id']);
+                $item['order_num'] = $orderData['num'];
+                $item['order_price'] = $orderData['sum'];
+                $item['performance_price'] = $orderData['sum'];
+            }
+            unset($item);
+            $this->enrichStaffPositionLabels($list);
+            $this->enrichMobileEnabled($list);
+        }
+        $count = $this->dao->count($where);
+        return compact('list', 'count');
+    }
+
+
+    /**
+     * 不查询总数
+     * @param array $where
+     * @param array $with
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStoreStaff(array $where, array $with = [])
+    {
+        [$page, $limit] = $this->getPageValue();
+        $list = $this->dao->getStoreStaffList($where, '*', $page, $limit, $with);
+        foreach ($list as $key => $item) {
+            unset($list[$key]['pwd']);
+        }
+        return $list;
+    }
+
+    /**
+     * 店员详情
+     * @param int $id
+     * @return array|\think\Model
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function read(int $id, bool $hideFencheng = false)
+    {
+        $staffInfo = $this->getStaffInfo($id);
+        if (is_object($staffInfo)) {
+            $staffInfo = $staffInfo->toArray();
+        }
+        /** @var UserServices $userService */
+        $userService = app()->make(UserServices::class);
+        $staffInfo['nickname'] = $userService->value(['uid' => $staffInfo['uid']], 'nickname');
+        $staffInfo = $this->formatStaffRead($staffInfo, $hideFencheng);
+        $info = [
+            'id' => $id,
+            'headerList' => $this->getHeaderList($id, $staffInfo),
+            'ps_info' => $staffInfo,
+        ];
+        return $info;
+    }
+
+    /**
+     * 获取单个店员统计信息
+     * @param $id 用户id
+     * @return mixed
+     */
+    public function staffDetail(int $id, string $type)
+    {
+        $staffInfo = $this->getStaffInfo($id);
+        if (!$staffInfo) {
+            throw new AdminException('店员不存在');
+        }
+        $where = ['store_id' => $staffInfo['store_id'], 'staff_id' => $staffInfo['id']];
+        $data = [];
+        switch ($type) {
+            case 'cashier_order':
+                /** @var BranchOrderServices $orderServices */
+                $orderServices = app()->make(BranchOrderServices::class);
+                $where = array_merge($where, ['pid' => 0, 'type' => 106, 'paid' => 1, 'refund_status' => [0, 3], 'is_del' => 0, 'is_system_del' => 0]);
+                $field = ['uid', 'order_id', 'real_name', 'total_num', 'total_price', 'pay_price', 'FROM_UNIXTIME(pay_time,"%Y-%m-%d") as pay_time', 'paid', 'pay_type', 'type', 'activity_id', 'pink_id'];
+                $data = $orderServices->getStoreOrderList($where, $field, [], true);
+                break;
+            case 'self_order':
+                /** @var BranchOrderServices $orderServices */
+                $orderServices = app()->make(BranchOrderServices::class);
+                $where = array_merge($where, ['pid' => 0, 'type' => 107, 'paid' => 1, 'refund_status' => [0, 3], 'is_del' => 0, 'is_system_del' => 0]);
+                $field = ['uid', 'order_id', 'real_name', 'total_num', 'total_price', 'pay_price', 'FROM_UNIXTIME(pay_time,"%Y-%m-%d") as pay_time', 'paid', 'pay_type', 'type', 'activity_id', 'pink_id'];
+                $data = $orderServices->getStoreOrderList($where, $field, [], true);
+                break;
+            case 'writeoff_order':
+                /** @var BranchOrderServices $orderServices */
+                $orderServices = app()->make(BranchOrderServices::class);
+                $where = array_merge($where, ['pid' => 0, 'type' => 105, 'paid' => 1, 'refund_status' => [0, 3], 'is_del' => 0, 'is_system_del' => 0]);
+                $field = ['uid', 'order_id', 'real_name', 'total_num', 'total_price', 'pay_price', 'FROM_UNIXTIME(pay_time,"%Y-%m-%d") as pay_time', 'paid', 'pay_type', 'type', 'activity_id', 'pink_id'];
+                $data = $orderServices->getStoreOrderList($where, $field, [], true);
+                break;
+            case 'recharge':
+                /** @var UserRechargeServices $userRechargeServices */
+                $userRechargeServices = app()->make(UserRechargeServices::class);
+                $data = $userRechargeServices->getRechargeList($where + ['paid' => 1]);
+                break;
+            case 'spread':
+                /** @var UserSpreadServices $userSpreadServices */
+                $userSpreadServices = app()->make(UserSpreadServices::class);
+                $data = $userSpreadServices->getSpreadList($where);
+                break;
+            case 'card':
+                /** @var UserCardServices $userCardServices */
+                $userCardServices = app()->make(UserCardServices::class);
+                $data = $userCardServices->getCardList($where + ['is_submit' => 1]);
+                break;
+            case 'svip':
+                /** @var OtherOrderServices $otherOrderServices */
+                $otherOrderServices = app()->make(OtherOrderServices::class);
+                $data = $otherOrderServices->getMemberRecord($where);
+                break;
+            case 'customer':
+                /** @var UserServices $userServices */
+                $userServices = app()->make(UserServices::class);
+                $data = $userServices->getStaffCustomerList(['salesman_id' => $id]);
+                break;
+            default:
+                throw new AdminException('type参数错误');
+        }
+        return $data;
+    }
+
+    /**
+     * 店员详情头部信息
+     * @param int $id
+     * @param array $staffInfo
+     * @return array[]
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getHeaderList(int $id, $staffInfo = [])
+    {
+        if (!$staffInfo) {
+            $staffInfo = $this->dao->get($id);
+        }
+        $where = ['store_id' => $staffInfo['store_id'], 'staff_id' => $staffInfo['id']];
+        /** @var BranchOrderServices $orderServices */
+        $orderServices = app()->make(BranchOrderServices::class);
+        $cashier_order = $orderServices->sum($where + ['pid' => 0, 'type' => 106, 'paid' => 1, 'refund_status' => 0, 'is_del' => 0, 'is_system_del' => 0], 'pay_price', true);
+        $writeoff_order = $orderServices->sum($where + ['pid' => 0, 'type' => 105, 'paid' => 1, 'refund_status' => 0, 'is_del' => 0, 'is_system_del' => 0], 'pay_price', true);
+        $self_order = $orderServices->sum($where + ['pid' => 0, 'type' => 107, 'paid' => 1, 'refund_status' => 0, 'is_del' => 0, 'is_system_del' => 0], 'pay_price', true);
+        /** @var UserRechargeServices $userRechargeServices */
+        $userRechargeServices = app()->make(UserRechargeServices::class);
+        $recharge = $userRechargeServices->sum($where + ['paid' => 1], 'price', true);
+        /** @var UserSpreadServices $userSpreadServices */
+        $userSpreadServices = app()->make(UserSpreadServices::class);
+        $spread = $userSpreadServices->count($where);
+        /** @var UserCardServices $userCardServices */
+        $userCardServices = app()->make(UserCardServices::class);
+        $card = $userCardServices->count($where + ['is_submit' => 1]);
+        /** @var OtherOrderServices $otherOrderServices */
+        $otherOrderServices = app()->make(OtherOrderServices::class);
+        $svip = $otherOrderServices->sum($where, 'pay_price', true);
+        return [
+            [
+                'title' => '收银订单',
+                'value' => $cashier_order,
+                'key' => '元',
+            ],
+            [
+                'title' => '核销订单',
+                'value' => $writeoff_order,
+                'key' => '元',
+            ],
+            [
+                'title' => '配送订单',
+                'value' => $self_order,
+                'key' => '元',
+            ],
+            [
+                'title' => '储值订单',
+                'value' => $recharge,
+                'key' => '元',
+            ],
+            [
+                'title' => '付费会员',
+                'value' => $svip,
+                'key' => '元',
+            ],
+            [
+                'title' => '推广用户数',
+                'value' => $spread,
+                'key' => '人',
+            ],
+            [
+                'title' => '激活会员卡',
+                'value' => $card,
+                'key' => '张',
+            ]
+        ];
+    }
+
+    /**
+     * 获取select选择框中的门店列表
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStoreSelectFormData()
+    {
+        /** @var SystemStoreServices $service */
+        $service = app()->make(SystemStoreServices::class);
+        $menus = [];
+        foreach ($service->getStore(['status' => 1]) as $menu) {
+            $menus[] = ['value' => $menu['id'], 'label' => $menu['name']];
+        }
+        return $menus;
+    }
+
+	/**
+	 * 获取核销员表单
+	 * @param array $formData
+	 * @return array
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function createStaffForm(array $formData = [])
+    {
+        // I1/G6：核销员不再选择商城用户；仅普通头像上传
+        $field[] = Form::frameImage(
+            'avatar',
+            '头像：',
+            $this->url(config('admin.admin_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true),
+            $formData['avatar'] ?? ''
+        )->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $field[] = Form::select('store_id', '所属门店：', ($formData['store_id'] ?? 0))->setOptions($this->getStoreSelectFormData())->filterable(true);
+        $field[] = Form::input('staff_name', '核销员名称：', $formData['staff_name'] ?? '')->col(24)->required();
+        $field[] = Form::input('phone', '手机号码：', $formData['phone'] ?? '')->col(24)->required();
+        $field[] = Form::radio('verify_status', '核销开关：', $formData['verify_status'] ?? 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        $field[] = Form::radio('status', '状态：', $formData['status'] ?? 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        return $field;
+    }
+
+	/**
+	 * 添加核销员表单
+	 * @return mixed
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function createForm()
+    {
+        return create_form('添加核销员', $this->createStaffForm(), $this->url('/merchant/store_staff/save/0'));
+    }
+
+	/**
+	 * 编辑核销员form表单
+	 * @param int $id
+	 * @return mixed
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function updateForm(int $id)
+    {
+        $storeStaff = $this->dao->get($id);
+        if (!$storeStaff) {
+            throw new AdminException('没有查到信息,无法修改');
+        }
+        return create_form('修改核销员', $this->createStaffForm($storeStaff->toArray()), $this->url('/merchant/store_staff/save/' . $id));
+    }
+
+    /**
+     * 获取门店店员
+     * @param $where
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getStoreAdminList($where)
+    {
+        [$page, $limit] = $this->getPageValue();
+        $list = $this->dao->getStoreAdminList($where, $page, $limit);
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        $allRole = $service->getRoleArray(['type' => 1, 'store_id' => $where['store_id']]);
+        foreach ($list as &$item) {
+            if ($item['roles']) {
+                $roles = [];
+                foreach ($item['roles'] as $id) {
+                    if (isset($allRole[$id])) $roles[] = $allRole[$id];
+                }
+                if ($roles) {
+                    $item['roles'] = implode(',', $roles);
+                } else {
+                    $item['roles'] = '';
+                }
+            }
+        }
+        $count = $this->dao->count($where);
+        return compact('list', 'count');
+    }
+
+	/**
+	 * 添加门店管理员
+	 * @param int $store_id
+	 * @param $level
+	 * @return mixed
+	 */
+    public function createStoreAdminForm(int $store_id, $level)
+    {
+        $field[] = Form::input('staff_name', '管理员名称：')->col(24)->required();
+        $field[] = Form::frameImage('avatar', '管理员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true))->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $field[] = Form::input('account', '管理员账号：')->maxlength(35)->required('请填写管理员账号');
+        $field[] = Form::input('phone', '手机号码：')->col(24)->required();
+        $field[] = Form::input('pwd', '管理员密码：')->type('password')->required('请填写管理员密码');
+        $field[] = Form::input('conf_pwd', '确认密码：')->type('password')->required('请输入确认密码');
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        $options = $service->getRoleFormSelect($level, 1, $store_id);
+        $roles = [];
+        $field[] = Form::select('roles', '管理员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择管理员身份');
+        $field[] = Form::radio('status', '状态：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        return create_form('添加门店管理员', $field, $this->url('/system/admin'));
+    }
+
+	/**
+	 * 修改门店管理员
+	 * @param $id
+	 * @param $level
+	 * @return mixed
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function updateStoreAdminForm($id, $level)
+    {
+        $adminInfo = $this->dao->get($id);
+        if (!$adminInfo) {
+            throw new AdminException('门店管理员不存在!');
+        }
+        if ($adminInfo->is_del) {
+            throw new AdminException('门店管理员已经删除');
+        }
+        $adminInfo = $adminInfo->toArray();
+        $field[] = Form::input('staff_name', '门店管理员名称：', $adminInfo['staff_name'])->col(24)->required('请填写门店管理员名称');
+        $field[] = Form::frameImage('avatar', '管理员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true), $adminInfo['avatar'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $field[] = Form::input('account', '门店管理员账号：', $adminInfo['account'])->maxlength(35)->required('请填写门店管理员账号');
+        $field[] = Form::input('phone', '手机号码：', $adminInfo['phone'])->col(24)->required();
+        $field[] = Form::input('pwd', '门店管理员密码：')->placeholder('不更改密码请留空')->type('password');
+        $field[] = Form::input('conf_pwd', '确认密码：')->placeholder('不更改密码请留空')->type('password');
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        $options = $service->getRoleFormSelect($level, 1, (int)$adminInfo['store_id']);
+        $roles = [];
+        if ($adminInfo && isset($adminInfo['roles']) && $adminInfo['roles']) {
+            foreach ($adminInfo['roles'] as $role) {
+                $roles[] = (int)$role;
+            }
+        }
+        $field[] = Form::select('roles', '管理员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择门店管理员身份');
+        $field[] = Form::radio('status', '状态：', (int)$adminInfo['status'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        return create_form('修改门店管理员', $field, $this->url('/system/admin/' . $id), 'put');
+    }
+
+	/**
+	 * 添加门店店员
+	 * @param int $store_id
+	 * @param $level
+	 * @return mixed
+	 */
+    public function createStoreStaffForm(int $store_id, $level)
+    {
+        // I1/G6：门店端仅基础资料 + 门店角色；移除商城用户/店长/收银/订单管理等总部字段
+        $field[] = Form::input('staff_name', '店员名称：')->col(24)->required('请输入门店店员名称');
+        $field[] = Form::frameImage('avatar', '店员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true))->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $field[] = Form::input('account', '店员账号：')->maxlength(35)->required('请填写门店店员账号');
+        $field[] = Form::input('pwd', '店员密码：')->type('password')->required('请填写门店店员密码');
+        $field[] = Form::input('conf_pwd', '确认密码：')->type('password')->required('请输入确认密码');
+        $field[] = Form::input('phone', '手机号码：')->col(24)->required('请输入手机号');
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        // I2：门店端仅可选总部已发布且允许本店选择的后台角色
+        try {
+            $options = app()->make(\app\services\organization\SystemRolePublishServices::class)
+                ->listStoreSelectableRoles($store_id);
+            if (!$options) {
+                $options = $service->getRoleFormSelect($level, 1, $store_id);
+            }
+        } catch (\Throwable $e) {
+            $options = $service->getRoleFormSelect($level, 1, $store_id);
+        }
+        $roles = [];
+        $field[] = Form::select('roles', '店员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择店员身份');
+        /** @var WorkMemberServices $workMemberService */
+        $workMemberService = app()->make(WorkMemberServices::class);
+        $work = 0;
+        $workList = $workMemberService->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']);
+        // I1/H1：门店端仅可选总部角色；核销/客服/可预约等总部字段禁止出现在门店表单
+        $field[] = Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false);
+        $field[] = Form::radio('notify', '通知开关：', 0)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        $field[] = Form::radio('status', '状态：', 1)->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        return create_form('添加门店店员', $field, $this->url('/staff/staff'));
+    }
+
+	/**
+	 * 编辑门店店员
+	 * @param $id
+	 * @param $level
+	 * @return mixed
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+    public function updateStoreStaffForm($id, $level)
+    {
+        $staffInfo = $this->dao->get($id);
+        if (!$staffInfo) {
+            throw new AdminException('门店店员不存在!');
+        }
+        if ($staffInfo->is_del) {
+            throw new AdminException('门店店员已经删除');
+        }
+        $field[] = Form::input('staff_name', '店员名称：', $staffInfo['staff_name'])->col(24)->required('请填写门店店员名称');
+        // I1/G6：门店编辑仅头像上传，不再选商城用户；不展示店长/收银/订单管理
+        $field[] = Form::frameImage('avatar', '店员头像：', $this->url(config('admin.store_prefix') . '/widget.images/index', ['fodder' => 'avatar'], true), $staffInfo['avatar'] ?? '')->icon('ios-add')->width('960px')->height('505px')->modal(['footer-hide' => true]);
+        $field[] = Form::input('account', '店员账号：', $staffInfo['account'])->maxlength(35)->required('请填写门店店员账号');
+        $field[] = Form::input('pwd', '店员密码：')->placeholder('不更改密码请留空')->type('password');
+        $field[] = Form::input('conf_pwd', '确认密码：')->placeholder('不更改密码请留空')->type('password');
+        $field[] = Form::input('phone', '手机号码：', $staffInfo['phone'])->col(24)->required('请输入手机号');
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        $storeId = (int)$staffInfo['store_id'];
+        try {
+            $options = app()->make(\app\services\organization\SystemRolePublishServices::class)
+                ->listStoreSelectableRoles($storeId);
+            if (!$options) {
+                $options = $service->getRoleFormSelect($level, 1, $storeId);
+            }
+        } catch (\Throwable $e) {
+            $options = $service->getRoleFormSelect($level, 1, $storeId);
+        }
+        $roles = [];
+        if ($staffInfo && isset($staffInfo['roles']) && $staffInfo['roles']) {
+            foreach ($staffInfo['roles'] as $role) {
+                $roles[] = (int)$role;
+            }
+        }
+        $field[] = Form::select('roles', '店员身份：', $roles)->setOptions(Form::setOptions($options))->multiple(true)->required('请选择店员身份');
+        /** @var WorkMemberServices $workMemberService */
+        $workMemberService = app()->make(WorkMemberServices::class);
+        $work = (int)$staffInfo['work_member_id'];
+        $workList = $workMemberService->getMemberList(['status' => 1, 'enable' => 1], ['id', 'name', 'qr_code']);
+        // I1/H1：门店端仅可选总部角色；核销/客服等总部字段禁止出现在门店表单
+        $field[] = Form::select('work_member_id', '企微员工：', $work)->setOptions(Form::setOptions($workList))->multiple(false);
+        $field[] = Form::radio('notify', '通知开关：', (int)$staffInfo['notify'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        $field[] = Form::radio('status', '状态：', (int)$staffInfo['status'])->options([['value' => 1, 'label' => '开启'], ['value' => 0, 'label' => '关闭']]);
+        return create_form('编辑门店店员', $field, $this->url('/staff/staff/' . $id), 'put');
+    }
+
+    /**
+     * 获取店员select
+     * @param array $where
+     * @return mixed
+     */
+    public function getSelectList($where = [])
+    {
+        $list = $this->dao->getSelectList($where, 'id,employee_id,staff_name');
+        $menus = [];
+        foreach ($list as $menu) {
+            $menus[] = [
+                'value' => $menu['id'],
+                'label' => $menu['staff_name'] ?? '',
+                'employee_id' => (int)($menu['employee_id'] ?? 0),
+            ];
+        }
+        return $menus;
+    }
+
+    public function geAllList($where = [])
+    {
+        $list = $this->dao->getChooseList($where,"*");
+        return $list;
+    }
+    /**
+     * 首页店员统计
+     * @param int $store_id
+     * @param array $time
+     * @return array
+     */
+    public function staffChart(int $store_id, array $time)
+    {
+        $list = $this->dao->getStoreStaffList(['store_id' => $store_id, 'is_del' => 0], 'id,uid,avatar,staff_name');
+        if ($list) {
+            /** @var UserSpreadServices $userSpreadServices */
+            $userSpreadServices = app()->make(UserSpreadServices::class);
+            /** @var BranchOrderServices $orderServices */
+            $orderServices = app()->make(BranchOrderServices::class);
+            /** @var OtherOrderServices $otherOrderServices */
+            $otherOrderServices = app()->make(OtherOrderServices::class);
+            $where = ['store_id' => $store_id, 'time' => $time];
+            $order_where = ['paid' => 1, 'pid' => 0, 'is_del' => 0, 'is_system_del' => 0, 'refund_status' => [0, 3]];
+            $staffIds = array_unique(array_column($list, 'id'));
+            $otherStaff = $otherOrderServices->preStaffTotal($where + ['staff_id' => $staffIds, 'paid' => 1, 'type' => [0, 1, 2, 4]], 'distinct(`uid`)');
+            $otherStaff = array_combine(array_column($otherStaff, 'staff_id'), $otherStaff);
+            foreach ($list as &$item) {
+                $staff_where = ['staff_id' => $item['id']];
+                $spread_uid = $userSpreadServices->getColumn($where + ['timeKey' => 'spread_time'] + $staff_where, 'uid', '', true);
+                $item['spread_count'] = count($spread_uid);
+                $item['speread_order_price'] = 0;
+                if ($spread_uid) {
+                    $item['speread_order_price'] = $orderServices->sum($where + $order_where + ['uid' => $spread_uid], 'pay_price', true);
+                }
+                $item['vip_count'] = $otherStaff[$item['id']]['count'] ?? 0;
+                $item['vip_price'] = $otherStaff[$item['id']]['price'] ?? 0;
+                unset($spread);
+            }
+        }
+        return $list;
+    }
+
+    /**
+     * 修改当前店员信息
+     * @param int $id
+     * @param array $data
+     * @return bool
+     */
+    public function updateStaffPwd(int $id, array $data)
+    {
+        $staffInfo = $this->dao->get($id);
+        if (!$staffInfo)
+            throw new AdminException('店员信息未查到');
+        if ($staffInfo->is_del) {
+            throw new AdminException('店员已经删除');
+        }
+        if ($data['real_name']) {
+            $staffInfo->staff_name = $data['real_name'];
+        }
+        if ($data['avatar']) {
+            $staffInfo->avatar = $data['avatar'];
+        }
+        if ($data['pwd']) {
+            if (!password_verify($data['pwd'], $staffInfo['pwd']))
+                throw new AdminException('原始密码错误');
+            if (!$data['new_pwd'])
+                throw new AdminException('请输入新密码');
+            if (!$data['conf_pwd'])
+                throw new AdminException('请输入确认密码');
+            if ($data['new_pwd'] != $data['conf_pwd'])
+                throw new AdminException('两次输入的密码不一致');
+            $staffInfo->pwd = $this->passwordHash($data['new_pwd']);
+        }
+        if ($staffInfo->save())
+            return true;
+        else
+            return false;
+    }
+
+    /**
+     * 获取门店接收通知店员
+     * @param int $store_id
+     * @param string $field
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function getNotifyStoreStaffList(int $store_id, string $field = '*')
+    {
+        $where = [
+            'store_id' => $store_id,
+            'status' => 1,
+            'is_del' => 0,
+            'notify' => 1
+        ];
+        $list = $this->dao->getStoreStaffList($where, $field);
+        return $list;
+    }
+
+    /**
+     * 会员端首页员工展示列表。
+     *
+     * 这是面向公开页面的安全投影：只返回装修组件所需字段，
+     * 不返回手机号、UID、密码、业绩等内部信息。首页展示不依赖
+     * 当日排班；真正预约时仍由 V3 预约命令最终校验排班和占用。
+     */
+    public function getHomeDisplayStaffList(int $storeId, int $limit = 6, array $selectedPositionIds = []): array
+    {
+        if ($storeId <= 0) {
+            return [];
+        }
+        $storeExists = Db::name('system_store')
+            ->where('id', $storeId)
+            ->where('is_show', 1)
+            ->where('is_del', 0)
+            ->count();
+        if (!$storeExists) {
+            return [];
+        }
+
+        $limit = max(1, min(12, $limit));
+        $selectedPositionIds = array_values(array_unique(array_filter(
+            array_map('intval', $selectedPositionIds),
+            static function (int $id): bool {
+                return $id > 0;
+            }
+        )));
+        $where = [
+            'store_id' => $storeId,
+            'status' => 1,
+            'is_del' => 0,
+            'is_reservable' => 1,
+        ];
+        if ($selectedPositionIds) {
+            $where['position_ids'] = $selectedPositionIds;
+        }
+        $list = $this->dao->getStoreStaffList(
+            $where,
+            'id,store_id,staff_name,avatar,staff_intro,position,position_level',
+            1,
+            $limit,
+            [],
+            'id ASC'
+        );
+
+        $levelIds = array_values(array_unique(array_filter(array_map(static function (array $item): int {
+            return (int)($item['position_level'] ?? 0);
+        }, $list))));
+        $levelMap = $levelIds ? PositionLevel::whereIn('id', $levelIds)->column('name', 'id') : [];
+        foreach ($list as &$item) {
+            $item['position_level_label'] = (string)($levelMap[(int)($item['position_level'] ?? 0)] ?? '');
+        }
+        unset($item);
+        $this->enrichStaffPositionLabels($list);
+
+        return array_map(static function (array $item): array {
+            return [
+                'id' => (int)($item['id'] ?? 0),
+                'store_id' => (int)($item['store_id'] ?? 0),
+                'staff_name' => trim((string)($item['staff_name'] ?? '')),
+                'avatar' => (string)($item['avatar'] ?? ''),
+                'staff_intro' => trim((string)($item['staff_intro'] ?? '')),
+                'position_id' => (int)(($item['position_ids'] ?? [])[0] ?? 0),
+                'position_ids' => array_values(array_map('intval', $item['position_ids'] ?? [])),
+                'position_label' => (string)($item['position_label'] ?? ''),
+                'position_level_label' => (string)($item['position_level_label'] ?? ''),
+            ];
+        }, array_values(array_filter($list, static function (array $item): bool {
+            return (int)($item['id'] ?? 0) > 0 && trim((string)($item['staff_name'] ?? '')) !== '';
+        })));
+    }
+
+    /**
+     * 预约选人：按门店加载可被预约的员工（不做距离筛选）
+     * @param int $storeId
+     * @param array $params keyword、service_date
+     * @return array
+     */
+    public function getReservationStaffList(int $storeId, array $params = []): array
+    {
+        if (!$storeId) {
+            throw new ValidateException('请选择门店');
+        }
+        $keyword = trim((string)($params['keyword'] ?? ''));
+        $serviceDate = trim((string)($params['service_date'] ?? ''));
+        $serviceTime = trim((string)($params['service_time'] ?? ''));
+        if (!$serviceTime) {
+            $serviceTime = trim((string)($params['reservation_start'] ?? ''));
+        }
+        $serviceDuration = (int)($params['service_duration'] ?? 0);
+        $excludeReservationId = (int)($params['exclude_reservation_id'] ?? 0);
+        $positionIds = $params['position_ids'] ?? [];
+        $positionIds = is_array($positionIds) ? $positionIds : explode(',', (string)$positionIds);
+        $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds), static function (int $id): bool {
+            return $id > 0;
+        })));
+        if (!$serviceDate) {
+            $serviceDate = date('Y-m-d');
+        }
+        /** @var StoreStaffScheduleServices $scheduleServices */
+        $scheduleServices = app()->make(StoreStaffScheduleServices::class);
+        /** @var StoreReservationStaffServices $reservationStaffServices */
+        $reservationStaffServices = app()->make(StoreReservationStaffServices::class);
+        if ($scheduleServices->isScheduleManageEnabled()) {
+            $boardStaff = $scheduleServices->getReservationBoardStaff($storeId, $serviceDate);
+            if (!$boardStaff) {
+                return [];
+            }
+            $staffIds = array_column($boardStaff, 'id');
+            $where = ['store_id' => $storeId, 'status' => 1, 'is_del' => 0];
+            if ($keyword) {
+                $where['keyword'] = $keyword;
+            }
+            if ($positionIds) {
+                $where['position_ids'] = $positionIds;
+            }
+            $staffIdSet = array_flip($staffIds);
+            $list = array_values(array_filter(
+                $this->dao->getStoreStaffList($where, 'id,uid,staff_name,phone,avatar,is_reservable,position,position_level,age,birthday_date', 0, 0, []),
+                function ($item) use ($staffIdSet) {
+                    return isset($staffIdSet[(int)($item['id'] ?? 0)]) && (int)($item['is_reservable'] ?? 1) === 1;
+                }
+            ));
+            $orderMap = array_flip($staffIds);
+            usort($list, function ($a, $b) use ($orderMap) {
+                return ($orderMap[$a['id']] ?? 999) <=> ($orderMap[$b['id']] ?? 999);
+            });
+            foreach ($list as &$item) {
+                $item['staff_id'] = (int)$item['id'];
+            }
+            unset($item);
+        } else {
+        $where = ['store_id' => $storeId, 'status' => 1, 'is_del' => 0, 'is_reservable' => 1];
+        if ($keyword) {
+            $where['keyword'] = $keyword;
+        }
+        if ($positionIds) {
+            $where['position_ids'] = $positionIds;
+        }
+        $list = $this->dao->getStoreStaffList($where, 'id,uid,staff_name,phone,avatar,is_reservable,position,position_level,age,birthday_date', 0, 0, []);
+        foreach ($list as &$item) {
+            $item['staff_id'] = (int)$item['id'];
+        }
+        unset($item);
+        }
+        if ($serviceTime && $list) {
+            $timeStr = strlen($serviceTime) <= 5 ? $serviceTime . ':00' : $serviceTime;
+            $appointmentTs = strtotime($serviceDate . ' ' . $timeStr);
+            if ($appointmentTs) {
+                if ($serviceDuration <= 0) {
+                    $serviceDuration = 120;
+                }
+                $list = array_values(array_filter($list, function ($item) use (
+                    $reservationStaffServices,
+                    $storeId,
+                    $serviceDate,
+                    $serviceTime,
+                    $serviceDuration,
+                    $excludeReservationId
+                ) {
+                    $staffId = (int)($item['id'] ?? 0);
+                    if (!$staffId || trim((string)($item['staff_name'] ?? '')) === '') {
+                        return false;
+                    }
+                    return $reservationStaffServices->isStaffSelectableForReservation(
+                        $staffId,
+                        $storeId,
+                        $serviceDate,
+                        $serviceTime,
+                        $serviceDuration,
+                        $excludeReservationId
+                    );
+                }));
+            }
+        } else {
+            $list = array_values(array_filter($list, function ($item) use ($reservationStaffServices) {
+                $staffId = (int)($item['id'] ?? 0);
+                if (!$staffId || trim((string)($item['staff_name'] ?? '')) === '') {
+                    return false;
+                }
+                return $reservationStaffServices->isStaffOnDuty($staffId);
+            }));
+        }
+        $this->enrichReservationStaffListItems($list, $storeId, [
+            'service_date' => $serviceDate,
+            'service_time' => $serviceTime,
+            'service_duration' => $serviceDuration,
+            'exclude_reservation_id' => $excludeReservationId,
+        ]);
+        return $list;
+    }
+
+    /**
+     * 预约老师列表：补充展示字段
+     */
+    protected function enrichReservationStaffListItems(array &$list, int $storeId, array $params = []): void
+    {
+        if (!$list) {
+            return;
+        }
+        $serviceDate = trim((string)($params['service_date'] ?? '')) ?: date('Y-m-d');
+        $serviceTime = trim((string)($params['service_time'] ?? ''));
+        if (!$serviceTime) {
+            $serviceTime = trim((string)($params['reservation_start'] ?? ''));
+        }
+        $serviceDuration = (int)($params['service_duration'] ?? 0);
+        $excludeReservationId = (int)($params['exclude_reservation_id'] ?? 0);
+        if ($serviceDuration <= 0) {
+            $serviceDuration = 120;
+        }
+        if ($serviceTime) {
+            $timeStr = strlen($serviceTime) <= 5 ? $serviceTime . ':00' : $serviceTime;
+            $appointmentTs = strtotime($serviceDate . ' ' . $timeStr) ?: time();
+        } else {
+            $appointmentTs = time();
+        }
+        /** @var StoreReservationStaffServices $reservationStaffServices */
+        $reservationStaffServices = app()->make(StoreReservationStaffServices::class);
+        $positionMap = Position::column('name', 'id');
+        $levelMap = PositionLevel::column('name', 'id');
+        $staffIds = array_map('intval', array_column($list, 'id'));
+        $orderCountMap = [];
+        if ($staffIds) {
+            $rows = \app\model\order\StoreReservationOrder::whereIn('service_staff_id', $staffIds)
+                ->where('store_id', $storeId)
+                ->where('status', 2)
+                ->where('is_del', 0)
+                ->field('service_staff_id, count(*) as cnt')
+                ->group('service_staff_id')
+                ->select();
+            foreach ($rows as $row) {
+                $row = is_object($row) ? $row->toArray() : (array)$row;
+                $orderCountMap[(int)($row['service_staff_id'] ?? 0)] = (int)($row['cnt'] ?? 0);
+            }
+        }
+        $uids = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'uid')))));
+        $sexMap = $uids ? \app\model\user\User::whereIn('uid', $uids)->column('sex', 'uid') : [];
+        /** @var UserServices $userService */
+        $userService = app()->make(UserServices::class);
+        foreach ($list as &$item) {
+            $staffId = (int)($item['id'] ?? 0);
+            $item['position_label'] = $positionMap[(int)($item['position'] ?? 0)] ?? '';
+            $item['position_level_label'] = $levelMap[(int)($item['position_level'] ?? 0)] ?? '初级';
+            $item['order_count'] = $orderCountMap[$staffId] ?? 0;
+            $item['follow_count'] = (int)$userService->getCount(['salesman_id' => $staffId]);
+            $item['star_level'] = 4;
+            $item['sex'] = (int)($sexMap[(int)($item['uid'] ?? 0)] ?? 0);
+            $item['age'] = (int)($item['age'] ?? 0);
+            $available = $reservationStaffServices->isStaffSelectableForReservation(
+                $staffId,
+                $storeId,
+                $serviceDate,
+                $serviceTime,
+                $serviceDuration,
+                $excludeReservationId
+            );
+            $item['service_available'] = $available ? 1 : 0;
+        }
+        unset($item);
+        // 预约列表同样以当前有效岗位任职关系为准；该方法会覆盖历史兼容字段生成的岗位名称。
+        $this->enrichStaffPositionLabels($list);
+    }
+
+    /**
+     * 老师中心信息
+     */
+    public function getTeacherCenterInfo(array $staffInfo): array
+    {
+        if (!$staffInfo) {
+            throw new ValidateException('非门店员工');
+        }
+        $storeId = (int)($staffInfo['store_id'] ?? 0);
+        $staffId = (int)($staffInfo['id'] ?? 0);
+        $storeName = '';
+        if ($storeId) {
+            /** @var SystemStoreServices $storeServices */
+            $storeServices = app()->make(SystemStoreServices::class);
+            $storeName = (string)$storeServices->value(['id' => $storeId], 'name');
+        }
+        return [
+            'id' => $staffId,
+            'staff_name' => (string)($staffInfo['staff_name'] ?? ''),
+            'phone' => (string)($staffInfo['phone'] ?? ''),
+            'avatar' => (string)($staffInfo['avatar'] ?? ''),
+            'store_id' => $storeId,
+            'store_name' => $storeName,
+            'is_reservable' => (int)($staffInfo['is_reservable'] ?? 1),
+            'off_work_time' => (string)($staffInfo['off_work_time'] ?? ''),
+            'staff_intro' => (string)($staffInfo['staff_intro'] ?? ''),
+            // 兼容期：历史管家等同店长；不再对外依赖 is_butler
+            'is_manager' => self::staffIsManager($staffInfo) ? 1 : 0,
+        ];
+    }
+
+    /**
+     * 更新老师中心资料
+     */
+    public function updateTeacherProfile(int $staffId, int $storeId, array $data): bool
+    {
+        $staff = $this->dao->getOne(['id' => $staffId, 'store_id' => $storeId, 'is_del' => 0]);
+        if (!$staff) {
+            throw new ValidateException('员工不存在');
+        }
+        $update = [];
+        if (array_key_exists('is_reservable', $data)) {
+            $update['is_reservable'] = (int)$data['is_reservable'] ? 1 : 0;
+        }
+        if (array_key_exists('off_work_time', $data)) {
+            $time = trim((string)$data['off_work_time']);
+            if ($time && !preg_match('/^\d{2}:\d{2}$/', $time)) {
+                throw new ValidateException('下班时间格式错误');
+            }
+            $update['off_work_time'] = $time;
+        }
+        if (array_key_exists('staff_intro', $data)) {
+            $update['staff_intro'] = mb_substr(trim((string)$data['staff_intro']), 0, 500);
+        }
+        if (!$update) {
+            return true;
+        }
+        return (bool)$this->dao->update($staffId, $update);
+    }
+
+    /**
+     * 老师休息可选班次（门店班次 + 固定「整天」）
+     */
+    public function getTeacherRestShiftOptions(int $storeId): array
+    {
+        /** @var StoreStaffShiftServices $shiftServices */
+        $shiftServices = app()->make(StoreStaffShiftServices::class);
+        $options = [];
+        foreach ($shiftServices->getList($storeId) as $shift) {
+            $start = trim((string)($shift['start_time'] ?? ''));
+            $end = trim((string)($shift['end_time'] ?? ''));
+            $label = trim((string)($shift['name'] ?? ''));
+            if ($start && $end) {
+                $label = $label !== '' ? ($label . '（' . $start . '-' . $end . '）') : ($start . '-' . $end);
+            }
+            $options[] = [
+                'shift_id' => (int)($shift['id'] ?? 0),
+                'name' => (string)($shift['name'] ?? ''),
+                'label' => $label ?: ('班次' . (int)($shift['id'] ?? 0)),
+                'start_time' => $start,
+                'end_time' => $end,
+                'is_full_day' => 0,
+            ];
+        }
+        $options[] = [
+            'shift_id' => 0,
+            'name' => '整天',
+            'label' => '整天',
+            'start_time' => '',
+            'end_time' => '',
+            'is_full_day' => 1,
+        ];
+        return $options;
+    }
+
+    /**
+     * 老师休息列表
+     */
+    public function getTeacherRestList(int $storeId, int $staffId, int $page, int $limit): array
+    {
+        /** @var StoreStaffScheduleServices $scheduleServices */
+        $scheduleServices = app()->make(StoreStaffScheduleServices::class);
+        /** @var \app\dao\store\StoreStaffScheduleDao $scheduleDao */
+        $scheduleDao = app()->make(\app\dao\store\StoreStaffScheduleDao::class);
+        $query = \think\facade\Db::name('store_staff_schedule')
+            ->where('store_id', $storeId)
+            ->where('staff_id', $staffId)
+            ->where('schedule_type', 0)
+            ->order('schedule_date desc,id desc');
+        $count = (int)(clone $query)->count();
+        $list = $query->page($page, $limit)->select()->toArray();
+        $shiftIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'shift_id')))));
+        $shiftNameMap = $shiftIds
+            ? \think\facade\Db::name('store_staff_shift')->whereIn('id', $shiftIds)->where('is_del', 0)->column('name', 'id')
+            : [];
+        $legacyShiftLabels = ['', '早班', '晚班', '整天', '当前至晚间'];
+        foreach ($list as &$row) {
+            $row['date'] = (string)($row['schedule_date'] ?? '');
+            $shiftId = (int)($row['shift_id'] ?? 0);
+            $startTime = trim((string)($row['start_time'] ?? ''));
+            $endTime = trim((string)($row['end_time'] ?? ''));
+            if (!$startTime && !$endTime) {
+                $row['type'] = 0;
+                $row['type_txt'] = '整天';
+            } elseif ($shiftId && isset($shiftNameMap[$shiftId])) {
+                $row['type'] = $shiftId;
+                $label = (string)$shiftNameMap[$shiftId];
+                if ($startTime && $endTime) {
+                    $label .= '（' . $startTime . '-' . $endTime . '）';
+                }
+                $row['type_txt'] = $label;
+            } else {
+                $type = $shiftId;
+                if (!$type) {
+                    if ($startTime && $endTime && $startTime <= '12:00' && $endTime <= '14:30') {
+                        $type = 1;
+                    } elseif ($endTime === '22:00' && $startTime > '12:00') {
+                        $type = in_array($startTime, ['14:00', '15:00'], true) ? 2 : 4;
+                    } elseif ($startTime || $endTime) {
+                        $type = 2;
+                    } else {
+                        $type = 3;
+                    }
+                }
+                $row['type'] = $type;
+                $row['type_txt'] = $legacyShiftLabels[$type] ?? '休息';
+                if ($startTime && $endTime && $row['type_txt'] !== '整天') {
+                    $row['type_txt'] .= '（' . $startTime . '-' . $endTime . '）';
+                }
+            }
+            $row['remark'] = (string)($row['mark'] ?? '');
+        }
+        unset($row);
+        return compact('list', 'count');
+    }
+
+    /**
+     * 添加老师休息
+     */
+    public function saveTeacherRest(int $storeId, int $staffId, array $data): bool
+    {
+        $date = trim((string)($data['date'] ?? $data['schedule_date'] ?? ''));
+        $shiftId = (int)($data['shift_id'] ?? 0);
+        $isFullDay = (int)($data['is_full_day'] ?? 0);
+        $type = (int)($data['type'] ?? 0);
+        $remark = trim((string)($data['remark'] ?? $data['mark'] ?? ''));
+        if (!$date) {
+            throw new ValidateException('请选择休息日期');
+        }
+        $startTime = '';
+        $endTime = '';
+        $saveShiftId = 0;
+        if ($isFullDay === 1 || $type === 3) {
+            $saveShiftId = 0;
+        } elseif ($shiftId > 0) {
+            /** @var StoreStaffShiftServices $shiftServices */
+            $shiftServices = app()->make(StoreStaffShiftServices::class);
+            $shiftMap = $shiftServices->getShiftMap($storeId);
+            if (!isset($shiftMap[$shiftId])) {
+                throw new ValidateException('休息班次不存在，请重新选择');
+            }
+            $shift = $shiftMap[$shiftId];
+            $startTime = trim((string)($shift['start_time'] ?? ''));
+            $endTime = trim((string)($shift['end_time'] ?? ''));
+            if ($startTime === '' || $endTime === '') {
+                throw new ValidateException('班次时间配置不完整');
+            }
+            $saveShiftId = $shiftId;
+        } elseif (in_array($type, [1, 2, 4], true)) {
+            if ($type === 1) {
+                $startTime = '09:00';
+                $endTime = '14:00';
+            } elseif ($type === 2) {
+                $startTime = '14:00';
+                $endTime = '22:00';
+            } else {
+                $startTime = date('H:i');
+                $endTime = '22:00';
+            }
+            $saveShiftId = $type;
+        } else {
+            throw new ValidateException('请选择休息班次');
+        }
+        /** @var StoreStaffScheduleServices $scheduleServices */
+        $scheduleServices = app()->make(StoreStaffScheduleServices::class);
+        return $scheduleServices->saveSchedule($storeId, [
+            'staff_id' => $staffId,
+            'schedule_date' => $date,
+            'schedule_type' => 0,
+            'shift_id' => $saveShiftId,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'mark' => $remark,
+        ]);
+    }
+
+    /**
+     * 删除老师休息
+     */
+    public function deleteTeacherRest(int $storeId, int $staffId, int $id): bool
+    {
+        /** @var StoreStaffScheduleServices $scheduleServices */
+        $scheduleServices = app()->make(StoreStaffScheduleServices::class);
+        $row = \think\facade\Db::name('store_staff_schedule')->where('id', $id)->find();
+        if (!$row || (int)$row['store_id'] !== $storeId || (int)$row['staff_id'] !== $staffId) {
+            throw new ValidateException('记录不存在');
+        }
+        return $scheduleServices->deleteSchedule($storeId, $id);
+    }
+
+    /**
+     * 规范化店员默认头像（写入前）
+     * 默认男/女头像统一存相对路径，避免 request()->domain() 缺端口导致列表裂图
+     */
+    public function normalizeStaffAvatar(array &$data): void
+    {
+        $avatar = trim((string)($data['avatar'] ?? ''));
+        if ($avatar === '') {
+            $data['avatar'] = '/static/images/staff/avatar_male.png';
+            return;
+        }
+        if (preg_match('#/static/images/staff/avatar_(male|female)\.(svg|png)(?:\?|$)#i', $avatar, $m)) {
+            $data['avatar'] = '/static/images/staff/avatar_' . strtolower($m[1]) . '.png';
+        }
+    }
+
+    /**
+     * 规范化店员日期字段（写入前）
+     */
+    public function normalizeStaffDates(array &$data): void
+    {
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            $value = $data[$field];
+            if ($value === null || $value === '' || $value === 0 || $value === '0') {
+                $data[$field] = null;
+                continue;
+            }
+            if (is_numeric($value)) {
+                $year = (int)date('Y', (int)$value);
+                if ($year <= 1899) {
+                    $data[$field] = null;
+                }
+                continue;
+            }
+            $str = trim((string)$value);
+            if ($str === '') {
+                $data[$field] = null;
+                continue;
+            }
+            $year = (int)substr($str, 0, 4);
+            if ($year <= 1899) {
+                $data[$field] = null;
+            }
+        }
+    }
+
+    /**
+     * 无效日期返回空字符串（读取展示）
+     */
+    public function formatInvalidDate($value): string
+    {
+        if ($value === null || $value === '' || $value === 0 || $value === '0') {
+            return '';
+        }
+        if (is_numeric($value)) {
+            $year = (int)date('Y', (int)$value);
+            return $year <= 1899 ? '' : date('Y-m-d', (int)$value);
+        }
+        $str = trim((string)$value);
+        if ($str === '') {
+            return '';
+        }
+        $year = (int)substr($str, 0, 4);
+        return $year <= 1899 ? '' : $str;
+    }
+
+    /**
+     * 手机号全局唯一校验
+     */
+    /**
+     * @deprecated I1：禁止 staff 手机号全局唯一。手机号唯一以 employee.phone 为准；同店有效任职由 EmployeeStaffWriteServices 校验。
+     * 保留空实现避免历史调用误阻断多店任职。
+     */
+    public function assertPhoneUnique(string $phone, int $excludeId = 0): void
+    {
+        // I1：不再做 staff 全局手机号唯一断言
+    }
+
+    /**
+     * 账号全局唯一校验（非空账号）
+     * 同一 employee_id 的多条任职投影可共用同一统一账号；不同员工之间仍全局唯一。
+     */
+    public function assertAccountUnique(string $account, int $excludeId = 0, int $allowEmployeeId = 0): void
+    {
+        $account = trim($account);
+        if ($account === '') {
+            return;
+        }
+        // 统一内部账号表优先
+        try {
+            $eia = Db::name('employee_internal_account')
+                ->where('account', $account)
+                ->where('is_del', 0)
+                ->find();
+            if ($eia) {
+                $eid = (int)($eia['employee_id'] ?? 0);
+                if ($allowEmployeeId > 0 && $eid === $allowEmployeeId) {
+                    // ok
+                } elseif ($excludeId > 0) {
+                    $selfEmp = (int)$this->dao->value(['id' => $excludeId], 'employee_id');
+                    if ($selfEmp > 0 && $eid === $selfEmp) {
+                        // ok
+                    } else {
+                        throw new AdminException('该登录账号已被其他员工使用');
+                    }
+                } else {
+                    throw new AdminException('该登录账号已被其他员工使用');
+                }
+            }
+        } catch (AdminException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // 表未升级时忽略，走 staff 校验
+        }
+
+        $query = $this->dao->getWhere()->where('account', $account)->where('is_del', 0);
+        if ($excludeId > 0) {
+            $query->where('id', '<>', $excludeId);
+        }
+        $staff = $query->find();
+        if (!$staff) {
+            return;
+        }
+        $row = is_object($staff) ? $staff->toArray() : (array)$staff;
+        $otherEmp = (int)($row['employee_id'] ?? 0);
+        if ($allowEmployeeId > 0 && $otherEmp === $allowEmployeeId) {
+            return;
+        }
+        if ($excludeId > 0) {
+            $selfEmp = (int)$this->dao->value(['id' => $excludeId], 'employee_id');
+            if ($selfEmp > 0 && $otherEmp === $selfEmp) {
+                return;
+            }
+        }
+        /** @var SystemStoreServices $storeServices */
+        $storeServices = app()->make(SystemStoreServices::class);
+        $storeName = (string)$storeServices->value(['id' => (int)($row['store_id'] ?? 0)], 'name');
+        $staffName = (string)($row['staff_name'] ?? '');
+        throw new AdminException('该员工账号已经存在于【' . $storeName . '】，店员名称【' . $staffName . '】');
+    }
+
+    /**
+     * 当前页的常用标签和专属客户数一次读齐；其他调用方继续沿用单行查询语义。
+     * 列表只有详情页行参与批量查询，避免集团视角的 N+1 查询。
+     */
+    protected function loadStaffListLookups(array $list): array
+    {
+        if (!$list) return ['positions' => [], 'levels' => [], 'customers' => [], 'nicknames' => [], 'stores' => []];
+        $ids = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['id'] ?? 0); }, $list))));
+        $positionIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['position'] ?? 0); }, $list))));
+        $levelIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['position_level'] ?? 0); }, $list))));
+        $uids = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['uid'] ?? 0); }, $list))));
+        $storeIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['store_id'] ?? 0); }, $list))));
+        $customerRows = $ids ? Db::name('user')->whereIn('salesman_id', $ids)
+            ->field('salesman_id,COUNT(*) AS customer_count')->group('salesman_id')->select()->toArray() : [];
+        $customers = [];
+        foreach ($customerRows as $row) $customers[(int)$row['salesman_id']] = (int)$row['customer_count'];
+        return [
+            'positions' => $positionIds ? Position::whereIn('id', $positionIds)->column('name', 'id') : [],
+            'levels' => $levelIds ? PositionLevel::whereIn('id', $levelIds)->column('name', 'id') : [],
+            'customers' => $customers,
+            'nicknames' => $uids ? Db::name('user')->whereIn('uid', $uids)->column('nickname', 'uid') : [],
+            'stores' => $storeIds ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id') : [],
+        ];
+    }
+
+    /**
+     * 列表项字段增强；批量映射仅供分页列表使用，其他调用方保持原取值路径。
+     */
+    public function enrichStaffListItem(array &$item, array $allRole = [], $userService = null, bool $hideFencheng = false, ?array $bulkLookups = null): void
+    {
+        $item['has_pwd'] = !empty($item['pwd']) ? 1 : 0;
+        unset($item['pwd']);
+        $item['position_label'] = $bulkLookups !== null
+            ? ($bulkLookups['positions'][(int)($item['position'] ?? 0)] ?? '-')
+            : (Position::where('id', $item['position'] ?? 0)->value('name') ?: '-');
+        $item['position_level_label'] = $bulkLookups !== null
+            ? ($bulkLookups['levels'][(int)($item['position_level'] ?? 0)] ?? '-')
+            : (PositionLevel::where('id', $item['position_level'] ?? 0)->value('name') ?: '-');
+        if ($item['level']) {
+            if (!empty($item['roles'])) {
+                $roles = [];
+                foreach ($item['roles'] as $roleId) {
+                    if (isset($allRole[$roleId])) {
+                        $roles[] = $allRole[$roleId];
+                    }
+                }
+                $item['roles'] = $roles ? implode(',', $roles) : '-';
+            } else {
+                $item['roles'] = '-';
+            }
+        } else {
+            $item['roles'] = '超级管理员';
+        }
+        if (!$userService) {
+            /** @var UserServices $userService */
+            $userService = app()->make(UserServices::class);
+        }
+        if (empty($item['nickname']) && !empty($item['uid'])) {
+            $item['nickname'] = $bulkLookups !== null
+                ? ($bulkLookups['nicknames'][(int)$item['uid']] ?? '')
+                : ($userService->value(['uid' => $item['uid']], 'nickname') ?: '');
+        }
+        $item['customer_num'] = $bulkLookups !== null
+            ? ($bulkLookups['customers'][(int)$item['id']] ?? 0)
+            : $userService->getCount(['salesman_id' => $item['id']]);
+        if (empty($item['name']) && !empty($item['store_id'])) {
+            if ($bulkLookups !== null) {
+                $item['name'] = (string)($bulkLookups['stores'][(int)$item['store_id']] ?? '');
+            } else {
+                /** @var SystemStoreServices $storeServices */
+                $storeServices = app()->make(SystemStoreServices::class);
+                $item['name'] = (string)$storeServices->value(['id' => (int)$item['store_id']], 'name');
+            }
+        }
+        $item['store_name'] = $item['name'] ?? '-';
+        $item['is_fencheng'] = (int)($item['is_fencheng'] ?? 0);
+        $item['cashier_salesperson_enabled'] = (int)($item['cashier_salesperson_enabled'] ?? 1);
+        $item['cashier_craftsman_enabled'] = (int)($item['cashier_craftsman_enabled'] ?? 1);
+        $type = (string)($item['craftsman_performance_type'] ?? 'commission');
+        if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) {
+            $type = 'commission';
+        }
+        $item['craftsman_performance_type'] = $type;
+        $item['craftsman_performance_enabled'] = $type === 'labor' ? 0 : 1;
+        $item['craftsman_labor_enabled'] = $type === 'commission' ? 0 : 1;
+        $item['mobile_enabled'] = (int)($item['mobile_enabled'] ?? 0) === 1 ? 1 : 0;
+        // 列表与完整详情使用同一分类空值口径，不按岗位或历史分成标记推断类型。
+        $employmentType = (string)($item['employment_type_code'] ?? '');
+        $item['employment_type_code'] = in_array($employmentType, ['internal', 'partner', 'outsourced'], true)
+            ? $employmentType : '';
+        if ($hideFencheng) {
+            unset($item['is_fencheng']);
+        }
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $dateField) {
+            if (array_key_exists($dateField, $item)) {
+                $formatted = $this->formatInvalidDate($item[$dateField]);
+                $item[$dateField] = $formatted !== '' ? $formatted : '-';
+            }
+        }
+    }
+
+    /**
+     * 手机端开关统一读取员工授权表，与人员详情页保持同一权威口径。
+     * system_store_staff.mobile_enabled 仅保留为历史兼容字段，不参与列表展示。
+     */
+    protected function enrichMobileEnabled(array &$list): void
+    {
+        $employeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $list))));
+        if (!$employeeIds) return;
+        try {
+            $enabledIds = Db::name('employee_mobile_auth')
+                ->whereIn('employee_id', $employeeIds)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->column('employee_id');
+        } catch (\Throwable $e) {
+            $enabledIds = [];
+        }
+        $enabled = [];
+        foreach ($enabledIds as $employeeId) {
+            $enabled[(int)$employeeId] = true;
+        }
+        foreach ($list as &$item) {
+            $item['mobile_enabled'] = isset($enabled[(int)($item['employee_id'] ?? 0)]) ? 1 : 0;
+        }
+        unset($item);
+    }
+
+    /**
+     * 岗位权威来源是 staff_job_position；system_store_staff.position 仅兼容旧数据。
+     * 列表按当前页批量回显全部有效岗位，避免逐员工查询。
+     */
+    protected function enrichStaffPositionLabels(array &$list): void
+    {
+        $staffIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['id'] ?? 0);
+        }, $list))));
+        if (!$staffIds) return;
+        $rows = Db::name('staff_job_position')->alias('j')
+            ->leftJoin('position p', 'p.id = j.position_id')
+            ->whereIn('j.staff_id', $staffIds)
+            ->where('j.is_del', 0)
+            ->where('j.status', 1)
+            ->where('j.end_time', 0)
+            ->field('j.staff_id,j.position_id,p.name AS position_name')
+            ->order('j.staff_id', 'asc')
+            ->order('j.id', 'asc')
+            ->select()->toArray();
+        $labels = [];
+        $positionIds = [];
+        foreach ($rows as $row) {
+            $staffId = (int)($row['staff_id'] ?? 0);
+            $positionId = (int)($row['position_id'] ?? 0);
+            $label = trim((string)($row['position_name'] ?? ''));
+            if ($staffId <= 0 || $positionId <= 0 || $label === '') continue;
+            $labels[$staffId][] = $label;
+            $positionIds[$staffId][] = $positionId;
+        }
+        foreach ($list as &$item) {
+            $staffId = (int)($item['id'] ?? 0);
+            if ($staffId > 0 && !empty($labels[$staffId])) {
+                $item['position_label'] = implode('、', array_values(array_unique($labels[$staffId])));
+                $item['position_ids'] = array_values(array_unique(array_map('intval', $positionIds[$staffId] ?? [])));
+            }
+        }
+        unset($item);
+    }
+
+    /**
+     * 详情读取格式化
+     */
+    public function formatStaffRead(array $staffInfo, bool $hideFencheng = false): array
+    {
+        $staffInfo['has_pwd'] = !empty($staffInfo['pwd']) ? 1 : 0;
+        unset($staffInfo['pwd']);
+        $staffInfo['is_fencheng'] = (int)($staffInfo['is_fencheng'] ?? 0);
+        $staffInfo['cashier_salesperson_enabled'] = (int)($staffInfo['cashier_salesperson_enabled'] ?? 1);
+        $staffInfo['cashier_craftsman_enabled'] = (int)($staffInfo['cashier_craftsman_enabled'] ?? 1);
+        $type = (string)($staffInfo['craftsman_performance_type'] ?? 'commission');
+        if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) {
+            $type = 'commission';
+        }
+        $staffInfo['craftsman_performance_type'] = $type;
+        $staffInfo['craftsman_performance_enabled'] = $type === 'labor' ? 0 : 1;
+        $staffInfo['craftsman_labor_enabled'] = $type === 'commission' ? 0 : 1;
+        if ($hideFencheng) {
+            unset($staffInfo['is_fencheng']);
+        }
+        foreach (['join_date', 'birthday_date', 'contract_begin', 'contract_end'] as $dateField) {
+            if (array_key_exists($dateField, $staffInfo)) {
+                $staffInfo[$dateField] = $this->formatInvalidDate($staffInfo[$dateField]);
+            }
+        }
+        return $staffInfo;
+    }
+
+    /**
+     * 店长判定（兼容期：历史 is_butler=1 等同店长，未删字段前仍可读）
+     * @param array|object|null $staff
+     */
+    public static function staffIsManager($staff): bool
+    {
+        if (!$staff) {
+            return false;
+        }
+        if (is_object($staff)) {
+            $staff = method_exists($staff, 'toArray') ? $staff->toArray() : (array)$staff;
+        }
+        if (!is_array($staff)) {
+            return false;
+        }
+        return (int)($staff['is_manager'] ?? 0) === 1
+            || (int)($staff['is_butler'] ?? 0) === 1;
+    }
+
+    /**
+     * 拒绝旧人员权限绕过：店员权限/角色、手工店长开关
+     * @param array $raw 原始请求体（未 postMore 默认值污染前）
+     */
+    public static function assertNoLegacyStaffAuthBypass(array $raw): void
+    {
+        $hasNonEmptyList = static function ($v): bool {
+            if ($v === null || $v === '' || $v === []) {
+                return false;
+            }
+            if (!is_array($v)) {
+                return trim((string)$v) !== '';
+            }
+            foreach ($v as $item) {
+                if ($item === null || $item === '') {
+                    continue;
+                }
+                if (is_numeric($item) && (int)$item === 0) {
+                    continue;
+                }
+                return true;
+            }
+            return false;
+        };
+        if ($hasNonEmptyList($raw['roles'] ?? null) || $hasNonEmptyList($raw['role_ids'] ?? null)) {
+            throw new AdminException('人员功能权限由岗位决定，不能单独选择角色或店员权限');
+        }
+        if (array_key_exists('save_roles', $raw) && (int)$raw['save_roles'] === 1) {
+            throw new AdminException('人员功能权限由岗位决定，不能单独选择角色或店员权限');
+        }
+        if (array_key_exists('is_manager', $raw) || array_key_exists('is_butler', $raw)) {
+            throw new AdminException('店长身份由岗位属性决定，不能手工设置店长开关');
+        }
+    }
+
+    /**
+     * 保存前归一：管家已合并店长（兼容历史内部调用）。
+     * 新建/编辑人员接口已禁止客户端传 is_manager/is_butler；店长身份改由岗位投影。
+     */
+    public function normalizeStaffManagerFields(array &$data): void
+    {
+        if ((int)($data['is_butler'] ?? 0) === 1) {
+            $data['is_manager'] = 1;
+        }
+        if (array_key_exists('is_manager', $data)) {
+            $data['is_manager'] = (int)$data['is_manager'] === 1 ? 1 : 0;
+            $data['is_butler'] = 0;
+        } else {
+            unset($data['is_butler']);
+        }
+    }
+
+    /**
+     * 接口展示归一：管家视为店长；兼容期仍带回 is_butler 供排查，权限以 is_manager 为准
+     */
+    public static function presentStaffManagerFlags(array $staff): array
+    {
+        if (self::staffIsManager($staff)) {
+            $staff['is_manager'] = 1;
+        }
+        return $staff;
+    }
+
+    /**
+     * 根据角色计算 order_status / is_cashier
+     */
+    public function applyRolesFlags(array &$data): void
+    {
+        $data['order_status'] = 0;
+        $data['is_cashier'] = 0;
+        if (empty($data['roles']) || !is_array($data['roles'])) {
+            return;
+        }
+        /** @var SystemRoleServices $systemRoleService */
+        $systemRoleService = app()->make(SystemRoleServices::class);
+        $roles = $systemRoleService->getColumn(['id' => $data['roles']], '*');
+        if (!$roles) {
+            return;
+        }
+        foreach ($roles as $role) {
+            if (!empty($role['mall_rules'])) {
+                $data['order_status'] = 1;
+                break;
+            }
+            if (!empty($role['cashier_rules'])) {
+                $data['is_cashier'] = 1;
+            }
+        }
+    }
+
+    /**
+     * 加载列表涉及门店的角色映射
+     */
+    protected function loadRoleMapForStaffList(array $list): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'store_id')))));
+        if (!$storeIds) {
+            return [];
+        }
+        /** @var SystemRoleServices $service */
+        $service = app()->make(SystemRoleServices::class);
+        // 角色搜索器支持门店 ID 数组，一次查询与逐店合并的权限结果相同。
+        return $service->getRoleArray(['type' => 1, 'store_id' => $storeIds, 'status' => 1]);
+    }
+
+}

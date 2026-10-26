@@ -1,0 +1,18 @@
+{
+  "task": "D5-entitlement-service-business-date",
+  "baselineHead": "67e25e56d5a3e6960c36b13f77aea41663956c23",
+  "files": [
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3OrderAttributionCorrectionServices.php",
+      "sha256": "9740de147f5c2251c37f2b8fe23dd2072563c05b532b2db2c87e5bc3af78392b"
+    },
+    {
+      "path": "tests/cashier-v3/php/entitlement-service-date-correction-integration.php",
+      "sha256": "c0aa97827a2eec4279000d62863810b9250f6e68f159cc26b11d6877a1164f11"
+    }
+  ],
+  "patchSha256": "bfeab9f78a7c76197fc808096eec34a8e1c338d2485db82fc938186270bed867",
+  "acceptance": "pending-product-manager",
+  "deployment": "not-authorized",
+  "databaseMigration": "none"
+}

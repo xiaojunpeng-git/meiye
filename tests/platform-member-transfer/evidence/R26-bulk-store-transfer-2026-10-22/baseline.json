@@ -1,0 +1,10 @@
+{
+  "head": "1e1296eb0e77b16dda1150deab74ce9a416f524c",
+  "files": {
+    "前端代码/admin/src/pages/store/storeList/index.vue": "85a56e7b472678c8bc91486ca290e00c108f82dd702514a465e62fc75ab60022",
+    "后端代码/app/services/user/UserBelongStoreServices.php": "e5433e33e0079f4f258c1f4979fafba56b9360a61eecfc1afd08fe0f9353cc1f",
+    "后端代码/route/admin.php": "09ecef5960912776cf8b5d312e2ff991bfa2e9f1468756b1b4ca183942202277"
+  },
+  "remote": "不适用，本轮本地开发",
+  "database": "已确认平台本地 mysql:3306/ruihao"
+}

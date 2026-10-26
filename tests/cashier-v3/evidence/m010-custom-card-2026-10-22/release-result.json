@@ -1,0 +1,31 @@
+{
+  "task": "M010-00001",
+  "sourceCommit": "f4005e6682bfe04d2397ffa1bd76c8141fac2c40",
+  "patch": "8ec66f10",
+  "publishedCommit": "b7713cdaf277b7a2b51e5d55714c58c7a04b544e",
+  "publishedBranch": "release/m010-custom-card-20261022",
+  "order": [
+    "rh-deployed-and-verified",
+    "origin-pushed-and-confirmed",
+    "008-deployed-and-verified"
+  ],
+  "sites": [
+    {
+      "site": "rh",
+      "backup": "/www/backup/m010-rh-f4005e66-20261022",
+      "status": "verified",
+      "protectedFiles": 12
+    },
+    {
+      "site": "008",
+      "backup": "/www/backup/m010-008-f4005e66-20261022",
+      "status": "verified",
+      "protectedFiles": 9
+    }
+  ],
+  "productionBusinessWrites": false,
+  "frontendChanged": false,
+  "existingRefundAndIntegerProtection": "unchanged",
+  "miniProgramUploaded": false,
+  "at": "2026-10-22T02:35:35.172Z"
+}

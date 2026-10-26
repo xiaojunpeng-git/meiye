@@ -1,0 +1,49 @@
+{
+  "version": "R14-HQ-MULTI-WAREHOUSE-20261013-94c01cab",
+  "environment": {
+    "php": "7.4",
+    "mysql": "5.6.51",
+    "database": "inventory_manual_inbound_test_20260730",
+    "businessFixtureRollback": true
+  },
+  "integration": {
+    "assertions": 30,
+    "exitCode": 0,
+    "output": "INVENTORY_MANUAL_TEST_BOOTSTRAP_OK database=inventory_manual_inbound_test_20260730\nPASS create and replay keep one warehouse\nPASS duplicate name rejected\nPASS same SKU has independent warehouse balances\nPASS request records supply warehouse without changing stock\nPASS draft replay cannot cross source warehouses\nPASS draft replay stays in exact warehouse\nPASS draft changes no stock\nPASS dispatch subtracts once and leaves receiver unchanged\nPASS dashboard separates in-transit cost from warehouse balance\nPASS wrong receiver warehouse rejected\nPASS receipt adds once and preserves total stock\nPASS fulfilled request belongs to original warehouse\nPASS legacy request binding writes audit and cannot change warehouse\nPASS stock summary remains warehouse-specific\nPASS warehouse directory stays inside authorized organization root\nPASS empty unauthorized warehouse scope fails closed\nPASS settings-only capability does not grant stock command permissions\nPASS query and export context freezes selected warehouse\nPASS query rejects unknown warehouse instead of widening scope\nPASS batch projection excludes other warehouses for same SKU\nPASS count draft cannot resume in another warehouse\nPASS warehouse with stock cannot disable\nPASS outbound deducts selected warehouse only\nPASS count confirmation adjusts original warehouse only\nPASS later warehouse import failure remains retryable\nPASS successful warehouse replay does not double deduct\nPASS failed warehouse resumes after stock replenishment\nPASS inactive warehouse remains readable but not writable\nPASS warehouse pagination returns 20/20/5 and complete total\nPASS stale warehouse setting version rejected\nR14_HQ_MULTI_WAREHOUSE_RESULT failed=0\n"
+  },
+  "transport": {
+    "passed": 14,
+    "failed": 0
+  },
+  "contracts": {
+    "rollout": 7,
+    "excelImport": 7,
+    "platformOperational": 12,
+    "unifiedQueryRegistration": 14,
+    "documentDetailScope": "PASS",
+    "transferConfirmation": 4,
+    "recipeFrontend": 6,
+    "salonOptionalProject": "PASS",
+    "recipeSearch": "PASS"
+  },
+  "legacyNotGreen": {
+    "storeMenu": "19 PASS / 2 FAIL (unchanged cashier shell assertions)",
+    "presalePlatform": "19 PASS / 2 FAIL (unmodified business sources)",
+    "apiAndLifecycle": "calls baseline-removed cancel/reverse methods",
+    "requestDialog": "old inline implementation/acceptance department contract"
+  },
+  "localInventoryInvariance": {
+    "stockRows": 7477,
+    "quantityUnits": 217666,
+    "movementRows": 13280
+  },
+  "uiFixtureCleanup": {
+    "locationId": 141,
+    "references": 0,
+    "removed": true
+  },
+  "status": "PENDING_PRODUCT_MANAGER_ACCEPTANCE",
+  "commit": false,
+  "deploy": false,
+  "push": false
+}

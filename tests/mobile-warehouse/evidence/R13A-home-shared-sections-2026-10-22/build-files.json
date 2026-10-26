@@ -1,0 +1,53 @@
+{
+  "home": {
+    "files": {
+      "src/merchant/pages/home/index.js": "b88778343382f125a28b38517d3be03c82947bd51cfed280d17ec0ce643d2d02",
+      "src/merchant/pages/home/index.wxml": "789051ac7327bc536ea8bb7c33320459b4a239979cc3592ce079d83b5214c703"
+    },
+    "markers": {
+      "sections-v2": true,
+      "分类业绩": true,
+      "今日客情": true
+    }
+  },
+  "category": {
+    "files": {
+      "src/merchant/pages/category-ranking/index.js": "2e41f2c3ef6cca253fb00b6e55f4c5342f91ead9d6b4fc26f1fc662391c64fd0",
+      "src/merchant/pages/category-ranking/index.wxml": "bf56077530875745687f44ff28bd328c98baa295af4c9ccb0abab144c2203b2b"
+    },
+    "markers": {
+      "categoryId": true,
+      "前五名": true
+    }
+  },
+  "login": {
+    "files": {
+      "src/app/pages/bootstrap/index.js": "346be41b7b40b50524503f6563a6f53915a68f2e2038757965fc3fcd7fa4a786",
+      "src/app/pages/bootstrap/index.wxml": "0ff6f1399c199c8558fe3accb274ea268ac7d3e5dfa3030d63b3fbba01771551"
+    },
+    "markers": {
+      "getPhoneNumber": true,
+      "账号登录": true
+    }
+  },
+  "warehouse": {
+    "files": {
+      "src/merchant/pages/warehouse/index.js": "f254667303a9566e42818db6e74d274f7ca1c141df48094e8ad09f6a68f37268",
+      "src/merchant/pages/warehouse/index.wxml": "36b35494ec6e0742658d1343f8c7fd7a2895d4f88e2b45fc9013f2ce71d8adf3"
+    },
+    "markers": {
+      "按现金业绩": true,
+      "按服务数": true
+    }
+  },
+  "ai_entry": {
+    "files": {
+      "src/shared/components/mohe-ai-entry.js": "5544dbbc31b64d453e42eaf46387965d282cc96d79ba625f6541dedea37819d7",
+      "src/shared/components/mohe-ai-entry.wxml": "91bdb222a6e47223f63e267b740ba28a9ef2fefef6397f2629e4096afb56ccff"
+    },
+    "markers": {
+      "onEntryTouchMove": true,
+      "restoreEntryPosition": true
+    }
+  }
+}

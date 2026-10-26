@@ -1,0 +1,35 @@
+{
+  "local_target": "mysql/ruihao",
+  "expired_test_runs": [
+    "42d8dff30ee8ac9c606815115a1a2ff2e631ab9d83a0096a",
+    "0e1f334b43eff7ee4eaca44325e8cb159ed9746fc742c0ca"
+  ],
+  "expiry_injection": "Only pause_at -= 600001 on two agent-created local test Runs; no business facts changed",
+  "completed_run": "d378ca559d3bc46bd7ee34c589d466e77ae302bfb8bdd97d",
+  "execution_mode": "async",
+  "status": "COMPLETED",
+  "client_elapsed_ms": 2406,
+  "attempts": [
+    {
+      "kind": "tool",
+      "target_code": "unified_metric_query",
+      "state": "SUCCEEDED"
+    }
+  ],
+  "model_attempts": 0,
+  "authorized_exact_identity_count": 1,
+  "selection_matches": true,
+  "authorized_store_count": 102,
+  "metric_code": "sales_collected_amount",
+  "range": [
+    "2026-09-01",
+    "2026-09-30"
+  ],
+  "fact_rows": 0,
+  "fact_sum_cents": 0,
+  "registered_reader_cents": 0,
+  "stored_result_cents": 0,
+  "source_note": "Identity and scope validated locally; phone and member ID omitted",
+  "fixed_head": "5d7d5cb0d5a960396add7f0cbaa0a53a08bed789",
+  "tracked_patch_sha256": "4a248ede9ec62f9d8efc6242cc6be55cb7e8ee450567149e7611d383caafa65c"
+}

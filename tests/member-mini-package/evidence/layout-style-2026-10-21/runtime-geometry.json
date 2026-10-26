@@ -1,0 +1,85 @@
+{
+  "system": {
+    "ok": true,
+    "tool": "automation_evaluate",
+    "clientName": "Codex",
+    "result": {
+      "success": true,
+      "result": {
+        "result": {
+          "screenHeight": 844,
+          "windowHeight": 844,
+          "safeArea": {
+            "top": 47,
+            "left": 0,
+            "right": 390,
+            "bottom": 810,
+            "width": 390,
+            "height": 763
+          },
+          "appid": "wx85d4bfd0b4b6aafb"
+        }
+      }
+    }
+  },
+  "staffStyle": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": "background:transparent;padding:12px 22px 12px;margin-top:0px"
+  },
+  "staffPadding": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": "22px"
+  },
+  "fixedOffset": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": {
+      "left": 0,
+      "top": 759
+    }
+  },
+  "fixedSize": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": {
+      "success": true,
+      "width": 390,
+      "height": 85
+    }
+  },
+  "barOffset": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": {
+      "left": 0,
+      "top": 759
+    }
+  },
+  "barSize": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": {
+      "success": true,
+      "width": 390,
+      "height": 85
+    }
+  },
+  "spacer": {
+    "ok": true,
+    "tool": "automation_element_action",
+    "clientName": "Codex",
+    "result": {
+      "success": true,
+      "width": 390,
+      "height": 85
+    }
+  }
+}

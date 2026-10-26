@@ -1,0 +1,14 @@
+{
+  "target": "rh.cc3798.com",
+  "backend_verified": 14,
+  "html_verified": 4,
+  "upgrade": {
+    "id": "221",
+    "upgrade_key": "20261011-003-inventory-no-expiry",
+    "sql_checksum": "ad146a34ca14c27d7c1770306a38504173c14e23973139762a1b338b00fd1849",
+    "code_version": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf",
+    "executed_at": "2026-10-11 17:04:23"
+  },
+  "business_writes": false,
+  "verified_at": "2026-10-11T17:13:07+08:00"
+}

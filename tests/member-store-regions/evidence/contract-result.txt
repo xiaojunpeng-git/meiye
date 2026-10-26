@@ -1,0 +1,1 @@
+PASS: SFC templates, province/city/district/all, async races, close/retry/empty, query identity, legacy selection callbacks.

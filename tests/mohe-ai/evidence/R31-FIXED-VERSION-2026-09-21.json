@@ -1,0 +1,37 @@
+{
+  "round": 31,
+  "title": "魔核 AI 统一指标分层、维度契约与能力保全治理",
+  "baseline_head": "44124c93b8161fdf56fda72125f27f15ab6a5c37",
+  "patch_sha256": "64297f3f677d4776fd7ccdcaf7a2c3261310e58ffdc7e3f03f6bfdff8f734bab",
+  "status": "product_accepted_authorized_for_commit_deploy_rh_and_push",
+  "files": {
+    "tests/mohe-ai/QUERY-READ-VIEW.md": "9e5bc36f5a95148ed57094780bc866ec7ae929adace38fc2c3d39ef0e694196f",
+    "tests/mohe-ai/README.md": "a343e6f2d25caaa4b6725a89cda4f4fc002d1b1fd810941dded43179e53026ba",
+    "tests/mohe-ai/context-delta-gateway.php": "4c0bd8db31f4df0dff2706651deae2b537110240c4ce3e96daac56b9cb9223e7",
+    "tests/mohe-ai/gateway-review-regressions.php": "224469642d8d8e6c8ee705a8871bcc2205b6b20f8784edea696d742ca5e12ddb",
+    "tests/mohe-ai/intent-understanding-contract.php": "cc9effe99d3712946bb09bee1bba3f2adffce24029cc8b501c20159373fa0570",
+    "tests/mohe-ai/management-gateway.php": "dc8ef2b9234bc0dd54c614a99a94ec3ffe22d7eaa8f332f7249f9c42c9307999",
+    "tests/mohe-ai/metric-registry-contract.php": "73fc972cb1db6dd432fd2d8d441cb6abc792e5a1bd3849a19cb0ddd70f1e2238",
+    "tests/mohe-ai/overview-metric-resolver.php": "7decf17d5602de3d778cc3e7c684b53d8065ca3aab6a8f9eeebffecb683a5757",
+    "tests/mohe-ai/r7-context-removal-audit.php": "ef244c2dd6697d6f4c16b8b52da0d2357cf0bc516d163dc261f688f66ee4b133",
+    "tests/mohe-ai/result-reference.php": "4450cb40b0d0dc4ad40ec58b0bf20c36c998b309839e090cdac63cc42df8f321",
+    "tests/mohe-ai/run-all.sh": "dc383f19047ce8b2a0bb3a770c8f1aba676ddf897cc945ac24ce85d25a245f42",
+    "tests/mohe-ai/evidence/R31-METRIC-LAYERING-LIVE-ACCEPTANCE-2026-09-21.md": "98063477253c564c808d01d2e4bab07e6baa40458d769866738215ffb289a471",
+    "前端代码/admin/src/pages/setting/moheAi/metrics.vue": "f66ce9f1aae8cb71aca106a8a59f6a750bc0066dc5fc2a048450a44997b2a7e4",
+    "后端代码/app/services/ai/AiGatewayServices.php": "1288ad1bf573b716dd4ddaf0980fb8ac89a820f2b42a5b490a32c6dcd106f26b",
+    "后端代码/app/services/ai/contract/AiIntentGroupContract.php": "c329a77d06ef7ea3edae142fcdc6f02e61941aa59d25291098efd9aaa16606ea",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "29ecd1844678c410793754e7e140dd6215e4b207b1b257ba759e82652654bc59",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7b68e29501c9272c99ade555de5c7277a8759f6e2181423aeb561805fc1b4305",
+    "后端代码/app/services/ai/execution/AiOverviewMetricResolver.php": "770b13d85e1d210b08d5e0866a939408e454dc10fd4fc670d069b7dc3a759b94",
+    "后端代码/app/services/ai/semantic/AiSemanticIntentParser.php": "acca646c65c68cf2ce893793461589df83cbf8b44f280bc82d604452634524e5",
+    "后端代码/app/services/ai/semantic/AiSemanticVocabulary.php": "11537b4918a6a2ad25cfac27ffd1b6253dc478ef9c3dad06f813297c741a6f70",
+    "后端代码/app/services/query/metric/MetricDefinitionRegistry.php": "0e007d53054c9084f84d55d8167886615f81af67bef0c29aaa71587f4c8d204a",
+    "后端代码/app/services/query/metric/MetricRegistryCatalogServices.php": "68ec13bf01cbd385575a1563cb0c8566e1c545f1a552ef33fee7d8e8c0cbfd0f"
+  },
+  "deleted": [
+    "tests/mohe-ai/metric-contract.php",
+    "后端代码/app/services/query/metric/MetricQueryCatalog.php",
+    "后端代码/app/services/query/metric/MetricQueryReadinessGate.php",
+    "后端代码/app/services/query/metric/MetricReportCapabilityRegistry.php"
+  ]
+}

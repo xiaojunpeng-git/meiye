@@ -1,0 +1,757 @@
+export const SALES_ORDER_RECEIPT_PRINT_SETTINGS_KEY = 'cashier-v3:sales-order-receipt-print-settings:v1'
+
+export const SALES_ORDER_RECEIPT_PAPER_PROFILES = Object.freeze([
+  // R12: preview text and headings are two pixels smaller; paper and driver geometry stay unchanged.
+  Object.freeze({ key: '58', label: '58mm', paperWidthMm: 58, contentWidthMm: 55, fontSizePx: 14, titleSizePx: 20 }),
+  // XP-76 exposes a 63.5 x 210mm default form; a taller CSS page makes the driver shrink the entire receipt.
+  Object.freeze({ key: '76', label: '76mm', paperWidthMm: 63, contentWidthMm: 60, fixedPageHeightMm: 210, fontSizePx: 18, titleSizePx: 24 }),
+  Object.freeze({ key: '80', label: '80mm', paperWidthMm: 80, contentWidthMm: 76, fontSizePx: 18, titleSizePx: 24 })
+])
+
+const DEFAULT_RECEIPT_PAPER_KEY = '76'
+// Fifteen 1/6-inch impact-printer lines, now owned by the receipt instead of the driver.
+const RECEIPT_TEAR_GUIDE_MM = 64
+const RECEIPT_TRAILING_SAFETY_MM = 4
+// Release both overflow axes: overflow-x:auto computes overflow-y:visible back
+// to auto, leaving the app scroll container active during native pagination.
+// Preserve width/min-width and receipt typography to retain native sizing.
+const RECEIPT_PRINT_ROOT_STYLES = Object.freeze({
+  height: 'auto', 'min-height': '0', 'max-height': 'none', 'overflow-x': 'visible', 'overflow-y': 'visible'
+})
+const RECEIPT_PRINT_ROOT_CSS = Object.entries(RECEIPT_PRINT_ROOT_STYLES)
+  .map(([property, value]) => `${property}: ${value} !important;`).join(' ')
+
+// Both native-print paths retain driver sizing, reduced by the same two pixels as preview.
+function receiptPrintFontSize(profile) {
+  return profile.key === '76' ? '21px' : `clamp(${profile.fontSizePx}px, calc(8vw - 2px), 68px)`
+}
+
+function resolveReceiptPageHeightMm(paperProfile, measuredHeightPx) {
+  if (Number.isFinite(paperProfile?.fixedPageHeightMm)) return paperProfile.fixedPageHeightMm
+  return Math.max(40, Math.ceil((measuredHeightPx * 25.4) / 96 + RECEIPT_TRAILING_SAFETY_MM))
+}
+
+function hasValue(value) {
+  if (value === 0 || value === false) return true
+  if (value === null || value === undefined) return false
+  return typeof value !== 'string' || value.trim() !== ''
+}
+
+function pickValue(source, keys) {
+  if (!source || typeof source !== 'object') return undefined
+  for (const key of keys) {
+    if (hasValue(source[key])) return source[key]
+  }
+  return undefined
+}
+
+function firstList(source, keys) {
+  if (!source || typeof source !== 'object') return []
+  for (const key of keys) {
+    if (Array.isArray(source[key])) return source[key]
+  }
+  return []
+}
+
+function firstNonEmptyList(source, keys) {
+  if (!source || typeof source !== 'object') return []
+  for (const key of keys) {
+    if (Array.isArray(source[key]) && source[key].length) return source[key]
+  }
+  return firstList(source, keys)
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function displayText(value, fallback = '—') {
+  return hasValue(value) ? String(value) : fallback
+}
+
+function displayAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return `¥${amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`
+}
+
+function itemName(item) {
+  return pickValue(item, ['name', 'itemName', 'productName', 'projectName', 'title']) || '未命名商品'
+}
+
+function itemQuantity(item) {
+  return pickValue(item, ['quantity', 'count', 'num', 'quantityText']) || 1
+}
+
+function itemAmount(item) {
+  // 小票展示核销快照金额，不把权益金额加进订单收款汇总。
+  if (item.businessTag === '权益') return item.entitlementAmount
+  return pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue', 'actualReceivedAmount', 'amount'])
+}
+
+function isEntitlementItem(item) {
+  const role = String(item?.lineRole || item?.kind || '').toLowerCase()
+  return item?.businessTag === '权益' || role === 'entitlement_service'
+}
+
+function entitlementRemainingTimes(item) {
+  return pickValue(item, [
+    'remainingTimesAfter',
+    'remaining_times_after',
+    'remainingTimes',
+    'remaining_times',
+    'availableTimes',
+    'available_times'
+  ])
+}
+
+// Browser and persisted checkout line IDs differ; source identity remains stable.
+function entitlementReceiptSourceKey(line) {
+  const type = line.entitlementInstanceType || 'card_holder'
+  const instance = String(line.entitlementInstanceId || '')
+  const detail = String(line.entitlementSourceDetailId || '')
+  return instance && detail ? `${type}:${instance}:${detail}` : ''
+}
+
+function paymentName(line) {
+  if (line?.isBalancePayment === true || ['balance', 'member_balance', '余额'].includes(String(pickValue(line, ['paymentSource', 'paymentMethodCode', 'methodCode', 'type']) || '').toLowerCase())) {
+    return '余额支付'
+  }
+  return pickValue(line, ['methodName', 'paymentMethodName', 'name', 'paymentMethod', 'label']) || '未命名收款方式'
+}
+
+function paymentAmount(line) {
+  return pickValue(line, ['amount', 'receivedAmount', 'paidAmount', 'actualReceivedAmount'])
+}
+
+function serviceName(service) {
+  return pickValue(service, ['serviceProject', 'projectName', 'name', 'itemName', 'title']) || '未命名服务'
+}
+
+function serviceQuantity(service) {
+  return pickValue(service, ['usedTimes', 'quantity', 'count', 'num']) || 1
+}
+
+function serviceSource() {
+  return '权益'
+}
+
+function summaryValue(order, keys) {
+  const summary = order.amountSummary || order.summary || order.orderSummary || {}
+  return pickValue(summary, keys) ?? pickValue(order, keys)
+}
+
+function receiptRows(rows) {
+  return rows
+    .filter((row) => hasValue(row.value))
+    .map((row) => `<div class="summary-row"><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(displayAmount(row.value))}</strong></div>`)
+    .join('')
+}
+
+export function resolveSalesOrderReceiptPaperProfile(paperSize) {
+  const normalized = String(paperSize || '').trim()
+  return SALES_ORDER_RECEIPT_PAPER_PROFILES.find((profile) => profile.key === normalized)
+    || SALES_ORDER_RECEIPT_PAPER_PROFILES.find((profile) => profile.key === DEFAULT_RECEIPT_PAPER_KEY)
+}
+
+export function loadSalesOrderReceiptPrintSettings(storageRef) {
+  try {
+    const storage = storageRef || globalThis?.localStorage
+    const parsed = JSON.parse(storage?.getItem?.(SALES_ORDER_RECEIPT_PRINT_SETTINGS_KEY) || '{}')
+    return { paperSize: resolveSalesOrderReceiptPaperProfile(parsed?.paperSize).key }
+  } catch {
+    return { paperSize: DEFAULT_RECEIPT_PAPER_KEY }
+  }
+}
+
+export function saveSalesOrderReceiptPrintSettings(settings = {}, storageRef) {
+  const normalized = { paperSize: resolveSalesOrderReceiptPaperProfile(settings.paperSize).key }
+  try {
+    const storage = storageRef || globalThis?.localStorage
+    storage?.setItem?.(SALES_ORDER_RECEIPT_PRINT_SETTINGS_KEY, JSON.stringify(normalized))
+  } catch {
+    // Printing still works when browser privacy settings block local storage.
+  }
+  return normalized
+}
+
+export function setSalesOrderReceiptPageSize(documentRef, paperSize = DEFAULT_RECEIPT_PAPER_KEY) {
+  const receipt = documentRef?.querySelector?.('.receipt')
+  if (!receipt) return null
+
+  const measuredHeight = Math.max(
+    Number(receipt.scrollHeight) || 0,
+    Number(receipt.getBoundingClientRect?.().height) || 0
+  )
+  if (measuredHeight <= 0) return null
+
+  const paperProfile = resolveSalesOrderReceiptPaperProfile(paperSize)
+  const pageHeightMm = resolveReceiptPageHeightMm(paperProfile, measuredHeight)
+  let style = documentRef.getElementById?.('sales-order-receipt-page-size')
+  if (!style) {
+    style = documentRef.createElement?.('style')
+    if (!style) return null
+    style.id = 'sales-order-receipt-page-size'
+    documentRef.head?.appendChild(style)
+  }
+  style.textContent = `@page { size: ${paperProfile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }`
+  return pageHeightMm
+}
+
+function localDateParts(dateValue) {
+  const value = dateValue instanceof Date ? dateValue : new Date(dateValue)
+  const valid = Number.isFinite(value.getTime()) ? value : new Date()
+  const pad = (part) => String(part).padStart(2, '0')
+  return {
+    date: `${valid.getFullYear()}-${pad(valid.getMonth() + 1)}-${pad(valid.getDate())}`,
+    compact: `${valid.getFullYear()}${pad(valid.getMonth() + 1)}${pad(valid.getDate())}-${pad(valid.getHours())}${pad(valid.getMinutes())}${pad(valid.getSeconds())}`
+  }
+}
+
+export function buildSalesOrderReceiptTestOrder(options = {}) {
+  const parts = localDateParts(options.now || new Date())
+  return {
+    isPrintTest: true,
+    salesOrderNo: `TEST-${parts.compact}`,
+    storeName: options.storeName || '打印测试门店',
+    memberName: '测试顾客',
+    businessDate: parts.date,
+    cashierName: options.cashierName || '测试操作员',
+    items: [
+      { name: '中文项目名称换行测试', quantity: 1, payableAmount: 129 },
+      { name: '产品金额对齐测试', quantity: 2, payableAmount: 499 }
+    ],
+    paymentDetails: [
+      { methodName: '微信', amount: 300 },
+      { methodName: '银联', amount: 328 }
+    ],
+    amountSummary: {
+      originalAmount: 628,
+      discountAmount: 0,
+      payableAmount: 628,
+      actualReceivedAmount: 628
+    },
+    orderNote: '测试小票底部内容完整。'
+  }
+}
+
+/**
+ * Amounts and items project an already-settled order snapshot; storeAddress is
+ * current contact information supplied by the authorized order-detail response.
+ * It never queries or changes an order, payment, inventory, or accounting record.
+ */
+export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
+  const source = order && typeof order === 'object' ? order : {}
+  const paperProfile = resolveSalesOrderReceiptPaperProfile(options.paperSize)
+  const member = source.member && typeof source.member === 'object' ? source.member : {}
+  const items = firstList(source, ['items', 'orderItems', 'lines', 'details'])
+  const salesItems = items.filter((item) => !isEntitlementItem(item))
+  const entitlementItems = items.filter(isEntitlementItem)
+  const services = firstList(source, ['serviceRecords', 'services', 'serviceItems', 'serviceLines'])
+  const payments = firstList(source, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
+  // 非销售业务只传入已授权订单投影；标题、金额标签由调用方显式给出，
+  // 避免把充值面额、补交金额或现金退款误写成销售应付与实收。
+  const businessReceipt = source.businessReceipt && typeof source.businessReceipt === 'object' ? source.businessReceipt : null
+  const receiptMode = String(source.receiptMode || (services.length && !items.length ? 'service' : 'sales'))
+  const hasSalesReceipt = receiptMode !== 'service'
+  const hasSalesSection = hasSalesReceipt && salesItems.length > 0
+  const hasEntitlementSection = entitlementItems.length > 0
+  const hasServiceSection = receiptMode !== 'sales' && services.length > 0
+  const orderNo = pickValue(source, ['salesOrderNo', 'orderNo', 'no'])
+  const memberName = pickValue(source, ['memberName']) || pickValue(member, ['name', 'memberName']) || (source.isGuest ? '游客' : '游客')
+  const note = pickValue(source, ['orderNote', 'remark', 'note'])
+  // 地址只取后端订单详情，不回退到当前会话门店；缺失资料不虚构地址。
+  const storeAddress = pickValue(source, ['storeAddress'])
+  const itemRows = salesItems.length
+    ? salesItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
+  const entitlementRows = entitlementItems.length
+    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">暂无权益明细</td></tr>'
+  const serviceRows = services.length
+    ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">暂无服务明细</td></tr>'
+  const paymentRows = payments.length
+    ? payments.map((line) => `<tr><td>${escapeHtml(paymentName(line))}</td><td class="right">${escapeHtml(displayAmount(paymentAmount(line)))}</td></tr>`).join('')
+    : '<tr><td colspan="2" class="empty">暂无收款明细</td></tr>'
+  const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
+  const summaryRows = receiptRows(businessReceipt?.summaryRows || [
+    { label: '应付金额', value: summaryValue(source, ['payableAmount', 'receivableAmount', 'amountDue']) },
+    ...(Number(debtAmount) > 0 ? [{ label: '欠款合计', value: debtAmount }] : []),
+    { label: '实收金额', value: summaryValue(source, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
+  ])
+  const extraMetaRows = (Array.isArray(businessReceipt?.metaRows) ? businessReceipt.metaRows : [])
+    .filter((row) => hasValue(row?.value))
+    .map((row) => `<div><span>${escapeHtml(row.label)}</span><span>${escapeHtml(row.value)}</span></div>`).join('')
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(source.isPrintTest ? '打印测试小票' : businessReceipt?.title || (receiptMode === 'service' ? '服务小票' : receiptMode === 'mixed' ? '结账小票' : '销售订单小票'))}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; color: #000; font: ${paperProfile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; background: #f8fafc; }
+  .receipt-toolbar { display: flex; justify-content: flex-end; gap: 8px; width: min(${paperProfile.contentWidthMm}mm, 100%); margin: 0 auto 12px; }
+  .receipt-toolbar button { border: 1px solid #98a2b3; border-radius: 6px; padding: 7px 12px; color: #344054; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  .receipt-toolbar button:first-child { border-color: #175cd3; color: #fff; background: #175cd3; }
+  .receipt { width: ${paperProfile.contentWidthMm}mm; max-width: 100%; margin: 0 auto; padding: 1mm; background: #fff; }
+  h1 { margin: 0; font-size: ${paperProfile.titleSizePx}px; font-weight: 700; text-align: center; }
+  .test-label { margin-top: 3px; text-align: center; font-weight: 700; }
+  .meta { margin: 10px 0; padding: 8px 0; border-top: 1px dashed #6b7280; border-bottom: 1px dashed #6b7280; }
+  .meta div { display: flex; justify-content: space-between; gap: 2px; }
+  .meta span:first-child { flex: none; white-space: nowrap; }
+  .meta span:last-child { text-align: right; overflow-wrap: anywhere; }
+  h2 { margin: 12px 0 5px; font-size: ${paperProfile.fontSizePx}px; font-weight: 700; text-align: center; }
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  th, td { padding: 4px 0; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+  th { color: #111; font-weight: 700; }
+  td:first-child { padding-right: 4px; overflow-wrap: anywhere; }
+  .right { padding-left: 2px; text-align: right; white-space: nowrap; }
+  .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 53%; }
+  .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 16%; }
+  .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 31%; }
+  .entitlements-table th:nth-child(1), .entitlements-table td:nth-child(1) { width: 54%; }
+  .entitlements-table th:nth-child(2), .entitlements-table td:nth-child(2) { width: 22%; }
+  .entitlements-table th:nth-child(3), .entitlements-table td:nth-child(3) { width: 24%; }
+  .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 45%; }
+  .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 20%; }
+  .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 35%; }
+  .payments-table th:nth-child(1), .payments-table td:nth-child(1) { width: 68%; }
+  .payments-table th:nth-child(2), .payments-table td:nth-child(2) { width: 32%; }
+  .empty { color: #6b7280; text-align: center; }
+  .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
+  .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
+  /* 地址比正文小一号；预览与顶层打印保持相同的相对字号。 */
+  .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Double the paper-only handwriting space to 20mm per row; no electronic signature data. */
+  .signatures { margin-top: 10px; }
+  .signature-row { min-height: 20mm; padding-top: 4px; }
+  .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
+  @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
+  @media print {
+    html, body { ${RECEIPT_PRINT_ROOT_CSS} }
+    body { padding: 0; background: #fff; }
+    .receipt-toolbar { display: none; }
+    /* The XP-76 driver exposes a 63mm page; use it fully while keeping text inside a 0.5mm inset. */
+    .receipt { width: ${paperProfile.key === '76' ? '63mm' : 'calc(100% - 2mm)'}; max-width: none; margin: ${paperProfile.key === '76' ? '0' : '0 1mm'}; padding: ${paperProfile.key === '76' ? '.5mm' : '1mm'}; font-size: ${receiptPrintFontSize(paperProfile)}; }
+    ${paperProfile.key === '76' ? '.receipt .meta div:first-child span:last-child { font-size: .78em; }' : ''}
+    .receipt h1 { font-size: 1.3em; }
+    .receipt h2 { font-size: 1em; }
+    .receipt .tear-guide { font-size: .6em; }
+    /* Keep handwriting space and its feed marker together; never create a blank-only tear-guide page. */
+    .signatures { break-inside: avoid; page-break-inside: avoid; }
+    .meta, tr, .summary, .store-address, .note, .signature-row, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+    h2 { break-after: avoid; page-break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+  ${options.hideToolbar ? '' : `<div class="receipt-toolbar" aria-label="小票预览操作">
+    <button type="button" onclick="window.prepareSalesOrderReceiptPrint(); window.print()">打印</button>
+    <button type="button" onclick="window.parent !== window ? window.parent.postMessage({ type: 'cashier-v3:close-receipt-preview' }, '*') : window.close()">关闭</button>
+  </div>`}
+  <main class="receipt">
+  <h1>${escapeHtml(displayText(pickValue(source, ['storeName', 'shopName']), '销售小票'))}</h1>
+  ${source.isPrintTest ? '<div class="test-label">打印测试小票 · 非业务凭证</div>' : ''}
+  ${businessReceipt?.title ? `<div class="test-label">${escapeHtml(businessReceipt.title)}</div>` : ''}
+  <div class="meta">
+    <div><span>单号</span><span>${escapeHtml(displayText(orderNo))}</span></div>
+    <div><span>顾客</span><span>${escapeHtml(memberName)}</span></div>
+    <div><span>日期</span><span>${escapeHtml(displayText(pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt', 'occurredAt'])))}</span></div>
+    <div><span>收银员</span><span>${escapeHtml(displayText(pickValue(source, ['cashierName', 'operatorName', 'operatedBy'])))}</span></div>
+    ${extraMetaRows}
+  </div>
+  ${hasSalesSection ? `<h2>${escapeHtml(businessReceipt?.detailHeading || '销售明细')}</h2>
+  <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
+  ${hasEntitlementSection ? `<h2>权益明细</h2>
+  <table class="entitlements-table"><thead><tr><th>名称</th><th class="right">次数</th><th class="right">余次</th></tr></thead><tbody>${entitlementRows}</tbody></table>` : ''}
+  ${hasServiceSection ? `<h2>服务明细</h2>
+  <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
+  ${businessReceipt?.showPaymentSection === false ? '' : payments.length || hasSalesReceipt ? `<h2>${escapeHtml(businessReceipt?.paymentHeading || '收款明细')}</h2>
+  <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
+  ${summaryRows || hasSalesReceipt ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
+  ${hasValue(storeAddress) ? `<div class="store-address"><strong>门店地址：</strong>${escapeHtml(storeAddress)}</div>` : ''}
+  ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
+  <div class="signatures">
+    <div class="signature-row">客户签字:</div>
+    <div class="signature-row">前台签字:</div>
+    <div class="signature-row">店长签字:</div>
+    <div class="tear-guide" aria-hidden="true"></div>
+  </div>
+  </main>
+  <script>
+    (() => {
+      const prepare = () => {
+        const receipt = document.querySelector('.receipt')
+        if (!receipt) return
+        const measuredHeight = Math.max(receipt.scrollHeight || 0, receipt.getBoundingClientRect().height || 0)
+        if (measuredHeight <= 0) return
+        const fixedPageHeightMm = ${Number.isFinite(paperProfile.fixedPageHeightMm) ? paperProfile.fixedPageHeightMm : 'null'}
+        const pageHeightMm = fixedPageHeightMm || Math.max(40, Math.ceil((measuredHeight * 25.4) / 96 + ${RECEIPT_TRAILING_SAFETY_MM}))
+        let style = document.getElementById('sales-order-receipt-page-size')
+        if (!style) {
+          style = document.createElement('style')
+          style.id = 'sales-order-receipt-page-size'
+          document.head.appendChild(style)
+        }
+        style.textContent = '@page { size: ${paperProfile.paperWidthMm}mm ' + pageHeightMm + 'mm; margin: 0; }'
+      }
+      window.prepareSalesOrderReceiptPrint = prepare
+      window.addEventListener('load', prepare)
+      window.addEventListener('beforeprint', prepare)
+    })()
+  </script>
+</body>
+</html>`
+}
+
+export function salesOrderReceiptFromCheckout(checkout = {}, submission) {
+  const source = checkout && typeof checkout === 'object' ? checkout : {}
+  const snapshot = source.orderSnapshot && typeof source.orderSnapshot === 'object'
+    ? source.orderSnapshot
+    : source.snapshot && typeof source.snapshot === 'object'
+      ? source.snapshot
+      : {}
+  const payment = source.payment && typeof source.payment === 'object' ? source.payment : {}
+  const lines = firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
+    ? firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details'])
+    : firstNonEmptyList(source, ['orderLines', 'lines'])
+  const entitlementRoles = new Set(['entitlement_service'])
+  const serviceRoles = new Set(['service', 'service_line'])
+  const paymentRoles = new Set(['payment', 'balance_payment'])
+  const entitlementLines = lines.filter((line) => entitlementRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()) || line?.businessTag === '权益')
+  // Only the committed receipt owns post-writeoff counts. Never subtract the
+  // displayed quantity or fall back to the pre-checkout count after settlement.
+  const completion = submission?.entitlementCompletion
+  const completed = (submission?.requestStatus || submission?.checkoutRequest?.requestStatus) === 'succeeded'
+    && (completion?.persistenceStatus === 'persisted' || completion?.receiptStatus === 'completed')
+  const committedRows = completed && Array.isArray(completion.receiptEntitlements) ? completion.receiptEntitlements : []
+  const committedRemaining = new Map(committedRows.map((row) => [String(row.lineId), row.remainingTimesAfter]))
+  const remainingBySource = new Map(committedRows
+    .filter((row) => entitlementReceiptSourceKey(row))
+    .map((row) => [entitlementReceiptSourceKey(row), row.remainingTimesAfter]))
+  const serviceLines = lines.filter((line) => serviceRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const paymentLines = lines.filter((line) => paymentRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
+  const salesLines = lines.filter((line) => {
+    const role = String(line?.lineRole || line?.kind || '').toLowerCase()
+    return !entitlementRoles.has(role) && !serviceRoles.has(role) && !paymentRoles.has(role) && line?.businessTag !== '权益'
+  })
+  const serviceRecords = serviceLines
+    .map((line) => ({
+      serviceProject: pickValue(line, ['serviceProject', 'projectName', 'name', 'itemName']),
+      usedTimes: pickValue(line, ['quantity', 'usedTimes', 'count', 'num']),
+      entitlementSource: pickValue(line, ['sourceNameSnapshot', 'sourceName', 'entitlementSource', 'sourceCardName']),
+      serviceAmount: pickValue(line, ['actualAmount', 'payableAmount', 'amountDue', 'amount'])
+    }))
+  const amountSummary = [source.amountSummary, source.summary, source.orderSummary, snapshot.summary, snapshot.amountSummary]
+    .find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {}
+  // 本次结账快照将欠款保存在顶层；小票摘要只搬运该冻结值，不根据收款反推欠款。
+  const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
+    ?? pickValue(snapshot, ['debtAmount', 'debt_amount'])
+  return {
+    ...snapshot,
+    salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
+    storeName: pickValue(source, ['storeName', 'shopName']) || pickValue(snapshot, ['storeName', 'shopName']),
+    storeAddress: pickValue(source, ['storeAddress']) || pickValue(snapshot, ['storeAddress']),
+    member: source.member || snapshot.member,
+    memberName: pickValue(source, ['memberName']) || pickValue(snapshot, ['memberName']),
+    isGuest: source.isGuest === true || snapshot.isGuest === true || !source.member,
+    businessDate: pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt']) || pickValue(snapshot, ['businessDate', 'settledAt', 'paymentCompletedAt']),
+    cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']),
+    orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
+    items: [
+      ...salesLines,
+      ...entitlementLines.map((line) => {
+        if (submission === undefined) return { ...line, businessTag: '权益' }
+        const remaining = committedRemaining.get(String(line.lineId || line.id || ''))
+          ?? remainingBySource.get(entitlementReceiptSourceKey(line))
+        return {
+          ...line,
+          businessTag: '权益',
+          remainingTimes: null, remaining_times: null,
+          availableTimes: null, available_times: null, remaining_times_after: null,
+          remainingTimesAfter: Number.isInteger(remaining) && remaining >= 0 ? remaining : null
+        }
+      })
+    ],
+    serviceRecords,
+    receiptMode: serviceRecords.length && !salesLines.length && !entitlementLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
+    paymentDetails: firstNonEmptyList(payment, ['resultLines', 'selectedLines']).length
+      ? firstNonEmptyList(payment, ['resultLines', 'selectedLines'])
+      : firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']).length
+        ? firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
+        : paymentLines,
+    amountSummary: hasValue(debtAmount) ? { ...amountSummary, debtAmount } : amountSummary
+  }
+}
+
+/** Mount a snapshot-only preview; native printing temporarily releases the app
+ * viewport and restores it on completion/cancel/failure without changing orders. */
+export function mountSalesOrderReceiptPreview(order, hostWindow = window, options = {}) {
+  const documentRef = hostWindow?.document
+  if (!documentRef?.createElement || !documentRef?.body) return null
+
+  documentRef.querySelector?.('.sales-order-receipt-preview-overlay')?.remove?.()
+  const overlay = documentRef.createElement('section')
+  const panel = documentRef.createElement('div')
+  const toolbar = documentRef.createElement('div')
+  const printButton = documentRef.createElement('button')
+  const closeButton = documentRef.createElement('button')
+  const status = documentRef.createElement('span')
+  const frame = documentRef.createElement('iframe')
+  overlay.className = 'sales-order-receipt-preview-overlay'
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  overlay.setAttribute('aria-label', '小票预览')
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:rgba(15,23,42,.48)'
+  panel.style.cssText = 'display:flex;width:min(460px,100%);height:min(820px,100%);flex-direction:column;overflow:hidden;border-radius:8px;background:#fff;box-shadow:0 24px 64px rgba(15,23,42,.28)'
+  toolbar.style.cssText = 'display:flex;min-height:46px;align-items:center;justify-content:flex-end;gap:8px;padding:6px 10px;border-bottom:1px solid #e5e7eb;background:#fff'
+  printButton.type = 'button'
+  printButton.textContent = '打印'
+  printButton.style.cssText = 'min-height:32px;padding:0 14px;border:1px solid #175cd3;border-radius:6px;background:#175cd3;color:#fff;font-weight:600;cursor:pointer'
+  closeButton.type = 'button'
+  closeButton.textContent = '关闭'
+  closeButton.style.cssText = 'min-height:32px;padding:0 14px;border:1px solid #98a2b3;border-radius:6px;background:#fff;color:#344054;font-weight:600;cursor:pointer'
+  status.setAttribute('role', 'status')
+  status.style.cssText = 'margin-right:auto;color:#b42318;font-size:12px'
+  frame.title = '小票预览'
+  frame.style.cssText = 'display:block;width:100%;min-height:0;flex:1;border:0;background:#fff'
+  const receiptHtml = buildSalesOrderReceiptHtml(order, { ...options, hideToolbar: true })
+  frame.srcdoc = receiptHtml
+  toolbar.appendChild(status)
+  toolbar.appendChild(printButton)
+  toolbar.appendChild(closeButton)
+  panel.appendChild(toolbar)
+  panel.appendChild(frame)
+  overlay.appendChild(panel)
+
+  let printHost = null
+  let printStyle = null
+  let printCapabilityTimer = null
+  let printLifecycleCompleted = false
+  let printLifecycleStarted = false
+  let hiddenPrintSiblings = null
+  let printRootStyles = null
+
+  // Hide the live page before opening the native dialog: some embedded browsers snapshot screen layout before applying @media print.
+  const isolatePrintDocument = () => {
+    if (!printHost || hiddenPrintSiblings) return
+    const isXp76 = resolveSalesOrderReceiptPaperProfile(options.paperSize).key === '76'
+    hiddenPrintSiblings = Array.from(documentRef.body.children || [])
+      .filter((child) => child !== printHost && child.style)
+      .map((child) => [child, child.style.display])
+    hiddenPrintSiblings.forEach(([child]) => { child.style.display = 'none' })
+    // Native hosts may snapshot screen layout before print CSS. Release the app's
+    // scroll container on both axes as well as its children, so long receipts
+    // can paginate without changing the existing width/min-width constraints.
+    // Keep exact inline values/priorities for cancel/close.
+    printRootStyles = [documentRef.documentElement, documentRef.body]
+      .filter((element) => typeof element?.style?.setProperty === 'function')
+      .map((element) => {
+        const styles = Object.entries(RECEIPT_PRINT_ROOT_STYLES).map(([property, value]) => {
+          const previous = [property, element.style.getPropertyValue(property), element.style.getPropertyPriority(property)]
+          element.style.setProperty(property, value, 'important')
+          return previous
+        })
+        return [element, styles]
+      })
+    printHost.style.position = 'static'
+    printHost.style.left = 'auto'
+    printHost.style.width = isXp76 ? '63mm' : 'calc(100% - 2mm)'
+    printHost.style.fontSize = isXp76 ? receiptPrintFontSize(resolveSalesOrderReceiptPaperProfile(options.paperSize)) : ''
+    printHost.style.margin = isXp76 ? '0' : '0 1mm'
+    printHost.style.padding = isXp76 ? '.5mm' : '1mm'
+    printHost.style.display = 'block'
+    printHost.getBoundingClientRect?.()
+  }
+
+  const restorePreviewAfterPrint = () => {
+    hiddenPrintSiblings?.forEach(([child, display]) => { child.style.display = display })
+    hiddenPrintSiblings = null
+    printRootStyles?.forEach(([element, styles]) => styles.forEach(([property, value, priority]) => {
+      if (value) element.style.setProperty(property, value, priority)
+      else element.style.removeProperty(property)
+    }))
+    printRootStyles = null
+    if (!printHost) return
+    for (const property of ['position', 'left', 'width', 'fontSize', 'margin', 'padding', 'display']) printHost.style[property] = ''
+  }
+
+  const handleBeforePrint = () => {
+    printLifecycleStarted = true
+    isolatePrintDocument()
+    status.textContent = ''
+  }
+
+  const handleAfterPrint = () => {
+    printLifecycleCompleted = true
+    hostWindow.removeEventListener?.('focus', handlePrintFocus)
+    restorePreviewAfterPrint()
+    status.textContent = ''
+    printButton.disabled = false
+  }
+
+  const handlePrintFocus = () => {
+    if (!printLifecycleCompleted) handleAfterPrint()
+  }
+
+  const ensureTopLevelPrintDocument = () => {
+    if (printHost && printStyle) return true
+    if (typeof hostWindow?.DOMParser !== 'function') return false
+    const parsed = new hostWindow.DOMParser().parseFromString(receiptHtml, 'text/html')
+    const receipt = parsed.querySelector?.('.receipt')
+    if (!receipt) return false
+
+    const profile = resolveSalesOrderReceiptPaperProfile(options.paperSize)
+    printHost = documentRef.createElement('main')
+    printHost.id = 'sales-order-receipt-print-document-v1'
+    printHost.innerHTML = receipt.innerHTML
+    printStyle = documentRef.createElement('style')
+    const root = '#sales-order-receipt-print-document-v1'
+    const buildPrintCss = (pageHeightMm) => `
+      ${root} { position: fixed; left: -10000px; top: 0; box-sizing: border-box; width: ${profile.contentWidthMm}mm; padding: 1mm; color: #000; background: #fff; font: ${profile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; }
+      ${root} *, ${root} *::before, ${root} *::after { box-sizing: border-box; }
+      ${root} h1 { margin: 0; font-size: ${profile.titleSizePx}px; font-weight: 700; text-align: center; }
+      ${root} .test-label { margin-top: 3px; text-align: center; font-weight: 700; }
+      ${root} .meta { margin: 10px 0; padding: 8px 0; border-top: 1px dashed #6b7280; border-bottom: 1px dashed #6b7280; }
+      ${root} .meta div { display: flex; justify-content: space-between; gap: 2px; }
+      ${root} .meta span:first-child { flex: none; white-space: nowrap; }
+      ${root} .meta span:last-child { text-align: right; overflow-wrap: anywhere; }
+      ${profile.key === '76' ? `${root} .meta div:first-child span:last-child { font-size: .78em; }` : ''}
+      ${root} h2 { margin: 12px 0 5px; font-size: ${profile.fontSizePx}px; font-weight: 700; text-align: center; }
+      ${root} table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+      ${root} th, ${root} td { padding: 4px 0; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+      ${root} th { color: #111; font-weight: 700; }
+      ${root} td:first-child { padding-right: 4px; overflow-wrap: anywhere; }
+      ${root} .right { padding-left: 2px; text-align: right; white-space: nowrap; }
+      ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 53%; }
+      ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 16%; }
+      ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 31%; }
+      ${root} .entitlements-table th:nth-child(1), ${root} .entitlements-table td:nth-child(1) { width: 54%; }
+      ${root} .entitlements-table th:nth-child(2), ${root} .entitlements-table td:nth-child(2) { width: 22%; }
+      ${root} .entitlements-table th:nth-child(3), ${root} .entitlements-table td:nth-child(3) { width: 24%; }
+      ${root} .payments-table th:nth-child(1), ${root} .payments-table td:nth-child(1) { width: 68%; }
+      ${root} .payments-table th:nth-child(2), ${root} .payments-table td:nth-child(2) { width: 32%; }
+      ${root} .empty { color: #6b7280; text-align: center; }
+      ${root} .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
+      ${root} .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
+      /* 与预览一致，地址相对正文缩小，不改变金额和明细字号。 */
+      ${root} .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
+      ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
+      /* Keep the doubled 20mm handwriting space when mounting the same receipt for native printing. */
+      ${root} .signatures { margin-top: 10px; }
+      ${root} .signature-row { min-height: 20mm; padding-top: 4px; }
+      ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
+      @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
+      @media print {
+        html, body { ${RECEIPT_PRINT_ROOT_CSS} margin: 0 !important; padding: 0 !important; background: #fff !important; }
+        body > * { display: none !important; }
+        body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${receiptPrintFontSize(profile)} !important; }
+        ${root} h1 { font-size: 1.3em !important; }
+        ${root} h2 { font-size: 1em !important; }
+        ${root} .tear-guide { font-size: .6em !important; }
+        /* Match the standalone document: signatures and the feed marker form one printable footer. */
+        ${root} .signatures { break-inside: avoid; page-break-inside: avoid; }
+        ${root} .meta, ${root} tr, ${root} .summary, ${root} .store-address, ${root} .note, ${root} .signature-row, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+        ${root} h2 { break-after: avoid; page-break-after: avoid; }
+      }
+    `
+    documentRef.body.appendChild(printHost)
+    documentRef.head?.appendChild(printStyle)
+
+    const previewReceipt = frame.contentDocument?.querySelector?.('.receipt')
+    const measurementTarget = previewReceipt || printHost
+    const measuredHeight = Math.max(
+      Number(measurementTarget.scrollHeight) || 0,
+      Number(measurementTarget.getBoundingClientRect?.().height) || 0
+    )
+    const pageHeightMm = resolveReceiptPageHeightMm(profile, measuredHeight)
+    printStyle.textContent = buildPrintCss(pageHeightMm)
+    return true
+  }
+
+  const disposePreview = () => {
+    restorePreviewAfterPrint()
+    hostWindow.removeEventListener?.('message', closePreview)
+    hostWindow.removeEventListener?.('beforeprint', handleBeforePrint)
+    hostWindow.removeEventListener?.('afterprint', handleAfterPrint)
+    hostWindow.removeEventListener?.('focus', handlePrintFocus)
+    if (printCapabilityTimer !== null) hostWindow.clearTimeout?.(printCapabilityTimer)
+    printHost?.remove?.()
+    printStyle?.remove?.()
+    overlay.remove()
+  }
+  const closePreview = (event) => {
+    if (event?.source !== frame.contentWindow || event?.data?.type !== 'cashier-v3:close-receipt-preview') return
+    disposePreview()
+  }
+  hostWindow.addEventListener?.('message', closePreview)
+  printButton.addEventListener?.('click', () => {
+    status.textContent = '正在打开系统打印窗口...'
+    if (!ensureTopLevelPrintDocument() || typeof hostWindow?.print !== 'function') {
+      status.textContent = '当前浏览器无法打开系统打印窗口。'
+      return
+    }
+    printLifecycleCompleted = false
+    printLifecycleStarted = false
+    printButton.disabled = true
+    hostWindow.addEventListener?.('beforeprint', handleBeforePrint, { once: true })
+    hostWindow.addEventListener?.('afterprint', handleAfterPrint, { once: true })
+    hostWindow.addEventListener?.('focus', handlePrintFocus, { once: true })
+    try {
+      isolatePrintDocument()
+      hostWindow.print()
+    } catch {
+      hostWindow.removeEventListener?.('focus', handlePrintFocus)
+      restorePreviewAfterPrint()
+      printButton.disabled = false
+      status.textContent = '当前浏览器无法打开系统打印窗口，请使用 Chrome 或 Edge。'
+      return
+    }
+    printCapabilityTimer = hostWindow.setTimeout?.(() => {
+      printCapabilityTimer = null
+      printButton.disabled = false
+      if (!printLifecycleCompleted && !printLifecycleStarted && documentRef.hasFocus?.() !== false) {
+        restorePreviewAfterPrint()
+        status.textContent = '当前内置浏览器未打开系统打印，请使用 Chrome 或 Edge。'
+      }
+    }, 800) ?? null
+  })
+  closeButton.addEventListener?.('click', disposePreview)
+  overlay.addEventListener?.('click', (event) => {
+    if (event.target !== overlay) return
+    disposePreview()
+  })
+  documentRef.body.appendChild(overlay)
+  return { overlay, panel, frame, printButton, closeButton, status }
+}
+
+export function openSalesOrderReceiptPrint(order, hostWindow = window, options = {}) {
+  try {
+    let storage
+    try {
+      storage = hostWindow?.localStorage
+    } catch {
+      storage = null
+    }
+    const printSettings = options.paperSize
+      ? { paperSize: resolveSalesOrderReceiptPaperProfile(options.paperSize).key }
+      : loadSalesOrderReceiptPrintSettings(storage)
+    const preview = mountSalesOrderReceiptPreview(order, hostWindow, printSettings)
+    if (!preview) return { ok: false, message: '当前浏览器无法显示小票预览，请更换浏览器后重试。' }
+    return { ok: true, preview }
+  } catch (error) {
+    return { ok: false, message: '小票暂时无法生成，请稍后重试。', error }
+  }
+}

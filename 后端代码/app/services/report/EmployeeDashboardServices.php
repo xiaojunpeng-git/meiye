@@ -1,0 +1,202 @@
+<?php
+
+declare(strict_types=1);
+
+namespace app\services\report;
+
+use think\facade\Db;
+
+/**
+ * 员工看板统一只读投影。
+ * 员工人数/岗位来自员工主档及有效门店任职，业绩与消耗来自 V3 事实，
+ * 目标复用集团看板目标事实；前端不得自行重算这些指标。
+ */
+final class EmployeeDashboardServices
+{
+    public const CONTRACT_VERSION = 'employee-dashboard-v1';
+    public const METRIC_VERSION = 'employee-dashboard-facts-v1';
+
+    /** @param int[] $stores */
+    public function dashboard(array $stores, array $range, array $input = []): array
+    {
+        $stores = array_values(array_unique(array_filter(array_map('intval', $stores))));
+        if ($stores === []) throw new \InvalidArgumentException('当前账号没有可查看的门店范围');
+        $range = $this->range($range);
+        $role = trim((string)($input['role'] ?? ''));
+        $staff = $this->staffRows($stores, $role);
+        $overview = $this->overview($staff, $range['end'], $this->departureCount($stores, $range, $role));
+        $roles = $this->roles($staff, $stores);
+        $performance = $this->performance($stores, $range);
+        $target = $this->target($stores, $range, $performance);
+        $scopeData = $this->scopeSummary($stores, $performance);
+        return [
+            'contract_version' => self::CONTRACT_VERSION,
+            'metric_version' => self::METRIC_VERSION,
+            'data_as_of' => date('Y-m-d H:i:s'),
+            'aggregation_caught_up' => true,
+            'aggregation_status' => '已读取统一员工、销售、服务和目标事实。',
+            'scope' => ['store_ids' => $stores, 'date_range' => $range, 'role' => $role ?: '全部岗位'],
+            'overview' => $overview,
+            'roles' => $roles,
+            'performance' => $performance,
+            'target' => $target,
+            'scopes' => $scopeData,
+            'source_explanations' => [
+                'overview' => '在职且启用的员工档案及有效门店任职关系；年龄和工龄按查询截止日计算。',
+                'roles' => '当前有效岗位任职和员工美容师能力开关；编制读取集团看板已保存的门店月度目标外的员工编制配置。',
+                'performance' => '成功销售分配、完成服务和消耗业绩事实；退款/作废按反向事实净额处理。',
+                'target' => '门店目标报表当前引用的有效方案；目标与完成值同为全店实际业绩，未配置显示“-”。',
+            ],
+        ];
+    }
+
+    private function range(array $range): array
+    {
+        $start = (string)($range['start'] ?? date('Y-m-01'));
+        $end = (string)($range['end'] ?? date('Y-m-d'));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end) || $start > $end) {
+            throw new \InvalidArgumentException('统计日期范围不正确');
+        }
+        return ['start' => $start, 'end' => $end];
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function staffRows(array $stores, string $role): array
+    {
+        $q = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+            ->leftJoin('staff_job_position jp', 'jp.staff_id=ss.id AND jp.is_del=0 AND jp.status=1 AND jp.end_time=0')
+            ->leftJoin('position p', 'p.id=jp.position_id AND p.status=1')
+            ->whereIn('ss.store_id', $stores)->where('ss.status', 1)->where('ss.is_del', 0)
+            ->where('e.status', 1)->where('e.is_del', 0)
+            ->field('ss.id staff_id,MAX(ss.store_id) store_id,MAX(ss.employee_id) employee_id,MAX(ss.cashier_craftsman_enabled) cashier_craftsman_enabled,MAX(e.name) name,MAX(e.education) education,MAX(ss.age) age,MAX(ss.birthday_date) birthday,MAX(ss.join_date) entry_time,MAX(p.name) position_name')
+            ->group('ss.id')->order('ss.id', 'asc');
+        if ($role !== '' && $role !== '全部岗位') $q->whereLike('p.name', '%' . $role . '%');
+        return $q->select()->toArray();
+    }
+
+    private function overview(array $staff, string $end, int $departureCount = 0): array
+    {
+        $unique = [];
+        foreach ($staff as $row) {
+            $id = (int)($row['employee_id'] ?? 0);
+            if ($id > 0 && !isset($unique[$id])) $unique[$id] = $row;
+        }
+        $staff = array_values($unique ?: $staff);
+        $now = strtotime($end . ' 23:59:59') ?: time();
+        // 学历与员工编辑页共用六档；历史未填写归入“其他”，保证分布合计等于当前员工数。
+        $total = count($staff); $ages = ['18-25岁'=>0,'26-35岁'=>0,'36-45岁'=>0,'46-55岁'=>0,'56岁以上'=>0]; $tenure = ['1年以内'=>0,'1-3年'=>0,'3-5年'=>0,'5-10年'=>0,'10年以上'=>0]; $edu = ['本科以上'=>0,'本科'=>0,'大专'=>0,'高中'=>0,'高中以下'=>0,'其他'=>0];
+        $ageSum = 0; $ageCount = 0; $tenureSum = 0; $tenureCount = 0;
+        foreach ($staff as $row) {
+            $birthday = $this->timestamp($row['birthday'] ?? 0); $storedAge = (int)($row['age'] ?? 0); if ($storedAge > 0) { $age = $storedAge; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; } elseif ($birthday > 0) { $age = max(0, (int)date('Y',$now)-(int)date('Y',$birthday) - (date('md',$now)<date('md',$birthday)?1:0)); if ($age < 18) $age = 18; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; }
+            $entry = $this->timestamp($row['entry_time'] ?? 0); if ($entry > 0) { $years = max(0, ($now-$entry)/31557600); $bucket = $years<1?'1年以内':($years<3?'1-3年':($years<5?'3-5年':($years<10?'5-10年':'10年以上'))); $tenure[$bucket]++; $tenureSum += $years; $tenureCount++; }
+            $education = trim((string)($row['education'] ?? '')); $edu[isset($edu[$education]) ? $education : '其他']++;
+        }
+        return ['cards' => [
+            $this->card('total','员工总人数',$total,'人','在职且启用员工档案统计','blue'), $this->card('average_age','平均年龄',$ageCount?round($ageSum/$ageCount,1):null,'岁','仅按已填写年龄或生日的员工计算','green'), $this->card('average_tenure','平均工龄',$tenureCount?round($tenureSum/$tenureCount,1):null,'年','仅按已填写入职日期的员工计算','teal'), $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效门店任职统计','purple'), $this->card('beautician_count', '美容师人数', count(array_filter($staff, fn($r)=>(int)($r['cashier_craftsman_enabled']??0)===1)), '人','启用美容师能力的有效任职统计','amber'), $this->card('departures','期间流失人数',$departureCount,'人','按离职记录的离职时间及门店统计','red')], 'education'=>$this->rows($edu), 'ages'=>$this->rows($ages), 'tenure'=>$this->rows($tenure)];
+    }
+
+    /**
+     * 期间流失只读取 action=leave 的任职结束事实，按员工去重；调店、停职和删除均不冒充离职。
+     * 岗位筛选使用离职同时结束的岗位历史，前端传入范围不能扩大后端门店权限。
+     */
+    private function departureCount(array $stores, array $range, string $role): int
+    {
+        $start = strtotime($range['start'] . ' 00:00:00') ?: 0;
+        $end = strtotime($range['end'] . ' 23:59:59') ?: 0;
+        $query = Db::name('staff_tenure_period')->alias('tp')
+            ->whereIn('tp.store_id', $stores)
+            ->where('tp.is_del', 0)
+            ->where('tp.status', 0)
+            ->where('tp.action', 'leave')
+            ->whereBetween('tp.end_time', [$start, $end]);
+        if ($role !== '' && $role !== '全部岗位') {
+            $query->join('staff_job_position jp', 'jp.staff_id=tp.staff_id AND jp.end_time=tp.end_time')
+                ->join('position p', 'p.id=jp.position_id')
+                ->whereLike('p.name', '%' . $role . '%');
+        }
+        return (int)$query->distinct(true)->count('tp.employee_id');
+    }
+
+    private function roles(array $staff, array $stores): array
+    {
+        $counts=[]; foreach($staff as $row){$name=trim((string)($row['position_name']??'')); if($name==='')$name=((int)($row['cashier_craftsman_enabled']??0)===1?'美容师':'未设置岗位'); $counts[$name]=($counts[$name]??0)+1;}
+        $positionIds = Db::name('position')->whereIn('name', array_keys($counts))->column('id', 'name');
+        $quotaRows = Db::name('staffing_quota')->where('tenant_id', '0')->where('scope_type', 'store')->whereIn('scope_id', $stores)->select()->toArray();
+        $quotas = [];
+        foreach ($quotaRows as $row) $quotas[(int)$row['position_id']] = ($quotas[(int)$row['position_id']] ?? 0) + (int)$row['quota_count'];
+        $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57']; $i=0; $out=[]; foreach($counts as $label=>$value){$pid=(int)($positionIds[$label]??0); $quota=array_key_exists($pid,$quotas)?$quotas[$pid]:$value; $out[]=['label'=>$label,'value'=>$value,'quota'=>$quota,'color'=>$colors[$i++%count($colors)]];} return $out;
+    }
+
+    private function performance(array $stores, array $range): array
+    {
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $cash = $reader->summary('staff_sales_yeji','0',$stores,$range); $consume = $reader->summary('consume_amount','0',$stores,$range);
+        $services = $reader->summary('completed_service_item_count','0',$stores,$range);
+        $customers = $reader->summary('customer_active','0',$stores,$range);
+        $trend=[]; $cursor=date('Y-m-01',strtotime($range['start'])); $endMonth=date('Y-m-01',strtotime($range['end'])); while($cursor<=$endMonth){$mStart=$cursor;$mEnd=date('Y-m-t',strtotime($cursor));$v=$this->sumPerformance($stores,['start'=>max($range['start'],$mStart),'end'=>min($range['end'],$mEnd)],'staff_sales_yeji');$trend[]=$v/100;$cursor=date('Y-m-01',strtotime($cursor.' +1 month'));}
+        $branches=[]; foreach(Db::name('system_store')->whereIn('id',$stores)->column('name','id') as $sid=>$name){$v=$this->sumPerformance([(int)$sid],$range,'staff_sales_yeji');$n=(int)Db::name('system_store_staff')->where('store_id',(int)$sid)->where('status',1)->where('is_del',0)->count();$branches[]=['label'=>(string)$name,'value'=>$v/100,'staff'=>$n,'color'=>'#3984ad'];}
+        $dictionary = new \app\services\metric\MetricDictionaryServices();
+        $salesDefinition = $dictionary->getTooltip('staff_sales_yeji');
+        $consumeDefinition = $dictionary->getTooltip('consume_amount');
+        return ['cards'=>[$this->registeredCard('performance_total','staff_sales_yeji',$cash/100,'元','blue','业绩总额',$cash),$this->registeredCard('active_customers','customer_active',$customers,'人','green','',null),$this->registeredCard('service_count','completed_service_item_count',$services,'次','teal','',null),$this->registeredCard('consumption_performance','consume_amount',$consume/100,'元','amber','',$consume)], 'trend'=>$trend, 'trendLabels'=>array_map(fn($v)=>substr($v,5).'月',array_filter($this->months($range))), 'categories'=>[['label'=>(string)$salesDefinition['name'],'value'=>$cash/100,'value_cents'=>$cash,'percent'=>$cash?100:0,'color'=>'#3984ad'],['label'=>(string)$consumeDefinition['name'],'value'=>$consume/100,'value_cents'=>$consume,'percent'=>$cash?round($consume*100/$cash,1):0,'color'=>'#3f9c92']], 'branches'=>$branches];
+    }
+
+    private function target(array $stores,array $range,array $performance): array
+    {
+        $month = substr($range['end'], 0, 7);
+        $schemes = new \app\services\target\TargetSchemeServices();
+        $context = ['tenant_id' => '0', 'store_ids' => $stores];
+        $effective = $schemes->effective($context, 'store_target', [$month]);
+        $targets = [];
+        foreach ($effective['lines'] as $line) {
+            if ($line['metric_code'] === 'actual_performance' && $line['scope_type'] === 'store')
+                $targets[(int)$line['store_id']] = (int)$line['target_value'];
+        }
+        $coveredStores = array_keys($targets);
+        $actual = $coveredStores ? $this->sumPerformance($coveredStores, $range, 'actual_performance') : 0;
+        $target = array_sum($targets);
+        $consumption = $this->sumPerformance($stores, $range, 'consume_amount');
+        $branches = [];
+        foreach (Db::name('system_store')->whereIn('id', $stores)->column('name', 'id') as $sid => $name) {
+            $t = (int)($targets[(int)$sid] ?? 0);
+            $value = $t ? $this->sumPerformance([(int)$sid], $range, 'actual_performance') : 0;
+            $branches[] = ['label' => (string)$name, 'consumption' => $value / 100,
+                'target' => $t / 100, 'completion' => $t ? round($value * 100 / $t, 1) : null];
+        }
+        $trend = []; $trendLabels = [];
+        $cursor = date('Y-m-01', strtotime($range['start']));
+        $endMonth = date('Y-m-01', strtotime($range['end']));
+        while ($cursor <= $endMonth) {
+            $monthKey = substr($cursor, 0, 7);
+            $lines = $schemes->effective($context, 'store_target', [$monthKey])['lines'];
+            $monthTargets = [];
+            foreach ($lines as $line) if ($line['metric_code'] === 'actual_performance' && $line['scope_type'] === 'store')
+                $monthTargets[(int)$line['store_id']] = (int)$line['target_value'];
+            $monthTarget = array_sum($monthTargets);
+            $monthActual = $monthTargets ? $this->sumPerformance(array_keys($monthTargets), [
+                'start' => max($range['start'], $cursor), 'end' => min($range['end'], date('Y-m-t', strtotime($cursor))),
+            ], 'actual_performance') : 0;
+            $trend[] = $monthTarget ? round($monthActual * 100 / $monthTarget, 1) : null;
+            $trendLabels[] = substr($cursor, 5) . '月';
+            $cursor = date('Y-m-01', strtotime($cursor . ' +1 month'));
+        }
+        // 消耗卡保持自身指标；只有目标卡使用实际业绩的同口径分子与分母。
+        return ['cards' => [
+            $this->registeredCard('consumption_amount', 'consume_amount', $consumption / 100, '元', 'teal'),
+            $this->card('consumption_ratio', '消耗/销售比例', $performance['cards'][0]['value']
+                ? round($consumption / $performance['cards'][0]['value'], 1) : null,
+                '%', '消耗业绩除以销售业绩，分母为零显示“-”', 'green'),
+            $this->card('target_amount', '实际业绩目标', $target / 100, '元', '门店目标有效方案', 'blue'),
+            $this->card('target_completion', '目标完成率', $target ? round($actual * 100 / $target, 1) : null,
+                '%', '仅统计有目标的门店，同口径实际业绩除以目标', 'amber'),
+        ], 'trend' => $trend, 'trendLabels' => $trendLabels, 'branches' => $branches];
+    }
+
+    private function scopeSummary(array $stores,array $performance): array { $amount=(float)($performance['cards'][0]['value']??0);$cons=(float)($performance['cards'][3]['value']??0);return ['总部'=>['total'=>(int)Db::name('system_store_staff')->whereIn('store_id',$stores)->where('status',1)->where('is_del',0)->count(),'amount'=>$amount,'consumption'=>$cons]]; }
+    private function sumPerformance(array $stores,array $range,string $metric): int { return (new \app\services\query\metric\RegisteredMetricReadServices())->summary($metric,'0',$stores,$range); }
+    private function card(string $key,string $label,$value,string $unit,string $source,string $tone): array { return ['key'=>$key,'label'=>$label,'value'=>$value,'unit'=>$unit,'source'=>$source,'tone'=>$tone]; }
+    private function registeredCard(string $key,string $metricCode,$value,string $unit,string $tone,string $contextLabel='',?int $valueCents=null): array { $definition=(new \app\services\metric\MetricDictionaryServices())->getTooltip($metricCode);if(($definition['user_ready']??false)!==true)throw new \RuntimeException('EMPLOYEE_METRIC_DICTIONARY_NOT_READY');$card=$this->card($key,$contextLabel!==''?$contextLabel:(string)$definition['name'],$value,$unit,(string)$definition['summary'],$tone);if($valueCents!==null)$card['value_cents']=$valueCents;return $card; }
+    private function rows(array $values): array { $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57','#6283a1'];$i=0;$out=[];foreach($values as $label=>$value)$out[]=['label'=>$label,'value'=>(int)$value,'color'=>$colors[$i++%count($colors)]];return $out; }
+    private function months(array $range): array { $out=[];$cursor=date('Y-m-01',strtotime($range['start']));$end=date('Y-m-01',strtotime($range['end']));while($cursor<=$end){$out[]=$cursor;$cursor=date('Y-m-01',strtotime($cursor.' +1 month'));}return $out; }
+    private function timestamp($value): int { if(is_numeric($value)){ $v=(int)$value; return $v>1000000000?$v:0; } return strtotime((string)$value)?:0; }
+}

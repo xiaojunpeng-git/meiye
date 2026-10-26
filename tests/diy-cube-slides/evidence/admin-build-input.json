@@ -1,0 +1,16 @@
+{
+  "head": "b99e8bd78c3f4709320c5c8674c942a0d636172d",
+  "tree": "7fe9c51077d9aa61e76582539d62ee4a233f3dc3",
+  "files": [
+    "前端代码/shared/diyCubeSlides.js",
+    "前端代码/admin/src/components/mobileConfig/c_picture_cube.vue",
+    "前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue",
+    "前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue",
+    "前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue",
+    "前端代码/admin/src/components/mobilePage/cubePreviewImage.vue",
+    "前端代码/admin/src/components/mobilePage/picture_cube.vue",
+    "前端代码/uniapp/pages/index/components/cubeRegionImage.vue",
+    "前端代码/uniapp/pages/index/components/pictureCube.vue"
+  ],
+  "remoteOperations": false
+}

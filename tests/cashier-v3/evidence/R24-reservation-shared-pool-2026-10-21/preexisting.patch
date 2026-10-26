@@ -1,0 +1,157 @@
+diff --git a/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php b/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php
+index c9eb8773..794bae62 100644
+--- a/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php
++++ b/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php
+@@ -22,6 +22,7 @@ use think\facade\Db;
+ final class CashierV3EntitlementProjectionServices
+ {
+     private const MAX_SELECTED_LINES = 50;
++    private const CUSTOM_CARD_SHELL_PRODUCT_ID = 8154;
+ 
+     /** @var CashierV3CashierReadinessGuard */
+     private $readiness;
+@@ -437,7 +438,7 @@ final class CashierV3EntitlementProjectionServices
+         }
+ 
+         $holderQuery = Db::name('user_card_holder')
+-            ->field('id,uid,oid,card_name,card_no,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
++            ->field('id,uid,oid,card_name,card_no,store_id,product_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
+             ->where('uid', $memberId)
+             ->where('is_del', 0);
+         if (!$includeUnavailableCards) {
+@@ -546,6 +547,19 @@ final class CashierV3EntitlementProjectionServices
+             $carts = $this->rows($cartQuery->order('id asc')->select());
+         }
+         $cartIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
++        $amountCarts = $carts;
++        if ($validOrderIds) {
++            // Whole-yuan normalization must see every component of the sold
++            // card, including exhausted rows hidden from the selector. Using
++            // only visible rows would move the rounding remainder after use.
++            $amountCarts = $this->rows(Db::name('store_order_cart_info')
++                ->field('id,oid,product_id,cart_info')
++                ->whereIn('oid', $validOrderIds)
++                ->where('cart_type', 2)
++                ->where('product_type', 6)
++                ->order('oid asc,id asc')
++                ->select());
++        }
+         $reservations = [];
+         // Reservations are deliberately not part of the cashier authority.
+         // The displayed and settleable amount is the current card balance.
+@@ -578,9 +592,9 @@ final class CashierV3EntitlementProjectionServices
+             'carts' => $carts,
+             'reservations' => $reservations,
+             'debts' => $debts,
+-            'actualSaleAmounts' => (new CashierV3CardSaleActualAmountServices())->forOrders(
+-                $validOrderIds,
+-                $carts
++            'actualSaleAmounts' => (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(
++                $orders,
++                $amountCarts
+             ),
+         ];
+     }
+@@ -696,6 +710,21 @@ final class CashierV3EntitlementProjectionServices
+         foreach ($snapshot['holders'] as $holder) {
+             $holdersByOrder[(int)$holder['oid']] = $holder;
+         }
++        // 已售定制卡的 holder.product_id 指向专用隐藏壳；按商品 ID 批量核对
++        // 壳的来源，不能仅凭卡名、有效期或次数猜测，以免同名普通卡被误标。
++        $customCardProductIds = [];
++        $holderProductIds = array_values(array_unique(array_filter(array_map(static function (array $holder): int {
++            return (int)($holder['product_id'] ?? 0);
++        }, $snapshot['holders']))));
++        if ($holderProductIds) {
++            foreach ($this->rows(Db::name('store_product')->field('id,pid')
++                ->whereIn('id', $holderProductIds)->select()) as $product) {
++                if ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
++                    || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID) {
++                    $customCardProductIds[(int)$product['id']] = true;
++                }
++            }
++        }
+         $debts = [];
+         foreach ($snapshot['debts'] as $debt) {
+             $debts[(int)$debt['order_id']] = $debt;
+@@ -1072,6 +1101,7 @@ final class CashierV3EntitlementProjectionServices
+                 'sourceType' => 'card_holder',
+                 'sourceKind' => $kind['code'],
+                 'sourceKindLabel' => $kind['label'],
++                'isCustomCard' => isset($customCardProductIds[(int)($holder['product_id'] ?? 0)]),
+                 'name' => trim((string)$holder['card_name']) !== '' ? (string)$holder['card_name'] : '会员卡项',
+                 'fullCardNo' => (string)$holder['card_no'],
+                 'reference' => (string)$holder['card_no'],
+diff --git a/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php b/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php
+index a18e11bd..8dd0aca7 100644
+--- a/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php
++++ b/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php
+@@ -7,6 +7,7 @@ namespace app\services\cashier\v3\reservation;
+ use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+ use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
+ use app\services\cashier\v3\CashierV3TransactionGuard;
++use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
+ use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+ use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
+ use app\services\report\CustomerLifecycleFactServices;
+@@ -281,20 +282,38 @@ final class CashierV3ReservationCompletionFactServices
+         if (!$detail) $detail = Db::name('store_order_cart_info')->where('id', (int)$occupation['entitlement_source_detail_id'])->lock(true)->find();
+         if (!$holder) $holder = Db::name('user_card_holder')->where('id', (int)$occupation['card_holder_id'])->lock(true)->find();
+         if (!$detail || !$holder) throw new \LogicException('reservation_completion_entitlement_missing');
++        $orderId = (int)($detail['oid'] ?? 0);
++        $order = $orderId > 0 ? Db::name('store_order')->where('id', $orderId)
++            ->field('id,pay_price')->lock(true)->find() : [];
++        $orderCarts = $orderId > 0 ? $this->rows(Db::name('store_order_cart_info')
++            ->where('oid', $orderId)->where('cart_type', 2)->where('product_type', 6)
++            ->field('id,oid,product_id,pay_price,cart_info')->order('id asc')->lock(true)->select()) : [];
++        $normalized = $order
++            ? (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([(array)$order], $orderCarts)
++            : [];
+         $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
+         $snapshot = is_array($snapshot) ? $snapshot : [];
+         $legacy = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
+-        $purchase = array_key_exists('source_line_paid_amount', $legacy) ? $legacy['source_line_paid_amount'] : ($detail['pay_price'] ?? '0');
++        $normalizedCents = $normalized[(int)($detail['id'] ?? 0)] ?? null;
++        $purchase = $normalizedCents !== null
++            ? bcdiv((string)$normalizedCents, '100', 2)
++            : (array_key_exists('source_line_paid_amount', $legacy)
++                ? $legacy['source_line_paid_amount'] : ($detail['pay_price'] ?? '0'));
+         $purchase = preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', trim((string)$purchase)) ? bcadd((string)$purchase, '0', 2) : '0.00';
++        if ($this->moneyToCents($purchase) % 100 !== 0) {
++            throw new \LogicException('reservation_completion_entitlement_not_whole_yuan');
++        }
+         $totalTimes = max(1, (int)($detail['write_times'] ?? $holder['write_times'] ?? 1));
+         $remainingBefore = (int)$detail['write_surplus_times'];
+         $consumedBefore = max(0, $totalTimes - $remainingBefore);
+-        $actual = CashierV3EntitlementActualAmountAllocator::allocateForSnapshot($purchase, $totalTimes, $consumedBefore, $quantity, $snapshot);
+-        $centCapable = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot);
++        // Reservation completion is a new service/writeoff fact. Historic
++        // operation-cent metadata may be displayed for traceability, but it
++        // cannot change the integer allocation used by this writer.
++        $actual = CashierV3EntitlementActualAmountAllocator::allocate($purchase, $totalTimes, $consumedBefore, $quantity);
+         return [
+             'actualCents' => $this->moneyToCents($actual), 'purchaseCents' => $this->moneyToCents($purchase),
+             'totalTimes' => $totalTimes, 'consumedBefore' => $consumedBefore,
+-            'calculationVersion' => ($centCapable ? 'operation-cent-' : 'legacy-cart-line-payment-') . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
++            'calculationVersion' => 'legacy-cart-line-payment-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
+             'detail' => $detail, 'holder' => $holder,
+         ];
+     }
+@@ -403,6 +422,17 @@ final class CashierV3ReservationCompletionFactServices
+         return (int)bcmul(bcadd($amount, '0', 2), '100', 0);
+     }
+ 
++    /** Keep locked cart rows as plain arrays before passing them to the shared whole-yuan allocator. */
++    private function rows($result): array
++    {
++        if (is_object($result) && method_exists($result, 'toArray')) {
++            $result = $result->toArray();
++        }
++        return is_array($result) ? array_values(array_map(static function ($row): array {
++            return (array)$row;
++        }, $result)) : [];
++    }
++
+     private function json(array $value): string
+     {
+         $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

@@ -1,0 +1,11 @@
+{
+	"requestContext": {
+		"activeContextId": "active-context-session-001",
+		"stateContextId": "state-context-session-001"
+	},
+	"body": {
+		"targetContextId": "context-store-002",
+		"expectedAuthVersion": 3,
+		"idempotencyKey": "switch-fixture-001"
+	}
+}

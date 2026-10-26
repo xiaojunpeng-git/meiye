@@ -1,0 +1,257 @@
+<template>
+	<view class="merchant-workbench" :class="{ 'merchant-workbench--native-mini': platformUsesNativeCanvas }">
+		<view class="merchant-workbench__header">
+			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore">
+				<view class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
+			</picker>
+			<view v-else class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
+		</view>
+		<view v-if="storeSwitchMessage.length > 0" class="merchant-workbench__store-error" role="alert"><text>{{ storeSwitchMessage }}</text></view>
+
+		<scroll-view scroll-y class="merchant-workbench__content">
+			<view class="merchant-workbench__content-inner">
+				<view class="merchant-workbench__section-heading"><view><text class="merchant-workbench__section-kicker">今日事务</text><text class="merchant-workbench__section-title">待办</text></view><text class="merchant-workbench__refresh" @tap="loadTodos">刷新</text></view>
+				<view class="merchant-workbench__todo-list">
+					<view v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__todo" @tap="openTodo('care')">
+						<view class="merchant-workbench__todo-count"><text>{{ careLoading ? '—' : (careFailed ? '!' : openTaskCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">跟进任务</text><text class="merchant-workbench__todo-note">{{ careFailed ? '数据暂不可用，点击进入后重试' : '未完成的跟进任务' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</view>
+					<view v-if="canOpenReservationEntry('service')" class="merchant-workbench__todo" @tap="openTodo('reservations')">
+						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</view>
+					<view v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__todo" @tap="openTodo('reservation-confirmation')">
+						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--confirm"><text>{{ confirmationLoading ? '—' : (confirmationFailed ? '!' : pendingConfirmationCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约待确认</text><text class="merchant-workbench__todo-note">{{ confirmationFailed ? '数据暂不可用，点击进入后重试' : '处理会员提交的新预约' }}</text></view>
+						<text class="merchant-workbench__chevron">›</text>
+					</view>
+				</view>
+
+				<view class="merchant-workbench__section-heading merchant-workbench__section-heading--functions"><view><text class="merchant-workbench__section-kicker">快捷入口</text><text class="merchant-workbench__section-title">常用功能</text></view></view>
+				<view class="merchant-workbench__grid">
+					<navigator v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__entry" url="/src/merchant/pages/reservation-confirmations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--confirmation"><text>确</text></view><text class="merchant-workbench__entry-label">预约确认</text></navigator>
+					<navigator v-if="canOpenReservationEntry('service')" class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>服</text></view><text class="merchant-workbench__entry-label">预约服务</text></navigator>
+					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
+					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.engineering')" class="merchant-workbench__entry" url="/src/merchant/pages/engineering/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--engineering"><text>工</text></view><text class="merchant-workbench__entry-label">工程管理</text></navigator>
+				</view>
+			</view>
+		</scroll-view>
+
+		<MerchantPrimaryTabBar activeKey="workbench" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
+	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
+	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
+	import { merchantActionIsAllowed } from '../../../shared/platform/merchant-tab-permissions.uts'
+
+	const openTaskCount = ref(0)
+	const dueNotArrivedCount = ref(0)
+	const pendingConfirmationCount = ref(0)
+	const careLoading = ref(false)
+	const reservationLoading = ref(false)
+	const confirmationLoading = ref(false)
+	const careFailed = ref(false)
+	const reservationFailed = ref(false)
+	const confirmationFailed = ref(false)
+	const storeContexts = ref<Array<any>>([])
+	const storeLabels = ref<Array<string>>([])
+	const activeStoreIndex = ref(0)
+	const activeStoreLabel = ref('门店信息加载中')
+	const switchingStore = ref(false)
+	const storeSwitchMessage = ref('')
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+
+	onShow(() => { if (ensureMerchantTabAccess('workbench')) { loadStoreContext(); loadTodos() } })
+
+	function loadStoreContext() : void {
+		let root = currentMerchantRoot()
+		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
+		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
+		storeContexts.value = contexts
+		storeLabels.value = contexts.map((context : any) : string => String(context.label || '未命名门店'))
+		let index = 0
+		for (let position = 0; position < contexts.length; position++) if (String(contexts[position].contextId || '') == activeId) { index = position; break }
+		activeStoreIndex.value = index
+		activeStoreLabel.value = contexts.length > 0 ? storeLabels.value[index] : '暂无可用门店'
+	}
+
+	function selectStore(event : any) : void {
+		if (switchingStore.value) return
+		let index = Number(event.detail.value || 0)
+		if (index < 0 || index >= storeContexts.value.length || index == activeStoreIndex.value) return
+		let targetContextId = String(storeContexts.value[index].contextId || '')
+		switchingStore.value = true
+		storeSwitchMessage.value = ''
+		switchMobileMerchantContext(targetContextId, (result : any) => {
+			switchingStore.value = false
+			if (!result.ok) { storeSwitchMessage.value = String(result.message || '门店切换失败。'); return }
+			loadStoreContext()
+			loadTodos()
+		})
+	}
+
+	function loadTodos() : void {
+		let careAllowed = canOpenWorkbenchEntry('mobile.merchant.customer_care')
+		let reservationsAllowed = canOpenReservationEntry('service')
+		if (careAllowed) loadOpenTasks()
+		else { careLoading.value = false; careFailed.value = false; openTaskCount.value = 0 }
+		if (reservationsAllowed) loadDueReservations()
+		else { reservationLoading.value = false; reservationFailed.value = false; dueNotArrivedCount.value = 0 }
+		if (canOpenReservationEntry('confirmation')) loadPendingConfirmations()
+		else { confirmationLoading.value = false; confirmationFailed.value = false; pendingConfirmationCount.value = 0 }
+	}
+
+	function canOpenReservationEntry(kind : string) : boolean {
+		let action = kind == 'confirmation' ? 'mobile.merchant.reservation_confirmation' : 'mobile.merchant.reservation_service'
+		if (merchantActionIsAllowed(action)) return true
+		return canOpenWorkbenchEntry('mobile.merchant.reservations')
+	}
+
+	function canOpenWorkbenchEntry(action : string) : boolean {
+		// New sessions expose the child-entry marker; once present it is the
+		// authoritative gate and prevents unrelated legacy actions from leaking
+		// into the workbench. Older sessions only expose business action codes.
+		if (merchantActionIsAllowed('mobile.merchant.workbench')) return merchantActionIsAllowed(action)
+		let legacyAction = action === 'mobile.merchant.reservations'
+			? 'RESERVATION_VIEW'
+			: (action === 'mobile.merchant.customer_care' ? 'CUSTOMER_CARE_VIEW' : 'ENGINEERING_LEDGER_VIEW')
+		return merchantActionIsAllowed(legacyAction)
+	}
+
+	function loadOpenTasks() : void {
+		careLoading.value = true
+		careFailed.value = false
+		queryMobileCustomerCare({ view: 'tasks', query: { bucket: 'all', statusGroup: 'open', pageSize: 1 } }, (response : any) => {
+			careLoading.value = false
+			let projection = response != null && response.body != null && response.body.projection != null ? response.body.projection.customerCare : null
+			if (!response.ok || projection == null || projection.taskView == null) { careFailed.value = true; return }
+			openTaskCount.value = Number(projection.taskView.total || 0)
+		})
+	}
+
+	function loadDueReservations() : void {
+		reservationLoading.value = true
+		reservationFailed.value = false
+		queryMobileReservations({}, (response : any) => {
+			reservationLoading.value = false
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			let view = payload != null && payload.data != null ? payload.data.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null || view.quickCounts == null) { reservationFailed.value = true; return }
+			dueNotArrivedCount.value = Number(view.quickCounts.dueNotArrived || 0)
+		})
+	}
+
+	function loadPendingConfirmations() : void {
+		confirmationLoading.value = true
+		confirmationFailed.value = false
+		queryMobileReservations({ workflow: 'confirmation', quickFilter: 'pending_confirmation', page: 1, pageSize: 1 }, (response : any) => {
+			confirmationLoading.value = false
+			let payload = response != null && response.body != null ? response.body.reservation : null
+			let view = payload != null && payload.data != null ? payload.data.reservation : null
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null) { confirmationFailed.value = true; return }
+			pendingConfirmationCount.value = Number(view.total || (view.quickCounts != null ? view.quickCounts.pendingConfirmation : 0) || 0)
+		})
+	}
+
+	function openTodo(kind : string) : void {
+		if (kind == 'care') {
+			if (!canOpenWorkbenchEntry('mobile.merchant.customer_care')) return
+			uni.navigateTo({ url: '/src/merchant/pages/customer-care/index?bucket=all&statusGroup=open' })
+			return
+		}
+		if (kind == 'reservation-confirmation') {
+			if (!canOpenReservationEntry('confirmation')) return
+			uni.navigateTo({ url: '/src/merchant/pages/reservation-confirmations/index' })
+			return
+		}
+		if (!canOpenReservationEntry('service')) return
+		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
+	}
+
+</script>
+
+<style>
+	.merchant-workbench { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f4f6f8; }
+	.merchant-workbench__header { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; padding: 52px 20px 18px 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e3e7ec; background-color: #ffffff; }
+	.merchant-workbench__heading-copy { display: flex; flex-shrink: 0; flex-direction: column; }
+	.merchant-workbench__eyebrow { font-size: 12px; font-weight: 600; line-height: 18px; color: #687483; }
+	.merchant-workbench__title { margin-top: 5px; font-size: 24px; font-weight: 700; line-height: 32px; color: #20242a; }
+	.merchant-workbench__store { display: flex; min-width: 0; max-width: 210px; min-height: 42px; flex-direction: row; align-items: center; justify-content: flex-end; }
+	.merchant-workbench__store--switchable { padding-left: 12px; }
+	.merchant-workbench__store-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; }
+	.merchant-workbench__store-label { font-size: 10px; line-height: 15px; color: #8993a0; }
+	.merchant-workbench__store-name { max-width: 150px; overflow: hidden; font-size: 14px; font-weight: 700; line-height: 21px; color: #2e3945; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-workbench__store-action { flex-shrink: 0; margin-left: 8px; padding: 4px 7px; border-radius: 4px; background-color: #edf5fb; font-size: 11px; line-height: 17px; color: #1677cc; }
+	.merchant-workbench__store-error { padding: 9px 18px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #f0cccc; background-color: #fff7f7; font-size: 12px; line-height: 18px; color: #a44848; }
+	.merchant-workbench__content { display: flex; min-height: 0; flex: 1; padding-bottom: 92px; }
+	.merchant-workbench__section { display: flex; flex-direction: column; padding: 20px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e3e7ec; background-color: #ffffff; }
+	.merchant-workbench__section--functions { margin-top: 10px; }
+	.merchant-workbench__section-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+	.merchant-workbench__section-title { font-size: 16px; font-weight: 700; line-height: 24px; color: #252a31; }
+	.merchant-workbench__refresh { padding: 4px 0px 4px 12px; font-size: 13px; line-height: 20px; color: #1677cc; }
+	.merchant-workbench__todo-list { display: flex; flex-direction: column; margin-top: 10px; }
+	.merchant-workbench__todo { display: flex; min-height: 72px; flex-direction: row; align-items: center; border-top-width: 1px; border-top-style: solid; border-top-color: #edf0f3; }
+	.merchant-workbench__todo:last-child { border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf0f3; }
+	.merchant-workbench__todo-count { display: flex; width: 42px; height: 42px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #e8f3fb; font-size: 18px; font-weight: 700; color: #1268a8; }
+	.merchant-workbench__todo-count--warm { background-color: #fff2df; color: #9a5a00; }
+	.merchant-workbench__todo-count--confirm { background-color: #f6ebff; color: #7b49a5; }
+	.merchant-workbench__todo-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 0px 12px; }
+	.merchant-workbench__todo-title { font-size: 15px; font-weight: 700; line-height: 22px; color: #252a31; }
+	.merchant-workbench__todo-note { margin-top: 2px; font-size: 12px; line-height: 18px; color: #737e8c; }
+	.merchant-workbench__chevron { width: 16px; flex-shrink: 0; font-size: 22px; line-height: 28px; color: #a0a8b2; }
+	.merchant-workbench__grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 12px; border-top-width: 1px; border-left-width: 1px; border-style: solid; border-color: #e2e7ec; }
+	.merchant-workbench__entry { display: flex; box-sizing: border-box; width: 25%; min-height: 84px; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; border-right-width: 1px; border-bottom-width: 1px; border-style: solid; border-color: #e2e7ec; background-color: #ffffff; }
+	.merchant-workbench__entry--pending { background-color: #fafbfc; }
+	.merchant-workbench__entry-index { font-size: 11px; font-weight: 600; line-height: 16px; color: #8993a0; }
+	.merchant-workbench__entry-label { margin-top: 4px; font-size: 13px; font-weight: 700; line-height: 20px; color: #30353c; }
+	.merchant-workbench__entry-state { margin-top: 2px; font-size: 10px; line-height: 14px; color: #9aa2ad; }
+	.merchant-workbench__tabs { display: flex; min-height: 72px; flex-direction: row; align-items: stretch; border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: #ffffff; }
+	.merchant-workbench__tab { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; border-top-width: 2px; border-top-style: solid; border-top-color: #ffffff; }
+	.merchant-workbench__tab--active { border-top-color: #1677cc; background-color: #f7fbff; }
+	.merchant-workbench__tab-index { font-size: 10px; font-weight: 600; line-height: 14px; color: #98a2b3; }
+	.merchant-workbench__tab-label { margin-top: 2px; font-size: 12px; font-weight: 600; line-height: 18px; color: #526071; }
+	.merchant-workbench__tab--active .merchant-workbench__tab-index, .merchant-workbench__tab--active .merchant-workbench__tab-label { color: #1677cc; }
+	/* 工作台常用功能按服务端返回的二级入口权限过滤，
+	 * 只恢复信息层级、图标和留白，不改变数据、客户、我的页面。 */
+	.merchant-workbench { background-color: #f4f7fa; }
+	.merchant-workbench__header { align-items: center; justify-content: flex-start; padding: 20px 18px 12px 18px; border-bottom-width: 0; border-bottom-color: transparent; background-color: transparent; }
+	.merchant-workbench__heading-copy { display: none; }
+	.merchant-workbench__org-filter { display: flex; box-sizing: border-box; width: 160px; min-width: 100px; height: 36px; align-items: center; justify-content: center; padding: 0 10px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.merchant-workbench__org-filter text { overflow: hidden; width: 100%; font-size: 13px; font-weight: 700; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-workbench__content { padding-bottom: 0; }
+	.merchant-workbench__content-inner { width: 100%; max-width: 1200px; box-sizing: border-box; margin: 0 auto; padding: 18px 18px 112px 18px; }
+	.merchant-workbench__section-heading { margin-bottom: 10px; align-items: flex-end; }
+	.merchant-workbench__section-heading--functions { margin-top: 24px; }
+	.merchant-workbench__section-kicker { font-size: 12px; font-weight: 600; line-height: 18px; color: #71839a; }
+	.merchant-workbench__section-title { display: block; margin-top: 2px; font-size: 17px; line-height: 25px; color: #26384d; }
+	.merchant-workbench__refresh { padding: 5px 0 5px 12px; font-size: 13px; font-weight: 700; line-height: 20px; }
+	.merchant-workbench__todo-list { margin-top: 0; }
+	.merchant-workbench__todo { box-sizing: border-box; min-height: 78px; margin-top: 10px; padding: 12px 14px; border-width: 1px; border-style: solid; border-color: #e7eef5; border-radius: 14px; background-color: #ffffff; box-shadow: 0 6px 16px rgba(60, 88, 130, 0.07); }
+	.merchant-workbench__todo:first-child { margin-top: 0; }
+	.merchant-workbench__todo-count { width: 40px; height: 40px; border-radius: 12px; background-color: #eaf1ff; color: #4a72c5; }
+	.merchant-workbench__todo-copy { margin-left: 11px; padding: 0; }
+	.merchant-workbench__todo-title { font-size: 14px; line-height: 20px; color: #26384d; }
+	.merchant-workbench__todo-note { margin-top: 3px; font-size: 11px; line-height: 17px; color: #71839a; }
+	.merchant-workbench__grid { overflow: hidden; margin-top: 12px; border: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.merchant-workbench__entry { width: 33.3333%; min-height: 116px; padding: 12px 4px; border-color: #edf1f5; }
+	.merchant-workbench__entry:nth-child(3n) { border-right-width: 0; }
+	.merchant-workbench__entry:nth-last-child(-n + 3) { border-bottom-width: 0; }
+	.merchant-workbench__entry-icon { display: flex; width: 34px; height: 34px; flex-direction: row; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; }
+	.merchant-workbench__entry-icon--reservation { background-color: #eaf1ff; color: #4a72c5; }
+	.merchant-workbench__entry-icon--confirmation { background-color: #f6ebff; color: #7b49a5; }
+	.merchant-workbench__entry-icon--care { background-color: #e8f6f0; color: #21845f; }
+	.merchant-workbench__entry-icon--customer { background-color: #fff2df; color: #bf7726; }
+	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
+	.merchant-workbench__entry-icon--engineering { background-color: #f2eaff; color: #7652c5; }
+	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
+	.merchant-workbench--native-mini .merchant-workbench__header { padding-top: 84px; }
+</style>

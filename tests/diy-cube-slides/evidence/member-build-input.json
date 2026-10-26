@@ -1,0 +1,17 @@
+{
+  "terminal": "member",
+  "variant": "candidate",
+  "commit": "d50cb7d416372682b330c2b2e1d8d9cc5e6b9327",
+  "tree": "d50cb7d416372682b330c2b2e1d8d9cc5e6b9327",
+  "canonical": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "input": "/private/tmp/m008-cube-slides-20261022-v2/member/candidate-readonly/前端代码/uniapp",
+  "output": "/private/tmp/m008-cube-slides-20261022-v2/member/member-candidate",
+  "inputFiles": 917,
+  "readonly": true,
+  "node": "v16.20.2",
+  "runtimeConfig": {
+    "source": "canonical ignored config/app.js",
+    "sha256": "a25d7e24e1009f635b1ad8d0f6040f627b2bd34c9e10b7d59864e296585859c4",
+    "h5ApiOrigin": "window.location origin"
+  }
+}

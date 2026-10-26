@@ -1,0 +1,55 @@
+<?php
+declare(strict_types=1);
+$backend=getenv('BACKEND_ROOT')?:'/workspace/后端代码'; require $backend.'/vendor/autoload.php';
+use app\services\product\inventory\InventoryManualInboundServices; use app\services\product\inventory\InventoryStockCountLineException; use app\services\product\inventory\InventoryStockCountServices; use app\services\product\inventory\InventoryStockCountQueryServices; use app\services\product\inventory\InventoryStoreCatalogServices; use think\facade\Config; use think\facade\Db;
+$app=new \think\App($backend.'/'); $app->env->load($backend.'/.env'); foreach([['database.type','mysql'],['DATABASE_TYPE','mysql'],['database.hostname',getenv('DB_HOST')?:'mysql'],['DATABASE_HOSTNAME',getenv('DB_HOST')?:'mysql'],['database.hostport',getenv('DB_PORT')?:'3306'],['DATABASE_HOSTPORT',getenv('DB_PORT')?:'3306'],['database.database',getenv('DB_DATABASE')?:'inventory_manual_inbound_test_20260730'],['DATABASE_DATABASE',getenv('DB_DATABASE')?:'inventory_manual_inbound_test_20260730'],['cache.driver','file'],['CACHE_DRIVER','file']] as [$k,$v])$app->env->set($k,$v); $p=new ReflectionProperty($app,'envName');$p->setAccessible(true);$p->setValue($app,'inventory_stock_count_test_skip_dotenv');$app->initialize();Config::set(['default'=>'file'],'cache');
+function cassert($n,$ok){global $failed;echo($ok?'PASS ':'FAIL ').$n."\n";if(!$ok)$failed++;} function reason(callable $f){try{$f();}catch(\Throwable $e){return $e->getMessage();}return '';}
+function ensure($t,$row){$q=Db::name($t);if($t==='organization_store')$q->where('store_id',$row['store_id']);else$q->where('id',$row['id']);if(!$q->find())Db::name($t)->insert($row);} function line($count,$no='',$cost='',$m='',$e=''){return ['product_id'=>990081,'sku_id'=>9900811,'sku_unique'=>'testsku9900811','counted_quantity'=>$count,'surplus_batch_no'=>$no,'surplus_unit_cost'=>$cost,'surplus_manufactured_date'=>$m,'surplus_expire_date'=>$e];} function cmd($key,$line){return ['idempotency_key'=>$key,'business_date'=>'2026-07-30','remark'=>'TEST-盘点保留数据','lines'=>[$line]];}
+$failed=0; ensure('system_store',['id'=>99008,'name'=>'TEST-盘点门店','is_del'=>0,'is_show'=>1]); ensure('system_store_staff',['id'=>990008,'store_id'=>99008,'status'=>1,'is_del'=>0]); ensure('organization',['id'=>99008,'pid'=>99000,'name'=>'TEST-盘点组织','is_del'=>0]); ensure('organization_store',['store_id'=>99008,'org_id'=>99008]); ensure('store_product',['id'=>990081,'type'=>1,'relation_id'=>99008,'is_del'=>0,'is_inventory'=>1,'store_name'=>'TEST-盘点精华','code'=>'TEST-P-990081','bar_code'=>'6909900100081','salon_stock_enabled'=>0,'sort'=>1,'keyword'=>'TEST-盘点精华']); ensure('store_product_attr_value',['id'=>9900811,'product_id'=>990081,'type'=>0,'unique'=>'testsku9900811','suk'=>'30ml','bar_code'=>'6909900100081','code'=>'TEST-S-990081','stock_unit'=>'瓶']);
+$in=new InventoryManualInboundServices(); foreach([['early','4','77.50','2026-10-01'],['late','5','88.50','2027-10-01']] as [$tag,$qty,$cost,$expiry])$in->create(99008,990008,['idempotency_key'=>'TEST-count-in-'.$tag.'-20260730','business_date'=>'2026-07-30','remark'=>'TEST','lines'=>[['product_id'=>990081,'sku_id'=>9900811,'sku_unique'=>'testsku9900811','batch_no'=>'TEST-COUNT-'.$tag,'quantity'=>$qty,'unit_cost'=>$cost,'manufactured_date'=>'2026-07-01','expire_date'=>$expiry]]]);
+$count=new InventoryStockCountServices(); $loss=$count->confirm(99008,990008,cmd('TEST-count-loss-20260730',line('6'))); $lossReplay=$count->confirm(99008,990008,cmd('TEST-count-loss-20260730',line('6'))); $gain=$count->confirm(99008,990008,cmd('TEST-count-gain-20260730',line('8','TEST-COUNT-SURPLUS','99.50','2026-07-02','2028-07-02')));
+$stock=Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990081)->find();$batches=Db::name('inventory_batch')->where('stock_id',(int)$stock['id'])->column('available_quantity_units','batch_no');
+cassert('count loss uses FEFO and preserves later batch', (int)$batches['TEST-COUNT-early']===1&&(int)$batches['TEST-COUNT-late']===5);
+cassert('count gain requires and creates an auditable new batch', (int)$batches['TEST-COUNT-SURPLUS']===2&&(int)$stock['available_quantity_units']===8&&(int)Db::name('inventory_stock_count_document')->where('id',(int)$gain['count_document_id'])->count()===1);
+$countQuery=new InventoryStockCountQueryServices();
+$gainDetail=$countQuery->detail(99008,990008,(int)$gain['count_document_id'],true);
+$hiddenCostDetail=$countQuery->detail(99008,990008,(int)$gain['count_document_id'],false);
+$lossDetail=$countQuery->detail(99008,990008,(int)$loss['count_document_id'],true);
+cassert('store count detail reads immutable quantities and batch cost through current store scope', $gainDetail['document']['order_sn']===$gain['count_no'] && $gainDetail['document']['detail_count']===1 && $gainDetail['lines'][0]['product_name']==='TEST-盘点精华' && $gainDetail['lines'][0]['book_quantity']==='6' && $gainDetail['lines'][0]['counted_quantity']==='8' && $gainDetail['lines'][0]['difference_quantity']==='+2' && (int)$gainDetail['lines'][0]['surplus_unit_cost_cents']===9950);
+// 盘亏取 FEFO 实际批次流水成本，盘盈取新批次入账成本，权限不足时两类成本字段都不可泄露。
+cassert('count detail amount follows settled gain and loss facts', (int)$gainDetail['lines'][0]['change_amount_cents']===19900 && (int)$lossDetail['lines'][0]['change_amount_cents']===-23250);
+cassert('store count detail hides cost without permission and rejects another store', $hiddenCostDetail['lines'][0]['surplus_unit_cost_cents']===null && $hiddenCostDetail['lines'][0]['change_amount_cents']===null && reason(static function()use($countQuery,$gain){$countQuery->detail(99009,990008,(int)$gain['count_document_id']);})==='inventory_stock_count_scope_denied');
+cassert('count idempotency returns the original confirmed document', $lossReplay['idempotent']&&(int)$loss['count_document_id']===(int)$lossReplay['count_document_id']);
+cassert('surplus without complete batch details rejects without a document', reason(static function()use($count){$count->confirm(99008,990008,cmd('TEST-count-missing-20260730',line('9')));})==='inventory_stock_count_surplus_batch_required'&&(int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-missing-20260730')->count()===0);
+$missingLineIndex = 0;
+try { $count->confirm(99008,990008,cmd('TEST-count-missing-20260730',line('9'))); }
+catch (InventoryStockCountLineException $exception) { $missingLineIndex = $exception->lineIndex(); }
+cassert('authoritative surplus rejection identifies the submitted line without writing stock', $missingLineIndex === 1 && (int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-missing-20260730')->count()===0);
+// 零差异也生成完整盘点记录，但不得新增库存主体或移动事实；大量盘盈仍一单原子入账。
+ensure('store_product',['id'=>990082,'type'=>1,'relation_id'=>99008,'is_del'=>0,'is_inventory'=>1,'store_name'=>'TEST-零库存盘点','code'=>'TEST-P-990082','bar_code'=>'','salon_stock_enabled'=>0,'sort'=>1,'keyword'=>'TEST-零库存盘点']);
+$largeLines=[];
+for($index=1;$index<=151;$index++){
+    $skuId=990082000+$index;
+    ensure('store_product_attr_value',['id'=>$skuId,'product_id'=>990082,'type'=>0,'unique'=>'testsku'.$skuId,'suk'=>'规格'.$index,'bar_code'=>'','code'=>'TEST-S-'.$skuId,'stock_unit'=>'件']);
+    $largeLines[]=['product_id'=>990082,'sku_id'=>$skuId,'sku_unique'=>'testsku'.$skuId,'counted_quantity'=>'0','surplus_batch_no'=>'','surplus_unit_cost'=>'','surplus_manufactured_date'=>'','surplus_expire_date'=>'','expected_book_quantity'=>'0'];
+}
+$stockBefore=(int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count();
+$noChange=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-151-noop-20260928','business_date'=>'2026-09-28','remark'=>'TEST-151零差异规格','lines'=>$largeLines]);
+cassert('all-zero unchanged rows create count lines without stock or movements', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$noChange['count_document_id'])->count()===151 && (int)Db::name('inventory_batch_movement_fact')->where('source_id',$noChange['count_no'])->count()===0 && (int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count()===$stockBefore);
+$catalog=new InventoryStoreCatalogServices();$firstPage=$catalog->search(99008,'',0,1,50,true);$lastPage=$catalog->search(99008,'',0,4,50,true);
+cassert('count catalog pages all active inventory-managed SKUs including zero stock', (int)$firstPage['total']>=152 && count($firstPage['list'])===50 && count($lastPage['list'])>=2 && in_array('0',array_column($firstPage['list'],'available_quantity'),true));
+$largeGain=$largeLines;
+foreach($largeGain as $index=>&$line){$line['counted_quantity']='1';$line['surplus_batch_no']='TEST-COUNT-GAIN-'.($index+1);$line['surplus_unit_cost']='2.30';$line['surplus_manufactured_date']='2026-06-07';$line['surplus_expire_date']='2027-07-07';}
+unset($line);
+$large=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-151-gain-20260928','business_date'=>'2026-09-28','remark'=>'TEST-151盘盈规格','lines'=>$largeGain]);
+cassert('151 changed SKUs confirm in one count document', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$large['count_document_id'])->count()===151 && (int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count()===151);
+$unchanged=$largeGain[0];$unchanged['surplus_batch_no']='';$unchanged['surplus_unit_cost']='';$unchanged['surplus_manufactured_date']='';$unchanged['surplus_expire_date']='';$unchanged['expected_book_quantity']='1';
+$changed=line('9','TEST-COUNT-MIXED-GAIN','2.30','2026-06-07','2027-07-07');$changed['expected_book_quantity']='8';
+$mixed=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-mixed-20260928','business_date'=>'2026-09-28','remark'=>'TEST-完整盘点仅调整差异','lines'=>[$unchanged,$changed]]);
+cassert('mixed count saves all counted SKUs and only moves changed stock', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->count()===2 && (int)Db::name('inventory_batch_movement_fact')->where('source_id',$mixed['count_no'])->count()===1 && (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->where('product_id',990081)->count()===1);
+$stale=line('8');$stale['expected_book_quantity']='7';
+// 导出时账面 7、提交时库存 9：以实盘 8 调整为盘亏 1，不因快照过期拒绝。
+$staleResult=$count->confirm(99008,990008,cmd('TEST-count-stale-20260928',$stale));
+$staleLine=Db::name('inventory_stock_count_line')->where('document_id',(int)$staleResult['count_document_id'])->find();
+cassert('stale book snapshot settles physical count against current stock', (int)$staleLine['book_quantity_units']===9 && (int)$staleLine['counted_quantity_units']===8 && (int)$staleLine['difference_quantity_units']===-1);
+echo "INVENTORY_STOCK_COUNT_RESULT failed={$failed}\n";exit($failed?1:0);

@@ -1,0 +1,18 @@
+{
+  "/api/debt/list?page=1&limit=20": {
+    "httpStatus": 200,
+    "businessStatus": 410000
+  },
+  "/pages/users/debt/index": {
+    "httpStatus": 200,
+    "sha256": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c"
+  },
+  "/system.html": {
+    "httpStatus": 200,
+    "sha256": "1954722ab061671ba2aed07804dce541e63688a0a879c4530aaa5e3fd518a8fe"
+  },
+  "/view_cashier_v3/": {
+    "httpStatus": 200,
+    "sha256": "627330d15fe5cc4e2928c0484d29845f01acfa4d80bef541116ef5be8c921b4a"
+  }
+}

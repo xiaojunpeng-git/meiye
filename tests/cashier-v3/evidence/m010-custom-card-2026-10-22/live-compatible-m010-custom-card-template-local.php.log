@@ -1,0 +1,39 @@
+PASS new store has no inherited customer template
+PASS read-only discovery creates no carrier
+PASS missing template materializes without fixed product ID
+PASS configured amount is authoritative; carrier price remains zero
+PASS configuration replay retains one template and one immutable line
+PASS configuration retains browser line identity
+PASS internal carrier is not offered as a card component
+PASS issuer resolves the frozen template identity
+PASS configuration-only trial leaves no carrier before the actual first checkout
+PASS production gateway completes a custom-card checkout
+PASS first real checkout creates its missing carrier inside the same final transaction
+PASS formal sale records the exact 1960-yuan amount
+PASS cash facts reconcile with the sale
+PASS checkout creates exactly one current-right holder
+PASS immediate activation preserves all three purchased uses
+PASS configuration is bound to the actual signed card
+PASS repeated command never duplicates order payment or rights
+PASS changed intent cannot reuse a successful request key
+PASS late failure atomically removes request sale payment configuration and signed rights
+PASS rolled-back server exception is returned as a bound failure, not indefinite processing
+PASS delayed activation retains the original disabled-card business rule
+PASS purchased card is recognized and available through the existing entitlement reader
+PASS inactive purchased card remains unavailable for write-off selection
+PASS real write-off consumes one use and preserves whole-yuan tail 0
+PASS real write-off consumes one use and preserves whole-yuan tail 1
+PASS real write-off consumes one use and preserves whole-yuan tail 2
+PASS three integer-yuan write-off facts conserve the 1960-yuan purchase
+PASS formal write-off still rejects an inactive card without consuming uses
+PASS existing full-order void revokes custom-card rights and balances the payment facts
+PASS ordinary card checkout retains its catalog identity without a custom-card configuration
+PASS fractional amount zero times or below-cost amount rejected 0
+PASS fractional amount zero times or below-cost amount rejected 1
+PASS fractional amount zero times or below-cost amount rejected 2
+PASS guest checkout cannot create a custom card
+PASS forged operating store cannot reuse another store template
+PASS disabled internal SKU is not silently replaced
+{"checks":["new store has no inherited customer template","read-only discovery creates no carrier","missing template materializes without fixed product ID","configured amount is authoritative; carrier price remains zero","configuration replay retains one template and one immutable line","configuration retains browser line identity","internal carrier is not offered as a card component","issuer resolves the frozen template identity","configuration-only trial leaves no carrier before the actual first checkout","production gateway completes a custom-card checkout","first real checkout creates its missing carrier inside the same final transaction","formal sale records the exact 1960-yuan amount","cash facts reconcile with the sale","checkout creates exactly one current-right holder","immediate activation preserves all three purchased uses","configuration is bound to the actual signed card","repeated command never duplicates order payment or rights","changed intent cannot reuse a successful request key","late failure atomically removes request sale payment configuration and signed rights","rolled-back server exception is returned as a bound failure, not indefinite processing","delayed activation retains the original disabled-card business rule","purchased card is recognized and available through the existing entitlement reader","inactive purchased card remains unavailable for write-off selection","real write-off consumes one use and preserves whole-yuan tail 0","real write-off consumes one use and preserves whole-yuan tail 1","real write-off consumes one use and preserves whole-yuan tail 2","three integer-yuan write-off facts conserve the 1960-yuan purchase","formal write-off still rejects an inactive card without consuming uses","existing full-order void revokes custom-card rights and balances the payment facts","ordinary card checkout retains its catalog identity without a custom-card configuration","fractional amount zero times or below-cost amount rejected 0","fractional amount zero times or below-cost amount rejected 1","fractional amount zero times or below-cost amount rejected 2","guest checkout cannot create a custom card","forged operating store cannot reuse another store template","disabled internal SKU is not silently replaced"],"source":"production submit handler"}
+PASS all synthetic store member carrier request order payment and entitlement rows roll back
+M010 PASS 37

@@ -1,0 +1,10 @@
+PASS 2180 over 9 uses assigns the integer tail to the ninth use
+PASS 2180 over 22 keeps the same final-tail invariant
+PASS fractional-yuan source is rejected without rounding or truncation
+PASS selector allocation and completion facts share one calculation version
+FAIL member detail reads the same completed actual-sale allocation as the cashier selector
+PASS disabled card state is authoritative for summary and detail
+PASS time-card count exclusion uses the persisted rule type
+PASS service records expose frozen card name and number
+ASSERT_PASSED=7
+ASSERT_FAILED=1

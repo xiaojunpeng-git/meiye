@@ -1,0 +1,146 @@
+<?php
+namespace app\services\ai\model;
+
+use app\services\ai\config\AiConfigStore;
+
+/**
+ * Produces a de-identified natural-language question. This boundary masks
+ * server-known private objects and deterministic credentials/identifiers, but
+ * never rebuilds the sentence from an allowlist of phrases.
+ */
+final class AiSafeQuestionProjector
+{
+    // The browser remains the complete 24-hour conversation store.  The
+    // external model receives a deliberately smaller recency window because
+    // the signed prior query carries the executable context independently.
+    // Six prior questions cover a five-round follow-up while keeping an old
+    // local transcript from inflating every provider request.
+    private const MODEL_RECENT_QUESTION_LIMIT = 6;
+
+    /**
+     * The device keeps the conversation locally.  When the customer has
+     * explicitly authorized the external model, only de-identified *questions*
+     * from that local context are supplied to it.  Previous answers can contain
+     * figures and names, so they never cross this boundary.
+     */
+    public function projectConversation(string $question,array $history,array $configuration,array $privateLabels=[],array $protectedTerms=[],array $referenceSeed=[]): array
+    {
+        // One conversation has one reference map.  A name mentioned in an
+        // earlier question must keep the same opaque reference when the next
+        // question uses a pronoun, while a newly mentioned name gets a new one.
+        if (count($history)>20) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        $history=array_slice($history,-self::MODEL_RECENT_QUESTION_LIMIT);
+        // A paused semantic clarification retains its encrypted reference map.
+        // New wording must not give an old opaque token a different identity.
+        if (count($referenceSeed)>128) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        foreach (array_values($referenceSeed) as $index=>$value) {
+            if (!array_key_exists('local_condition_'.($index+1),$referenceSeed)
+                || !is_string($value) || $value==='' || strlen($value)>8192 || preg_match('//u',$value)!==1) {
+                throw new \RuntimeException('AI_CONVERSATION_INVALID');
+            }
+        }
+        $references=$referenceSeed;
+        $recent=[];
+        foreach ($history as $round) {
+            if (!is_array($round) || !is_string($round['question']??null)) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+            $past=$this->projectWithReferences($round['question'],$configuration,$privateLabels,$references,$protectedTerms);
+            $recent[]=$past['outbound']['question'];
+        }
+        $current=$this->projectWithReferences($question,$configuration,$privateLabels,$references,$protectedTerms);
+        $current['outbound']['recent_questions']=$recent;
+        $messages=[['id'=>'current','text'=>$current['outbound']['question']]];
+        foreach ($recent as $index=>$text) $messages[]=['id'=>'recent_'.($index+1),'text'=>$text];
+        // A de-identified, request-scoped evidence projection. It never
+        // contains answers, result rows, entity IDs or server reference values.
+        $current['outbound']['evidence_messages']=$messages;
+        // Current conditions are the only ones that can block this request.
+        // The complete map is retained locally so a model can safely refer to
+        // a de-identified object that first appeared in the conversation.
+        $current['reference_values']=$references;
+        return $current;
+    }
+
+    public function project(string $question,array $configuration,array $privateLabels=[],array $protectedTerms=[]): array
+    {
+        $references=[];
+        return $this->projectWithReferences($question,$configuration,$privateLabels,$references,$protectedTerms);
+    }
+
+    /**
+     * A signed prior-query reference is a stronger, server-verified carrier
+     * for a continuation than locally retained conversational wording.  Once
+     * that reference has been restored, old de-identified questions cannot
+     * add authority or resolve a condition outside the signed query; sending
+     * them again only makes the understanding request larger and lets stale
+     * wording compete with the current turn.  Keep the current evidence
+     * message because the understanding contract still grounds every new
+     * requirement in the actual customer message.
+     */
+    public function forVerifiedContext(array $outbound): array
+    {
+        if (($outbound['schema_version']??null)!=='sanitized-question-v2'
+            || !is_string($outbound['question']??null) || $outbound['question']==='') {
+            throw new \RuntimeException('AI_MODEL_INPUT_INVALID');
+        }
+        $outbound['recent_questions']=[];
+        $outbound['evidence_messages']=[['id'=>'current','text'=>$outbound['question']]];
+        return $outbound;
+    }
+
+    private function projectWithReferences(string $question,array $configuration,array $privateLabels,array &$references,array $protectedTerms=[]): array
+    {
+        if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new \RuntimeException('AI_EXTERNAL_SCOPE_REQUIRED');
+        if ($question==='' || strlen($question)>8192 || preg_match('//u',$question)!==1
+            || preg_match('/[\x00-\x08\x0b\x0c\x0e-\x1f]/',$question)) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        foreach ($privateLabels as $label) if (!is_string($label)||$label===''||strlen($label)>512||preg_match('//u',$label)!==1) throw new \RuntimeException('AI_PRIVATE_LABEL_INVALID');
+        $privateLabels=array_values(array_unique($privateLabels));
+        usort($privateLabels,static function(string $left,string $right):int{return strlen($right)<=>strlen($left);});
+
+        $local=[];$safe=$question;
+        $reference=static function(string $value) use (&$local,&$references):string {
+            $ref=array_search($value,$references,true);
+            if ($ref===false) {
+                $ref='local_condition_'.(count($references)+1);
+                $references[$ref]=$value;
+            }
+            $local[$ref]=$value;
+            return '['.$ref.']';
+        };
+        // Match raw sensitive spans in one pass. Sequential replacements let
+        // the generic identifier rule redact our own local_condition token,
+        // breaking its identity mapping (especially a phone-only reply).
+        // Literal customer-written tokens are still treated as raw input;
+        // this is not an exemption from masking or a trusted-token allowlist.
+        $sensitivePattern='/\\bsk-[A-Za-z0-9_-]{12,}\\b'
+            .'|[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}'
+            .'|(?<![0-9])1[3-9][0-9]{9}(?![0-9])'
+            .'|(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9_-]{15,}(?![A-Za-z0-9])/iu';
+        $safe=preg_replace_callback($sensitivePattern,static function(array $match) use($reference):string {
+            return $reference($match[0]);
+        },$safe);
+        // A complete registered measurement is public capability vocabulary,
+        // even where it contains a private object alias such as a position.
+        // Shield its full exact span while local aliases are de-identified,
+        // then restore it verbatim before it reaches the model. This preserves
+        // the metric's registry identity without exposing a person, member or
+        // store label and without maintaining a phrase-specific exception.
+        $protected=[];
+        foreach (array_values(array_unique($protectedTerms)) as $term) {
+            if (!is_string($term) || $term==='' || mb_strpos($safe,$term,0,'UTF-8')===false) continue;
+            $token="\u{E000}metric_".count($protected)."\u{E001}";
+            $protected[$token]=$term;
+            $safe=str_replace($term,$token,$safe);
+        }
+        foreach ($privateLabels as $label) {
+            if (mb_strpos($safe,$label,0,'UTF-8')===false) continue;
+            $ref=$reference($label);$safe=str_replace($label,$ref,$safe);
+        }
+        if ($protected) $safe=strtr($safe,$protected);
+        $safe=preg_replace('/\s+/u',' ',trim($safe));
+        if (!is_string($safe)||$safe===''||strlen($safe)>16384) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        return [
+            'outbound'=>['schema_version'=>'sanitized-question-v2','question'=>$safe,'has_unresolved_conditions'=>(bool)$local,'server_resolved_fields'=>[]],
+            'local_conditions'=>$local,
+        ];
+    }
+}

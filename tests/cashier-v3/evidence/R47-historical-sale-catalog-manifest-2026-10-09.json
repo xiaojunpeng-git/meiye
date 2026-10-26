@@ -1,0 +1,74 @@
+{
+  "task": "R47-00001 历史承载与新销售目录隔离",
+  "generated_at": "2026-10-09T09:07:58.730Z",
+  "start_head": "31598aaddad0962e675acb89739cb916ae38fd63",
+  "delivery_head": "460686e19d17e9ad3a8811bf0b4071ce650192d8",
+  "patch_sha256": "aef23d8e0b294d069dd1d8b90c0259db30fd63c760c187aee14969361b73a4b4",
+  "files": [
+    {
+      "path": "后端代码/config/product_catalog.php",
+      "sha256": "4a555eae42f3e88a3595852a5cfadb8352ca4d9d4551dd071b6cd7035cf691d5"
+    },
+    {
+      "path": "后端代码/app/services/product/product/StoreProductSaleUsagePolicy.php",
+      "sha256": "7ddd66b11d452604cc96580a2aa74376bad88941adbf0e81546ed9d62494cdfc"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+      "sha256": "3fb8cda3ffe79cbd24b7cae20ba3e32c76becd7b913c8d20f9df36c3a88cacf1"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php",
+      "sha256": "a9d8a48e038e8c1f9fae5daddfa05accf57c547ca4661c0c8d75c89e110fbd77"
+    },
+    {
+      "path": "后端代码/app/services/product/branch/StoreBranchProductServices.php",
+      "sha256": "1a8b92d57213d0ee23121a12501506d46c321d30c3f0e30a18fec831eb9c2735"
+    },
+    {
+      "path": "tests/cashier-v3/php/historical-catalog-audit.php",
+      "sha256": "04b28f605801a13992ff8c4fef71af26eb6054a1f05e511c0c74ae102310b901"
+    },
+    {
+      "path": "tests/cashier-v3/php/historical-catalog-local-integration.php",
+      "sha256": "35bb7a2bf508540cba31398864c208c442cd6276eb326659dffad0dd2024fe20"
+    },
+    {
+      "path": "tests/cashier-v3/php/c2-sale-cart-contract.php",
+      "sha256": "50ba2162181c8b7ddc16faad9bae2bc13ae56ae3b1f6ecca9233324c1f2f6608"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "tests/cashier-v3/evidence/R47-historical-sale-catalog-selftest-2026-10-09.md",
+      "sha256": "c3fa8e58063864d3d2b77114a195600fa9133c1317aca108950198fee2b1f68d"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R47-local-catalog-audit-2026-10-09.json",
+      "sha256": "e0954e67abbd78bf443f33a4c407dbe4451b258a85eaf7c44693042f4c591b79"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R47-rh-catalog-audit-2026-10-09.json",
+      "sha256": "3433d48d205e645977557576fa5bbf6a1058d4ccf2f73db214da7341b7270f42"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R47-local-integration-2026-10-09.json",
+      "sha256": "f0a829178c17345c7975389ebff8c58e0e168b355417437c78930395542a6c1d"
+    }
+  ],
+  "verification": {
+    "local_integration_checks": 55,
+    "rollback_verified": true,
+    "lock_order_checks": 20,
+    "off_shelf_checks": 12,
+    "card_authority_checks": 13,
+    "pure_entitlement_void": "PASS",
+    "syntax": "PHP7.4 PASS",
+    "limitations": "See selftest record; old C2/R25/R26 suites not counted as passing; no actual related historical writeoff/refund write."
+  },
+  "acceptance": "pending_product_manager",
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "remote_business_writes": false
+}

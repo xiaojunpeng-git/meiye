@@ -1,0 +1,49 @@
+PASS recovered fixture starts with 6 remaining, version 10 and two existing voids
+PASS reverse 29: remainder 8, monotonically increasing version 11
+PASS same/new-key replay 29 cannot restore twice or append an event
+PASS reverse 28: remainder 10, monotonically increasing version 12
+PASS same/new-key replay 28 cannot restore twice or append an event
+PASS reverse 27: remainder 12, monotonically increasing version 13
+PASS same/new-key replay 27 cannot restore twice or append an event
+PASS reverse 26: remainder 14, monotonically increasing version 14
+PASS same/new-key replay 26 cannot restore twice or append an event
+PASS reverse 24: remainder 16, monotonically increasing version 15
+PASS same/new-key replay 24 cannot restore twice or append an event
+PASS previously voided records stay idempotent; final count is original 16, not purchased 28
+PASS all original card-operation snapshots remain immutable
+PASS exactly seven successful reversal audits, including the two existing ones
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS each reversal has an immutable linked event
+PASS seven replacement targets revoked, not deleted
+PASS complete serial reversal test rolled back every entitlement, audit, event and version write
+PASS out-of-order earlier operation rejected without partial writes
+PASS different handling store rejected without partial writes
+PASS unknown state marker rejected without partial writes
+PASS unexplained version gap rejected without partial writes
+PASS missing reversal event rejected without partial writes
+PASS wrong reversal origin rejected without partial writes
+PASS pending later operation rejected without partial writes
+PASS target already consumed rejected without partial writes
+PASS source count drift rejected without partial writes
+PASS source card transferred rejected without partial writes
+PASS later extension cannot masquerade as reversible replacement rejected without partial writes
+PASS active service blocks reversal rejected without partial writes
+PASS late target version failure reaches transactional rollback boundary
+PASS late failure restores counts, version, audits and events after rollback
+PASS normal: five serial voids restore only independent counters and revoke seven targets; shared/time rule unchanged
+PASS normal: immutable rule fingerprints still valid
+PASS choice_kind: five serial voids restore only independent counters and revoke seven targets; shared/time rule unchanged
+PASS choice_kind: immutable rule fingerprints still valid
+PASS choice_count: five serial voids restore only independent counters and revoke seven targets; shared/time rule unchanged
+PASS choice_count: immutable rule fingerprints still valid
+PASS time: five serial voids restore only independent counters and revoke seven targets; shared/time rule unchanged
+PASS time: immutable rule fingerprints still valid
+PASS all four issued-rule fixtures and serial reversals rolled back
+PASS second MySQL connection cannot acquire holder while reversal owns it
+PASS two-connection conflict left no business writes
+R8_PROJECT_REPLACEMENT_SERIAL_VOID_LOCAL=PASS

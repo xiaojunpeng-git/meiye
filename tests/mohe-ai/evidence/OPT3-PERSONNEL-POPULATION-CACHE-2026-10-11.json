@@ -1,0 +1,900 @@
+{
+  "suite": "OPT3 personnel population reuse",
+  "date": "2026-10-11",
+  "base_head": "be821109147b046734c27fcf69472af44289e1b1",
+  "source_sha256": {
+    "后端代码/app/services/query/metric/MetricReadViewServices.php": "bedc101ca0437b40ec1dc7843b04a6a37b6eff49ee25561869b204b046eb31d9",
+    "后端代码/app/services/query/metric/PersonnelAnalysisObjectServices.php": "4d8cd07d2fad7a2f7b167854bbb106d9725cec989130a3c881dfd16c8a49d2d9",
+    "tests/mohe-ai/opt3-personnel-population-cache.php": "82164935903a4771468ce7173ecb72b479c1cef9129e993eb88cd1681da339b4",
+    "tests/mohe-ai/opt3-personnel-ranking-local.php": "2eed9d68f72274c27ae2b229a2b2111b1660691dceccd7b83e3f5c3c38e63edd"
+  },
+  "offline": {
+    "host": {
+      "population_cache": 21,
+      "personnel_analysis": 56
+    },
+    "php_7_4_33_isolated": {
+      "population_cache": 21,
+      "personnel_analysis": 56
+    }
+  },
+  "profiles": {
+    "current": {
+      "uncached": {
+        "suite": "OPT3-personnel-ranking-local",
+        "mode": "uncached",
+        "shape": "person-ranking-top-1",
+        "primary_metric": "staff_sales_yeji",
+        "profile": [
+          "staff_sales_yeji",
+          "staff_labor_yeji",
+          "staff_project_num",
+          "staff_labor_fee",
+          "staff_service_num",
+          "staff_point_visit_num"
+        ],
+        "store_count": 102,
+        "range": {
+          "start": "2026-10-01",
+          "end": "2026-10-11"
+        },
+        "reader_budget_ms": 10000,
+        "elapsed_ms": 9772,
+        "authority_calls": 13,
+        "authority_ms": 31,
+        "checkpoints": 9,
+        "events": [
+          {
+            "stage": "primary_population",
+            "ms": 162,
+            "rows": 338,
+            "ok": true
+          },
+          {
+            "stage": "primary_totals",
+            "ms": 135,
+            "rows": 573,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_population",
+            "ms": 1629,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_totals",
+            "ms": 10,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_population",
+            "ms": 1239,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_totals",
+            "ms": 7,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_population",
+            "ms": 1188,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_totals",
+            "ms": 5,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_population",
+            "ms": 1191,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_totals",
+            "ms": 2814,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_population",
+            "ms": 1368,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_totals",
+            "ms": 0,
+            "rows": 1,
+            "ok": true
+          }
+        ],
+        "sql_by_stage": {
+          "authority": {
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.471
+            },
+            "SELECT": {
+              "calls": 2,
+              "ms": 1.595
+            }
+          },
+          "primary_population": {
+            "SELECT": {
+              "calls": 7,
+              "ms": 165.779
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.397
+            },
+            "SET": {
+              "calls": 3,
+              "ms": 0.489
+            }
+          },
+          "primary_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.181
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.033
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 128.787
+            }
+          },
+          "staff_labor_yeji_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1627.867
+            }
+          },
+          "staff_labor_yeji_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.276
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 9.07
+            }
+          },
+          "staff_project_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1238.162
+            }
+          },
+          "staff_project_num_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.224
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 6.208
+            }
+          },
+          "staff_labor_fee_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1186.678
+            }
+          },
+          "staff_labor_fee_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.209
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 4.67
+            }
+          },
+          "staff_service_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1189.668
+            }
+          },
+          "staff_service_num_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.245
+            },
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.214
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 2256.245
+            }
+          },
+          "staff_point_visit_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1366.518
+            }
+          },
+          "staff_point_visit_num_totals": {
+            "SET": {
+              "calls": 2,
+              "ms": 0.325
+            }
+          }
+        },
+        "error": null,
+        "result_hashes": {
+          "staff_sales_yeji": "8e21d7e4e64f0e3e86203a35924fba2c6c37436953be37345c39e3177ac05766",
+          "staff_labor_yeji": "ca2008a1d2476393e5c64277ded60cdc8f9adcef04f24fa097608d1a69b93af0",
+          "staff_project_num": "4fcf2b94de84d1521f92686917cd0eaf7ee5d34cff7b8cd8dae307db652c4890",
+          "staff_labor_fee": "f6e88a616c9b68ca7d3fc2e925bc13436499d4e9c54f7459fd83fb8456ae5886",
+          "staff_service_num": "a350d30c4a73d9c151ba0f8c3e5380bd8c8b5562a212809713120a7780415a2d",
+          "staff_point_visit_num": "c35adfd66a03ecc00b03d95b40e6e5e62d51ac4bcd1c1f49b27e30818a8cd720"
+        },
+        "selection_hashes": {
+          "staff_sales_yeji": "dc6ef788c99ed273419769e536cb098b7b58651e8874ece0d58a3fcb3c783c20",
+          "staff_labor_yeji": "2d80202171ea09653019e9af15bd7de751d5f07b65a837aaee99f124bf7fa479",
+          "staff_project_num": "6cdb3b2ffb9863c652ce5589f16cb1c1932ee342c8db79ab1bec632d1c3849a0",
+          "staff_labor_fee": "7014303fcd2763065b0190657892cbe7bf5c4cc7134e019ed18dffe895d4e2c1",
+          "staff_service_num": "41e77ae4688b7090c05f22e459239d0d8876fc03cac59f960d78ad6a026c19a2",
+          "staff_point_visit_num": "11ebc05f32cd422a2b0c4d9e74f8a1b811ced8bb31693785d1d4f0ffff58d4e9"
+        },
+        "memory_limit": "128M",
+        "peak_bytes": 14680064,
+        "limitation": "registered shape reconstruction; excludes Run heartbeat/audit writes and model binding"
+      },
+      "cached": {
+        "suite": "OPT3-personnel-ranking-local",
+        "mode": "cached",
+        "shape": "person-ranking-top-1",
+        "primary_metric": "staff_sales_yeji",
+        "profile": [
+          "staff_sales_yeji",
+          "staff_labor_yeji",
+          "staff_project_num",
+          "staff_labor_fee",
+          "staff_service_num",
+          "staff_point_visit_num"
+        ],
+        "store_count": 102,
+        "range": {
+          "start": "2026-10-01",
+          "end": "2026-10-11"
+        },
+        "reader_budget_ms": 10000,
+        "elapsed_ms": 4107,
+        "authority_calls": 13,
+        "authority_ms": 30,
+        "checkpoints": 9,
+        "events": [
+          {
+            "stage": "primary_population",
+            "ms": 145,
+            "rows": 338,
+            "ok": true
+          },
+          {
+            "stage": "primary_totals",
+            "ms": 129,
+            "rows": 573,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_population",
+            "ms": 1355,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_totals",
+            "ms": 7,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_population",
+            "ms": 3,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_totals",
+            "ms": 5,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_population",
+            "ms": 3,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_totals",
+            "ms": 5,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_population",
+            "ms": 3,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_totals",
+            "ms": 2422,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_population",
+            "ms": 5,
+            "rows": 664,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_totals",
+            "ms": 0,
+            "rows": 1,
+            "ok": true
+          }
+        ],
+        "sql_by_stage": {
+          "authority": {
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.746
+            },
+            "SELECT": {
+              "calls": 2,
+              "ms": 1.982
+            }
+          },
+          "primary_population": {
+            "SELECT": {
+              "calls": 7,
+              "ms": 145.767
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 4.126
+            },
+            "SET": {
+              "calls": 3,
+              "ms": 0.626
+            }
+          },
+          "primary_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.171
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.125
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 123.228
+            }
+          },
+          "staff_labor_yeji_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 1354.37
+            }
+          },
+          "staff_labor_yeji_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.187
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 6.343
+            }
+          },
+          "staff_project_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.442
+            }
+          },
+          "staff_project_num_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.156
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 4.808
+            }
+          },
+          "staff_labor_fee_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.336
+            }
+          },
+          "staff_labor_fee_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.132
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 4.476
+            }
+          },
+          "staff_service_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.134
+            }
+          },
+          "staff_service_num_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.172
+            },
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.204
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 1928.503
+            }
+          },
+          "staff_point_visit_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 4.11
+            }
+          },
+          "staff_point_visit_num_totals": {
+            "SET": {
+              "calls": 2,
+              "ms": 0.354
+            }
+          }
+        },
+        "error": null,
+        "result_hashes": {
+          "staff_sales_yeji": "8e21d7e4e64f0e3e86203a35924fba2c6c37436953be37345c39e3177ac05766",
+          "staff_labor_yeji": "ca2008a1d2476393e5c64277ded60cdc8f9adcef04f24fa097608d1a69b93af0",
+          "staff_project_num": "4fcf2b94de84d1521f92686917cd0eaf7ee5d34cff7b8cd8dae307db652c4890",
+          "staff_labor_fee": "f6e88a616c9b68ca7d3fc2e925bc13436499d4e9c54f7459fd83fb8456ae5886",
+          "staff_service_num": "a350d30c4a73d9c151ba0f8c3e5380bd8c8b5562a212809713120a7780415a2d",
+          "staff_point_visit_num": "c35adfd66a03ecc00b03d95b40e6e5e62d51ac4bcd1c1f49b27e30818a8cd720"
+        },
+        "selection_hashes": {
+          "staff_sales_yeji": "dc6ef788c99ed273419769e536cb098b7b58651e8874ece0d58a3fcb3c783c20",
+          "staff_labor_yeji": "2d80202171ea09653019e9af15bd7de751d5f07b65a837aaee99f124bf7fa479",
+          "staff_project_num": "6cdb3b2ffb9863c652ce5589f16cb1c1932ee342c8db79ab1bec632d1c3849a0",
+          "staff_labor_fee": "7014303fcd2763065b0190657892cbe7bf5c4cc7134e019ed18dffe895d4e2c1",
+          "staff_service_num": "41e77ae4688b7090c05f22e459239d0d8876fc03cac59f960d78ad6a026c19a2",
+          "staff_point_visit_num": "11ebc05f32cd422a2b0c4d9e74f8a1b811ced8bb31693785d1d4f0ffff58d4e9"
+        },
+        "memory_limit": "128M",
+        "peak_bytes": 14680064,
+        "limitation": "registered shape reconstruction; excludes Run heartbeat/audit writes and model binding"
+      },
+      "same_six_result_hashes": true,
+      "same_metric_selection_binding_hashes": true
+    },
+    "previous": {
+      "uncached": {
+        "suite": "OPT3-personnel-ranking-local",
+        "mode": "uncached",
+        "shape": "person-ranking-top-3",
+        "primary_metric": "staff_sales_yeji",
+        "profile": [
+          "staff_sales_yeji",
+          "staff_labor_yeji",
+          "staff_project_num",
+          "staff_labor_fee",
+          "staff_service_num",
+          "staff_point_visit_num"
+        ],
+        "store_count": 102,
+        "range": {
+          "start": "2026-09-01",
+          "end": "2026-09-30"
+        },
+        "reader_budget_ms": 10000,
+        "elapsed_ms": 164,
+        "authority_calls": 13,
+        "authority_ms": 26,
+        "checkpoints": 5,
+        "events": [
+          {
+            "stage": "primary_population",
+            "ms": 63,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "primary_totals",
+            "ms": 11,
+            "rows": 6,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_population",
+            "ms": 22,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_population",
+            "ms": 12,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_population",
+            "ms": 11,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_population",
+            "ms": 12,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_population",
+            "ms": 11,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          }
+        ],
+        "sql_by_stage": {
+          "authority": {
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.484
+            },
+            "SELECT": {
+              "calls": 2,
+              "ms": 1.957
+            }
+          },
+          "primary_population": {
+            "SELECT": {
+              "calls": 7,
+              "ms": 65.8
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.31
+            },
+            "SET": {
+              "calls": 3,
+              "ms": 0.565
+            }
+          },
+          "primary_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.18
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.29
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 6.698
+            }
+          },
+          "staff_labor_yeji_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 21.292
+            }
+          },
+          "staff_project_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 11.773
+            }
+          },
+          "staff_labor_fee_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 10.843
+            }
+          },
+          "staff_service_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 11.209
+            }
+          },
+          "staff_point_visit_num_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 11.003
+            }
+          },
+          "staff_point_visit_num_totals": {
+            "SET": {
+              "calls": 2,
+              "ms": 0.335
+            }
+          }
+        },
+        "error": null,
+        "result_hashes": {
+          "staff_sales_yeji": "71a340483901fed9576487a40c25018f4fc5667c09eae648b1cab5f7ef17c61b",
+          "staff_labor_yeji": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_project_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_labor_fee": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_service_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_point_visit_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "selection_hashes": {
+          "staff_sales_yeji": "6458c74468de992ac3b6feef4da6ccbc7d0b65adcb233d28dcccc1dbb5b762b7",
+          "staff_labor_yeji": "c06052ac68456014b4b3e0f9c4d00bea76f5d3ac9f54ab0286ca28f96a250c4b",
+          "staff_project_num": "b64057e4e6711caabda91fe58d4125553cbc5ec8d50484bac8c49cb531923a23",
+          "staff_labor_fee": "f51d0707e51d317772282dd1aab49a974b65488e47b69adf07a5456ab265040e",
+          "staff_service_num": "c22c0ca6c1262352a94cdac30615e76b89c5eaef293d3cbc98e91a7a5b7106a7",
+          "staff_point_visit_num": "b9571ba677da3e59da277765e3206184e1e2ccfc879b58a5d26dce78a38ca0a2"
+        },
+        "memory_limit": "128M",
+        "peak_bytes": 10485760,
+        "limitation": "registered shape reconstruction; excludes Run heartbeat/audit writes and model binding"
+      },
+      "cached": {
+        "suite": "OPT3-personnel-ranking-local",
+        "mode": "cached",
+        "shape": "person-ranking-top-3",
+        "primary_metric": "staff_sales_yeji",
+        "profile": [
+          "staff_sales_yeji",
+          "staff_labor_yeji",
+          "staff_project_num",
+          "staff_labor_fee",
+          "staff_service_num",
+          "staff_point_visit_num"
+        ],
+        "store_count": 102,
+        "range": {
+          "start": "2026-09-01",
+          "end": "2026-09-30"
+        },
+        "reader_budget_ms": 10000,
+        "elapsed_ms": 73,
+        "authority_calls": 13,
+        "authority_ms": 23,
+        "checkpoints": 5,
+        "events": [
+          {
+            "stage": "primary_population",
+            "ms": 17,
+            "rows": 7,
+            "ok": true
+          },
+          {
+            "stage": "primary_totals",
+            "ms": 11,
+            "rows": 6,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_population",
+            "ms": 12,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_yeji_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_population",
+            "ms": 3,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_project_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_population",
+            "ms": 3,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_labor_fee_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_population",
+            "ms": 2,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_service_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_population",
+            "ms": 2,
+            "rows": 0,
+            "ok": true
+          },
+          {
+            "stage": "staff_point_visit_num_totals",
+            "ms": 0,
+            "rows": 0,
+            "ok": true
+          }
+        ],
+        "sql_by_stage": {
+          "authority": {
+            "SHOW": {
+              "calls": 2,
+              "ms": 4.12
+            },
+            "SELECT": {
+              "calls": 2,
+              "ms": 1.417
+            }
+          },
+          "primary_population": {
+            "SELECT": {
+              "calls": 7,
+              "ms": 21.474
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.234
+            },
+            "SET": {
+              "calls": 3,
+              "ms": 0.645
+            }
+          },
+          "primary_totals": {
+            "SET": {
+              "calls": 1,
+              "ms": 0.137
+            },
+            "SHOW": {
+              "calls": 1,
+              "ms": 2.248
+            },
+            "SELECT": {
+              "calls": 1,
+              "ms": 6.663
+            }
+          },
+          "staff_labor_yeji_population": {
+            "SELECT": {
+              "calls": 5,
+              "ms": 11.404
+            }
+          },
+          "staff_project_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.38
+            }
+          },
+          "staff_labor_fee_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.368
+            }
+          },
+          "staff_service_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.203
+            }
+          },
+          "staff_point_visit_num_population": {
+            "SELECT": {
+              "calls": 4,
+              "ms": 2.113
+            }
+          },
+          "staff_point_visit_num_totals": {
+            "SET": {
+              "calls": 2,
+              "ms": 0.347
+            }
+          }
+        },
+        "error": null,
+        "result_hashes": {
+          "staff_sales_yeji": "71a340483901fed9576487a40c25018f4fc5667c09eae648b1cab5f7ef17c61b",
+          "staff_labor_yeji": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_project_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_labor_fee": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_service_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "staff_point_visit_num": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "selection_hashes": {
+          "staff_sales_yeji": "6458c74468de992ac3b6feef4da6ccbc7d0b65adcb233d28dcccc1dbb5b762b7",
+          "staff_labor_yeji": "c06052ac68456014b4b3e0f9c4d00bea76f5d3ac9f54ab0286ca28f96a250c4b",
+          "staff_project_num": "b64057e4e6711caabda91fe58d4125553cbc5ec8d50484bac8c49cb531923a23",
+          "staff_labor_fee": "f51d0707e51d317772282dd1aab49a974b65488e47b69adf07a5456ab265040e",
+          "staff_service_num": "c22c0ca6c1262352a94cdac30615e76b89c5eaef293d3cbc98e91a7a5b7106a7",
+          "staff_point_visit_num": "b9571ba677da3e59da277765e3206184e1e2ccfc879b58a5d26dce78a38ca0a2"
+        },
+        "memory_limit": "128M",
+        "peak_bytes": 10485760,
+        "limitation": "registered shape reconstruction; excludes Run heartbeat/audit writes and model binding"
+      },
+      "same_six_result_hashes": true,
+      "same_metric_selection_binding_hashes": true
+    }
+  },
+  "limitations": [
+    "Reconstructed registered shape; excludes Run heartbeat/audit writes, model binding, and user-visible business acceptance.",
+    "Previous-month top3 is real scope but sparse local data; it is not large full-month load evidence.",
+    "No model requests, business-row writes, configuration changes, or timeout increases were made."
+  ]
+}

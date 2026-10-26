@@ -1,0 +1,9 @@
+{
+  "source_commit": "c7440b6b804a5b857dc84d372eb5a6ca49d323cb",
+  "source_baseline_commit": "261617ebdb7e94d1406d395be1c118d381fcaf2e",
+  "push_parent": "907ef3696f5cd9addaf76604e48d724dc5ecb0d7",
+  "push_baseline_commit": "7f1b331cf935d257cdb6adc63c753b25df1742e7",
+  "push_commit": "7307fe7ae7f8aa2862265e4c61e37cf19ea76bad",
+  "branch": "release/r25-refund-void-balance-20261022",
+  "scope": "仅本轮精确文件及独立已上线依赖基线，不推送共享分支其他未发布历史"
+}

@@ -1,0 +1,319 @@
+{
+  "instance": "008",
+  "database": "mohe_008",
+  "port": 3307,
+  "mode": "READ ONLY",
+  "stores": [
+    {
+      "id": "107",
+      "name": "金宸店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "108",
+      "name": "海伦堡",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "109",
+      "name": "越秀店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "110",
+      "name": "春天",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "111",
+      "name": "金门店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "112",
+      "name": "东沙湖",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "113",
+      "name": "东环",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "114",
+      "name": "欧丽薇",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "115",
+      "name": "和雍锦园",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "116",
+      "name": "木渎天虹",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "117",
+      "name": "万达",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "118",
+      "name": "国金",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "119",
+      "name": "常熟",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "120",
+      "name": "钻石",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "121",
+      "name": "天安",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "122",
+      "name": "安镇",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "123",
+      "name": "滨湖",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "124",
+      "name": "玉兰",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "125",
+      "name": "海门店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "126",
+      "name": "建业店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "127",
+      "name": "苏州 金茂府店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "江苏苏州市姑苏区",
+      "detailed_address": "江苏省苏州市姑苏区金门路777号金茂城市花园18幢115室",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "128",
+      "name": "渼约新港店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "",
+      "detailed_address": "",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "129",
+      "name": "广州 雅居乐店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "广东广州市番禺区南村镇",
+      "detailed_address": "观景路268号东北方向170米",
+      "is_show": "1",
+      "is_del": "0"
+    },
+    {
+      "id": "130",
+      "name": "浙江 富阳店",
+      "province": "0",
+      "city": "0",
+      "area": "0",
+      "street": "0",
+      "address": "浙江杭州市富阳区胥口镇",
+      "detailed_address": "鹿山街道依江路492号山水国际中心广场三层",
+      "is_show": "1",
+      "is_del": "0"
+    }
+  ],
+  "dictionary": [],
+  "dictionaryCountAllLevels": 0,
+  "legacyDictionaryCount": 0,
+  "tableEngines": [
+    {
+      "TABLE_NAME": "eb_city_area",
+      "ENGINE": "InnoDB"
+    },
+    {
+      "TABLE_NAME": "eb_system_store",
+      "ENGINE": "InnoDB"
+    }
+  ],
+  "latestUpgrade": {
+    "upgrade_key": "20261023-r51-basic-reports",
+    "code_version": "dfea59566663c76f0cae00d1fb851c45a262f9f9",
+    "executed_at": "2026-10-24 01:45:41"
+  },
+  "backend": {
+    "app/controller/api/v1/store/Store.php": "e078f917359a3080b76b0c90da44be0f5dd822999e6b44026e739d41d8d086e0",
+    "app/services/store/SystemStoreServices.php": "32d6bf423ec9ea11fd8c23a7e429ac8df7ad0b2673d8d578bbd21121df71c422",
+    "app/services/store/StoreSelectableRegionServices.php": "cd3abb4498e0dac780172800c6c824c42288099489a8a8e81bae154388d369c1"
+  }
+}

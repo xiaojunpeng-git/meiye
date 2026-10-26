@@ -1,0 +1,126 @@
+{
+  "task": "D4-00002",
+  "supersedes": "D4-zero-difference-manifest-2026-10-09.json",
+  "baseline_head": "4cf87e84d09e640e5cd3fb7a9d712f12694edcd6",
+  "observed_head": "31598aaddad0962e675acb89739cb916ae38fd63",
+  "files": [
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "sha256": "12df6b2df04bc7b2f5f4d8c064c015e87258abcb9fd6b4332a9f1cbc385e6100"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/utils/countSubmission.js",
+      "sha256": "2947c276c1e48a45dc32f2985992b7105a93d17572b8fb32fbeaf5f4649260fe"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/services/inventoryApi.js",
+      "sha256": "61db57c94ab58592c99edf4e122bcd92c1ae30a29ba50def345a30891d00d971"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+      "sha256": "e4181b71d29bbe0f5ef7317a9df78e60b6269c0d19a7f5ed07aeb6e334e21209"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStockCountDetailProjectionServices.php",
+      "sha256": "8c13223cd269223e9a9ad851ef7a0097aad871f30a8dce82d837cf849bcec445"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryErrorMessage.php",
+      "sha256": "c19987e143c95b6a81d9178f7512d9d8665e9702122c64d474ab8f4a5d54a53d"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+      "sha256": "ffd25daa8100eb5284e55c42f886bb4412c7d169aa8a8dd5b322d39b72e43da7"
+    },
+    {
+      "path": "tests/inventory/js/count-submission-contract.mjs",
+      "sha256": "01df0d3ce03be1dac911c71d5d6c26841572b5793c2e7e48eab68249f811f6fa"
+    },
+    {
+      "path": "tests/inventory/js/count-physical-authority-contract.mjs",
+      "sha256": "403ccf73ee06475fb9a3ba006030d2b5de472a04ddad3b50f855de0a5d08a60e"
+    },
+    {
+      "path": "tests/inventory/js/count-flexible-import-contract.mjs",
+      "sha256": "56edee5a8175af6c89fbb08fe751f4cf99ed4d346080b5e4482894f72134dd9f"
+    },
+    {
+      "path": "tests/inventory/php/stock-count-integration.php",
+      "sha256": "bd0e9dff35bda6b92d68b98025a7a768166cd4ea2e0a7a286580e43b834fba8c"
+    },
+    {
+      "path": "tests/inventory/php/stock-count-catalog-validation-integration.php",
+      "sha256": "d88d450acf9368f9c220eb6496f096c41772c19921c658298121a445e8bf3822"
+    },
+    {
+      "path": "tests/inventory/php/headquarters-count-draft-integration.php",
+      "sha256": "b8fb464a7fdf568854b222603540dc9e04d4c04bb233ae78aff2a8cf9d4073d1"
+    },
+    {
+      "path": "tests/inventory/php/stock-count-zero-difference-integration.php",
+      "sha256": "c384b03143df27412c379a23b1b46e6e38039d2c339abcbf01c957b0ab770128"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "fe7ea9f2102f1ab23b1022353f038293db0d92793a2f05834d51f62a45d94168"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php",
+      "sha256": "4d0da88ffb5aeb58dce076a613991170bc761bdc4385839bb2bb5963cb07fa8e"
+    },
+    {
+      "path": "tests/inventory/js/store-menu-contract.mjs",
+      "sha256": "7fa3a3f32e9de59c1079cefdd9ce5fbb95f8fd88abd9727910b6dbd4d5b97998"
+    },
+    {
+      "path": "tests/inventory/js/count-store-name-contract.mjs",
+      "sha256": "813addb00cee0f7828eb67d80128a84aa1c0bdc44478f14407cf840d7f4c70f1"
+    }
+  ],
+  "fixed_file_set_sha256": "36c43368be790a7ee67c14c75c2c4c2013c52dea1b1bb28d1813ae3f9257d9f5",
+  "tracked_working_patch_sha256": "f8643dba96a8497dec001dac7d5458a12e66999c800cb28f891d1cf1039731f5",
+  "patch_boundary_note": "App.vue已有其他任务的分组列表修改；完整文件指纹用于固定验收版本，不代表可整体暂存。仅本次门店字段、表头和count行映射属于本闭环；其他分组列表改动不归本任务。",
+  "supplement_files": [
+    "前端代码/inventory-vue3/src/App.vue",
+    "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php",
+    "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+    "tests/inventory/js/store-menu-contract.mjs",
+    "tests/inventory/js/count-store-name-contract.mjs",
+    "tests/inventory/php/stock-count-zero-difference-integration.php",
+    "tests/inventory/php/headquarters-count-draft-integration.php"
+  ],
+  "build": {
+    "source_root": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/前端代码/inventory-vue3/",
+    "source_fingerprint": "81495f4460f78f64080996355ca5c0b2032bda6714fca33763073c56435009e2",
+    "source_unchanged_during_build": true,
+    "scope": "仅本地库存模块构建，不是8080集成包",
+    "assets": [
+      {
+        "path": "dist/index.html",
+        "sha256": "47dfee9e31126c41573e8bae1f3e139cee9b00959d73a8066144ee8dc8f0f8e2"
+      },
+      {
+        "path": "dist/assets/exceljs.min-a0d233a6.js",
+        "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+      },
+      {
+        "path": "dist/assets/index-bac916a0.js",
+        "sha256": "adcfed8cbbebe863dabec509ae4cc6eb5374b7c501dc7bd0b73aaaaf8ae7265a"
+      },
+      {
+        "path": "dist/assets/index-d5faa9b1.css",
+        "sha256": "d5faa9b1f6254245834c393d0650fb0ec5c52d965f01c763ffc548f741260347"
+      }
+    ]
+  },
+  "tests": {
+    "zero_difference_and_store_name": 26,
+    "hq_and_store_draft": 23,
+    "frontend_focused_contracts": 5,
+    "store_menu_contract": "19通过2失败；以HEAD源码在内存中复跑同样两项失败，未修改导航或总部流程。",
+    "database_fixtures": "隔离库事务回滚，无残留"
+  },
+  "status": "开发与自测完成，待产品经理验收；未提交、未部署、未push",
+  "migration": "无",
+  "recorded_at": "2026-10-09T09:02:44.145Z"
+}

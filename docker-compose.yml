@@ -1,0 +1,58 @@
+services:
+  mysql:
+    image: mysql:5.7
+    platform: linux/amd64
+    container_name: mohe-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: localdev123
+      MYSQL_DATABASE: lin8
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=512M
+      - --sql_mode=NO_ENGINE_SUBSTITUTION
+    ports:
+      - "3307:3306"
+    volumes:
+      - mohe_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-plocaldev123"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: mohe-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    platform: linux/amd64
+    container_name: mohe-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "20700:20700"
+    volumes:
+      - ./后端代码:/var/www/html
+    environment:
+      APP_DEBUG: "true"
+
+volumes:
+  mohe_mysql_data:

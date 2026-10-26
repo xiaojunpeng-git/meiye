@@ -1,0 +1,21 @@
+baseline_head=06757680bf07101c54259a8d9512533b7bf9bbf1
+round=22
+scope=平台项目状态筛选、会员调店与调店详情
+
+320090ea1e312ac5cc60e83d64ed5d8f7c6b7a052796e1329233f9a622cf207e  前端代码/admin/src/api/user.js
+f76c5b959873bde73cc1c9d9b6ead557ccdebace066af08c08cda1f281c3a3e8  前端代码/admin/src/components/goodsAttr/index.vue
+5e7b6b2e4bf45c9f588ad3c48e43649cea5336bd60c1d147864bb62dd8fb049f  前端代码/admin/src/pages/user/list/handle/userDetails.vue
+0eace1d186d38c79794cff21f15821288084c293591f35090b31e4afe68980ed  前端代码/admin/src/pages/user/list/index.vue
+3b48c0bb6ba7633a3e56125dcaebb4c7f765276b3db47ff3897071d9d099ca4b  后端代码/app/controller/admin/v1/product/StoreProduct.php
+6796eca9db2d54b9ba607b19bc87566376469db48061caafd1f645c96a2a6a33  后端代码/app/controller/admin/v1/user/User.php
+e5433e33e0079f4f258c1f4979fafba56b9360a61eecfc1afd08fe0f9353cc1f  后端代码/app/services/user/UserBelongStoreServices.php
+784665493620fea7fa8273d7902fe0c3ddef5563832f3055607bf6f5574f5dab  后端代码/app/services/user/UserServices.php
+09ecef5960912776cf8b5d312e2ff991bfa2e9f1468756b1b4ca183942202277  后端代码/route/admin.php
+b8f99924596900190e1a2779e1a7a96f0f1d449ddbbb1a30b7e17de722cb9c26  tests/platform-member-transfer/php/r22-transfer-rollback.php
+e2a870aee40d6c629c7026feae4f0697d74972f4ec374642dcb7c7dc97918ab9  后端代码/database/upgrades/2026-10-21-平台会员调店审计/00-升级清单.md
+38ed0b54b5100e8e2e9b434190e91519bde6f752bcdb0cf1e78cd36f75e4070c  后端代码/database/upgrades/2026-10-21-平台会员调店审计/01-升级前检查.sql
+246f99d7432ec807fe378ec9be7045ad77dec4a27c4a63a30f05701e8c7b390d  后端代码/database/upgrades/2026-10-21-平台会员调店审计/02-正式升级.sql
+e9986b138c400500db5549936d22cc65397df230b595e990cca07e4df4636869  后端代码/database/upgrades/2026-10-21-平台会员调店审计/03-升级后验证.sql
+
+shared_file_note=后端代码/route/admin.php 另有既存 scheme/delete 未提交改动，candidate.patch 已排除该改动
+candidate_patch_sha256=f98d39b06f1c5ff43e9b9a3df46d9596b70d00f79728e691e547bac0c54d058d

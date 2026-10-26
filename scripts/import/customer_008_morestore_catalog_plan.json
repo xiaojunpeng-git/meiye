@@ -1,0 +1,2785 @@
+{
+  "plan_version": "008-morestore-catalog-r1",
+  "target_instance": "008.cc3798.com",
+  "target_database": "mohe_008",
+  "source_database": "morestore",
+  "source_catalog_sha256": "b4b6d66b311eb7db611d42f7075e7276fa5b4047f9aba8f70c6527cf4c0009ea",
+  "store_map": {
+    "17": 118,
+    "25": 120,
+    "30": 115,
+    "35": 113,
+    "36": 110,
+    "38": 117,
+    "41": 125,
+    "42": 122,
+    "43": 124,
+    "44": 127,
+    "45": 112,
+    "46": 128,
+    "47": 119,
+    "49": 108,
+    "50": 129,
+    "54": 130,
+    "55": 107,
+    "57": 116,
+    "60": 114,
+    "62": 123,
+    "64": 126,
+    "68": 121
+  },
+  "roots": [
+    {
+      "old_id": 158,
+      "old_name": "王牌 · 胶原瓷光肌",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "a6b30f6f",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 697
+        }
+      ]
+    },
+    {
+      "old_id": 303,
+      "old_name": "王牌 · 古法筋疗",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "04bd4658",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 715
+        }
+      ]
+    },
+    {
+      "old_id": 318,
+      "old_name": "王牌 · 粉红丝带",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "9576b622",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 733
+        }
+      ]
+    },
+    {
+      "old_id": 436,
+      "old_name": "王牌 · 五行灸",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "5e008a73",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 751
+        }
+      ]
+    },
+    {
+      "old_id": 453,
+      "old_name": "胶原枪（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "769c8c9a",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 470,
+      "old_name": "王牌 · 暨大超水光",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "10de9ba8",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 679
+        }
+      ]
+    },
+    {
+      "old_id": 589,
+      "old_name": "王牌 · 色素管理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "886f24e6",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "暨大超水光"
+        },
+        {
+          "index": 2,
+          "label": "色素管理"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 679
+        },
+        {
+          "old_project_id": 643
+        }
+      ]
+    },
+    {
+      "old_id": 606,
+      "old_name": "自由卡-A",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "dd43f121",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "柔嘉四大排寒"
+        },
+        {
+          "index": 2,
+          "label": "凤飞飞堂 丰韵翘臀"
+        },
+        {
+          "index": 3,
+          "label": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "index": 4,
+          "label": "比利时纯姬颈部"
+        },
+        {
+          "index": 5,
+          "label": "比利时纯姬眼部"
+        },
+        {
+          "index": 6,
+          "label": "比利时纯姬面部"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "柔嘉四大排寒"
+        },
+        {
+          "old_project_id": 911
+        },
+        {
+          "new_tag_project_name": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬颈部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬面部"
+        }
+      ]
+    },
+    {
+      "old_id": 643,
+      "old_name": "色素管理（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "2a011339",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 661,
+      "old_name": "王牌 · 胶原枪",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "39514ed3",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 453
+        }
+      ]
+    },
+    {
+      "old_id": 679,
+      "old_name": "暨大超水光(单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "ce1d258e",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 697,
+      "old_name": "胶原瓷光肌（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "2bd79d6f",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 715,
+      "old_name": "古法筋疗（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "a2e40e7e",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 733,
+      "old_name": "粉红丝带（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "559560e8",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 751,
+      "old_name": "五行灸（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "4a0dee9a",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 845,
+      "old_name": "肩颈无忧（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "7603a0b7",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 867,
+      "old_name": "晶莹美目（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "68a97b71",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 889,
+      "old_name": "八倍水动力（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "a24755f8",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 911,
+      "old_name": "丰韵翘臀（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "a2ba344b",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 933,
+      "old_name": "自由卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "debfae74",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "柔嘉四大排寒"
+        },
+        {
+          "index": 2,
+          "label": "凤飞飞堂 丰韵翘臀"
+        },
+        {
+          "index": 3,
+          "label": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "index": 4,
+          "label": "比利时纯姬颈部"
+        },
+        {
+          "index": 5,
+          "label": "比利时纯姬眼部"
+        },
+        {
+          "index": 6,
+          "label": "比利时纯姬面部"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "柔嘉四大排寒"
+        },
+        {
+          "old_project_id": 911
+        },
+        {
+          "new_tag_project_name": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬颈部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬面部"
+        }
+      ]
+    },
+    {
+      "old_id": 955,
+      "old_name": "美团抖音身体基础卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "7e016539",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "组合标签含多个选项，缺实际项目清单",
+      "old_tags": "头/肩/手/背/腿(5选2),全身SPA按摩,胸部/臀部保养(2选1),艾灸五行罐,小蛮腰纤体塑形"
+    },
+    {
+      "old_id": 977,
+      "old_name": "美团抖音面部基础卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "f13c6303",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "纯姬八倍水动力"
+        },
+        {
+          "index": 2,
+          "label": "超水光敏感肌修复"
+        },
+        {
+          "index": 3,
+          "label": "面部清洁补水"
+        },
+        {
+          "index": 4,
+          "label": "面部水润亮白"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "纯姬八倍水动力"
+        },
+        {
+          "new_tag_project_name": "超水光敏感肌修复"
+        },
+        {
+          "new_tag_project_name": "面部清洁补水"
+        },
+        {
+          "new_tag_project_name": "面部水润亮白"
+        }
+      ]
+    },
+    {
+      "old_id": 999,
+      "old_name": "面部自由卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "65f327e1",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "色素管理"
+        },
+        {
+          "index": 2,
+          "label": "英国胶原枪"
+        },
+        {
+          "index": 3,
+          "label": "暨大超水光"
+        },
+        {
+          "index": 4,
+          "label": "胶原瓷光肌"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 643
+        },
+        {
+          "old_project_id": 453
+        },
+        {
+          "old_project_id": 679
+        },
+        {
+          "old_project_id": 697
+        }
+      ]
+    },
+    {
+      "old_id": 1021,
+      "old_name": "身体自由卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "3c0a37da",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "古法筋疗"
+        },
+        {
+          "index": 2,
+          "label": "粉红丝带"
+        },
+        {
+          "index": 3,
+          "label": "五行灸"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 715
+        },
+        {
+          "old_project_id": 733
+        },
+        {
+          "old_project_id": 751
+        }
+      ]
+    },
+    {
+      "old_id": 1043,
+      "old_name": "王牌 · 幸 福 臀",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "283fe2a1",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 1065,
+      "old_name": "英诺深度补水护理-A",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "d8e4388c",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1087,
+      "old_name": "英诺亮肤美白套-B",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e9f2fa0e",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1109,
+      "old_name": "自由卡-B",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "0e9be5e5",
+      "old_write_times": 15,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "柔嘉四大排寒"
+        },
+        {
+          "index": 2,
+          "label": "凤飞飞堂 丰韵翘臀"
+        },
+        {
+          "index": 3,
+          "label": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "index": 4,
+          "label": "比利时纯姬颈部"
+        },
+        {
+          "index": 5,
+          "label": "比利时纯姬眼部"
+        },
+        {
+          "index": 6,
+          "label": "比利时纯姬面部"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "柔嘉四大排寒"
+        },
+        {
+          "old_project_id": 911
+        },
+        {
+          "new_tag_project_name": "柔嘉肩颈气循环疏通"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬颈部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬面部"
+        }
+      ]
+    },
+    {
+      "old_id": 1154,
+      "old_name": "幸 福 臀",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "d17db74e",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 1178,
+      "old_name": "王牌 · 小蛮腰",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "45b9325e",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 1304
+        }
+      ]
+    },
+    {
+      "old_id": 1278,
+      "old_name": "幸 福 臀（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "eb434c3c",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 1304,
+      "old_name": "小蛮腰（单次）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "8b8dcf64",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 1332,
+      "old_name": "真久美雕",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "16b11f1f",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1358,
+      "old_name": "特色 · 荷尔蒙调理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "2ef7c783",
+      "old_write_times": 20,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1384,
+      "old_name": "特色 · BTH发烧大师",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e723e2de",
+      "old_write_times": 15,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1410,
+      "old_name": "三型胶原面部私教",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "26456aeb",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1436,
+      "old_name": "特色 · CDPD",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "4df21746",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1462,
+      "old_name": "特色 · 脊柱骨盆特调",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "f4f68c48",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1488,
+      "old_name": "特色 · 春德堂",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "19d4ed43",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 1514,
+      "old_name": "氨基酸净颜粉",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "4aadd6f7",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1540,
+      "old_name": "臻颜靓肌精华霜",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "97080cd5",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1566,
+      "old_name": "纯姬焕彩眼霜",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "604e379b",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1592,
+      "old_name": "白莲鲜活精华",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "fd8e1473",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1644,
+      "old_name": "面部卡（单项）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "6582ab37",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "比利时纯姬颈部"
+        },
+        {
+          "index": 2,
+          "label": "比利时纯姬眼部"
+        },
+        {
+          "index": 3,
+          "label": "比利时纯姬面部"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "比利时纯姬颈部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬面部"
+        }
+      ]
+    },
+    {
+      "old_id": 1671,
+      "old_name": "肩颈卡（单项）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "ac012ac3",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "柔嘉四大排寒"
+        },
+        {
+          "index": 2,
+          "label": "凤飞飞堂 丰韵翘臀"
+        },
+        {
+          "index": 3,
+          "label": "柔嘉肩颈气循环疏通"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "柔嘉四大排寒"
+        },
+        {
+          "old_project_id": 911
+        },
+        {
+          "new_tag_project_name": "柔嘉肩颈气循环疏通"
+        }
+      ]
+    },
+    {
+      "old_id": 1698,
+      "old_name": "莲花面膜",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "643b5b92",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1725,
+      "old_name": "焕采隔离乳液",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "89221387",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1752,
+      "old_name": "平衡精华水",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "871b6c49",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1778,
+      "old_name": "弹性水源洁面乳",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "9d85e3ac",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1804,
+      "old_name": "鱼子保湿爽肤水",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "4bf383f8",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1830,
+      "old_name": "鱼子保湿面膜",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "91c08583",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 1894,
+      "old_name": "金秋福利卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "8a2c316a",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "纯姬面部抗衰"
+        },
+        {
+          "index": 2,
+          "label": "肩颈气循环"
+        },
+        {
+          "index": 3,
+          "label": "超水光"
+        },
+        {
+          "index": 4,
+          "label": "筋疗"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "纯姬面部抗衰"
+        },
+        {
+          "new_tag_project_name": "肩颈气循环"
+        },
+        {
+          "new_tag_project_name": "超水光"
+        },
+        {
+          "old_project_id": 715
+        }
+      ]
+    },
+    {
+      "old_id": 2091,
+      "old_name": "细胞抗衰",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a50d1b9b",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2122,
+      "old_name": "超值王牌卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "55045fad",
+      "old_write_times": 3,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "超水光"
+        },
+        {
+          "index": 2,
+          "label": "胶原枪"
+        },
+        {
+          "index": 3,
+          "label": "胶原瓷光肌"
+        },
+        {
+          "index": 4,
+          "label": "色素管理"
+        },
+        {
+          "index": 5,
+          "label": "古法筋疗"
+        },
+        {
+          "index": 6,
+          "label": "粉红丝带"
+        },
+        {
+          "index": 7,
+          "label": "五行灸"
+        },
+        {
+          "index": 8,
+          "label": "幸福臀"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "超水光"
+        },
+        {
+          "old_project_id": 453
+        },
+        {
+          "old_project_id": 697
+        },
+        {
+          "old_project_id": 643
+        },
+        {
+          "old_project_id": 715
+        },
+        {
+          "old_project_id": 733
+        },
+        {
+          "old_project_id": 751
+        },
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 2227,
+      "old_name": "A卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "bcdcfa7e",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2259,
+      "old_name": "面部抗衰",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "deff6d8d",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "标签为未释义的代码",
+      "old_tags": "GDSG,GDRKT,GDSN,GDM22,LTDZ,LTLZ,LTCSG,LTKS,JYCGJ,JYSWN,JYSS"
+    },
+    {
+      "old_id": 2291,
+      "old_name": "B卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e7b0ce68",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2323,
+      "old_name": "C卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "aeed2ef1",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2355,
+      "old_name": "D卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "323d2689",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2387,
+      "old_name": "E卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "26930c69",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2419,
+      "old_name": "F卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a52b5937",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2451,
+      "old_name": "G卡（面部）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "445011b0",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2486,
+      "old_name": "399体验卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a997a874",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2518,
+      "old_name": "医美999体验卡 A",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "5751edc1",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2550,
+      "old_name": "医美999体验卡 B",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "847c265a",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2582,
+      "old_name": "医美399体验卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "32c87b62",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2614,
+      "old_name": "面部抗衰",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "5ba707d0",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2646,
+      "old_name": "身体抗衰",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "0a54a625",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "标签为未释义的代码",
+      "old_tags": "GDSG,GDRKT,GDSN,GDM22,LTDZ,LTLZ,LTCSG,LTKS,JYCGJ,JYSWN,JYSS"
+    },
+    {
+      "old_id": 2678,
+      "old_name": "健康调理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e64964e8",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "标签为未释义的代码",
+      "old_tags": "GDSG,GDRKT,GDSN,GDM22,LTDZ,LTLZ,LTCSG,LTKS,JYCGJ,JYSWN,JYSS"
+    },
+    {
+      "old_id": 2856,
+      "old_name": "急救三件套A",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "63769dbf",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2891,
+      "old_name": "急救三件套B",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "318193e0",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 2948,
+      "old_name": "开门红-999",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "962cc174",
+      "old_write_times": 6,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "福袋分组未展开为实际项目",
+      "old_tags": "福袋一（任选三项）,福袋二（任选两项）,福袋三（任选一项）"
+    },
+    {
+      "old_id": 3075,
+      "old_name": "轻体躿（单次）",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "1cb0449d",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 3112,
+      "old_name": "CGF (眼周或口周)（单次）",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "22a6e81c",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 3149,
+      "old_name": "fotome眼部抗衰（单次）",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "69af3732",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 3186,
+      "old_name": "爆水胶原（单次）",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "c687f204",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 3223,
+      "old_name": "2025开门红福袋",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "fd69b98f",
+      "old_write_times": 3,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "比利时 纯姬面部"
+        },
+        {
+          "index": 2,
+          "label": "比利时 纯姬眼部"
+        },
+        {
+          "index": 3,
+          "label": "毛孔收细"
+        },
+        {
+          "index": 4,
+          "label": "比利时纯姬颈部"
+        },
+        {
+          "index": 5,
+          "label": "肩颈无忧"
+        },
+        {
+          "index": 6,
+          "label": "魔蝎刷"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "比利时 纯姬面部"
+        },
+        {
+          "new_tag_project_name": "比利时 纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "毛孔收细"
+        },
+        {
+          "new_tag_project_name": "比利时纯姬颈部"
+        },
+        {
+          "old_project_id": 845
+        },
+        {
+          "new_tag_project_name": "魔蝎刷"
+        }
+      ]
+    },
+    {
+      "old_id": 3260,
+      "old_name": "爆水胶原（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e067f401",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 3297,
+      "old_name": "fotome眼部抗衰（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "0737ce08",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 3334,
+      "old_name": "CGF (眼周或口周)（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "31c07db7",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 3371,
+      "old_name": "轻体躿（单次）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "531256ac",
+      "old_write_times": 1,
+      "target_type": 6,
+      "kind": "project"
+    },
+    {
+      "old_id": 3458,
+      "old_name": "王牌 · 暨大超水光（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "6aeb425c",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 679
+        }
+      ]
+    },
+    {
+      "old_id": 3496,
+      "old_name": "王牌 · 胶原枪（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "d8fd3571",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 453
+        }
+      ]
+    },
+    {
+      "old_id": 3534,
+      "old_name": "王牌 · 胶原瓷光肌（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "fb88d75f",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 697
+        }
+      ]
+    },
+    {
+      "old_id": 3572,
+      "old_name": "王牌 · 色素管理（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "74b22bb7",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "暨大超水光"
+        },
+        {
+          "index": 2,
+          "label": "色素管理"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 679
+        },
+        {
+          "old_project_id": 643
+        }
+      ]
+    },
+    {
+      "old_id": 3610,
+      "old_name": "王牌 · 古法筋疗（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "dcf8fed6",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 715
+        }
+      ]
+    },
+    {
+      "old_id": 3648,
+      "old_name": "王牌 · 粉红丝带（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "ef58a876",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 733
+        }
+      ]
+    },
+    {
+      "old_id": 3686,
+      "old_name": "王牌 · 五行灸（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "bcb73529",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 751
+        }
+      ]
+    },
+    {
+      "old_id": 3724,
+      "old_name": "王牌 · 幸 福 臀（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "95b272c4",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 3762,
+      "old_name": "王牌 · 小蛮腰（体验卡）",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "c568c868",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "related": [
+        {
+          "old_project_id": 1304
+        }
+      ]
+    },
+    {
+      "old_id": 3817,
+      "old_name": "王牌套餐—— 全效护理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "5d56fe74",
+      "old_write_times": 16,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "八倍水动力"
+        },
+        {
+          "index": 2,
+          "label": "晶莹美目眼护"
+        },
+        {
+          "index": 3,
+          "label": "强效颈护"
+        },
+        {
+          "index": 4,
+          "label": "毛孔收细"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 889
+        },
+        {
+          "old_project_id": 867
+        },
+        {
+          "new_tag_project_name": "强效颈护"
+        },
+        {
+          "new_tag_project_name": "毛孔收细"
+        }
+      ]
+    },
+    {
+      "old_id": 3855,
+      "old_name": "特色套餐—— 白美人",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "cbc7d55e",
+      "old_write_times": 9,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "(比利时纯姬)焕采皙白"
+        },
+        {
+          "index": 2,
+          "label": "(暨美梵品)超水光"
+        },
+        {
+          "index": 3,
+          "label": "(露妃诗)焕采美肌色素"
+        },
+        {
+          "index": 4,
+          "label": "(M22)瓷肌女王"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "(比利时纯姬)焕采皙白"
+        },
+        {
+          "new_tag_project_name": "(暨美梵品)超水光"
+        },
+        {
+          "new_tag_project_name": "(露妃诗)焕采美肌色素"
+        },
+        {
+          "new_tag_project_name": "(M22)瓷肌女王"
+        }
+      ]
+    },
+    {
+      "old_id": 3893,
+      "old_name": "特色套餐—— 内脂代谢",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "0fa75ca1",
+      "old_write_times": 9,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "魔蝎刷体（单部位）"
+        },
+        {
+          "index": 2,
+          "label": "古法筋疗（单部位）"
+        },
+        {
+          "index": 3,
+          "label": "BTL代谢（单部位）"
+        },
+        {
+          "index": 4,
+          "label": "少女线（单部位）"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "魔蝎刷体（单部位）"
+        },
+        {
+          "new_tag_project_name": "古法筋疗（单部位）"
+        },
+        {
+          "new_tag_project_name": "BTL代谢（单部位）"
+        },
+        {
+          "new_tag_project_name": "少女线（单部位）"
+        }
+      ]
+    },
+    {
+      "old_id": 3931,
+      "old_name": "2025女神季拼团活动",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "f09a4869",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 3969,
+      "old_name": "2025女神季拼团活动",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "a3588bc8",
+      "old_write_times": 1,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 4010,
+      "old_name": "A卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "997e06f0",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4051,
+      "old_name": "B卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "b25890c9",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4092,
+      "old_name": "C卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "f521172d",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4133,
+      "old_name": "D卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "5aaac4a2",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4174,
+      "old_name": "E卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "2c74d92f",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4215,
+      "old_name": "F卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "b5db2b23",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4256,
+      "old_name": "G卡（身体）",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "ef308fd4",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4355,
+      "old_name": "开放日98卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "4d0f5057",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "超水光"
+        },
+        {
+          "index": 2,
+          "label": "黄金面雕"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "超水光"
+        },
+        {
+          "new_tag_project_name": "黄金面雕"
+        }
+      ]
+    },
+    {
+      "old_id": 4394,
+      "old_name": "开放日 （自由卡）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "b6c6b4e9",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "比利时 纯姬面部"
+        },
+        {
+          "index": 2,
+          "label": "比利时 纯姬眼部"
+        },
+        {
+          "index": 3,
+          "label": "毛孔收细 黑头"
+        },
+        {
+          "index": 4,
+          "label": "比利时 纯姬颈部"
+        },
+        {
+          "index": 5,
+          "label": "肩颈无忧"
+        },
+        {
+          "index": 6,
+          "label": "魔蝎刷"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "比利时 纯姬面部"
+        },
+        {
+          "new_tag_project_name": "比利时 纯姬眼部"
+        },
+        {
+          "new_tag_project_name": "毛孔收细 黑头"
+        },
+        {
+          "new_tag_project_name": "比利时 纯姬颈部"
+        },
+        {
+          "old_project_id": 845
+        },
+        {
+          "new_tag_project_name": "魔蝎刷"
+        }
+      ]
+    },
+    {
+      "old_id": 4433,
+      "old_name": "开放日 超水光 面膜",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "ce152b68",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 4472,
+      "old_name": "开放日4980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "c909d396",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "超水光"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "超水光"
+        }
+      ]
+    },
+    {
+      "old_id": 4511,
+      "old_name": "开放日（胶原蚕丝蛋白补水）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e9358c23",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "胶原蚕丝蛋白补水"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "胶原蚕丝蛋白补水"
+        }
+      ]
+    },
+    {
+      "old_id": 4550,
+      "old_name": "开放日（超水光）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "2488fafb",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 4589,
+      "old_name": "开放日（黄金面雕）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "c16d1791",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "黄金面雕"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "黄金面雕"
+        }
+      ]
+    },
+    {
+      "old_id": 4628,
+      "old_name": "开放日（蛋白靓颜）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "3bb171e6",
+      "old_write_times": 6,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "蛋白靓颜"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "蛋白靓颜"
+        }
+      ]
+    },
+    {
+      "old_id": 4667,
+      "old_name": "开放日6980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "1dc92202",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "黄金面雕"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "黄金面雕"
+        }
+      ]
+    },
+    {
+      "old_id": 4706,
+      "old_name": "开放日9980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "7da9e49d",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "超水光"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "超水光"
+        }
+      ]
+    },
+    {
+      "old_id": 4745,
+      "old_name": "特色 · 色素管理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "df5eb6b9",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "暨大超水光"
+        },
+        {
+          "index": 2,
+          "label": "色素管理"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 679
+        },
+        {
+          "old_project_id": 643
+        }
+      ]
+    },
+    {
+      "old_id": 4784,
+      "old_name": "王牌项目 超值礼遇",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "5e9eff11",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "筋疗"
+        },
+        {
+          "index": 2,
+          "label": "五行灸"
+        },
+        {
+          "index": 3,
+          "label": "粉红丝带"
+        },
+        {
+          "index": 4,
+          "label": "小蛮腰"
+        },
+        {
+          "index": 5,
+          "label": "幸福臀"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 715
+        },
+        {
+          "old_project_id": 751
+        },
+        {
+          "old_project_id": 733
+        },
+        {
+          "old_project_id": 1304
+        },
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 4823,
+      "old_name": "特色理疗 限定放送",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "f8179d7b",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "ITB魔法仪"
+        },
+        {
+          "index": 2,
+          "label": "脊柱盆骨"
+        },
+        {
+          "index": 3,
+          "label": "脏腑"
+        },
+        {
+          "index": 4,
+          "label": "肠排"
+        },
+        {
+          "index": 5,
+          "label": "荷尔蒙"
+        },
+        {
+          "index": 6,
+          "label": "春德堂瑶烫"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "ITB魔法仪"
+        },
+        {
+          "new_tag_project_name": "脊柱盆骨"
+        },
+        {
+          "new_tag_project_name": "脏腑"
+        },
+        {
+          "new_tag_project_name": "肠排"
+        },
+        {
+          "new_tag_project_name": "荷尔蒙"
+        },
+        {
+          "new_tag_project_name": "春德堂瑶烫"
+        }
+      ]
+    },
+    {
+      "old_id": 4862,
+      "old_name": "开放日（三伏灸）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "df225079",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "三伏灸"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "三伏灸"
+        }
+      ]
+    },
+    {
+      "old_id": 4901,
+      "old_name": "开放日（固本培元）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e4a1c02c",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "固本培元"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "固本培元"
+        }
+      ]
+    },
+    {
+      "old_id": 4940,
+      "old_name": "开放日（古法筋疗）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "6785e1cf",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "古法筋疗"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 715
+        }
+      ]
+    },
+    {
+      "old_id": 4979,
+      "old_name": "开放日（古法筋疗 单次）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "3b8ce32c",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "古法筋疗"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 715
+        }
+      ]
+    },
+    {
+      "old_id": 5018,
+      "old_name": "开放日（脏腑调理 单次）副卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "c628a5ac",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "脏腑调理"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "脏腑调理"
+        }
+      ]
+    },
+    {
+      "old_id": 5057,
+      "old_name": "开放日98卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "c8c769ef",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "超水光"
+        },
+        {
+          "index": 2,
+          "label": "黄金面雕"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "超水光"
+        },
+        {
+          "new_tag_project_name": "黄金面雕"
+        }
+      ]
+    },
+    {
+      "old_id": 5096,
+      "old_name": "开放日4980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a9f891a9",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "筋疗养生"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "筋疗养生"
+        }
+      ]
+    },
+    {
+      "old_id": 5135,
+      "old_name": "开放日9980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "479291f6",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "私定脏腑项目"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "私定脏腑项目"
+        }
+      ]
+    },
+    {
+      "old_id": 5174,
+      "old_name": "开放日2980卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "190884c7",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "肩颈无忧项目"
+        }
+      ],
+      "related": [
+        {
+          "old_project_id": 845
+        }
+      ]
+    },
+    {
+      "old_id": 5355,
+      "old_name": "焕颜亮肤套餐---特级补水",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "85c7743b",
+      "old_write_times": 4,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "特级补水面护"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "特级补水面护"
+        }
+      ]
+    },
+    {
+      "old_id": 5396,
+      "old_name": "露妃诗色素管理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "00058b62",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5437,
+      "old_name": "超水光",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "1aae2687",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5478,
+      "old_name": "固本培元套餐——固本培元",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a6a582d6",
+      "old_write_times": 4,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "normal",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "固本培元"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "固本培元"
+        }
+      ]
+    },
+    {
+      "old_id": 5519,
+      "old_name": "固本培元——艾灸特调",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "33991d36",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5560,
+      "old_name": "固本培元——古法筋疗",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "903a87ab",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5601,
+      "old_name": "固本培元——藏药特调",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "804dc452",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5642,
+      "old_name": "基因魔法瘦——即刻瘦",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "01efb166",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5683,
+      "old_name": "基因魔法瘦——AI魔法瘦",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "f7edff71",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5724,
+      "old_name": "基因魔法瘦——纤体收紧",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "1aa79688",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5765,
+      "old_name": "基因魔法瘦——魔蝎刷体",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "8b8fec40",
+      "old_write_times": 4,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 5806,
+      "old_name": "秋日悦己美肤团",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "8f3c6f40",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 5993,
+      "old_name": "科技抗衰999卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "8c1159df",
+      "old_write_times": 3,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "含未释义的项目代码",
+      "old_tags": "◆spl,◆seyo,◆水光针,◆皮秒,◆光子嫩肤,◆热拉提,◆小V脸,◆fotome眼部"
+    },
+    {
+      "old_id": 6036,
+      "old_name": "脏腑调理",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "a19095b9",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6307,
+      "old_name": "粉红丝带开放日98体验",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "e59d39e2",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6353,
+      "old_name": "粉红丝带开放日3980套餐",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "95e5d7d4",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 6399,
+      "old_name": "粉红丝带开放日6980套餐",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "7a8dbbe3",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 6445,
+      "old_name": "粉红丝带开放日9980套餐",
+      "old_product_type": 0,
+      "old_is_show": 0,
+      "old_sku_unique": "984e434e",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 6491,
+      "old_name": "3980套餐——康韵净化疗程",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "7381d27e",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6537,
+      "old_name": "3980套餐——私定粉红丝带",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "dad862cc",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6583,
+      "old_name": "3980套餐——丰韵翘臀",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "5aae8499",
+      "old_write_times": 3,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6629,
+      "old_name": "6980套餐——康韵净化疗程",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "107970d2",
+      "old_write_times": 20,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6675,
+      "old_name": "6980套餐——私定粉红丝带",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "95f5b4f2",
+      "old_write_times": 1,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6721,
+      "old_name": "6980套餐——丰韵翘臀",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "7d25c19e",
+      "old_write_times": 6,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6767,
+      "old_name": "9980套餐——胸部私定疗程",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "1e27b84b",
+      "old_write_times": 10,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6813,
+      "old_name": "9980套餐——康韵净化疗程",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "1cc0fae8",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6859,
+      "old_name": "9980套餐——丰韵翘臀",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "d6117b02",
+      "old_write_times": 5,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6905,
+      "old_name": "第十届美容文化节",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "543f397b",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 6959,
+      "old_name": "2026开门红 美丽特权",
+      "old_product_type": 0,
+      "old_is_show": 1,
+      "old_sku_unique": "3e94cd1d",
+      "old_write_times": 0,
+      "target_type": 0,
+      "kind": "product"
+    },
+    {
+      "old_id": 7005,
+      "old_name": "2026开门红 健康特权",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "accc4da0",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 7051,
+      "old_name": "2026开门红 美丽特权",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "c0f234f2",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 7097,
+      "old_name": "2026约惠3月 王炸卡",
+      "old_product_type": 4,
+      "old_is_show": 0,
+      "old_sku_unique": "01e94dda",
+      "old_write_times": 12,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    },
+    {
+      "old_id": 7210,
+      "old_name": "2026秋季拼团 新人超值卡",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "89915849",
+      "old_write_times": 8,
+      "target_type": 5,
+      "kind": "card",
+      "card_rule": "choice_count",
+      "tag_occurrences": [
+        {
+          "index": 1,
+          "label": "特级补水面部"
+        },
+        {
+          "index": 2,
+          "label": "特级补水面部"
+        },
+        {
+          "index": 3,
+          "label": "背部理疗"
+        },
+        {
+          "index": 4,
+          "label": "幸福臀"
+        }
+      ],
+      "related": [
+        {
+          "new_tag_project_name": "特级补水面部"
+        },
+        {
+          "new_tag_project_name": "背部理疗"
+        },
+        {
+          "old_project_id": 1278
+        }
+      ]
+    },
+    {
+      "old_id": 7257,
+      "old_name": "2026秋季拼团  老客宠粉卡A",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "e6643b55",
+      "old_write_times": 4,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "重复的逐项1次标签与SKU总次数不一致",
+      "old_tags": "超水光1次,胶原三温暖1次,胶原三温暖1次,古法筋疗1次,古法筋疗1次,沉香灸1次"
+    },
+    {
+      "old_id": 7304,
+      "old_name": "2026秋季拼团 老客宠粉卡B",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "b576fdd3",
+      "old_write_times": 3,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "重复的逐项1次标签与SKU总次数不一致",
+      "old_tags": "BTH深源热1次,参滋骨1次,美雕单部位1次,美雕单部位1次,参呼吸1次,瑶烫1次"
+    },
+    {
+      "old_id": 7351,
+      "old_name": "2026秋季拼团 共享健康美丽卡",
+      "old_product_type": 4,
+      "old_is_show": 1,
+      "old_sku_unique": "b6eccb46",
+      "old_write_times": 2,
+      "target_type": 5,
+      "kind": "shell",
+      "reason": "无标签且无可靠单次项目对应"
+    }
+  ]
+}

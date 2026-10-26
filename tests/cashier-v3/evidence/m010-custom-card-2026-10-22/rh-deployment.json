@@ -1,0 +1,14 @@
+{
+  "commit": "f4005e6682bfe04d2397ffa1bd76c8141fac2c40",
+  "site": "rh",
+  "state": "deployed-verified",
+  "remote": "/www/backup/m010-rh-f4005e66-20261022",
+  "prepared": "{\"result\":\"PASS\",\"mode\":\"prepare\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":12,\"backup\":\"\\/www\\/backup\\/m010-rh-f4005e66-20261022\"}\n",
+  "beforeProbe": "{\"result\":\"PASS\",\"database\":\"ruihao\",\"readOnly\":true,\"schemaReady\":true,\"delayedActivationContract\":true,\"templateLookups\":0,\"latestUpgrade\":{\"upgrade_key\":\"20261021-024-reservation-shared-pool\",\"code_version\":\"1d6cdad46e14fb16aec1689dc1bae4bea57a22b4\",\"executed_at\":\"2026-10-21 19:23:02\"}}\n",
+  "at": "2026-10-22T02:23:18.128Z",
+  "install": "{\"result\":\"PASS\",\"mode\":\"install\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":12,\"backup\":\"\\/www\\/backup\\/m010-rh-f4005e66-20261022\"}\n",
+  "verify": "{\"result\":\"PASS\",\"mode\":\"verify\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":12,\"backup\":\"\\/www\\/backup\\/m010-rh-f4005e66-20261022\"}\n",
+  "afterProbe": "{\"result\":\"PASS\",\"database\":\"ruihao\",\"readOnly\":true,\"schemaReady\":true,\"delayedActivationContract\":true,\"templateLookups\":102,\"latestUpgrade\":{\"upgrade_key\":\"20261021-024-reservation-shared-pool\",\"code_version\":\"1d6cdad46e14fb16aec1689dc1bae4bea57a22b4\",\"executed_at\":\"2026-10-21 19:23:02\"}}\n",
+  "serviceStatus": "manager_count=1\nmanager_pids=31461\n",
+  "verifiedAt": "2026-10-22T02:30:33.288Z"
+}

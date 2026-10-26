@@ -1,0 +1,55 @@
+{
+  "base_head": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+  "development_head": "2bb0ace05e65b7a8406393525fb93386a0a1ccfb",
+  "build_source_head": "2bb0ace05e65b7a8406393525fb93386a0a1ccfb",
+  "head_change": "3b7c7cdc only changes member uniapp and evidence; mobile/report paths unchanged",
+  "files": [
+    {
+      "path": "tests/mobile-warehouse/js/r13-home-client.mjs",
+      "sha256": "0ae6f575fcd2b39e205e0f3f1d8bc22b4ae1e3518e5224915929fca67499bdf5",
+      "scope": "whole file"
+    },
+    {
+      "path": "tests/mobile-warehouse/php/r13-home-shared-sections-readonly.php",
+      "sha256": "23c5d0c3ced0cfffb68ce00b7dbc6c9fb7e56a94df525002db1960389823a4b3",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/pages.json",
+      "sha256": "40de1059aaa12d389bd05976b9c81bbd22b69a51d76cf82b1dcf8cec366f59c0",
+      "scope": "category-ranking route only; excludes existing target routes"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/category-ranking/index.uvue",
+      "sha256": "f7dc9912a87ffd4034e31413d22dca269f02e3f0a489cb17fc7e8022128ac05c",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/home/index.uvue",
+      "sha256": "2d4ddb817fd0a176ab56765dae67660e436c429f49ab065d20685e00ff962e02",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/api/mobile-home-client.uts",
+      "sha256": "2e0fd5edbda1fac8db7dc0122d208747c20d0f0c1fb5638bebc3d23eb79fd549",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/platform/merchant-dashboard-presentation.uts",
+      "sha256": "63d05f7eb35861554148b1c3676f920355d7fe3fa41471af3fc7f1662486f9d4",
+      "scope": "whole file"
+    },
+    {
+      "path": "后端代码/app/services/mobile/dashboard/MobileMerchantDashboardServices.php",
+      "sha256": "81b389acd8638a7719acdfae956c0e9b06af89405a9da31e1bc9a621cd19e1de",
+      "scope": "whole file"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "794187d5a39e929c786f163c0f9b5185a145daf17f1865e0df2cf8dd42060b70",
+      "scope": "whole file"
+    }
+  ],
+  "patch_sha256": "9128e3107dab2fe9f10b645208ae3b6a7fd2fa9af599cebb23bf8285ee9162ad",
+  "workspace_pages_sha256": "5f7a8762688cb6161514df8419737d5258f2a18128ffe73c2c451fd36ce0ffee"
+}

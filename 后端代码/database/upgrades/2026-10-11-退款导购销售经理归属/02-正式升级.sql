@@ -1,0 +1,25 @@
+-- One immutable refund attribution row per role and employee; guide rounds belong only to sales/service facts.
+CREATE TABLE IF NOT EXISTS `eb_cashier_v3_refund_attribution` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `attribution_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `tenant_id` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `store_id` bigint(20) unsigned NOT NULL,
+  `member_id` bigint(20) unsigned NOT NULL,
+  `operation_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `role` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `employee_id` bigint(20) unsigned NOT NULL,
+  `employee_name_snapshot` varchar(128) NOT NULL,
+  `employee_type_snapshot` varchar(64) NOT NULL DEFAULT '',
+  `source_sales_order_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  `source_sales_line_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT '',
+  `business_event_no` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `command_idempotency_key` varchar(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `business_date` date NOT NULL,
+  `occurred_at` bigint(20) unsigned NOT NULL,
+  `recorded_at` bigint(20) unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_attribution_id` (`attribution_id`),
+  UNIQUE KEY `uk_refund_role_employee` (`tenant_id`,`operation_id`,`role`,`employee_id`),
+  KEY `idx_refund` (`tenant_id`,`operation_id`,`role`),
+  KEY `idx_employee_date` (`tenant_id`,`employee_id`,`business_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='退款自身的导购和销售经理归属快照';

@@ -1,0 +1,17 @@
+PASS two projects cannot consume the same single shared use
+PASS 99 yuan shared card writes 99 yuan, never project allocation 23
+PASS issued rule and legacy holder exhaust atomically
+PASS exhausted selector uses shared-pool reason without false debt
+PASS legacy holder exhausted but rule pool stale blocks all alternative projects
+PASS another reservation cannot spend the exhausted pool
+PASS service void restores shared and legacy pools exactly once on replay
+PASS shared restoration stays within original total
+PASS duplicate rule restoration rejects overflow
+PASS multi-project completion preserves shared whole-yuan sequence and last-use remainder
+PASS invalid amount rolls back rule deduction and facts
+PASS normal issued card also updates its rule component
+PASS stale concurrent deduction cannot spend a changed pool
+PASS combination groups deduct independently and preserve their own purchase amounts
+PASS repeated end-service invocation cannot create a second deduction or writeoff
+PASS independent transactions serialize on the common holder lock
+PASS all synthetic cards and facts rolled back

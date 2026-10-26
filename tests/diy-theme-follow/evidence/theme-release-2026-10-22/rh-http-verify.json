@@ -1,0 +1,34 @@
+{
+  "site": "rh",
+  "results": [
+    {
+      "entry": "member",
+      "assetsVerified": 3
+    },
+    {
+      "entry": "admin",
+      "assetsVerified": 4
+    },
+    {
+      "entry": "cashier",
+      "assetsVerified": 2
+    },
+    {
+      "entry": "cashier_preview",
+      "assetsVerified": 2
+    }
+  ],
+  "theme": {
+    "status": 200,
+    "msg": "ok",
+    "data": {
+      "status": 7,
+      "navigation": 1
+    }
+  },
+  "regression": {
+    "projection": "PASS",
+    "menuCount": 22
+  },
+  "time": "2026-10-22T05:14:33.599Z"
+}

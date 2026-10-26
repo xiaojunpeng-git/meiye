@@ -1,0 +1,35 @@
+{
+  "acceptance": "production_execution_stability_and_answer_latency_local_v1",
+  "recorded_at": "2026-09-17T18:53:00+08:00",
+  "scope": "authorized_local_instance; deidentified question; no historical-data reconciliation; no business values, identities, prompts, answers, credentials, or run identifiers retained",
+  "model": "Qwen/Qwen2.5-32B-Instruct",
+  "runtime": {
+    "execution_consumer": {
+      "container": "mohe-ai-execution-worker",
+      "restart_policy": "unless-stopped",
+      "restart_test": "stopped only while no active Run existed; an admitted durable Run completed after restart",
+      "restart_result": {
+        "final_status": "COMPLETED",
+        "elapsed_ms": 15421,
+        "dispatch_count": 1,
+        "model_attempt_count": 3
+      }
+    },
+    "supervisor": {
+      "container": "mohe-ai-supervisor",
+      "restart_policy": "unless-stopped",
+      "restart_result": "running with a fresh supervisor heartbeat"
+    }
+  },
+  "complete_answer_sample": {
+    "final_status": "COMPLETED",
+    "server_answer_ms": 13696,
+    "queue_ms": 400,
+    "execution_ms": 13296,
+    "model_total_ms": 12838,
+    "reader_total_ms": 93,
+    "model_attempt_count": 3,
+    "business_records_modified": false
+  },
+  "interpretation": "The local asynchronous path is durable and recovers from a consumer restart without duplicate execution. Model calls are the dominant latency; queue and Reader are not the current bottleneck. One local sample is not a production P50/P95 or a before/after performance claim."
+}

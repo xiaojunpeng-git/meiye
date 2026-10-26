@@ -1,0 +1,23 @@
+{
+  "manifestVersion": "mobile-auth-identity-writers-v1",
+  "entries": [
+    {
+      "id": "user-services-set-user-info",
+      "sourcePath": "后端代码/app/services/user/UserServices.php",
+      "symbol": "setUserInfo",
+      "operation": "CREATE|CREATE_WITHOUT_PHONE",
+      "canonicalMethod": "ensureUserIdentity|createUserWithoutPhoneIdentity",
+      "testEvidence": "php/canonical-identity-contract.php",
+      "legacyDisposition": "CANONICAL_ADAPTED"
+    },
+    {
+      "id": "login-services-update-user-info",
+      "sourcePath": "后端代码/app/services/user/LoginServices.php",
+      "symbol": "updateUserInfo",
+      "operation": "BIND",
+      "canonicalMethod": "bindPhoneIdentity",
+      "testEvidence": "php/canonical-identity-contract.php",
+      "legacyDisposition": "CANONICAL_ADAPTED"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+    "recorded_at": "2026-10-11T22:55:48+08:00",
+    "run_id": "ceda650f83f0549f596f6925339ecbdf45718f3b3013adea",
+    "original_raw_result_preserved": true,
+    "raw_reason": "AI_UNSUPPORTED_CONDITION",
+    "classification": "test_oracle_legacy_carrier_incompatibility",
+    "normalized_condition": {
+        "subject": "member",
+        "relation": "all",
+        "conditions": [
+            {
+                "metric_code": "cash_performance",
+                "operator": "eq",
+                "value": 498000
+            }
+        ]
+    },
+    "semantic_equivalence": true,
+    "fresh_legacy_results_equal": true,
+    "same_authority": true,
+    "actual_count": 1,
+    "fresh_legacy_count": 1,
+    "fresh_condition_set_count": 1,
+    "count_equivalence": true,
+    "query_shapes": {
+        "actual": "threshold_count",
+        "independent": "condition_count"
+    },
+    "source_sha256": {
+        "app\/services\/query\/metric\/MetricReadViewServices.php": "b77940267ce3c2351488152570b7e2eb5a74dcae72205cd7b4e76307fd78f020",
+        "app\/services\/query\/metric\/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+        "app\/services\/metric\/MetricDictionaryServices.php": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7"
+    },
+    "corrected_functional_pass": true
+}

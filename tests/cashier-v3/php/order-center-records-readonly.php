@@ -1,0 +1,357 @@
+<?php
+
+$root = dirname(__DIR__, 3);
+$backendRoot = $root . '/后端代码';
+require $backendRoot . '/app/services/cashier/v3/CashierV3ResultCode.php';
+require $backendRoot . '/app/services/cashier/v3/CashierV3CommandException.php';
+require $backendRoot . '/app/services/cashier/v3/CashierV3ResourceScope.php';
+require $backendRoot . '/app/services/cashier/v3/CashierV3OperatorScope.php';
+require $backendRoot . '/app/services/cashier/v3/CashierV3DataScopeContext.php';
+require $backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php';
+
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices;
+
+$passed = 0;
+$failed = 0;
+
+function recordOk(string $label, bool $condition, $detail = null): void
+{
+    global $passed, $failed;
+    if ($condition) {
+        $passed++;
+        echo "[PASS] {$label}\n";
+        return;
+    }
+    $failed++;
+    echo "[FAIL] {$label}";
+    if ($detail !== null) {
+        echo ' :: ' . json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    echo "\n";
+}
+
+function recordScope(string $mode, $stores, array $features = ['cashier.v3.order_center']): CashierV3DataScopeContext
+{
+    return new CashierV3DataScopeContext(
+        71,
+        701,
+        133,
+        'tenant:default',
+        'organization:8',
+        $stores,
+        $mode,
+        [],
+        $mode === CashierV3DataScopeContext::MODE_ALL,
+        $mode === CashierV3DataScopeContext::MODE_ALL ? 'test-super' : '',
+        'permission-v2',
+        $features,
+        ['account' => 'order-center-record-test']
+    );
+}
+
+$operator = new CashierV3OperatorScope(133, 71, 'organization:8', 'tenant:default');
+$orderCenterSource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
+$salesOrderQuerySource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');
+$orderProjectionSource = (string)file_get_contents($root . '/前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js');
+$recordDetailOverlaySource = (string)file_get_contents($root . '/前端代码/cashier-v3/src/components/order/BusinessRecordDetailOverlay.vue');
+$calls = [];
+$reader = function (string $operation, array $context) use (&$calls): array {
+    $calls[] = ['operation' => $operation, 'context' => $context];
+    return [
+        'records' => [[
+            'id' => 'legacy-card-upgrade:1',
+            'operationType' => 'card_upgrade',
+            'operationTypeLabel' => '卡升级',
+        ]],
+        'total' => 1,
+    ];
+};
+$service = new CashierV3OrderCenterRecordQueryServices($reader);
+$storesScope = recordScope(CashierV3DataScopeContext::MODE_STORES, [133]);
+
+$page = $service->queryRecords([
+    'recordType' => 'card_operation',
+    'keyword' => '卡升级',
+    'storeIds' => [133, 999],
+    'page' => 1,
+    'pageSize' => 20,
+], $operator, $storesScope);
+$queryCall = $calls[0]['context']['criteria'] ?? [];
+recordOk('卡操作中文类型转换为严格操作码', ($queryCall['operationType'] ?? '') === 'card_upgrade'
+    && ($queryCall['keyword'] ?? 'x') === '', $queryCall);
+recordOk('客户端门店只能与服务端门店范围取交集', ($queryCall['allowedStoreIds'] ?? null) === [133], $queryCall);
+recordOk('合法订单中心记录返回 offset 分页契约', $page['recordType'] === 'card_operation'
+    && $page['total'] === 1
+    && $page['page'] === 1
+    && $page['pageSize'] === 20);
+recordOk('服务权益来源不向页面泄漏内部英文类型码', strpos($orderCenterSource, "'time_card' => '时间卡权益'") !== false
+    && strpos($orderCenterSource, "'count_card' => '次数卡权益'") !== false
+    && strpos($orderCenterSource, "'卡项权益（' . \$kind") === false);
+recordOk('退款记录只读取收银 V3 退款生命周期事实，不兼容旧退货表',
+    strpos($orderCenterSource, "CashierV3OrderLifecycleServices::OPERATION_TABLE") !== false
+    && strpos($orderCenterSource, "->where('rlo.operation_type', 'refund')") !== false
+    && strpos($orderCenterSource, "->where('rlo.status', 'succeeded')") !== false
+    && strpos($orderCenterSource, "Db::name('store_order_refund')") === false
+    && strpos($orderCenterSource, "'refundStatus' => (string)\$row['status'] === 'voided' ? '已作废' : '已退款'") !== false);
+recordOk('退款页签使用退款记录名称', strpos($orderCenterSource, "['key' => 'refund', 'label' => '退款记录'") !== false);
+recordOk('订单中心投影合同统一升级至退款事实 v3',
+    strpos($orderCenterSource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
+    && strpos($salesOrderQuerySource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
+    && strpos($orderProjectionSource, "ORDER_CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false);
+recordOk('卡升级和项目升级的关联销售订单号只从结算权威记录关联，不把结账请求号当业务单号',
+    strpos($orderCenterSource, "->leftJoin('cashier_v3_card_operation_settlement s'") !== false
+    && strpos($orderCenterSource, "o.tenant_id = s.tenant_id AND o.order_id = s.sales_order_id") !== false
+    && strpos($orderCenterSource, "'o.order_no AS sales_order_no'") !== false
+    && strpos($orderCenterSource, "'salesOrderNo' => \$row['sales_order_no']") !== false
+    && strpos($orderCenterSource, "'salesOrderNo' => \$row['checkout_request_id']") === false);
+recordOk('卡转让进入订单中心卡操作白名单并使用中文筛选标签',
+    strpos($orderCenterSource, "'card_transfer',") !== false
+    && strpos($orderCenterSource, "'card_transfer' => '卡转让'") !== false);
+// Historical replacement details must render from the immutable operation
+// snapshot, so later card changes cannot erase or rename their source lines.
+$sourceContentMethod = new ReflectionMethod($service, 'cardOperationSourceContent');
+$replacementSourceContent = $sourceContentMethod->invoke($service, [
+    'operation_type' => 'project_replacement',
+    'card_name_snapshot' => '6980随心挑',
+    'result_snapshot_json' => json_encode([
+        'replacementSnapshot' => ['sourceLines' => [
+            ['projectName' => '面部补水', 'quantity' => 2],
+            ['projectName' => '润享精华套', 'quantity' => 1],
+        ]],
+    ], JSON_UNESCAPED_UNICODE),
+]);
+recordOk('项目替换详情展示冻结的多来源项目明细',
+    $replacementSourceContent === "6980随心挑\n面部补水 × 2次\n润享精华套 × 1次",
+    $replacementSourceContent);
+recordOk('订单详情保留来源项目换行展示',
+    strpos($recordDetailOverlaySource, 'white-space: pre-line;') !== false);
+
+$beforeBlocked = count($calls);
+$blocked = $service->queryRecords([
+    'recordType' => 'card_operation',
+    'storeIds' => [999],
+], $operator, $storesScope);
+recordOk('完全越权门店 fail-closed 且不访问读取器', $blocked['total'] === 0
+    && $blocked['dataStatus'] === 'permission_filtered'
+    && count($calls) === $beforeBlocked);
+
+$servicePage = $service->queryRecords([
+    'recordType' => 'service',
+    'topFilters' => [
+        ['field' => 'business_date', 'value' => '2026-08-02'],
+        ['field' => 'member_name', 'value' => '会员甲'],
+        ['field' => 'unexpected_sql', 'value' => 'should-not-pass'],
+    ],
+    'sorts' => [
+        ['field' => 'service_completed_at', 'direction' => 'asc'],
+        ['field' => 'unexpected_sql', 'direction' => 'desc'],
+    ],
+], $operator, $storesScope);
+$serviceCall = $calls[count($calls) - 1]['context']['criteria'] ?? [];
+recordOk('服务记录进入同一只读查询契约', $servicePage['recordType'] === 'service'
+    && $servicePage['total'] === 1
+    && count($calls) === $beforeBlocked + 1);
+recordOk('服务统一查询只接受白名单筛选与排序字段', ($serviceCall['businessDateFrom'] ?? '') === '2026-08-02'
+    && ($serviceCall['businessDateTo'] ?? '') === '2026-08-02'
+    && ($serviceCall['topFilters'] ?? []) === ['member_name' => '会员甲']
+    && ($serviceCall['sorts'] ?? []) === [[
+    'field' => 'service_completed_at', 'direction' => 'asc',
+]], $serviceCall);
+$drillPayload = [
+    'recordType' => 'service', 'storeIds' => [133], 'dataScope' => 'all',
+    'servicePerformanceDrilldown' => [
+        'employeeId' => 1233, 'storeId' => 133,
+        'from' => '2026-09-01', 'to' => '2026-09-23', 'dayOfMonth' => 19,
+    ],
+];
+$service->queryRecords($drillPayload, $operator, $storesScope);
+$drillCriteria = $calls[count($calls) - 1]['context']['criteria'] ?? [];
+recordOk('手艺人报表下钻保留员工、门店、事实发生日期和作废审计范围',
+    ($drillCriteria['servicePerformanceDrilldown'] ?? null) === $drillPayload['servicePerformanceDrilldown']
+    && ($drillCriteria['allowedStoreIds'] ?? []) === [133]
+    && ($drillCriteria['dataScope'] ?? '') === 'all');
+$drillCalls = count($calls);
+$blockedDrill = $service->queryRecords(array_replace($drillPayload, ['storeIds' => [999]]), $operator, $storesScope);
+recordOk('手艺人报表下钻不得越过订单中心门店权限',
+    $blockedDrill['total'] === 0 && count($calls) === $drillCalls);
+recordOk('手艺人报表下钻按事实日期而非服务日期过滤原记录',
+    strpos($orderCenterSource, "if (\$performanceDrilldown === null)") !== false
+    && strpos($orderCenterSource, "\$this->applyBusinessDateRange(\$query, 'sf.business_date', \$criteria)") !== false
+    && strpos($orderCenterSource, "\$this->applyPerformanceDrilldownDate(\$fact, \$performanceDrilldown, 'pf.business_date')") !== false
+    && strpos($orderCenterSource, "->whereExists(function (\$fact) use (\$performanceDrilldown)") !== false);
+recordOk('订单中心关键词检索统一转换历史 ascii 编号与中文字段，避免中文查询排序规则冲突',
+    strpos($orderCenterSource, 'CONVERT(') !== false
+    && strpos($orderCenterSource, 'USING utf8mb4') !== false
+    && strpos($orderCenterSource, 'COLLATE utf8mb4_general_ci LIKE ?') !== false
+    && strpos($orderCenterSource, 'whereUtf8Like') !== false
+    && strpos($salesOrderQuerySource, 'whereUtf8Like') !== false);
+
+$invalid = $service->queryRecords(['recordType' => 'unknown'], $operator, $storesScope);
+recordOk('不在订单中心清单中的记录类型被拒绝', $invalid['recordType'] === ''
+    && $invalid['total'] === 0
+    && count($calls) === $drillCalls);
+
+$beforeNavigationCalls = count($calls);
+
+$partition = $service->augmentInitialPartition([
+    'total' => 2472,
+    'recordsByType' => ['sales' => []],
+    'pagesByType' => ['sales' => ['total' => 2472]],
+    'statusOptionsByType' => ['sales' => []],
+], $operator, $storesScope);
+recordOk('导航仅包含八类名称，不调用统计且保留列表分页', count($partition['businessTypes']) === 8
+    && !isset($partition['countsByType']) && count($calls) === $beforeNavigationCalls
+    && $partition['businessTypes'][0]['label'] === '消费订单'
+    && $partition['pagesByType']['sales']['total'] === 2472);
+
+$source = file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
+recordOk('页签专用数量方法及分支已删除', strpos($source, 'function counts(') === false
+    && strpos($source, '$countOnly') === false);
+recordOk('服务记录只读取完成态服务事实，不从销售订单回推', strpos($source, "Db::name('cashier_v3_entitlement_service_fact')") !== false
+    && strpos($source, "->where('sf.service_status', 'completed')") !== false
+    && strpos($source, "case 'service':") !== false);
+recordOk('服务记录使用会员详情同源的可见服务单号并携带会员编号', strpos($source, "'sf.service_record_no'") !== false
+    && strpos($source, "'serviceRecordNo' => (string)(\$row['service_record_no'] ?: \$row['service_fact_id'])") !== false
+    && strpos($source, "'memberId' => (int)\$row['member_id']") !== false);
+recordOk('服务记录优先读取同次销售单来源，纯权益回退结账来源选择', strpos($source, "'cashier_v3_sales_order so'") !== false
+    && strpos($source, 'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id') !== false
+    && strpos($source, "'cashier_v3_checkout_business_source_selection bs'") !== false
+    && strpos($source, "bs.checkout_kind = \\'sale\\'") !== false
+    && strpos($source, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false
+    && strpos($source, 'business_source_secondary_name_snapshot') !== false
+    && strpos($source, 'checkout_source_secondary_name_snapshot') !== false
+    && strpos($source, 'serviceBusinessSourceLabel') !== false);
+recordOk('服务记录只关联同次销售单号，纯权益核销不借用原卡购买单',
+    strpos($source, "'so.order_no AS sales_order_no'") !== false
+    && strpos($source, "'salesOrderNo' => (string)(\$row['sales_order_no'] ?? '')") !== false
+    && strpos($source, 'cp.legacy_order_id') === false);
+$sourceLabelMethod = new ReflectionMethod(new CashierV3OrderCenterRecordQueryServices(), 'serviceBusinessSourceLabel');
+if (PHP_VERSION_ID < 80100) $sourceLabelMethod->setAccessible(true);
+recordOk('纯权益服务读取同次结账来源，不把当前会员来源混入历史',
+    $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), [
+        'checkout_source_secondary_name_snapshot' => '',
+        'checkout_source_primary_name_snapshot' => 'A老客首护',
+        'checkout_source_label_snapshot' => 'A老客首护',
+    ]) === 'A老客首护'
+    && $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), [
+        'business_source_secondary_name_snapshot' => '本次销售来源',
+        'checkout_source_primary_name_snapshot' => 'A老客首护',
+    ]) === '本次销售来源'
+    && $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), []) === '');
+recordOk('劳动业绩汇总有效事实的正负净额，服务记录调整后不保留旧分配', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
+    && strpos($source, "->where('status', 'effective')") !== false
+    && strpos($source, "'fact_direction'") !== false
+    && strpos($source, "['amountCents'] += (int)(\$fact['amount_cents'] ?? 0)") !== false);
+recordOk('服务记录携带服务事实手工费与服务业绩类型快照', strpos($source, "'sf.labor_amount_cents'") !== false
+    && strpos($source, "'sf.labor_mode'") !== false
+    && strpos($source, "'laborFeeAmount' =>") !== false
+    && strpos($source, "'laborPerformanceType' =>") !== false
+    && strpos($source, "'laborPerformanceTypeLabel' =>") !== false);
+recordOk('服务记录携带劳动业绩分配比例和人员快照', strpos($source, 'allocation_weight_numerator') !== false
+    && strpos($source, 'allocation_weight_denominator') !== false
+    && strpos($source, "'laborPerformanceRatio' =>") !== false
+    && strpos($source, "'laborPerformanceAllocations' =>") !== false
+    && strpos($source, "employee_type_snapshot") !== false
+    && strpos($source, "rule_version_snapshot") !== false);
+recordOk('补交记录同时读取销售与充值 V3 权威补交和旧兼容记录，展示不回写旧表', strpos($source, "readV3SalesDebtRepayments") !== false
+    && strpos($source, "cashier_v3_debt_repayment_collection") !== false
+    && strpos($source, "readV3RechargeDebtRepayments") !== false
+    && strpos($source, "cashier_v3_recharge_debt_repayment") !== false
+    && strpos($source, "readLegacySupplements") !== false
+    && strpos($source, "不写入旧 store_debt_repay") !== false
+    && strpos($source, "不得为订单中心展示而回写旧 store_debt_repay") !== false);
+recordOk('补交商品名称复用欠款历史快照，充值欠款使用固定业务名称',
+    strpos($source, 'private function supplementDebtProductNames') !== false
+    && strpos($source, 'summariesForDebts($debtIds)') !== false
+    && substr_count($source, "'productName' => (string)(\$productNames") === 2
+    && strpos($source, "'productName' => '储值充值'") !== false);
+recordOk('补交商品分类实时读取平台当前档案',
+    strpos($source, 'private function supplementDebtProductCategories') !== false
+    && strpos($source, 'categorySummariesForDebts($debtIds)') !== false
+    && substr_count($source, "'productCategory' => (string)(\$productCategories") === 2
+    && strpos($source, "'productCategory' => '未分类'") !== false);
+recordOk('欠款管理直接读取欠款主表和 V3 权威映射，不从销售订单拼算余额', strpos($source, 'private function readDebts') !== false
+    && strpos($source, "Db::name('store_debt')") !== false
+    && strpos($source, "cashier_v3_debt_authority") !== false
+    && strpos($source, "cashier_v3_recharge_debt_authority") !== false
+    && strpos($source, "bcsub(\$totalDebt, \$repaidDebt, 2)") !== false
+    && strpos($source, "case 'debt':") !== false);
+recordOk('充值套餐赠送从 V3 事实读取且排除其旧权益投影，避免项目和赠券漏记或重复', strpos($source, "readV3RechargeGifts") !== false
+    && strpos($source, "cashier_v3_gift_fact") !== false
+    && strpos($source, "cashier_v3_recharge_gift_authority") !== false
+    && strpos($source, "not like', '%cashier_v3_recharge_gift%") !== false);
+recordOk('充值订单收款方式读取真实组合收款，不误用会员渠道代码', strpos($source, "'r.combination_info'") !== false
+    && strpos($source, 'rechargePaymentLabel($row)') !== false
+    && strpos($source, 'channel_type describes the member channel') !== false);
+recordOk('V3 充值现金业绩只读取有效收款事实并按门店和充值单号净额聚合', strpos($source, 'private function readRechargeEconomics') !== false
+    && strpos($source, "Db::name('cashier_v3_payment_fact')") !== false
+    && strpos($source, "->where('pf.source_document_type', 'recharge')") !== false
+    && strpos($source, "->where('pf.status', 'effective')") !== false
+    && strpos($source, "->whereIn('pf.store_id'") !== false
+    && strpos($source, "->whereIn('pf.order_no_snapshot'") !== false
+    && strpos($source, 'SUM(pf.amount_cents) AS actual_received_cents') !== false
+    && strpos($source, "->group('pf.store_id,pf.order_no_snapshot')") !== false);
+// 纯赠金充值本来没有收款事实；它的合法 0 元收款不能误判为旧充值缺事实。
+recordOk('V3 充值事实存在即使冲销后净额为零也为 ready，纯赠金 0 元同样 ready', strpos($source, 'array_key_exists($economicsKey, $rechargeEconomics)') !== false
+    && strpos($source, "'actualReceivedAmount' => \$hasV3PaymentFacts") !== false
+    && strpos($source, "'economicsDataStatus' => \$hasV3PaymentFacts || (string)\$row['recharge_type'] === 'bonus_only' ? 'ready' : 'not_ready'") !== false
+    && strpos($source, 'must not filter to forward facts only') !== false);
+recordOk('充值订单状态和筛选读取成功的追加式退款作废操作，不回写旧充值主表',
+    strpos($source, 'rechargeLifecycleOperationQuery') !== false
+    && strpos($source, 'readRechargeLifecycleOperations') !== false
+    && strpos($source, "->where('rlo.status', 'succeeded')") !== false
+    && strpos($source, "\$lifecycleOperation === 'void'") !== false
+    && strpos($source, "\$lifecycleOperation === 'refund'") !== false
+    && strpos($source, "Db::name('user_recharge')->alias('r')") !== false
+    && strpos($source, "Db::name('user_recharge')->where") === false);
+// 纯赠金没有现金业绩事实，销售人调整仍是有效的人员归属；列表取最近成功调整的冻结姓名。
+$rechargePersonnelReader = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3RechargePersonnelSnapshotReader.php');
+$rechargePersonnelEditor = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3RechargePersonnelAdjustmentServices.php');
+recordOk('充值销售人优先读取最近成功调整快照且不凭空生成现金业绩',
+    strpos($source, 'CashierV3RechargePersonnelSnapshotReader())->latest($recharges, $tenantId)') !== false
+    && strpos($rechargePersonnelReader, "->where('operation_type', 'personnel_adjustment')->where('status', 'succeeded')") !== false
+    && strpos($rechargePersonnelReader, "->field('source_order_id,store_id,request_json')->order('id', 'desc')") !== false
+    && strpos($rechargePersonnelReader, "\$person['_staff']") !== false);
+recordOk('充值销售人编辑器回显同一快照且零收款不冒充销售业绩',
+    strpos($rechargePersonnelEditor, 'CashierV3RechargePersonnelSnapshotReader())->latest([') !== false
+    && strpos($rechargePersonnelEditor, "\$amount = (int)(\$fact['amountCents'] ?? 0)") !== false
+    && strpos($rechargePersonnelEditor, "'currentSalespeople' => array_values(\$current)") !== false);
+
+$paymentLabel = new ReflectionMethod(CashierV3OrderCenterRecordQueryServices::class, 'rechargePaymentLabel');
+recordOk('充值订单组合收款展示真实方式并去重', $paymentLabel->invoke($service, [
+    'channel_type' => 'cashier',
+    'recharge_type' => 'unionpay',
+    'combination_info' => json_encode([
+        ['paymentMethod' => 'wechat'],
+        ['paymentMethod' => 'alipay'],
+        ['paymentMethod' => 'wechat'],
+    ], JSON_UNESCAPED_UNICODE),
+]) === '微信、支付宝');
+recordOk('旧充值订单组合收款缺失时回退充值方式', $paymentLabel->invoke($service, [
+    'channel_type' => 'cashier',
+    'recharge_type' => 'unionpay',
+    'combination_info' => '',
+]) === '银联刷卡');
+
+$noneCalls = 0;
+$noneService = new CashierV3OrderCenterRecordQueryServices(function () use (&$noneCalls): array {
+    $noneCalls++;
+    return [];
+});
+$nonePartition = $noneService->augmentInitialPartition([], $operator, recordScope(CashierV3DataScopeContext::MODE_NONE, []));
+recordOk('NONE 权限导航不访问读取器', !isset($nonePartition['countsByType']) && $noneCalls === 0);
+
+$noFeature = $service->queryRecords(
+    ['recordType' => 'recharge'],
+    $operator,
+    recordScope(CashierV3DataScopeContext::MODE_STORES, [133], [])
+);
+recordOk('缺少订单中心功能权限时不返回任何记录', $noFeature['total'] === 0
+    && $noFeature['dataStatus'] === 'permission_filtered');
+
+echo "ASSERT_PASSED={$passed}\n";
+echo "ASSERT_FAILED={$failed}\n";
+echo $failed === 0 ? "ORDER_CENTER_RECORDS_READONLY=PASS\n" : "ORDER_CENTER_RECORDS_READONLY=FAIL\n";
+exit($failed === 0 ? 0 : 1);

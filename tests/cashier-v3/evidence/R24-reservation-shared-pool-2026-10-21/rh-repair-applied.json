@@ -1,0 +1,12 @@
+{
+  "status": "committed",
+  "result": {
+    "holderId": 2079298,
+    "remainingTimes": 0,
+    "consumptionNetCents": 9900,
+    "eventNo": "EV-842cff89528d0f1ea5f72b92c11378dd",
+    "deltaCents": 7600,
+    "beforeFingerprint": "8bff52daae9fe77eb61b6a95222ab5d3842f1c64f2906788a5bf9ba2ceed5c4a",
+    "keptPersonnelAdjustments": 1
+  }
+}

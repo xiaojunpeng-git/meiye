@@ -1,0 +1,18 @@
+import { currentMerchantRoot } from './mobile-merchant-session.uts'
+import { firstAllowedMerchantTab, merchantTabIsAllowed } from './merchant-tab-permissions.uts'
+import { openMerchantBootstrap, switchMerchantPrimaryTab } from './mobile-navigation.uts'
+
+// Guard every merchant page entry, including deep links. A page must not render
+// data before its parent bottom-tab entrance has been authorized.
+export function ensureMerchantTabAccess(tabKey : string) : boolean {
+	let root = currentMerchantRoot()
+	if (root == null) {
+		openMerchantBootstrap()
+		return false
+	}
+	if (merchantTabIsAllowed(tabKey, root)) return true
+	let fallback = firstAllowedMerchantTab(root)
+	if (fallback.length > 0) switchMerchantPrimaryTab(fallback)
+	else openMerchantBootstrap()
+	return false
+}

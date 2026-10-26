@@ -1,0 +1,10 @@
+{
+  "head": "b50fd1f13d32c157ccd13e6ef63fb139d5d09702",
+  "tree": "e665264474db6d75a58d7a323cc265b6b32b33c5",
+  "files": [
+    "前端代码/uniapp/api/new_store.js",
+    "前端代码/uniapp/pages/store/list/index.vue",
+    "前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue"
+  ],
+  "localOnly": true
+}

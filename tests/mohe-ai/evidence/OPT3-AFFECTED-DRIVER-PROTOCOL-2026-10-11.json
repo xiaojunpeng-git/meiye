@@ -1,0 +1,61 @@
+{
+  "recorded_at": "2026-10-11T22:58:48.639919+08:00",
+  "scope": "Local regression driver only; no business source changes or new live questions",
+  "source_sha256": {
+    "tests/mohe-ai/opt3-local-regression.php": "4f0db1c43a7f2dc3e5bf182eea865055c82312680b58925659a72b91199eaf0a",
+    "tests/mohe-ai/opt3-local-driver-protocol.php": "4e5d0e38ef231db01a7b6f22f9fb061154cfde045a13819be57e9b29be22a69a"
+  },
+  "verification": {
+    "runtime": "PHP 7.4 mohe-app:local; network none; read-only source",
+    "command": "php tests/mohe-ai/opt3-local-driver-protocol.php",
+    "exit_code": 0,
+    "checks": 40,
+    "result": "PASS",
+    "rerun_at": "2026-10-11T15:09:00.001901+00:00"
+  },
+  "affected_plan": {
+    "environment": "MOHE_OPT3_TEST_PLAN=affected",
+    "conversations": 3,
+    "questions": 15,
+    "original_cases": {
+      "A": [
+        "R2T1",
+        "R2T2",
+        "R2T3",
+        "R2T4",
+        "R2T8",
+        "R2T9",
+        "R2T10"
+      ],
+      "B": [
+        "R3T1",
+        "R3T2",
+        "R3T3"
+      ],
+      "C": [
+        "R5T4",
+        "R5T5",
+        "R5T6",
+        "R5T7",
+        "R5T8"
+      ]
+    },
+    "dependency_mapping": "Remapped to each selected conversation position; original round and turn retained per case",
+    "direct_first_answer_required": [
+      "R2T9",
+      "R2T10"
+    ],
+    "ranking_missing_fields_guidance_allowed": true
+  },
+  "oracle_correction": {
+    "legacy_threshold_count": "Exact closed schema normalized from amount_cents to one member condition predicate; equivalence checks preserve metric, operator, period and authorized scope. Invalid or conflicting carriers rejected.",
+    "original_raw_report_preserved": "OPT3-local-20261011-223237-50d385.json",
+    "independent_reader_evidence": "OPT3-local-20261011-223237-50d385-legacy-reader-crosscheck.json"
+  },
+  "live_retest_started": false,
+  "awaiting": "Parent fixes, final source freeze and local worker reload authorization",
+  "affected_business_source_fingerprints_include": [
+    "app/services/query/metric/MetricReadViewServices.php",
+    "app/services/query/metric/PersonnelAnalysisObjectServices.php"
+  ]
+}

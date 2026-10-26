@@ -1,0 +1,29 @@
+{
+  "task": "M008-MEMBER-DEBT-20261026",
+  "applicationSource": "40147d669ac4783c76146419578d62e416878178",
+  "existingFeatureSource": "7e77f5849911342db250187f8c4471948010da86",
+  "approval": "确认，仅恢复008后端入口",
+  "result": "PASS",
+  "backendMysql": "PASS",
+  "authenticatedOnlineBrowser": "PASS",
+  "applicationFilesChanged": 1,
+  "debtDataWrites": 0,
+  "frontendDeployment": false,
+  "push": false,
+  "otherInstancesChanged": false,
+  "pendingLocalFrontend": "Not accepted, committed or deployed",
+  "files": {
+    "scripts/member-debt-list-008-install.php": "4eafc7f33f5ad491cf8a1d9e9345611f9788a1dd37d005bbcb3d7a97fa49f4c0",
+    "scripts/member-debt-list-008-release.cjs": "5b02b78581de9a26df1fdaa650ac229500851503ec0a1b15ffc8e163b7a860e2",
+    "tests/member-debt-list/backend.php": "4587669365a4b51f271f61ccc1cc6f48e8c3be163bfc2ee1f90c0e7df2aaaebc",
+    "tests/member-debt-list/evidence/backend.txt": "b4fb432da9ab5d93afde71270968321dbe75f098e856fa223b4b16f87146f014",
+    "tests/member-debt-list/evidence/backend-restore-20261026/README.md": "539b2951267215ad66e865abea3efbd77fd1d6772375484f610e0bde7087e218",
+    "tests/member-debt-list/evidence/backend-restore-20261026/after.json": "94eea1c181a733dcea75eadde9823f10ead70f327a87a0bfe10662850fe862ac",
+    "tests/member-debt-list/evidence/backend-restore-20261026/attempt.json": "969bacaf1df043cb493787fea0c1c596c45a00d19221ea35a356a2310024471a",
+    "tests/member-debt-list/evidence/backend-restore-20261026/before.json": "35c5103f377295fb68488856d4bf60a554efaf0337399b0b8750d21d9f9a2aba",
+    "tests/member-debt-list/evidence/backend-restore-20261026/browser-result.json": "b10567df2cab56d6ff0c3c96f545da2ace5152c2226534a30684e8489b815a39",
+    "tests/member-debt-list/evidence/backend-restore-20261026/installed.json": "83314662b34cf711cd6d4d4d3812c3d0d44b112ff8e726eb3f451869d18c9fbd",
+    "tests/member-debt-list/evidence/backend-restore-20261026/member-after.png": "a549cdbab0ecd1eb45b09ea3bf46b3c4e97dce6a5313f2d5984cec602c02f08b",
+    "tests/member-debt-list/evidence/backend-restore-20261026/verified.json": "aa5b892d50576747658fd4cb2edb878212c9b6129cd9fb1358ff8f729f9253e0"
+  }
+}

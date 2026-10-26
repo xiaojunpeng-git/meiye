@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "scope": "Existing 008 package with local service-generated API response; not a production fix or physical-device acceptance",
+  "state": {
+    "route": "pages/user/index",
+    "menuCount": 13,
+    "names": [
+      "我的预约",
+      "积分兑换",
+      "中奖记录",
+      "付费会员",
+      "发票管理",
+      "积分中心",
+      "联系客服",
+      "优惠券",
+      "我的收藏",
+      "地址信息",
+      "我的余额",
+      "我的卡包",
+      "砍价记录"
+    ]
+  },
+  "screenshot": "/private/tmp/member-center-r8-mini.jpg"
+}

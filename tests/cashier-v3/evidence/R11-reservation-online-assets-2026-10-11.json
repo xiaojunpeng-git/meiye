@@ -1,0 +1,89 @@
+{
+  "verified_at": "2026-10-11T13:10:00.474Z",
+  "checks": [
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "actual_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-f323dad8.js",
+      "status": 200,
+      "expected_sha256": "79fbd3575844a4df0f7f05bb436da292563ea80dbaa7f853842dd8683206172a",
+      "actual_sha256": "79fbd3575844a4df0f7f05bb436da292563ea80dbaa7f853842dd8683206172a",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "272cf8f820b28b4d07fba510fcd12edd7c533897d25c8e3ee05b0fc1138c0933",
+      "actual_sha256": "272cf8f820b28b4d07fba510fcd12edd7c533897d25c8e3ee05b0fc1138c0933",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "actual_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-f323dad8.js",
+      "status": 200,
+      "expected_sha256": "79fbd3575844a4df0f7f05bb436da292563ea80dbaa7f853842dd8683206172a",
+      "actual_sha256": "79fbd3575844a4df0f7f05bb436da292563ea80dbaa7f853842dd8683206172a",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "6a7c7714d8477b84087228bef5cc042561bcee41ba306f07e8c4093ea0f140a6",
+      "actual_sha256": "6a7c7714d8477b84087228bef5cc042561bcee41ba306f07e8c4093ea0f140a6",
+      "pass": true
+    }
+  ],
+  "anonymous_api_status": 410000,
+  "authenticated_ui_tested": false,
+  "business_writes": false,
+  "browser": {
+    "url": "https://rh.cc3798.com/view_cashier_v3/#/login",
+    "loaded_script": "/view_cashier_v3/assets/index-f323dad8.js",
+    "login_page_rendered": true,
+    "console_errors": 0,
+    "authenticated_business_ui_tested": false,
+    "screenshot": "R11-reservation-rh-entry-2026-10-11.png"
+  },
+  "preview_static_verified": true,
+  "preview_backend_changed": false,
+  "validation_boundary": "Production domain helper and PHP contract, read-only database transaction, formal runtime health and HTTPS asset hashes. No production cashier login session or appointment writes."
+}

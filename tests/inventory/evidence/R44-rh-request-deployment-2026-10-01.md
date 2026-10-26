@@ -1,0 +1,12 @@
+# R44 瑞昊请货零库存与数量回填发布记录（2026-10-01）
+
+- 范围与授权：产品经理确认本轮验收通过并要求 commit、部署瑞昊、push。功能提交为 `1e911444`（`R44-00002 请货零库存与数量回填闭环`），连同此前已验收提交 `42f202cc` 的入库保存栏可见性修复，一并形成此次瑞昊门店端固定发布版本。仅操作 `rh.cc3798.com`；007、008、012 均未改。
+- 业务口径：请货单只记录需求，不预占、不变动库存，供货方当前为零库存也允许保存；真实发货或调拨仍由服务端校验可用批次。请货详情数量采用整数单位与小数精度的确定性格式化，整数 `10000` 不再错误回填为 `1`。
+- 源码与构建：从 Git 提交 `1e911444` 的纯净归档构建 `前端代码/cashier-v3/`，Vite 共转换 1983 个模块。未使用当前脏工作区构建，未纳入其他任务改动。构建 HTML SHA-256 为 `1a1752db79804378116f28ccfe691ddb0660e9016f003e5c41a4bebe4c4bc2da`，主 JS `index-339be25c.js` 为 `d98199cc7296c71e2fae4db09b3f6ffadd70c0fbc8bd00cfb45aef8842a56e72`，主 CSS `index-9e1f132f.css` 为 `9e1f132fac4740e336cfaaf949da46f85ec632a0e9b90451f1180ff04b8d469f`。
+- 目标与前置：瑞昊正式门店端 `/www/wwwroot/rh.cc3798.com/public/view_cashier_v3/`、独立 8080 预览 `/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/`，以及后端单文件 `/www/wwwroot/rh.cc3798.com/app/services/product/inventory/InventoryStockRequestQueryServices.php`。部署前两处前端 HTML 均为 `4aac2a182fe3adebae5a8c556718b7ea0a712e1c75ec1a72a31c6ac1787e50ae`，后端目标文件为 `3af639efd3541e384ed4f7b9f9c77567ee2ecca83998c8de5889ca4cbe099b7e`；磁盘余量约 218GB，Swoole 单管理进程正常。本轮无数据库迁移、配置、Redis、队列或计划任务变更。
+- 备份与回滚：部署前备份位于 `/www/backups/rh.cc3798.com/20261001-r44-request-1e911444/`，三个压缩包均通过 `tar -tzf` 校验。正式前端备份 SHA-256 为 `e09c9ffc4f849de2501924f3476869c5f5839ccf919ed11d83c10e7751997b45`，预览前端为 `a2b7aaa04735aedfa86bddf3576ece444b7c226906626bcc366a78cedda3e73b`，后端文件为 `9cf2ac2b78fb43b341e6588b372fa825438651fbeb54f319c465d47019a5876a`。回滚只恢复两处前端目录与该后端文件并重启瑞昊 Swoole，不恢复数据库、不覆盖业务数据。
+- 部署结果：固定构建包先上传至备份目录 `stage/` 并核对指纹，PHP 语法检查通过；随后同步正式和预览门店端静态资源、原子替换 HTML、原子替换后端单文件并清理 PHP 缓存，重启 Swoole。部署后正式与预览 HTML、主 JS 及后端目标文件均与固定构建指纹一致，Swoole `manager_count=1`。
+- 线上验证：正式入口与 8080 预览入口 HTTPS 均返回 200，两处主 JS HTTPS 指纹均为 `d98199cc7296c71e2fae4db09b3f6ffadd70c0fbc8bd00cfb45aef8842a56e72`；线上 JS 不含旧的“所选商品在供货方库存均为 0”拦截文案。服务器对已部署详情格式化逻辑执行只读验证，`10000` 返回 `10000`。未创建、修改或发货任何生产请货单。
+- 数据架构自检：请货文档和明细仍是需求权威源，保存不生成库存事实；发货/调拨继续在原事务内完成可用批次、并发和剩余请货量校验。本轮只移除浏览器端零库存保存限制并修正详情展示，不改变事实粒度、幂等、冲销、历史修订、数据权限、统计、索引或迁移。
+- 文件分组：前端源码 `前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue`；后端源码 `后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php`；自动化测试 `tests/inventory/js/request-dialog-contract.mjs`、`tests/inventory/php/request-quantity-format-contract.php`；数据库迁移和工程脚本无；生成物为固定提交构建的门店端 dist，本文件为部署证据。
+- 推送：功能提交 `1e911444` 已推送至 Gitee `origin/release/store-cashier-c14-main`。未向 GitHub 推送。

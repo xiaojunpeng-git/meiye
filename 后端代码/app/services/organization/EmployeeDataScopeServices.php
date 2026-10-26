@@ -1,0 +1,1194 @@
+<?php
+namespace app\services\organization;
+
+use app\services\BaseServices;
+use mohe\exceptions\AdminException;
+use think\facade\Db;
+
+/**
+ * I2 人员数据权限（多来源合并 + 订单列表范围）
+ */
+class EmployeeDataScopeServices extends BaseServices
+{
+    public const SOURCE_HQ = 'hq';
+    public const SOURCE_STORE = 'store';
+
+    public const MODE_PERSONAL = 'personal';
+    public const MODE_ORG = 'org';
+    public const MODE_STORE = 'store';
+    public const MODE_STORE_SELECTED = 'store_selected';
+    public const MODE_STORE_SELF = 'store_self';
+
+    /**
+     * @return array{msg:string,data:array,replay:bool}
+     */
+    public function saveScope(
+        int $employeeId,
+        array $data,
+        array $adminInfo,
+        array $requestCtx,
+        bool $requireSuperAdmin = true
+    ): array {
+        $sourceType = trim((string)($data['source_type'] ?? self::SOURCE_HQ));
+        $sourceStoreId = (int)($data['source_store_id'] ?? 0);
+        $scopeMode = trim((string)($data['scope_mode'] ?? self::MODE_PERSONAL));
+        $orgIds = $this->normalizeIntIds($data['org_ids'] ?? []);
+        $storeIds = $this->normalizeIntIds($data['store_ids'] ?? []);
+
+        $payload = [
+            'employee_id' => $employeeId,
+            'source_type' => $sourceType,
+            'source_store_id' => $sourceStoreId,
+            'scope_mode' => $scopeMode,
+            'org_ids' => $orgIds,
+            'store_ids' => $storeIds,
+        ];
+
+        /** @var OrganizationStrictIdempotencyServices $idem */
+        $idem = app()->make(OrganizationStrictIdempotencyServices::class);
+        return $idem->run(
+            'employee_data_scope_save',
+            'employee:' . $employeeId . ':scope:' . $sourceType . ':' . $sourceStoreId,
+            $payload,
+            $adminInfo,
+            $requestCtx,
+            function (array $auditMeta) use (
+                $employeeId,
+                $sourceType,
+                $sourceStoreId,
+                $scopeMode,
+                $orgIds,
+                $storeIds,
+                $adminInfo
+            ) {
+                $data = $this->saveScopeInTx(
+                    $employeeId,
+                    [
+                        'source_type' => $sourceType,
+                        'source_store_id' => $sourceStoreId,
+                        'scope_mode' => $scopeMode,
+                        'org_ids' => $orgIds,
+                        'store_ids' => $storeIds,
+                    ],
+                    $adminInfo,
+                    $auditMeta
+                );
+                return ['msg' => '保存成功', 'data' => $data];
+            },
+            $requireSuperAdmin
+        );
+    }
+
+    /**
+     * 外层事务内写数据权限（不再套幂等）
+     * @return array{id:int,version:int,source_type:string,source_store_id:int,scope_mode:string,org_ids:int[],store_ids:int[]}
+     */
+    public function saveScopeInTx(
+        int $employeeId,
+        array $data,
+        array $adminInfo,
+        array $auditMeta = []
+    ): array {
+        $this->assertEmployee($employeeId);
+        $sourceType = trim((string)($data['source_type'] ?? self::SOURCE_HQ));
+        $sourceStoreId = (int)($data['source_store_id'] ?? 0);
+        $scopeMode = trim((string)($data['scope_mode'] ?? self::MODE_PERSONAL));
+        $orgIds = $this->normalizeIntIds($data['org_ids'] ?? []);
+        $storeIds = $this->normalizeIntIds($data['store_ids'] ?? []);
+
+        if (!in_array($sourceType, [self::SOURCE_HQ, self::SOURCE_STORE], true)) {
+            throw new AdminException('数据权限来源无效');
+        }
+
+        if ($sourceType === self::SOURCE_STORE) {
+            if ($sourceStoreId <= 0) {
+                throw new AdminException('门店来源须指定本店');
+            }
+            if (in_array($scopeMode, [self::MODE_ORG, self::MODE_STORE_SELECTED], true)) {
+                throw new AdminException('门店不能设置跨店数据范围');
+            }
+            if (!in_array($scopeMode, [self::MODE_PERSONAL, self::MODE_STORE_SELF], true)) {
+                throw new AdminException('门店只能设置个人或本店数据范围');
+            }
+            $orgIds = [];
+            if ($scopeMode === self::MODE_STORE_SELF) {
+                $storeIds = [$sourceStoreId];
+            } else {
+                $storeIds = [];
+            }
+        } else {
+            $sourceStoreId = 0;
+            if (!in_array($scopeMode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE, self::MODE_STORE_SELECTED], true)) {
+                throw new AdminException('总部数据范围类型无效');
+            }
+            if ($scopeMode === self::MODE_PERSONAL) {
+                $orgIds = [];
+                $storeIds = [];
+            } elseif ($scopeMode === self::MODE_ORG) {
+                if (!$orgIds) {
+                    throw new AdminException('请选择可看组织');
+                }
+                $found = Db::name('organization')->whereIn('id', $orgIds)->where('is_del', 0)->column('id');
+                $found = array_map('intval', $found);
+                sort($found);
+                $want = $orgIds;
+                sort($want);
+                if ($found !== $want) {
+                    throw new AdminException('组织范围包含无效或已删除组织');
+                }
+                // 非超管：只能授权自己可管范围内的组织
+                $allowedOrgIds = $this->resolveOperatorAllowedOrgIds($adminInfo);
+                if ($allowedOrgIds !== null) {
+                    $denied = array_values(array_diff($found, $allowedOrgIds));
+                    if ($denied) {
+                        throw new AdminException('组织范围超出可授权范围');
+                    }
+                }
+                $orgIds = $found;
+                $storeIds = [];
+            } elseif ($scopeMode === self::MODE_STORE_SELECTED) {
+                // 指定门店是精确授权：不继承组织下级，也不能相信前端送来的任意门店 ID。
+                if (!$storeIds) {
+                    throw new AdminException('请选择可看门店');
+                }
+                if (strlen((string)json_encode($storeIds)) > 2000) {
+                    throw new AdminException('所选门店过多，请缩小范围');
+                }
+                $found = Db::name('system_store')->whereIn('id', $storeIds)->where('is_del', 0)->column('id');
+                $found = array_values(array_unique(array_map('intval', $found)));
+                sort($found);
+                $want = $storeIds;
+                sort($want);
+                if ($found !== $want) {
+                    throw new AdminException('门店范围包含无效或已删除门店');
+                }
+                $allowedStoreIds = $this->resolveOperatorAllowedSelectedStoreIds($adminInfo);
+                if ($allowedStoreIds !== null && array_diff($found, $allowedStoreIds)) {
+                    throw new AdminException('门店范围超出可授权范围');
+                }
+                $storeIds = $found;
+                $orgIds = [];
+            } else {
+                // 门店模式：服务端按当前有效任职自动计算，忽略前端 store_ids（防扩权）
+                $clientStoreIds = $storeIds;
+                $appointmentStoreId = (int)($data['appointment_store_id'] ?? 0);
+                $currentStoreIds = $this->resolveCurrentActiveStoreIds($employeeId);
+                if ($appointmentStoreId > 0 && !in_array($appointmentStoreId, $currentStoreIds, true)) {
+                    // 同事务新建任职尚未落库可见时，允许以本次提交的任职门店为准
+                    $currentStoreIds[] = $appointmentStoreId;
+                    $currentStoreIds = array_values(array_unique(array_filter(array_map('intval', $currentStoreIds))));
+                }
+                if (!$currentStoreIds) {
+                    throw new AdminException('该人员没有当前任职门店，不能选择「门店」数据权限。请先选择当前任职门店，或改用「个人」「组织」。');
+                }
+                // 不信任前端传来的任意 store_ids；持久化仅记空数组，解析时按任职自动计算
+                $storeIds = [];
+                $orgIds = [];
+                unset($clientStoreIds);
+            }
+        }
+
+        $now = time();
+        $token = (string)($auditMeta['request_token'] ?? '');
+        $opId = (int)($auditMeta['operator_id'] ?? $adminInfo['id'] ?? 0);
+        $opName = (string)($auditMeta['operator_name'] ?? $adminInfo['real_name'] ?? $adminInfo['account'] ?? '');
+
+        $exist = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('source_type', $sourceType)
+            ->where('source_store_id', $sourceStoreId)
+            ->where('is_del', 0)
+            ->lock(true)
+            ->order('id', 'desc')
+            ->find();
+
+        // 门店编辑总部权限时必须基于打开页面时的版本，防止旧页面覆盖总部或另一门店的新设置。
+        if (array_key_exists('expected_version', $data)
+            && (int)$data['expected_version'] !== (int)($exist['version'] ?? 0)) {
+            throw new AdminException('数据范围已由他人修改，请刷新员工资料后重试');
+        }
+
+        $orgJson = json_encode($orgIds, JSON_UNESCAPED_UNICODE);
+        $storeJson = json_encode($storeIds, JSON_UNESCAPED_UNICODE);
+        if ($exist) {
+            $ver = (int)($exist['version'] ?? 1) + 1;
+            Db::name('employee_data_scope')->where('id', (int)$exist['id'])->update([
+                'scope_mode' => $scopeMode,
+                'org_ids' => $orgJson,
+                'store_ids' => $storeJson,
+                'status' => 1,
+                'version' => $ver,
+                'request_token' => $token !== '' ? $token : (string)($exist['request_token'] ?? ''),
+                'operator_id' => $opId,
+                'operator_name' => $opName,
+                'update_time' => $now,
+            ]);
+            $id = (int)$exist['id'];
+        } else {
+            $id = (int)Db::name('employee_data_scope')->insertGetId([
+                'employee_id' => $employeeId,
+                'source_type' => $sourceType,
+                'source_store_id' => $sourceStoreId,
+                'scope_mode' => $scopeMode,
+                'org_ids' => $orgJson,
+                'store_ids' => $storeJson,
+                'status' => 1,
+                'version' => 1,
+                'request_token' => $token !== '' ? $token : ('scope-' . $employeeId . '-' . $sourceType . '-' . $sourceStoreId . '-' . $now),
+                'is_del' => 0,
+                'operator_id' => $opId,
+                'operator_name' => $opName,
+                'add_time' => $now,
+                'update_time' => $now,
+            ]);
+            $ver = 1;
+        }
+
+        $this->writeAudit(
+            $employeeId,
+            'employee_data_scope_save',
+            $id,
+            [
+                'source_type' => $sourceType,
+                'source_store_id' => $sourceStoreId,
+                'scope_mode' => $scopeMode,
+                'org_ids' => $orgIds,
+                'store_ids' => $storeIds,
+                'version' => $ver,
+            ],
+            $adminInfo,
+            $auditMeta,
+            '保存数据权限'
+        );
+
+        return [
+            'id' => $id,
+            'version' => $ver,
+            'source_type' => $sourceType,
+            'source_store_id' => $sourceStoreId,
+            'scope_mode' => $scopeMode,
+            'org_ids' => $orgIds,
+            'store_ids' => $storeIds,
+        ];
+    }
+
+    /**
+     * 撤销某门店来源授权（软删）
+     */
+    public function revokeStoreSourceScope(int $employeeId, int $storeId, array $auditMeta = []): void
+    {
+        if ($employeeId <= 0 || $storeId <= 0) {
+            return;
+        }
+        $now = time();
+        Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('source_type', self::SOURCE_STORE)
+            ->where('source_store_id', $storeId)
+            ->where('is_del', 0)
+            ->update([
+                'status' => 0,
+                'is_del' => 1,
+                'update_time' => $now,
+                'operator_id' => (int)($auditMeta['operator_id'] ?? 0),
+                'operator_name' => (string)($auditMeta['operator_name'] ?? ''),
+            ]);
+    }
+
+    /**
+     * @return array<int, array>
+     */
+    public function listScopes(int $employeeId, int $forStoreId = 0): array
+    {
+        $q = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->where('status', 1);
+        if ($forStoreId > 0) {
+            // 门店端：可见总部 + 本店来源
+            $q->where(function ($qq) use ($forStoreId) {
+                $qq->where(function ($q1) {
+                    $q1->where('source_type', self::SOURCE_HQ);
+                })->whereOr(function ($q2) use ($forStoreId) {
+                    $q2->where('source_type', self::SOURCE_STORE)->where('source_store_id', $forStoreId);
+                });
+            });
+        }
+        $rows = $q->order('id', 'asc')->select()->toArray();
+        foreach ($rows as &$r) {
+            $r['org_ids'] = json_decode((string)($r['org_ids'] ?? '[]'), true) ?: [];
+            $r['store_ids'] = json_decode((string)($r['store_ids'] ?? '[]'), true) ?: [];
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /**
+     * 两端编辑器读取同一人员权限。旧门店来源尚未写入总部记录时，仅按其真实授权门店合成回显，
+     * 不改变旧数据；下一次明确修改数据范围才写入统一的总部记录。
+     */
+    public function readEditorScope(int $employeeId): array
+    {
+        $rows = $this->listScopes($employeeId);
+        $hqRows = array_values(array_filter($rows, static fn(array $row): bool =>
+            (string)($row['source_type'] ?? '') === self::SOURCE_HQ
+            && (int)($row['source_store_id'] ?? 0) === 0
+        ));
+        if ($hqRows) {
+            usort($hqRows, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+            return $hqRows[0];
+        }
+
+        $legacyStoreIds = [];
+        foreach ($rows as $row) {
+            if ((string)($row['source_type'] ?? '') === self::SOURCE_STORE
+                && (string)($row['scope_mode'] ?? '') === self::MODE_STORE_SELF
+                && (int)($row['source_store_id'] ?? 0) > 0) {
+                $legacyStoreIds[] = (int)$row['source_store_id'];
+            }
+        }
+        $legacyStoreIds = $this->normalizeIntIds($legacyStoreIds);
+        $activeStoreIds = $this->resolveCurrentActiveStoreIds($employeeId);
+        sort($activeStoreIds);
+        $isAllAppointedStores = $legacyStoreIds && $legacyStoreIds === $activeStoreIds;
+        return [
+            'id' => 0,
+            'version' => 0,
+            'source_type' => self::SOURCE_HQ,
+            'source_store_id' => 0,
+            'scope_mode' => !$legacyStoreIds ? self::MODE_PERSONAL
+                : ($isAllAppointedStores ? self::MODE_STORE : self::MODE_STORE_SELECTED),
+            'org_ids' => [],
+            'store_ids' => $legacyStoreIds,
+        ];
+    }
+
+    /**
+     * 解析有效门店 ID 集合；空数组表示「仅个人参与、无门店扩展」
+     * 返回 null 表示超级管理员全量（不限制门店）
+     * @return int[]|null
+     */
+    public function resolveEffectiveStoreIds(int $employeeId, int $contextStoreId = 0, array $adminInfo = [])
+    {
+        $scopes = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->select()->toArray();
+
+        // 总部记录是两端共同的人员权限正本；旧门店来源仅在尚无总部记录时生效。
+        // 否则门店改成“个人”或总部改成其他范围后，旧来源可能继续扩大授权。
+        $hqScopes = array_values(array_filter($scopes, static function (array $scope): bool {
+            return (string)($scope['source_type'] ?? '') === self::SOURCE_HQ
+                && (int)($scope['source_store_id'] ?? 0) === 0;
+        }));
+        if ($hqScopes) {
+            usort($hqScopes, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+        }
+        $primaryHqMode = (string)($hqScopes[0]['scope_mode'] ?? '');
+        // 即使操作者兼有超管身份，明确的总部“个人”仍收紧本人数据；
+        // 其他模式维持既有超管全量语义，不在本闭环改变角色权限。
+        if ($this->isSuperAdmin($adminInfo) && $primaryHqMode !== self::MODE_PERSONAL) {
+            return null;
+        }
+        if ($hqScopes) {
+            $scopes = [$hqScopes[0]];
+        }
+
+        $storeSet = [];
+        $hasExtension = false;
+        if (!$scopes) {
+            // 默认个人：无门店扩展
+            $hasExtension = false;
+        } else {
+            foreach ($scopes as $scope) {
+                $mode = (string)($scope['scope_mode'] ?? self::MODE_PERSONAL);
+                if ($mode === self::MODE_PERSONAL) {
+                    continue;
+                }
+                $hasExtension = true;
+                if ($mode === self::MODE_STORE_SELF) {
+                    $sid = (int)($scope['source_store_id'] ?? 0);
+                    if ($sid > 0) {
+                        $storeSet[$sid] = true;
+                    }
+                    continue;
+                }
+                if ($mode === self::MODE_STORE) {
+                    // 门店模式：仅当前有效任职门店进入「全量门店」集合；历史由 applyOrderListScope 按本人窗口补齐
+                    foreach ($this->resolveCurrentActiveStoreIds($employeeId) as $sid) {
+                        if ($sid > 0) {
+                            $storeSet[$sid] = true;
+                        }
+                    }
+                    // 兼容旧数据：若仍存有 store_ids，不并入（防历史扩权残留）
+                    continue;
+                }
+                if ($mode === self::MODE_ORG) {
+                    $orgIds = json_decode((string)($scope['org_ids'] ?? '[]'), true) ?: [];
+                    foreach ($orgIds as $oid) {
+                        foreach ($this->expandOrgToStoreIds((int)$oid) as $sid) {
+                            $storeSet[$sid] = true;
+                        }
+                    }
+                    continue;
+                }
+                if ($mode === self::MODE_STORE_SELECTED) {
+                    // 精确门店模式只使用仍有效的已选门店；隔离门店在下方进一步扣除。
+                    $selectedIds = json_decode((string)($scope['store_ids'] ?? '[]'), true) ?: [];
+                    $selectedIds = $this->normalizeIntIds($selectedIds);
+                    $activeIds = $selectedIds
+                        ? Db::name('system_store')->whereIn('id', $selectedIds)->where('is_del', 0)->column('id')
+                        : [];
+                    foreach ($activeIds as $sid) {
+                        $storeSet[$sid] = true;
+                    }
+                }
+            }
+        }
+
+        $isolated = Db::name('employee_store_isolation')
+            ->where('employee_id', $employeeId)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->column('store_id');
+        foreach ($isolated as $sid) {
+            unset($storeSet[(int)$sid]);
+        }
+
+        if ($contextStoreId > 0) {
+            // 门店端上下文：结果再与当前门店求交（门店端永远不能看其他店）
+            if (!$hasExtension) {
+                return [];
+            }
+            return isset($storeSet[$contextStoreId]) ? [$contextStoreId] : [];
+        }
+
+        if (!$hasExtension) {
+            return [];
+        }
+        $ids = array_map('intval', array_keys($storeSet));
+        sort($ids);
+        return $ids;
+    }
+
+    /**
+     * @return int[]
+     */
+    public function resolveStaffIdsForEmployee(int $employeeId): array
+    {
+        if ($employeeId <= 0) {
+            return [];
+        }
+        $ids = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->column('id');
+        $ids = array_values(array_unique(array_map('intval', $ids ?: [])));
+        sort($ids);
+        return $ids;
+    }
+
+    /**
+     * 变更订单列表 where：个人参与 / 门店范围 / 超管不限
+     */
+    public function applyOrderListScope(array &$where, int $employeeId, string $end, int $storeId, array $adminInfo): void
+    {
+        if ($employeeId <= 0 && $this->isSuperAdmin($adminInfo)) {
+            $where['employee_data_scope'] = ['mode' => 'all'];
+            return;
+        }
+        if ($employeeId <= 0) {
+            // 未关联员工：禁止默认全量
+            $where['id'] = -1;
+            $where['employee_data_scope'] = ['mode' => 'none', 'reason' => '未关联内部员工'];
+            return;
+        }
+
+        $end = $end === 'store' ? 'store' : 'admin';
+        $staffIds = $this->resolveStaffIdsForEmployee($employeeId);
+        $effectiveStores = $this->resolveEffectiveStoreIds($employeeId, $end === 'store' ? $storeId : 0, $adminInfo);
+        if ($effectiveStores === null) {
+            // 显式总部个人已在共享解析中收紧；仅真正的超管全量继续走这里。
+            $where['employee_data_scope'] = ['mode' => 'all'];
+            return;
+        }
+
+        if ($end === 'store') {
+            if ($storeId <= 0) {
+                $where['id'] = -1;
+                $where['employee_data_scope'] = ['mode' => 'none'];
+                return;
+            }
+            $where['store_id'] = $storeId;
+            // 本店扩展：当前门店全部 + 历史任职门店本人期间数据
+            if (is_array($effectiveStores) && in_array($storeId, $effectiveStores, true)) {
+                $historyWindows = $this->resolveTenureWindows($employeeId, $storeId);
+                $where['employee_data_scope'] = [
+                    'mode' => 'store_with_history',
+                    'store_id' => $storeId,
+                    'staff_ids' => $staffIds,
+                    'history_windows' => $historyWindows,
+                ];
+                return;
+            }
+            // 个人：当前/历史任职期间本人参与
+            $this->applyPersonalParticipate($where, $staffIds, $storeId, $this->resolveTenureWindows($employeeId));
+            return;
+        }
+
+        // 平台端
+        $hqMode = $this->resolvePrimaryHqScopeMode($employeeId);
+        if ($hqMode === self::MODE_STORE) {
+            $current = $this->resolveCurrentActiveStoreIds($employeeId);
+            $curStore = (int)($current[0] ?? 0);
+            if ($curStore <= 0) {
+                $this->applyPersonalParticipate($where, $staffIds, 0, $this->resolveTenureWindows($employeeId));
+                return;
+            }
+            $where['employee_data_scope'] = [
+                'mode' => 'store_with_history',
+                'store_id' => $curStore,
+                'staff_ids' => $staffIds,
+                'history_windows' => $this->resolveTenureWindows($employeeId, $curStore),
+            ];
+            return;
+        }
+
+        if ($effectiveStores) {
+            // 组织范围：全量这些门店
+            if (count($effectiveStores) === 1) {
+                $where['store_id'] = $effectiveStores[0];
+            } else {
+                $where['store_id'] = $effectiveStores;
+            }
+            $where['employee_data_scope'] = [
+                'mode' => 'stores',
+                'store_ids' => $effectiveStores,
+            ];
+            return;
+        }
+        // 默认个人（含历史任职期间）
+        $this->applyPersonalParticipate($where, $staffIds, 0, $this->resolveTenureWindows($employeeId));
+    }
+
+    /**
+     * 当前有效任职门店（未删除、在职）
+     * @return int[]
+     */
+    public function resolveCurrentActiveStoreIds(int $employeeId): array
+    {
+        if ($employeeId <= 0) {
+            return [];
+        }
+        $ids = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->where('store_id', '>', 0)
+            ->column('store_id');
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids ?: []))));
+        sort($ids);
+        return $ids;
+    }
+
+    /**
+     * 总部来源主数据权限模式
+     */
+    public function resolvePrimaryHqScopeMode(int $employeeId): string
+    {
+        if ($employeeId <= 0) {
+            return self::MODE_PERSONAL;
+        }
+        $row = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('source_type', self::SOURCE_HQ)
+            ->where('source_store_id', 0)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->order('id', 'desc')
+            ->find();
+        $mode = (string)($row['scope_mode'] ?? self::MODE_PERSONAL);
+        if (!in_array($mode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE, self::MODE_STORE_SELECTED], true)) {
+            return self::MODE_PERSONAL;
+        }
+        return $mode;
+    }
+
+    /**
+     * 操作者可授权组织；null=超管不限
+     * @return int[]|null
+     */
+    protected function resolveOperatorAllowedOrgIds(array $adminInfo): ?array
+    {
+        if ($this->isSuperAdmin($adminInfo)) {
+            return null;
+        }
+        $adminId = (int)($adminInfo['id'] ?? 0);
+        if ($adminId <= 0) {
+            return [];
+        }
+
+        // 平台账号的“集团/组织”数据权限是授权边界的一部分。
+        // 旧实现只读取 organization_admin，导致账号页面显示集团权限，
+        // 但没有对应 organization_admin 行时，保存员工组织范围仍被拒绝。
+        // 显式员工数据权限优先；没有统一数据权限记录时再兼容旧组织管理员关系。
+        $scopeAllowed = $this->resolveOperatorEmployeeScopeOrgIds($adminInfo, $adminId);
+        if ($scopeAllowed !== null) {
+            return $scopeAllowed;
+        }
+
+        $orgAdminIds = Db::name('organization_admin')
+            ->where('admin_id', $adminId)
+            ->where('is_del', 0)
+            ->column('id');
+        if (!$orgAdminIds) {
+            return [];
+        }
+        /** @var OrganizationScopeService $scope */
+        $scope = app()->make(OrganizationScopeService::class);
+        $storeIds = [];
+        foreach ($orgAdminIds as $oaId) {
+            $storeIds = array_merge($storeIds, $scope->getAdminResolvedStoreIds((int)$oaId));
+        }
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        if (!$storeIds) {
+            return [];
+        }
+        $directOrgIds = Db::name('organization_store')
+            ->whereIn('store_id', $storeIds)
+            ->column('org_id');
+        $directOrgIds = array_values(array_unique(array_filter(array_map('intval', $directOrgIds))));
+        if (!$directOrgIds) {
+            return [];
+        }
+        $pidMap = Db::name('organization')->where('is_del', 0)->column('pid', 'id');
+        $allowed = [];
+        foreach ($directOrgIds as $oid) {
+            $cur = $oid;
+            $guard = 0;
+            while ($cur > 0 && $guard++ < 128) {
+                $allowed[$cur] = true;
+                $cur = (int)($pidMap[$cur] ?? 0);
+            }
+        }
+        return array_map('intval', array_keys($allowed));
+    }
+
+    /**
+     * 返回操作者可精确授权的门店集合。已有总部范围优先，以其实际有效门店为上限；
+     * 仅没有总部范围时才兼容独立的组织管理员授权，避免借祖先组织 ID 授出兄弟门店。
+     * null 仅表示超管不限，空数组必须拒绝授权。
+     * @return int[]|null
+     */
+    protected function resolveOperatorAllowedSelectedStoreIds(array $adminInfo): ?array
+    {
+        if ($this->isSuperAdmin($adminInfo)) {
+            return null;
+        }
+        $adminId = (int)($adminInfo['id'] ?? 0);
+        if ($adminId <= 0) {
+            return [];
+        }
+        $employeeId = (int)($adminInfo['employee_id'] ?? 0);
+        if ($employeeId <= 0) {
+            $employeeId = (int)Db::name('system_admin')->where('id', $adminId)->where('is_del', 0)->value('employee_id');
+        }
+        if ($employeeId > 0) {
+            $hqScope = Db::name('employee_data_scope')
+                ->where('employee_id', $employeeId)
+                ->where('source_type', self::SOURCE_HQ)
+                ->where('source_store_id', 0)
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->order('id', 'desc')
+                ->find();
+            $mode = (string)($hqScope['scope_mode'] ?? '');
+            if ($mode === self::MODE_ORG || $mode === self::MODE_STORE_SELECTED || $mode === self::MODE_STORE) {
+                $ids = $this->resolveEffectiveStoreIds($employeeId, 0, $adminInfo);
+                return array_values(array_unique(array_filter(array_map('intval', (array)$ids))));
+            }
+            if ($hqScope) {
+                // 明确的个人范围是空授权，不能回退历史组织管理员关系而重新扩大。
+                return [];
+            }
+        }
+        $orgAdminIds = Db::name('organization_admin')->where('admin_id', $adminId)->where('is_del', 0)->column('id');
+        if (!$orgAdminIds) {
+            return [];
+        }
+        /** @var OrganizationScopeService $scope */
+        $scope = app()->make(OrganizationScopeService::class);
+        $ids = [];
+        foreach ($orgAdminIds as $orgAdminId) {
+            $ids = array_merge($ids, $scope->getAdminResolvedStoreIds((int)$orgAdminId));
+        }
+        return array_values(array_unique(array_filter(array_map('intval', $ids))));
+    }
+
+    /**
+     * 返回平台操作者可管理的组织范围；null 表示总部超管不限。
+     * 组织直属人员写入、组织名册维护等入口必须复用这条边界，
+     * 不能只依赖页面上的“集团”文案或前端传入的 org_id。
+     *
+     * @return int[]|null
+     */
+    public function resolveOperatorManageableOrgIds(array $adminInfo): ?array
+    {
+        return $this->resolveOperatorAllowedOrgIds($adminInfo);
+    }
+
+    /**
+     * 将平台操作者自身的总部数据权限转换为“可授权组织范围”。
+     *
+     * null 表示没有可用于组织授权的统一组织范围，调用方可回退
+     * organization_admin；[] 表示明确配置了组织模式但没有有效组织，必须拒绝。
+     * 组织模式允许所选组织及其下级，集团根组织因此自然覆盖全集团。
+     *
+     * @return int[]|null
+     */
+    protected function resolveOperatorEmployeeScopeOrgIds(array $adminInfo, int $adminId): ?array
+    {
+        $employeeId = (int)($adminInfo['employee_id'] ?? 0);
+        if ($employeeId <= 0) {
+            $employeeId = (int)Db::name('system_admin')
+                ->where('id', $adminId)
+                ->where('is_del', 0)
+                ->value('employee_id');
+        }
+        if ($employeeId <= 0) {
+            return null;
+        }
+
+        $scope = Db::name('employee_data_scope')
+            ->where('employee_id', $employeeId)
+            ->where('source_type', self::SOURCE_HQ)
+            ->where('source_store_id', 0)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->order('id', 'desc')
+            ->find();
+        if (!$scope) {
+            return null;
+        }
+
+        $mode = strtolower(trim((string)($scope['scope_mode'] ?? self::MODE_PERSONAL)));
+        if ($mode === self::MODE_STORE_SELECTED) {
+            // 精确门店不是组织授权；禁止回退旧组织管理员路径扩大范围。
+            return [];
+        }
+        if ($mode !== self::MODE_ORG) {
+            // 个人/门店模式本身不是集团组织授权；继续走旧
+            // organization_admin 兼容路径，避免覆盖已有的组织管理员授权。
+            return null;
+        }
+
+        $roots = json_decode((string)($scope['org_ids'] ?? '[]'), true) ?: [];
+        $roots = $this->normalizeIntIds($roots);
+        if (!$roots) {
+            return [];
+        }
+
+        $pidMap = Db::name('organization')
+            ->where('is_del', 0)
+            ->column('pid', 'id');
+        $children = [];
+        foreach ($pidMap as $id => $pid) {
+            $id = (int)$id;
+            $pid = (int)$pid;
+            if ($id > 0 && $pid > 0) {
+                $children[$pid][] = $id;
+            }
+        }
+
+        $allowed = [];
+        $stack = $roots;
+        $seen = [];
+        while ($stack) {
+            $id = (int)array_pop($stack);
+            if ($id <= 0 || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $allowed[$id] = true;
+            foreach (($children[$id] ?? []) as $childId) {
+                $stack[] = (int)$childId;
+            }
+        }
+
+        $ids = array_map('intval', array_keys($allowed));
+        sort($ids);
+        return $ids;
+    }
+
+    /**
+     * 任职期间窗口：用于历史门店数据截断
+     * @return array<int, array{store_id:int,staff_id:int,start_time:int,end_time:int}>
+     */
+    public function resolveTenureWindows(int $employeeId, int $excludeStoreId = 0): array
+    {
+        if ($employeeId <= 0) {
+            return [];
+        }
+        $rows = Db::name('staff_tenure_period')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->order('id', 'asc')
+            ->select()
+            ->toArray();
+        $out = [];
+        foreach ($rows as $r) {
+            $sid = (int)($r['store_id'] ?? 0);
+            if ($sid <= 0 || ($excludeStoreId > 0 && $sid === $excludeStoreId)) {
+                continue;
+            }
+            $out[] = [
+                'store_id' => $sid,
+                'staff_id' => (int)($r['staff_id'] ?? 0),
+                'start_time' => (int)($r['start_time'] ?? 0),
+                'end_time' => (int)($r['end_time'] ?? 0),
+            ];
+        }
+        // 无 tenure 行时回退 staff_job_position / 有效 staff 的起止
+        if (!$out) {
+            $jobs = Db::name('staff_job_position')
+                ->where('employee_id', $employeeId)
+                ->where('is_del', 0)
+                ->select()
+                ->toArray();
+            foreach ($jobs as $j) {
+                $sid = (int)($j['store_id'] ?? 0);
+                if ($sid <= 0 || ($excludeStoreId > 0 && $sid === $excludeStoreId)) {
+                    continue;
+                }
+                $out[] = [
+                    'store_id' => $sid,
+                    'staff_id' => (int)($j['staff_id'] ?? 0),
+                    'start_time' => (int)($j['start_time'] ?? 0),
+                    'end_time' => (int)($j['end_time'] ?? 0),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param int[] $staffIds
+     * @param array<int, array{store_id:int,staff_id:int,start_time:int,end_time:int}> $windows
+     */
+    protected function applyPersonalParticipate(array &$where, array $staffIds, int $forceStoreId, array $windows = []): void
+    {
+        if (!$staffIds) {
+            $where['id'] = -1;
+            $where['employee_data_scope'] = ['mode' => 'personal', 'staff_ids' => []];
+            return;
+        }
+        if ($forceStoreId > 0 && !$windows) {
+            $where['store_id'] = $forceStoreId;
+        }
+        $where['employee_data_scope'] = [
+            'mode' => 'personal',
+            'staff_ids' => $staffIds,
+            'store_id' => $forceStoreId,
+            'tenure_windows' => $windows,
+        ];
+        // 供现有 search 可消费的辅助键；订单 DAO 接入时优先读 employee_data_scope
+        $where['data_scope_participate_staff_ids'] = $staffIds;
+        $where['data_scope_participate_fields'] = ['staff_id', 'clerk_id', 'service_staff_id', 'gendan_staff_id'];
+    }
+
+    /**
+     * @return int[]
+     */
+    public function expandOrgToStoreIds(int $orgId): array
+    {
+        if ($orgId <= 0) {
+            return [];
+        }
+        $orgIds = $this->collectOrgIdsIncl($orgId);
+        if (!$orgIds) {
+            return [];
+        }
+        $ids = Db::name('organization_store')->alias('os')
+            ->join('system_store st', 'st.id = os.store_id')
+            ->whereIn('os.org_id', $orgIds)
+            ->where('st.is_del', 0)
+            ->column('os.store_id');
+        $ids = array_values(array_unique(array_map('intval', $ids ?: [])));
+        sort($ids);
+        return $ids;
+    }
+
+    /**
+     * @return int[]
+     */
+    protected function collectOrgIdsIncl(int $orgId): array
+    {
+        $rows = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
+        $children = [];
+        foreach ($rows as $row) {
+            $children[(int)($row['pid'] ?? 0)][] = (int)$row['id'];
+        }
+        $out = [];
+        $stack = [$orgId];
+        $guard = 0;
+        while ($stack && $guard < 5000) {
+            $cur = (int)array_pop($stack);
+            if ($cur <= 0 || isset($out[$cur])) {
+                $guard++;
+                continue;
+            }
+            $out[$cur] = true;
+            foreach ($children[$cur] ?? [] as $cid) {
+                $stack[] = (int)$cid;
+            }
+            $guard++;
+        }
+        return array_map('intval', array_keys($out));
+    }
+
+    public function isSuperAdmin(array $adminInfo): bool
+    {
+        if (!is_array($adminInfo) || !array_key_exists('level', $adminInfo) || !array_key_exists('admin_type', $adminInfo)) {
+            return false;
+        }
+        $level = (int)$adminInfo['level'];
+        $adminType = (int)$adminInfo['admin_type'];
+        return $level === 0 && $adminType !== 3;
+    }
+
+    /** 核销/共享写入口统一拒绝文案（人话） */
+    public const DENY_ORDER_WRITEOFF_MSG = '无权查看或核销该订单';
+
+    /**
+     * 列表进入详情二次校验：与列表同一数据范围
+     * @param array $orderRow 至少含 id/store_id/staff_id/clerk_id/service_staff_id/gendan_staff_id
+     */
+    public function assertOrderReadable(array $orderRow, int $employeeId, string $end, int $storeId, array $adminInfo): void
+    {
+        if ($this->isSuperAdmin($adminInfo)) {
+            return;
+        }
+        if ($employeeId <= 0) {
+            throw new AdminException('无权查看该订单');
+        }
+        $orderId = (int)($orderRow['id'] ?? 0);
+        $orderStoreId = (int)($orderRow['store_id'] ?? 0);
+        if ($orderId <= 0) {
+            throw new AdminException('订单不存在');
+        }
+        $end = $end === 'store' ? 'store' : 'admin';
+        if ($end === 'store') {
+            if ($storeId <= 0 || $orderStoreId !== $storeId) {
+                throw new AdminException('无权查看该订单');
+            }
+        }
+
+        $isolated = Db::name('employee_store_isolation')
+            ->where('employee_id', $employeeId)
+            ->where('store_id', $orderStoreId)
+            ->where('status', 1)
+            ->where('is_del', 0)
+            ->value('id');
+        if ((int)$isolated > 0) {
+            throw new AdminException('无权查看该订单');
+        }
+
+        $staffIds = $this->resolveStaffIdsForEmployee($employeeId);
+        $effectiveStores = $this->resolveEffectiveStoreIds($employeeId, $end === 'store' ? $storeId : 0, $adminInfo);
+
+        if ($end === 'store') {
+            if (is_array($effectiveStores) && in_array($storeId, $effectiveStores, true)) {
+                return; // 本店范围
+            }
+            if ($this->orderParticipatedByStaff($orderRow, $staffIds)) {
+                return;
+            }
+            throw new AdminException('无权查看该订单');
+        }
+
+        // 平台端
+        if ($effectiveStores === null) {
+            return;
+        }
+        if ($effectiveStores) {
+            if (in_array($orderStoreId, $effectiveStores, true)) {
+                return;
+            }
+            throw new AdminException('无权查看该订单');
+        }
+        if ($this->orderParticipatedByStaff($orderRow, $staffIds)) {
+            return;
+        }
+        throw new AdminException('无权查看该订单');
+    }
+
+    /**
+     * 平台端核销/写入口：解析员工后按数据范围校验订单
+     */
+    public function guardOrderAccessFromAdmin(array $adminInfo, array $orderRow): void
+    {
+        $employeeId = $this->resolveEmployeeIdFromOperator($adminInfo, 'admin');
+        try {
+            $this->assertOrderReadable($orderRow, $employeeId, 'admin', 0, $adminInfo);
+        } catch (AdminException $e) {
+            throw new AdminException(self::DENY_ORDER_WRITEOFF_MSG);
+        }
+    }
+
+    /**
+     * 门店端核销/写入口：解析员工后按本店数据范围校验订单
+     */
+    public function guardOrderAccessFromStoreStaff(array $staffInfo, int $storeId, array $orderRow): void
+    {
+        $employeeId = $this->resolveEmployeeIdFromOperator($staffInfo, 'store');
+        $adminInfo = [
+            'id' => (int)($staffInfo['id'] ?? 0),
+            'level' => 1,
+            'admin_type' => 3,
+            'employee_id' => $employeeId,
+        ];
+        try {
+            $this->assertOrderReadable($orderRow, $employeeId, 'store', $storeId, $adminInfo);
+        } catch (AdminException $e) {
+            throw new AdminException(self::DENY_ORDER_WRITEOFF_MSG);
+        }
+    }
+
+    /**
+     * 收银台核销/写入口：收银员同属门店店员体系
+     */
+    public function guardOrderAccessFromCashier(array $cashierInfo, int $storeId, array $orderRow): void
+    {
+        $employeeId = $this->resolveEmployeeIdFromOperator($cashierInfo, 'cashier');
+        $adminInfo = [
+            'id' => (int)($cashierInfo['id'] ?? 0),
+            'level' => 1,
+            'admin_type' => 3,
+            'employee_id' => $employeeId,
+        ];
+        try {
+            $this->assertOrderReadable($orderRow, $employeeId, 'store', $storeId, $adminInfo);
+        } catch (AdminException $e) {
+            throw new AdminException(self::DENY_ORDER_WRITEOFF_MSG);
+        }
+    }
+
+    /**
+     * 门店核销记录列表：锁定本店；个人模式叠加核销店员 staff_id 过滤
+     */
+    public function applyWriteOffRecordsScope(array &$where, array $staffInfo, int $storeId): void
+    {
+        $storeId = (int)$storeId;
+        $where['relation_id'] = $storeId > 0 ? $storeId : -1;
+        if ($storeId <= 0) {
+            $where['scope_staff_ids'] = [-1];
+            return;
+        }
+        $employeeId = $this->resolveEmployeeIdFromOperator($staffInfo, 'store');
+        $adminInfo = [
+            'id' => (int)($staffInfo['id'] ?? 0),
+            'level' => 1,
+            'admin_type' => 3,
+            'employee_id' => $employeeId,
+        ];
+        $tmp = [];
+        $this->applyOrderListScope($tmp, $employeeId, 'store', $storeId, $adminInfo);
+        $mode = (string)($tmp['employee_data_scope']['mode'] ?? '');
+        if ($mode === 'store_all' || $mode === 'all') {
+            return;
+        }
+        $staffIds = array_values(array_filter(array_map('intval', (array)($tmp['employee_data_scope']['staff_ids'] ?? []))));
+        $where['scope_staff_ids'] = $staffIds ?: [-1];
+    }
+
+    /**
+     * @param int[] $staffIds
+     */
+    protected function orderParticipatedByStaff(array $orderRow, array $staffIds): bool
+    {
+        if (!$staffIds) {
+            return false;
+        }
+        $set = array_fill_keys($staffIds, true);
+        foreach (['staff_id', 'clerk_id', 'service_staff_id', 'gendan_staff_id'] as $field) {
+            $v = (int)($orderRow[$field] ?? 0);
+            if ($v > 0 && isset($set[$v])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从 adminInfo / staffInfo / cashierInfo 解析 employee_id
+     */
+    public function resolveEmployeeIdFromOperator(array $operator, string $end = 'admin'): int
+    {
+        $employeeId = (int)($operator['employee_id'] ?? 0);
+        if ($employeeId > 0) {
+            return $employeeId;
+        }
+        $opId = (int)($operator['id'] ?? 0);
+        if ($opId <= 0) {
+            return 0;
+        }
+        if ($end === 'store' || $end === 'cashier') {
+            return (int)Db::name('system_store_staff')->where('id', $opId)->where('is_del', 0)->value('employee_id');
+        }
+        return (int)Db::name('system_admin')->where('id', $opId)->where('is_del', 0)->value('employee_id');
+    }
+
+    protected function assertEmployee(int $employeeId): void
+    {
+        $emp = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->find();
+        if (!$emp) {
+            throw new AdminException('员工不存在');
+        }
+    }
+
+    /**
+     * @param mixed $raw
+     * @return int[]
+     */
+    protected function normalizeIntIds($raw): array
+    {
+        if (!is_array($raw)) {
+            $raw = $raw !== '' && $raw !== null ? explode(',', (string)$raw) : [];
+        }
+        $ids = array_values(array_unique(array_filter(array_map('intval', $raw))));
+        sort($ids);
+        return $ids;
+    }
+
+    protected function writeAudit(
+        int $employeeId,
+        string $action,
+        int $targetId,
+        array $after,
+        array $operator,
+        array $auditMeta,
+        string $reason
+    ): void {
+        $json = json_encode($after, JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            throw new AdminException('审计序列化失败');
+        }
+        Db::name('employee_change_log')->insert([
+            'employee_id' => $employeeId,
+            'action' => $action,
+            'target_type' => 'data_scope',
+            'target_id' => $targetId,
+            'source' => 'admin',
+            'before_data' => '',
+            'after_data' => $json,
+            'reason' => $reason,
+            'operator_type' => 'admin',
+            'operator_id' => (int)($auditMeta['operator_id'] ?? $operator['id'] ?? 0),
+            'operator_name' => (string)($auditMeta['operator_name'] ?? $operator['real_name'] ?? $operator['account'] ?? ''),
+            'operator_ip' => (string)($auditMeta['operator_ip'] ?? ''),
+            'request_id' => (string)($auditMeta['request_id'] ?? ''),
+            'add_time' => time(),
+        ]);
+    }
+}

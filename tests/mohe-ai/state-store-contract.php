@@ -1,0 +1,142 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__.'/../../后端代码/app/services/ai/execution/AiRunStore.php';
+use app\services\ai\execution\AiRunStore;
+
+function installAiStateFixture(PDO $db): void
+{
+    // SQLite is only a local transactional test adapter, not the production deployment schema.
+    $db->exec('CREATE TABLE mohe_ai_mutex (instance_id TEXT PRIMARY KEY, quarantined_slots INTEGER NOT NULL DEFAULT 0)');
+    $db->exec('CREATE TABLE mohe_ai_receipt (instance_id TEXT, receipt_key TEXT, request_hash TEXT, window_id TEXT, run_id TEXT, reason TEXT, expires_at INTEGER, PRIMARY KEY(instance_id,receipt_key))');
+    $db->exec('CREATE TABLE mohe_ai_attempt (instance_id TEXT,run_id TEXT,attempt_code TEXT,kind TEXT,target_code TEXT,payload_hash TEXT,state TEXT,input_tokens INTEGER,output_tokens INTEGER,created_at INTEGER,expires_at INTEGER,PRIMARY KEY(instance_id,run_id,attempt_code))');
+    $db->exec('CREATE TABLE mohe_ai_run (instance_id TEXT,run_id TEXT,account_id INTEGER,terminal TEXT,conversation_id TEXT,window_id TEXT,generation INTEGER,status TEXT,reason TEXT,progress_code TEXT,clarification_ref TEXT,version INTEGER,created_at INTEGER,expires_at INTEGER,deadline_at INTEGER,last_clock_at INTEGER,remaining_ms INTEGER,pause_at INTEGER,clarification_count INTEGER,slot_held INTEGER,worker_token TEXT,evidence_ref TEXT,answer_ref TEXT,snapshot_json TEXT,counters_json TEXT,PRIMARY KEY(instance_id,run_id))');
+}
+$checks=0;
+function checkState(bool $condition,string $label): void { global $checks; ++$checks; if (!$condition) { throw new RuntimeException('FAIL '.$label); } }
+function rejectsState(callable $fn,string $code): void { try { $fn(); } catch (RuntimeException $e) { checkState($e->getMessage()===$code,'expected '.$code.', got '.$e->getMessage()); return; } throw new RuntimeException('Expected '.$code); }
+$db=new PDO('sqlite::memory:'); installAiStateFixture($db);
+$now=1000000; $clock=function () use (&$now) { return $now; };
+$store=new AiRunStore($db,'','fixture.instance',$clock);
+$owner=['account_id'=>1,'terminal'=>'store','conversation_id'=>'conversation1','window_id'=>'window1'];
+$snapshot=['capability_snapshot_ref'=>'cap1','capability_snapshot_hash'=>str_repeat('a',64),'budget_profile_version'=>'b1','authorization_version'=>'auth1','model_config_version'=>'model1'];
+$hash=hash('sha256','fixture request');
+$created=$store->create($owner,'request1',$hash,$snapshot,180000,2);
+$r=$created['run']; $id=$r['run_id']; $g=$r['generation'];
+checkState($created['accepted'] && !$created['replayed'],'create');
+checkState($store->create($owner,'request1',$hash,$snapshot,180000,2)['replayed'],'idempotent create');
+checkState(!isset($store->create($owner,'request1',$hash,$snapshot)['run']['worker_token']),'replay redacts internals');
+rejectsState(function () use ($store,$owner,$snapshot) { $store->create($owner,'request1',str_repeat('b',64),$snapshot); },'AI_IDEMPOTENCY_CONFLICT');
+$otherWindow=$owner; $otherWindow['window_id']='window2';
+rejectsState(function () use ($store,$otherWindow,$hash,$snapshot) { $store->create($otherWindow,'request1',$hash,$snapshot); },'AI_IDEMPOTENCY_CONFLICT');
+foreach (['account_id'=>2,'terminal'=>'platform','conversation_id'=>'other','window_id'=>'other'] as $key=>$value) {
+    $wrong=$owner; $wrong[$key]=$value;
+    rejectsState(function () use ($store,$wrong,$id,$g) { $store->get($wrong,$id,$g); },'AI_RUN_NOT_FOUND');
+}
+$otherInstance=new AiRunStore($db,'','fixture.other',$clock);
+rejectsState(function () use ($otherInstance,$owner,$id,$g) { $otherInstance->get($owner,$id,$g); },'AI_RUN_NOT_FOUND');
+$executionRef='request-'.str_repeat('a',48); $executionHash=hash('sha256','initial durable envelope');
+checkState($store->queueExecution($owner,$id,$g,'execute',$executionRef,$executionHash)['status']==='RECEIVED','queue initial execution envelope');
+checkState($store->claim($owner,$id,$g,'worker1'),'claim once');
+// A browser may lose the create response and submit the same receipt while
+// the original worker is already running.  The retry must observe that Run,
+// never turn it into an invalid second execution.
+$replayedExecution=$store->queueExecution($owner,$id,$g,'execute',$executionRef,$executionHash,true);
+checkState(($replayedExecution['execution_replayed']??false)===true && $replayedExecution['status']==='WORKFLOW_EXECUTING','create replay observes claimed run');
+// A refresh can rebuild the private request envelope and therefore its
+// transport hash, after the worker has already claimed the original Run.
+// It is still the same receipt-validated create request: return the current
+// Run for polling instead of dereferencing a second execution.  This covers
+// the replay branch rather than the identical-hash fast path above.
+$replayedClaimed=$store->queueExecution($owner,$id,$g,'execute',$executionRef,hash('sha256','refresh rebuilt envelope'),true);
+checkState(($replayedClaimed['execution_replayed']??false)===true && $replayedClaimed['status']==='WORKFLOW_EXECUTING','create replay accepts claimed run with rebuilt envelope');
+checkState(!$store->claim($owner,$id,$g,'worker2'),'cannot duplicate execute');
+rejectsState(function () use ($store,$owner,$id,$g) { $store->checkpoint($owner,$id,$g,'worker2'); },'AI_WORKER_FENCED');
+$store->assertRequest($owner,$id,$g,$hash);
+rejectsState(function () use ($store,$owner,$id,$g) { $store->assertRequest($owner,$id,$g,str_repeat('b',64)); },'AI_IDEMPOTENCY_CONFLICT');
+rejectsState(function () use ($store,$owner,$id,$g) { $store->reserve($owner,$id,$g,'worker1','model_attempt_count'); },'AI_COUNTER_SEQUENCE');
+checkState($store->reserve($owner,$id,$g,'worker1','stage_count')===1,'reserve stage');
+checkState($store->reserve($owner,$id,$g,'worker1','model_attempt_count')===1,'reserve attempt');
+checkState($store->reserve($owner,$id,$g,'worker1','tool_call_count',8)===8,'reserve eight tools');
+rejectsState(function () use ($store,$owner,$id,$g) { $store->reserve($owner,$id,$g,'worker1','tool_call_count'); },'AI_COUNTER_EXHAUSTED');
+$otherConversation=$owner; $otherConversation['conversation_id']='conversation2';
+checkState($store->create($otherConversation,'requestOther',$hash,$snapshot)['reason']==='OTHER_CONVERSATION_ACTIVE','another conversation refused');
+$cancelled=$store->cancel($owner,$id,$g);
+checkState($cancelled['status']==='CANCELLED' && $cancelled['slot_held']===1,'cancel holds physical slot');
+checkState($store->cancel($owner,$id,$g)['status']==='CANCELLED','cancel idempotent');
+rejectsState(function () use ($store,$owner,$id,$g) { $store->publish($owner,$id,$g,'worker1','e1','a1'); },'AI_RUN_TERMINAL');
+checkState($store->create($owner,'capacity1',$hash,$snapshot,180000,1)['reason']==='CAPACITY_REJECTED','logical cancel cannot sell slot');
+$store->release($owner,$id,$g,'worker1');
+checkState($store->create($owner,'capacity1',$hash,$snapshot,180000,1)['reason']==='CAPACITY_REJECTED','rejected receipt stable after release');
+$r=$store->create($owner,'request2',$hash,$snapshot,180000,1)['run']; $id2=$r['run_id']; $g2=$r['generation'];
+checkState($g2>$g,'generation monotonic');
+$store->claim($owner,$id2,$g2,'worker2');
+$now+=10000;
+$paused=$store->pauseForClarification($owner,$id2,$g2,'worker2');
+checkState($paused['status']==='WAITING_CLARIFICATION' && $paused['slot_held']===0,'clarification pauses and releases');
+$now+=300000;
+$resumed=$store->resume($owner,$id2,$g2,'worker3');
+checkState($resumed['deadline_at']===$now+170000,'resume exact remaining budget');
+rejectsState(function () use ($store,$owner,$id2,$g2) { $store->pauseForClarification($owner,$id2,$g2,'worker3'); },'AI_CLARIFICATION_EXHAUSTED');
+$published=$store->publish($owner,$id2,$g2,'worker3','evidence2','answer2');
+checkState($published['status']==='COMPLETED','publish');
+checkState($store->cancel($owner,$id2,$g2)['status']==='COMPLETED','publish wins cancel race');
+$store->release($owner,$id2,$g2,'worker3');
+$r3=$store->create($owner,'request3',$hash,$snapshot,180000,2)['run'];
+$r4=$store->create($owner,'request4',$hash,$snapshot,180000,2)['run'];
+checkState($store->get($owner,$r3['run_id'],$r3['generation'])['status']==='CANCELLED','same conversation superseded');
+checkState($store->get($owner,$r3['run_id'],$r3['generation'])['slot_held']===0,'unclaimed superseded reservation released');
+$store->claim($owner,$r4['run_id'],$r4['generation'],'worker4');
+$now-=1;
+rejectsState(function () use ($store,$owner,$r4) { $store->checkpoint($owner,$r4['run_id'],$r4['generation'],'worker4'); },'AI_EXECUTION_CLOCK_REGRESSED');
+$now+=1;
+$now+=180000;
+rejectsState(function () use ($store,$owner,$r4) { $store->checkpoint($owner,$r4['run_id'],$r4['generation'],'worker4'); },'AI_RUN_DEADLINE');
+$store->cleanup();
+checkState($store->get($owner,$r4['run_id'],$r4['generation'])['status']==='FAILED','deadline supervisor terminalizes');
+checkState($store->get($owner,$r4['run_id'],$r4['generation'])['slot_held']===1,'deadline never physical release');
+$now+=86400000;
+rejectsState(function () use ($store,$owner,$r4) { $store->get($owner,$r4['run_id'],$r4['generation']); },'AI_RUN_EXPIRED');
+$clean=$store->cleanup();
+checkState($clean['quarantined_slots']===1,'expired occupied slot quarantined');
+checkState((int)$db->query('SELECT COUNT(*) FROM mohe_ai_run')->fetchColumn()===0,'all expired states purged');
+checkState((int)$db->query('SELECT COUNT(*) FROM mohe_ai_receipt')->fetchColumn()===0,'receipts purged');
+checkState($store->create($owner,'afterexpiry',$hash,$snapshot,180000,1)['reason']==='CAPACITY_REJECTED','no unsafe expiry recovery');
+$badSnapshot=$snapshot; $badSnapshot['question']='never persist me';
+rejectsState(function () use ($store,$owner,$hash,$badSnapshot) { $store->create($owner,'bad',$hash,$badSnapshot); },'AI_SNAPSHOT_INVALID');
+
+// A panel can close between acceptance and execution.  That Run has no worker
+// and therefore must never make a later, explicitly new conversation wait for
+// a task that cannot be doing work.
+$admissionDb=new PDO('sqlite::memory:'); installAiStateFixture($admissionDb); $admissionNow=5000000;
+$admission=new AiRunStore($admissionDb,'','admission-reconcile',function () use (&$admissionNow) { return $admissionNow; });
+$firstOwner=['account_id'=>8,'terminal'=>'merchant','conversation_id'=>'first','window_id'=>'window'];
+$nextOwner=$firstOwner; $nextOwner['conversation_id']='next';
+$orphan=$admission->create($firstOwner,'orphan',$hash,$snapshot,180000,2)['run'];
+$replacement=$admission->create($nextOwner,'replacement',$hash,$snapshot,180000,2);
+checkState($replacement['accepted'],'new conversation admits after safe unclaimed orphan reconciliation');
+checkState($admission->get($firstOwner,$orphan['run_id'],$orphan['generation'])['status']==='CANCELLED','unclaimed foreign conversation is superseded');
+
+// Deadline reconciliation is also part of admission.  A worker-held slot is
+// still retained for physical safety, but its expired logical Run cannot turn
+// into an OTHER_CONVERSATION_ACTIVE deadlock.
+$deadlineDb=new PDO('sqlite::memory:'); installAiStateFixture($deadlineDb); $deadlineNow=6000000;
+$deadlineStore=new AiRunStore($deadlineDb,'','deadline-reconcile',function () use (&$deadlineNow) { return $deadlineNow; });
+$deadlineOwner=['account_id'=>9,'terminal'=>'merchant','conversation_id'=>'old','window_id'=>'window'];
+$deadlineRun=$deadlineStore->create($deadlineOwner,'old-request',$hash,$snapshot,5000,2)['run'];
+checkState($deadlineStore->claim($deadlineOwner,$deadlineRun['run_id'],$deadlineRun['generation'],'deadline-worker'),'deadline fixture claimed');
+$deadlineNow+=5000; $newDeadlineOwner=$deadlineOwner; $newDeadlineOwner['conversation_id']='new';
+checkState($deadlineStore->create($newDeadlineOwner,'new-request',$hash,$snapshot,180000,2)['accepted'],'expired foreign Run no longer blocks a new conversation');
+checkState($deadlineStore->get($deadlineOwner,$deadlineRun['run_id'],$deadlineRun['generation'])['status']==='FAILED','admission terminalizes expired Run');
+// A feedback source is bound to the same owner and original question fingerprint;
+// the runtime table still contains no raw chat text before the user votes.
+$feedbackDb=new PDO('sqlite::memory:'); installAiStateFixture($feedbackDb);
+$feedbackStore=new AiRunStore($feedbackDb,'','feedback.instance',function () { return 7000000; });
+$feedbackHash=hash_hmac('sha256','本月现金业绩多少','fixture-key');
+$feedbackRun=$feedbackStore->create($owner,'feedback-request',$hash,$snapshot,180000,2,8,$feedbackHash)['run'];
+$feedbackSource=$feedbackStore->feedbackSource($owner,$feedbackRun['run_id'],$feedbackRun['generation']);
+checkState($feedbackRun['feedback_available']===true && $feedbackSource['question_hash']===$feedbackHash,'owner feedback source retains only the keyed question fingerprint');
+checkState(strpos((string)$feedbackDb->query('SELECT counters_json FROM mohe_ai_run')->fetchColumn(),'本月现金业绩多少')===false,'raw question is absent from Run metadata');
+$wrongOwner=$owner;$wrongOwner['account_id']=2;
+rejectsState(function () use($feedbackStore,$wrongOwner,$feedbackRun) { $feedbackStore->feedbackSource($wrongOwner,$feedbackRun['run_id'],$feedbackRun['generation']); },'AI_RUN_NOT_FOUND');
+echo 'PASS '.$checks." transactional state checks (isolated SQLite; no production DB).\n";

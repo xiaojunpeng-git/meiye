@@ -1,0 +1,130 @@
+{
+  "task": "R13-00001 异业收客汇总年份控件补验",
+  "status": "开发与自测完成，待产品经理确认验收；未提交、未部署、未推送",
+  "fixed_version": "R13-20261012-year-56bd026d",
+  "generated_at": "2026-10-12T05:33:50.933Z",
+  "baseline_head": "f25d019857e838a59ea977c9bfa28d7ed46ae09c",
+  "branch": "release/store-cashier-c14-main",
+  "supersedes_for_acceptance": "R13-cross-industry-summary-detail-fixed-2026-10-12.json；继承其中后端范围与验证，本文件更新前端年份控件、测试和当前文件指纹。旧证据保留历史事实。",
+  "approved_scope": [
+    "异业收客汇总表周期改为年份控件，默认今年。",
+    "查询、导出和路由提交完整自然年；明细表保留日期区间，月度下钻保留精确月份。"
+  ],
+  "files": {
+    "frontend_source": [
+      {
+        "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+        "sha256": "ab6b2b24e1a4254be8683b49e62181cd53be7401c6a3abe8fa9690af9a20d0c3"
+      }
+    ],
+    "backend_source": [
+      {
+        "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+        "sha256": "3ad5560b0590bd879e83fb801a5c47714a09e6170b553d0ab7e9b7fbccab6966",
+        "boundary": "不含 newCustomerSummaryAddRow 的实例系统名称与对应注释改动；该两处属于其他任务。"
+      },
+      {
+        "path": "后端代码/app/services/report/StoreReportParticipantScopeServices.php",
+        "sha256": "21b8106ea97ae8731775265d75dd7180805cc00a7c74afa6991db1058f3e5678"
+      },
+      {
+        "path": "后端代码/app/services/report/StoreOperationsReportAnnotationServices.php",
+        "sha256": "aadf5efb50f92f33463e25905bb39c6cced2a0facd2290f462c7a1688c892a33"
+      }
+    ],
+    "automated_tests": [
+      {
+        "path": "tests/cashier-v3/php/phase-two-report-projection-contract.php",
+        "sha256": "836f27a35c244f02f5500081c5ee31a4159a758077112f460e63b6c175b140cd"
+      },
+      {
+        "path": "tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+        "sha256": "9d439e243dc882ec303a7ddf89b777d8ecc672bb63499b0886291d1ece644c3a"
+      },
+      {
+        "path": "tests/cashier-v3/php/r13-cross-industry-summary-annotation-rollback.php",
+        "sha256": "53c27b72a27066c43821fa37007d92ac5423abf37d28058e150165acd4ce3d51"
+      },
+      {
+        "path": "tests/cashier-v3/js/r10-report-today-defaults.mjs",
+        "sha256": "2042fd5d7cb539e75f66fa592174bfc450e80fedcee0233ee4471c62f055a273"
+      },
+      {
+        "path": "tests/cashier-v3/js/store-business-report-contract.mjs",
+        "sha256": "6390ace407f7aa4fb75e3953a708ce09e609f1184bd9882cba78aa058369b167"
+      }
+    ],
+    "database_migrations": [],
+    "engineering_scripts": [],
+    "generated_artifacts": [
+      {
+        "path": "/tmp/r13-cross-industry-year-build-20261012/index.html",
+        "sha256": "dad27d843a18a194dcc858ced6fe6e6de086adcb0ad6eb33c35b04c8572873d3"
+      },
+      {
+        "path": "/tmp/r13-cross-industry-year-build-20261012/assets/index-69a75391.js",
+        "sha256": "f5d8aa377115938d9341fac72ee211fb72d417837703c307b62450ca42134c8a"
+      },
+      {
+        "path": "/tmp/r13-cross-industry-year-build-20261012/assets/index-cd6a6e1b.css",
+        "sha256": "cd6a6e1b2e01d86f9f1abb25b2a51d8b914a8394ec0046260356ab9219f25192"
+      }
+    ],
+    "evidence": [
+      {
+        "path": "tests/cashier-v3/evidence/R13-summary-year-filter-2026-10-12.jpg",
+        "sha256": "5100e94dbb1b98b730811c7b69b8cbaf0905bb51289bc9e6c20fc11b8f585d3d"
+      },
+      {
+        "path": "/Users/xiaojunpeng/Downloads/门店经营报表-异业收客汇总表-20261012133057.csv",
+        "sha256": "9868fb9e93eb3bd8f387d598e2236c7c05aa6c9433183d8a363fc1859c310081"
+      }
+    ]
+  },
+  "owned_patch": {
+    "sha256": "56bd026d94fddabe9d39cb20fb21ce76ecc80b70e2bd060ce2207995cf973055",
+    "excluded_hunks": [
+      {
+        "header": "@@ -1978,0 +2106,4 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices",
+        "sha256": "52e63e750e363e967b6c77ece54b4912cd6170a0f1201f475b9bbd3580b151d3"
+      },
+      {
+        "header": "@@ -1991 +2122,4 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices",
+        "sha256": "35e320566cefaa593a5994c9afdbf1d21cf09af86eb289ca41a1ff7d3d00d9db"
+      }
+    ],
+    "staged_diff_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+    "format": "按所列7个已跟踪源码/测试文件 git diff --unified=0，剔除列明的两处其他任务片段；另两个未跟踪PHP测试由文件SHA-256固定。",
+    "concurrent_change": "开发期间其他任务新增f25d0198，仅归档008上传证据，无本轮源码变更；暂存区指纹保持不变，本任务未暂存。"
+  },
+  "architecture": "只调整前端年度输入与既有参数链路；统一收款事实、门店会员粒度、年度指标、后端权限和冲销口径不变。无数据库迁移、资金事实写入、远程操作或新增共享依赖。",
+  "verification": {
+    "year_runtime_test": "PASS：23张门店报表默认值、所选年份查询/导出/路由/刷新恢复、旧日期链接结束年兼容、明细日期模式、上海跨年、平台既有年/月规则。",
+    "report_js_contract": "44 passed, 0 failed",
+    "inherited_backend_tests": "前版只读MySQL143项、注释事务回滚21项、PHP语法6文件、投影与跨报表合同测试通过；本次后端和三个PHP测试SHA-256均与前版相同，未重复执行。",
+    "browser": [
+      "18091本地异业汇总显示年份2026；查询URL提交year=2026,start_date=2026-01-01,end_date=2026-12-31；李灰芝年度及10月均1200。",
+      "切换2025实际提交2025全年；后端明确提示统计日期范围无效或早于V3报表覆盖期，旧2026结果清空。",
+      "切回2026查询成功；导出CSV实际下载并核对：李灰芝一行，合计/全年/10月1200，其余月0。",
+      "点击10月1200进入明细：2026-10-01至2026-10-31, include_followup_cash=1, member_id=1093146, store_ids=175；BJ26100200015业务日期2026-10-02，合计1200，日期区间控件保留。",
+      "浏览器后退和刷新恢复所选2026年及全年日期，页面截图无布局重叠。"
+    ],
+    "frontend_build": {
+      "command": "npm run build -- --outDir /tmp/r13-cross-industry-year-build-20261012",
+      "cwd": "前端代码/cashier-v3",
+      "result": "PASS，1999 modules，现有chunk-size提示；构建源与18091热更新正本一致。仅本地验证，不是8080集成发布包。",
+      "remote_instance_migration_backup": "不适用，未连接远程"
+    },
+    "comment_updates": [
+      "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "tests/cashier-v3/js/r10-report-today-defaults.mjs",
+      "tests/cashier-v3/js/store-business-report-contract.mjs"
+    ],
+    "git_diff_check": "PASS"
+  },
+  "limitations": [
+    "原有V3覆盖期自2026-08-10开始，2025年不在覆盖期内；本次不扩展历史数据范围。",
+    "本地没有线上朱海燕1185元样本，未声称核验线上2385元合计。",
+    "本轮仍等待产品经理对最新固定版本验收；线上未更新。"
+  ]
+}

@@ -1,0 +1,820 @@
+diff --git a/前端代码/admin/src/api/user.js b/前端代码/admin/src/api/user.js
+index e48323e6..efa8a84c 100644
+--- a/前端代码/admin/src/api/user.js
++++ b/前端代码/admin/src/api/user.js
+@@ -21,6 +21,29 @@ export function userList(data) {
+     params: data
+   });
+ }
++
++/**
++ * @description 获取会员调店可选的全部启用门店；该入口不按管理员组织范围裁剪。
++ */
++export function memberTransferStoreOptionsApi() {
++  return request({
++    url: 'user/user/transfer_store/options',
++    method: 'get'
++  });
++}
++
++/**
++ * @description 仅变更会员归属门店，并保存调店原因审计。
++ * @param {Number} id 会员 ID
++ * @param {Object} data { store_id, reason }
++ */
++export function memberTransferStoreApi(id, data) {
++  return request({
++    url: `user/user/transfer_store/${id}`,
++    method: 'post',
++    data
++  });
++}
+ /**
+  * @description 获取用户设置
+  * @param {Object} param data {Object} 传值参数
+diff --git a/前端代码/admin/src/components/goodsAttr/index.vue b/前端代码/admin/src/components/goodsAttr/index.vue
+index e395ef16..96c87ed9 100644
+--- a/前端代码/admin/src/components/goodsAttr/index.vue
++++ b/前端代码/admin/src/components/goodsAttr/index.vue
+@@ -28,6 +28,13 @@
+ 					<Input search enter-button placeholder="请输入商品名称,关键字,编号" v-model="formValidate.store_name"
+ 						style="width: 240px" @on-search="userSearchs" />
+ 				</FormItem>
++				<!-- 平台卡项选项目时，状态筛选与左侧商品标签处于同一行。 -->
++				<FormItem v-if="Number(chooseType) === 97" label="商品状态：">
++					<Select v-model="formValidate.type" @on-change="userSearchs">
++						<Option :value="1">销售中</Option>
++						<Option :value="2">仓库中</Option>
++					</Select>
++				</FormItem>
+ 				</Col>
+ 			</Row>
+ 		</Form>
+@@ -177,7 +184,9 @@ export default {
+         is_new: this.is_new,
+         store_label_id: '',
+         product_type: '',
+-        choose_type: this.chooseType
++        choose_type: this.chooseType,
++        // 卡项项目选择默认只读销售中商品，2 与商品列表“仓库中”使用同一后端状态口径。
++        type: Number(this.chooseType) === 97 ? 1 : ''
+       },
+       total: 0,
+       loading: false,
+diff --git a/前端代码/admin/src/pages/user/list/handle/userDetails.vue b/前端代码/admin/src/pages/user/list/handle/userDetails.vue
+index f788831f..4e6e62f2 100644
+--- a/前端代码/admin/src/pages/user/list/handle/userDetails.vue
++++ b/前端代码/admin/src/pages/user/list/handle/userDetails.vue
+@@ -147,6 +147,7 @@
+                     { val: 'reservation_record', label: '预约记录' },
+                     { val: 'visit', label: '浏览足迹' },
+                     { val: 'spread_change', label: '推荐人变更记录' },
++                    { val: 'store_transfer', label: '调店详情' },
+                 ],
+                 modals: false,
+                 spinShow: false,
+@@ -710,6 +711,36 @@
+                   },
+                 ]
+                 break;
++                          case 'store_transfer':
++                            // 调店详情直接展示后端审计快照，避免前端重新解释历史门店和操作人。
++                            this.columns = [
++                              {
++                                title: '原门店',
++                                key: 'from_store_name',
++                                minWidth: 160,
++                              },
++                              {
++                                title: '目标门店',
++                                key: 'to_store_name',
++                                minWidth: 160,
++                              },
++                              {
++                                title: '调店原因',
++                                key: 'reason',
++                                minWidth: 240,
++                              },
++                              {
++                                title: '操作人',
++                                key: 'operator_name',
++                                minWidth: 140,
++                              },
++                              {
++                                title: '操作时间',
++                                key: 'add_time',
++                                minWidth: 170,
++                              },
++                            ]
++                            break;
+                           case 'belong_store_change':
+                             this.columns = [
+                               {
+diff --git a/前端代码/admin/src/pages/user/list/index.vue b/前端代码/admin/src/pages/user/list/index.vue
+index 33b65c7e..0bddffe7 100644
+--- a/前端代码/admin/src/pages/user/list/index.vue
++++ b/前端代码/admin/src/pages/user/list/index.vue
+@@ -585,7 +585,7 @@
+         <vxe-column field="cash_consume_amount" title="消费现金金额" min-width="120"></vxe-column>
+         <vxe-column field="cash_consume_count" title="消费次数" min-width="90"></vxe-column>
+         <vxe-column field="writeoff_count" title="到店次数" min-width="90"></vxe-column>
+-        <vxe-column field="action" title="操作" width="180" fixed="right">
++        <vxe-column field="action" title="操作" width="230" fixed="right">
+           <template v-slot="{ row }">
+             <span v-auth="['admin-user-user-edit']" v-if="row.delete_time != null" style="color: #c5c8ce;">编辑</span>
+             <a v-auth="['admin-user-user-edit']" v-else @click="edit(row)">编辑</a>
+@@ -593,6 +593,9 @@
+             <a v-auth="['admin-user-user-extend_info']" @click="extendInfo(row)" v-if="row.is_extend_info">信息补充</a>
+             <Divider v-auth="['admin-user-user-extend_info']" type="vertical" />
+             <a @click="changeMenu(row, '1')">详情</a>
++            <Divider type="vertical" />
++            <a v-if="row.delete_time == null" @click="openMemberTransfer(row)">调店</a>
++            <span v-else style="color: #c5c8ce;">调店</span>
+           </template>
+         </vxe-column>
+       </vxe-table>
+@@ -607,6 +610,58 @@
+         />
+       </div>
+     </Card>
++    <!-- 调店只改变会员归属门店；原因随归属历史落库，不联动订单、卡项、余额或店员。 -->
++    <Modal
++        v-model="memberTransferModal"
++        title="会员调店"
++        width="560"
++        :mask-closable="false"
++        @on-cancel="resetMemberTransfer"
++    >
++      <Alert show-icon>仅变更会员所属门店，会员的订单、卡项、权益、余额和绑定店员不会改变。</Alert>
++      <Form
++          ref="memberTransferForm"
++          :model="memberTransferForm"
++          :rules="memberTransferRules"
++          :label-width="100"
++      >
++        <FormItem label="会员">
++          <span>{{ memberTransferForm.member_name || '-' }}</span>
++        </FormItem>
++        <FormItem label="当前门店">
++          <span>{{ memberTransferForm.current_store_name || '未设置' }}</span>
++        </FormItem>
++        <FormItem label="目标门店" prop="store_id">
++          <Select
++              v-model="memberTransferForm.store_id"
++              filterable
++              placeholder="请选择目标门店"
++              :loading="memberTransferOptionsLoading"
++          >
++            <Option
++                v-for="store in memberTransferStoreList"
++                :key="store.id"
++                :value="store.id"
++                :disabled="Number(store.id) === Number(memberTransferForm.current_store_id)"
++            >{{ store.name }}</Option>
++          </Select>
++        </FormItem>
++        <FormItem label="调店原因" prop="reason">
++          <Input
++              v-model="memberTransferForm.reason"
++              type="textarea"
++              :rows="4"
++              :maxlength="200"
++              show-word-limit
++              placeholder="请输入调店原因"
++          />
++        </FormItem>
++      </Form>
++      <div slot="footer">
++        <Button @click="resetMemberTransfer">取消</Button>
++        <Button type="primary" :loading="memberTransferSubmitting" @click="saveMemberTransfer">保存</Button>
++      </div>
++    </Modal>
+     <!-- 用户标签 -->
+     <Modal
+         v-model="labelListShow"
+@@ -832,6 +887,8 @@ import {
+   extendInfo,
+   batchProcess,
+   exportUserData,
++  memberTransferStoreOptionsApi,
++  memberTransferStoreApi,
+ } from "@/api/user";
+ import { agentSpreadApi } from "@/api/agent";
+ import { staffListInfo } from "@/api/store";
+@@ -1101,6 +1158,25 @@ export default {
+       },
+       spread_name: '',
+       storeList: [],
++      memberTransferModal: false,
++      memberTransferSubmitting: false,
++      memberTransferOptionsLoading: false,
++      memberTransferStoreList: [],
++      memberTransferForm: {
++        uid: 0,
++        member_name: '',
++        current_store_id: 0,
++        current_store_name: '',
++        store_id: '',
++        reason: '',
++      },
++      memberTransferRules: {
++        store_id: [{ required: true, type: 'number', message: '请选择目标门店', trigger: 'change' }],
++        reason: [
++          { required: true, message: '请输入调店原因', trigger: 'blur' },
++          { min: 2, max: 200, message: '调店原因请输入 2-200 个字符', trigger: 'blur' },
++        ],
++      },
+       importShow: false,
+       importCardShow: false,
+       integralStart: null,
+@@ -1185,6 +1261,75 @@ export default {
+         this.$Message.error(err.msg);
+       })
+     },
++    /**
++     * 打开会员调店弹窗。目标门店使用专用全集接口，避免复用列表筛选的组织范围。
++     */
++    openMemberTransfer(row) {
++      if (this.$refs.memberTransferForm) {
++        this.$refs.memberTransferForm.resetFields();
++      }
++      this.memberTransferForm = {
++        uid: Number(row.uid),
++        member_name: row.nickname || row.real_name || `会员 ${row.uid}`,
++        current_store_id: Number(row.belong_store_id || 0),
++        current_store_name: row.belong_store_name || '',
++        store_id: '',
++        reason: '',
++      };
++      this.memberTransferModal = true;
++      this.memberTransferOptionsLoading = true;
++      memberTransferStoreOptionsApi()
++          .then((res) => {
++            this.memberTransferStoreList = Array.isArray(res.data) ? res.data : [];
++          })
++          .catch((err) => {
++            this.$Message.error(err.msg || '门店列表加载失败');
++          })
++          .finally(() => {
++            this.memberTransferOptionsLoading = false;
++          });
++    },
++    /**
++     * 保存独立调店命令；提交中禁用按钮，成功后刷新列表显示新的归属门店。
++     */
++    saveMemberTransfer() {
++      this.$refs.memberTransferForm.validate((valid) => {
++        if (!valid || this.memberTransferSubmitting) return;
++        if (Number(this.memberTransferForm.store_id) === Number(this.memberTransferForm.current_store_id)) {
++          return this.$Message.warning('目标门店不能与当前门店相同');
++        }
++        this.memberTransferSubmitting = true;
++        memberTransferStoreApi(this.memberTransferForm.uid, {
++          store_id: Number(this.memberTransferForm.store_id),
++          reason: this.memberTransferForm.reason.trim(),
++        })
++            .then((res) => {
++              this.$Message.success(res.msg || '调店成功');
++              this.memberTransferModal = false;
++              this.getList();
++            })
++            .catch((err) => {
++              this.$Message.error(err.msg || '调店失败');
++            })
++            .finally(() => {
++              this.memberTransferSubmitting = false;
++            });
++      });
++    },
++    /** 清理弹窗草稿，避免下一位会员继承上一次的目标门店或原因。 */
++    resetMemberTransfer() {
++      if (this.memberTransferSubmitting) return;
++      this.memberTransferModal = false;
++      this.memberTransferForm = {
++        uid: 0,
++        member_name: '',
++        current_store_id: 0,
++        current_store_name: '',
++        store_id: '',
++        reason: '',
++      };
++      this.$nextTick(() => this.$refs.memberTransferForm && this.$refs.memberTransferForm.resetFields());
++    },
+     checkboxItem(e){
+       let uid = parseInt(e.rowid);
+       let index = this.checkUidList.indexOf(uid);
+diff --git a/后端代码/app/controller/admin/v1/product/StoreProduct.php b/后端代码/app/controller/admin/v1/product/StoreProduct.php
+index 762f255f..f35210af 100644
+--- a/后端代码/app/controller/admin/v1/product/StoreProduct.php
++++ b/后端代码/app/controller/admin/v1/product/StoreProduct.php
+@@ -820,10 +820,13 @@ class StoreProduct extends AuthController
+             $where['type'] = 0;
+             $where['relation_id'] = 0;
+         } elseif ($chooseType === 97) {
+-            // 平台卡项只配置已上架的平台项目主数据；门店项目 ID 在同步后由原映射链路解析。
++            // 平台卡项只配置平台项目主数据；状态 1/2 分别复用商品列表“销售中/仓库中”口径。
++            // 未传或篡改为其他状态时仍收敛到销售中，门店项目 ID 继续由原映射链路解析。
+             $where['type'] = 0;
+             $where['relation_id'] = 0;
+-            $where['is_show'] = 1;
++            $projectStatus = (int)($where['status'] ?? 1);
++            $where['status'] = in_array($projectStatus, [1, 2], true) ? $projectStatus : 1;
++            unset($where['is_show']);
+             $where['is_card'] = 0;
+         } else {
+             $where['type'] = [0, 2];
+diff --git a/后端代码/app/controller/admin/v1/user/User.php b/后端代码/app/controller/admin/v1/user/User.php
+index c9cc1b4b..2a1228a2 100644
+--- a/后端代码/app/controller/admin/v1/user/User.php
++++ b/后端代码/app/controller/admin/v1/user/User.php
+@@ -19,6 +19,7 @@ use app\services\store\SystemStoreStaffServices;
+ use app\services\user\group\UserGroupServices;
+ use app\services\user\label\UserLabelServices;
+ use app\services\user\UserBatchProcessServices;
++use app\services\user\UserBelongStoreServices;
+ use app\services\user\UserCardHolderServices;
+ use app\services\user\UserServices;
+ use app\controller\admin\AuthController;
+@@ -539,6 +540,27 @@ class User extends AuthController
+         return $this->success($this->services->edit($id));
+     }
+ 
++    /**
++     * 获取会员调店可选门店。此功能按产品口径仅要求平台登录，不额外校验角色菜单权限。
++     */
++    public function transferStoreOptions(UserBelongStoreServices $services)
++    {
++        return $this->success($services->getTransferStoreOptions());
++    }
++
++    /**
++     * 保存会员调店命令；目标门店与原因是唯一可写入的业务输入。
++     */
++    public function transferStore($id, UserBelongStoreServices $services)
++    {
++        [$storeId, $reason] = $this->request->postMore([
++            ['store_id', 0],
++            ['reason', ''],
++        ], true);
++        $result = $services->transferUserStore((int)$id, (int)$storeId, (string)$reason, (int)$this->adminId);
++        return $this->success($result['changed'] ? '调店成功' : '会员已属于目标门店', $result);
++    }
++
+     public function update($id)
+     {
+         $data = $this->request->postMore([
+diff --git a/后端代码/app/services/user/UserBelongStoreServices.php b/后端代码/app/services/user/UserBelongStoreServices.php
+index 355daaf7..fa89eb62 100644
+--- a/后端代码/app/services/user/UserBelongStoreServices.php
++++ b/后端代码/app/services/user/UserBelongStoreServices.php
+@@ -17,6 +17,7 @@ use app\services\BaseServices;
+ use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
+ use app\services\store\StoreUserServices;
+ use think\facade\Db;
++use think\exception\ValidateException;
+ 
+ 
+ /**
+@@ -44,6 +45,7 @@ class UserBelongStoreServices extends BaseServices
+         'expire' => '有效期到期解绑',
+         'admin_expire' => '管理员操作解绑',
+         'shop' => '更换', //更换店员同步更换归属门店
++        'admin_transfer' => '平台会员调店',
+     ];
+ 
+     /**
+@@ -131,6 +133,170 @@ class UserBelongStoreServices extends BaseServices
+         return true;
+     }
+ 
++    /**
++     * 平台会员调店命令。
++     *
++     * 该命令只更新会员主表的 belong_store_id，并追加带原因的归属历史；订单、权益、余额、
++     * 绑定店员等其他业务字段都不在写集合内。行锁保证并发时以最新归属为准，相同目标门店
++     * 的重复提交按幂等成功处理，不重复写历史。
++     *
++     * @return array{changed:bool,from_store_id:int,to_store_id:int,history_id:int}
++     */
++    public function transferUserStore(int $uid, int $targetStoreId, string $reason, int $adminId): array
++    {
++        $reason = trim($reason);
++        if ($uid <= 0) {
++            throw new ValidateException('会员不存在');
++        }
++        if ($targetStoreId <= 0) {
++            throw new ValidateException('请选择目标门店');
++        }
++        if (mb_strlen($reason) < 2 || mb_strlen($reason) > 200) {
++            throw new ValidateException('调店原因请输入2-200个字符');
++        }
++
++        $result = Db::transaction(function () use ($uid, $targetStoreId, $reason, $adminId): array {
++            // 锁定会员主记录后再读取旧门店，防止两个调店命令互相覆盖而丢失审计链。
++            $user = Db::name('user')->where('uid', $uid)->lock(true)->find();
++            if (!$user || !empty($user['delete_time'])) {
++                throw new ValidateException('会员不存在或已注销');
++            }
++            $targetStore = Db::name('system_store')
++                ->where(['id' => $targetStoreId, 'is_del' => 0, 'is_show' => 1])
++                ->field('id,name')
++                ->find();
++            if (!$targetStore) {
++                throw new ValidateException('目标门店不存在或已停用');
++            }
++
++            $fromStoreId = (int)($user['belong_store_id'] ?? 0);
++            if ($fromStoreId === $targetStoreId) {
++                return [
++                    'changed' => false,
++                    'from_store_id' => $fromStoreId,
++                    'to_store_id' => $targetStoreId,
++                    'history_id' => 0,
++                ];
++            }
++
++            $now = time();
++            // 名称作为事件发生时快照保存，后续门店或管理员改名不应改写历史含义。
++            $fromStoreName = $fromStoreId > 0
++                ? (string)Db::name('system_store')->where('id', $fromStoreId)->value('name')
++                : '未设置';
++            $operatorName = (string)Db::name('system_admin')->where('id', $adminId)->value('real_name');
++            if ($operatorName === '') {
++                $operatorName = (string)Db::name('system_admin')->where('id', $adminId)->value('account');
++            }
++            $historyId = (int)Db::name('user_belong_store')->insertGetId([
++                'group' => $fromStoreId > 0 ? 2 : 1,
++                'type' => 'admin_transfer',
++                'is_store' => 1,
++                'uid' => $uid,
++                'store_id' => $targetStoreId,
++                'from_store_id' => $fromStoreId,
++                'staff_id' => 0,
++                'admin_id' => $adminId,
++                'reason' => $reason,
++                'from_store_name' => $fromStoreName !== '' ? $fromStoreName : ('门店#' . $fromStoreId),
++                'to_store_name' => (string)$targetStore['name'],
++                'operator_name' => $operatorName !== '' ? $operatorName : ('管理员#' . $adminId),
++                'add_time' => $now,
++            ]);
++            if ($historyId <= 0) {
++                throw new \RuntimeException('会员调店记录保存失败');
++            }
++
++            // 写集合严格限定为会员归属门店；报表事实仅记录同一归属事件的历史投影。
++            $updated = Db::name('user')->where('uid', $uid)->update(['belong_store_id' => $targetStoreId]);
++            if ($updated !== 1) {
++                throw new \RuntimeException('会员归属门店更新失败');
++            }
++            (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberStoreAssignmentInTx(
++                ['tenant_id' => '0'],
++                [
++                    'member_id' => $uid,
++                    'assigned' => true,
++                    'store_id' => $targetStoreId,
++                    'effective_at' => $now,
++                    'source_type' => 'USER_BELONG_STORE',
++                    'source_event_id' => (string)$historyId,
++                    'idempotency_key' => 'phase3-member-store:' . $historyId,
++                ]
++            );
++
++            return [
++                'changed' => true,
++                'from_store_id' => $fromStoreId,
++                'to_store_id' => $targetStoreId,
++                'history_id' => $historyId,
++            ];
++        });
++
++        if ($result['changed']) {
++            /** @var UserServices $userServices */
++            $userServices = app()->make(UserServices::class);
++            $userServices->cacheTag()->clear();
++        }
++        return $result;
++    }
++
++    /**
++     * 返回平台调店可选的全部启用门店，不套用管理员组织范围；只提供门店 ID 和名称。
++     */
++    public function getTransferStoreOptions(): array
++    {
++        return Db::name('system_store')
++            ->where(['is_del' => 0, 'is_show' => 1])
++            ->field('id,name')
++            ->order('id asc')
++            ->select()
++            ->toArray();
++    }
++
++    /**
++     * 获取会员的平台调店历史。
++     *
++     * 只读取 admin_transfer 事件，避免把自动归属、店员换绑等记录混入“调店详情”；
++     * 名称优先使用写入时快照，旧数据缺少快照时才回查当前名称并给出可识别兜底值。
++     *
++     * @return array{list:array,count:int}
++     */
++    public function getTransferHistory(int $uid): array
++    {
++        [$page, $limit] = $this->getPageValue();
++        $query = Db::name('user_belong_store')->where([
++            'uid' => $uid,
++            'is_store' => 1,
++            'type' => 'admin_transfer',
++        ]);
++        $count = (int)(clone $query)->count();
++        $list = $query
++            ->field('id,from_store_id,store_id,admin_id,reason,from_store_name,to_store_name,operator_name,add_time')
++            ->page($page, $limit)
++            ->order('add_time desc,id desc')
++            ->select()
++            ->toArray();
++
++        foreach ($list as &$item) {
++            if ((string)$item['from_store_name'] === '') {
++                $item['from_store_name'] = (int)$item['from_store_id'] > 0
++                    ? ((string)Db::name('system_store')->where('id', (int)$item['from_store_id'])->value('name') ?: ('门店#' . $item['from_store_id']))
++                    : '未设置';
++            }
++            if ((string)$item['to_store_name'] === '') {
++                $item['to_store_name'] = (string)Db::name('system_store')->where('id', (int)$item['store_id'])->value('name') ?: ('门店#' . $item['store_id']);
++            }
++            if ((string)$item['operator_name'] === '') {
++                $item['operator_name'] = (string)Db::name('system_admin')->where('id', (int)$item['admin_id'])->value('real_name') ?: ('管理员#' . $item['admin_id']);
++            }
++            $item['add_time'] = $item['add_time'] ? date('Y-m-d H:i:s', (int)$item['add_time']) : '';
++        }
++        unset($item);
++
++        return compact('list', 'count');
++    }
++
+     /**
+      * 店员绑定记录
+      * @param int $uid
+diff --git a/后端代码/app/services/user/UserServices.php b/后端代码/app/services/user/UserServices.php
+index 2375af58..a3cf95f7 100644
+--- a/后端代码/app/services/user/UserServices.php
++++ b/后端代码/app/services/user/UserServices.php
+@@ -1954,6 +1954,11 @@ class UserServices extends BaseServices
+                 $services = app()->make(UserSpreadServices::class);
+                 return $services->getSpreadList(['store_id' => 0, 'staff_id' => 0, 'uid' => $id], '*', ['spreadUser'], false);
+                 break;
++            case 'store_transfer'://平台会员调店审计记录
++                /** @var UserBelongStoreServices $userBelongStoreServices */
++                $userBelongStoreServices = app()->make(UserBelongStoreServices::class);
++                return $userBelongStoreServices->getTransferHistory($id);
++                break;
+             case 'belong_store_change'://所属门店变更记录
+                 /** @var UserBelongStoreServices $userBelongStoreServices */
+                 $userBelongStoreServices = app()->make(UserBelongStoreServices::class);
+diff --git a/后端代码/route/admin.php b/后端代码/route/admin.php
+index eff078dd..1a08a3b6 100644
+--- a/后端代码/route/admin.php
++++ b/后端代码/route/admin.php
+@@ -2988,6 +2989,9 @@ Route::group('adminapi', function () {
+         Route::get('user/extend_info/:id', 'v1.user.User/extendInfoForm')->option(['real_name' => '用户补充信息表单']);
+         //用户补充信息保存
+         Route::post('user/extend_info/:id', 'v1.user.User/saveExtendForm')->option(['real_name' => '用户补充信息保存']);
++        // 第22轮会员调店：保持为登录即用的未登记接口，不附加角色菜单权限。
++        Route::get('user/transfer_store/options', 'v1.user.User/transferStoreOptions')->option(['real_name' => '会员调店门店选项']);
++        Route::post('user/transfer_store/:id', 'v1.user.User/transferStore')->option(['real_name' => '会员调店保存']);
+         //用户管理资源路由
+         Route::resource('user', 'v1.user.user')->option(['real_name' => [
+             'index' => '获取用户列表',
+diff --git a/tests/platform-member-transfer/php/r22-transfer-rollback.php b/tests/platform-member-transfer/php/r22-transfer-rollback.php
+new file mode 100644
+index 00000000..cba434e2
+--- /dev/null
++++ b/tests/platform-member-transfer/php/r22-transfer-rollback.php
+@@ -0,0 +1,96 @@
++<?php
++declare(strict_types=1);
++
++// 本地集成测试在外层事务内调用真实调店服务，最终回滚，避免污染会员归属和审计历史。
++require '/var/www/html/vendor/autoload.php';
++$app = new think\App('/var/www/html/');
++$app->initialize();
++
++use app\services\user\UserBelongStoreServices;
++use think\facade\Db;
++
++function r22Assert(bool $condition, string $message): void
++{
++    if (!$condition) {
++        throw new RuntimeException($message);
++    }
++}
++
++$member = Db::name('user')
++    ->where('belong_store_id', '>', 0)
++    ->whereNull('delete_time')
++    ->order('uid desc')
++    ->find();
++r22Assert((bool)$member, '缺少可用于回滚测试的在用会员');
++
++$targetStore = Db::name('system_store')
++    ->where(['is_del' => 0, 'is_show' => 1])
++    ->where('id', '<>', (int)$member['belong_store_id'])
++    ->field('id,name')
++    ->order('id asc')
++    ->find();
++r22Assert((bool)$targetStore, '缺少不同于会员当前归属的启用门店');
++
++$uid = (int)$member['uid'];
++$targetStoreId = (int)$targetStore['id'];
++$reason = 'R22会员调店事务回滚自测';
++$storeUserBefore = Db::name('store_user')->where('uid', $uid)->order('id asc')->select()->toArray();
++$historyBefore = (int)Db::name('user_belong_store')->where(['uid' => $uid, 'type' => 'admin_transfer'])->count();
++
++Db::startTrans();
++try {
++    /** @var UserBelongStoreServices $services */
++    $services = app()->make(UserBelongStoreServices::class);
++    $first = $services->transferUserStore($uid, $targetStoreId, $reason, 1);
++    r22Assert($first['changed'] === true, '首次调店必须写入新归属');
++
++    $after = Db::name('user')->where('uid', $uid)->find();
++    r22Assert((int)$after['belong_store_id'] === $targetStoreId, '会员主表归属门店未更新');
++    $afterWithoutStore = $after;
++    $beforeWithoutStore = $member;
++    unset($afterWithoutStore['belong_store_id'], $beforeWithoutStore['belong_store_id']);
++    r22Assert($afterWithoutStore == $beforeWithoutStore, '调店修改了会员主表的其他字段');
++
++    $history = Db::name('user_belong_store')->where('id', (int)$first['history_id'])->find();
++    r22Assert((int)$history['from_store_id'] === (int)$member['belong_store_id'], '审计记录缺少原门店');
++    r22Assert((int)$history['store_id'] === $targetStoreId, '审计记录目标门店错误');
++    r22Assert((string)$history['reason'] === $reason, '审计记录原因错误');
++    r22Assert((string)$history['type'] === 'admin_transfer', '审计记录类型错误');
++    r22Assert((string)$history['from_store_name'] !== '', '审计记录缺少原门店名称快照');
++    r22Assert((string)$history['to_store_name'] === (string)$targetStore['name'], '审计记录目标门店名称快照错误');
++    r22Assert((string)$history['operator_name'] !== '', '审计记录缺少操作人名称快照');
++
++    $historyPage = $services->getTransferHistory($uid);
++    $detailRow = array_values(array_filter($historyPage['list'], static function (array $row) use ($first): bool {
++        return (int)$row['id'] === (int)$first['history_id'];
++    }));
++    r22Assert(count($detailRow) === 1, '调店详情接口未返回本次审计记录');
++    r22Assert((string)$detailRow[0]['reason'] === $reason, '调店详情原因与审计事实不一致');
++    r22Assert((string)$detailRow[0]['add_time'] !== '', '调店详情未格式化操作时间');
++
++    // 相同目标重复提交必须幂等，不得增加第二条历史或改写店员绑定。
++    $second = $services->transferUserStore($uid, $targetStoreId, $reason, 1);
++    r22Assert($second['changed'] === false, '相同目标门店重复提交未幂等返回');
++    $historyAfter = (int)Db::name('user_belong_store')->where(['uid' => $uid, 'type' => 'admin_transfer'])->count();
++    r22Assert($historyAfter === $historyBefore + 1, '重复提交产生了额外调店历史');
++    $storeUserAfter = Db::name('store_user')->where('uid', $uid)->order('id asc')->select()->toArray();
++    r22Assert($storeUserAfter == $storeUserBefore, '调店意外修改了会员店员绑定');
++
++    Db::rollback();
++} catch (Throwable $e) {
++    Db::rollback();
++    throw $e;
++}
++
++$restored = Db::name('user')->where('uid', $uid)->find();
++$historyRestored = (int)Db::name('user_belong_store')->where(['uid' => $uid, 'type' => 'admin_transfer'])->count();
++r22Assert((int)$restored['belong_store_id'] === (int)$member['belong_store_id'], '回滚后会员归属未恢复');
++r22Assert($historyRestored === $historyBefore, '回滚后仍残留调店历史');
++
++echo json_encode([
++    'status' => 'PASS',
++    'uid' => $uid,
++    'from_store_id' => (int)$member['belong_store_id'],
++    'tested_target_store_id' => $targetStoreId,
++    'persistent_changes' => 0,
++], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;
+diff --git a/后端代码/database/upgrades/2026-10-21-平台会员调店审计/00-升级清单.md b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/00-升级清单.md
+new file mode 100644
+index 00000000..2f248532
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/00-升级清单.md
+@@ -0,0 +1,15 @@
++# 平台会员调店审计升级
++
++- 升级编号：`20261021-001-platform-member-store-transfer-audit`
++- 适用范围：第 22 轮平台会员调店
++- 权威写入：`eb_user.belong_store_id`
++- 历史审计：`eb_user_belong_store`
++- 兼容性：MySQL 5.7，可重复执行
++
++执行顺序：
++
++1. `01-升级前检查.sql`
++2. `02-正式升级.sql`
++3. `03-升级后验证.sql`
++
++本升级只增加调店审计字段及门店、操作人名称快照，不改写任何既有会员归属记录。
+diff --git a/后端代码/database/upgrades/2026-10-21-平台会员调店审计/01-升级前检查.sql b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/01-升级前检查.sql
+new file mode 100644
+index 00000000..f43ed81a
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/01-升级前检查.sql
+@@ -0,0 +1,14 @@
++-- Read-only preflight for R22 platform member store transfer audit.
++SET NAMES utf8mb4;
++
++SELECT DATABASE() AS current_database;
++SELECT COUNT(*) AS user_belong_store_table_count
++FROM information_schema.TABLES
++WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='eb_user_belong_store';
++
++SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT
++FROM information_schema.COLUMNS
++WHERE TABLE_SCHEMA=DATABASE()
++  AND TABLE_NAME='eb_user_belong_store'
++  AND COLUMN_NAME IN ('from_store_id','admin_id','reason','from_store_name','to_store_name','operator_name')
++ORDER BY ORDINAL_POSITION;
+diff --git a/后端代码/database/upgrades/2026-10-21-平台会员调店审计/02-正式升级.sql b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/02-正式升级.sql
+new file mode 100644
+index 00000000..54a84e87
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/02-正式升级.sql
+@@ -0,0 +1,60 @@
++-- upgrade_key: 20261021-001-platform-member-store-transfer-audit
++-- MySQL 5.7 compatible, replay-safe, schema-only. Existing history rows remain unchanged.
++SET NAMES utf8mb4;
++SET @r22_db := DATABASE();
++
++SET @r22_has_from_store := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='from_store_id'
++);
++SET @r22_sql := IF(@r22_has_from_store=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `from_store_id` int(10) unsigned NOT NULL DEFAULT ''0'' COMMENT ''变更前归属门店ID'' AFTER `store_id`',
++  'SELECT ''skip eb_user_belong_store.from_store_id''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SET @r22_has_admin := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='admin_id'
++);
++SET @r22_sql := IF(@r22_has_admin=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `admin_id` int(10) unsigned NOT NULL DEFAULT ''0'' COMMENT ''平台操作管理员ID'' AFTER `staff_id`',
++  'SELECT ''skip eb_user_belong_store.admin_id''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SET @r22_has_reason := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='reason'
++);
++SET @r22_sql := IF(@r22_has_reason=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `reason` varchar(255) NOT NULL DEFAULT '''' COMMENT ''会员调店原因'' AFTER `admin_id`',
++  'SELECT ''skip eb_user_belong_store.reason''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SET @r22_has_from_store_name := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='from_store_name'
++);
++SET @r22_sql := IF(@r22_has_from_store_name=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `from_store_name` varchar(100) NOT NULL DEFAULT '''' COMMENT ''变更前门店名称快照'' AFTER `reason`',
++  'SELECT ''skip eb_user_belong_store.from_store_name''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SET @r22_has_to_store_name := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='to_store_name'
++);
++SET @r22_sql := IF(@r22_has_to_store_name=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `to_store_name` varchar(100) NOT NULL DEFAULT '''' COMMENT ''变更后门店名称快照'' AFTER `from_store_name`',
++  'SELECT ''skip eb_user_belong_store.to_store_name''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SET @r22_has_operator_name := (
++  SELECT COUNT(*) FROM information_schema.COLUMNS
++  WHERE TABLE_SCHEMA=@r22_db AND TABLE_NAME='eb_user_belong_store' AND COLUMN_NAME='operator_name'
++);
++SET @r22_sql := IF(@r22_has_operator_name=0,
++  'ALTER TABLE `eb_user_belong_store` ADD COLUMN `operator_name` varchar(100) NOT NULL DEFAULT '''' COMMENT ''操作人名称快照'' AFTER `to_store_name`',
++  'SELECT ''skip eb_user_belong_store.operator_name''');
++PREPARE r22_stmt FROM @r22_sql; EXECUTE r22_stmt; DEALLOCATE PREPARE r22_stmt;
++
++SELECT 'APPLY_OK' AS apply_result;
+diff --git a/后端代码/database/upgrades/2026-10-21-平台会员调店审计/03-升级后验证.sql b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/03-升级后验证.sql
+new file mode 100644
+index 00000000..abdc1371
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-21-平台会员调店审计/03-升级后验证.sql
+@@ -0,0 +1,19 @@
++-- Read-only verification for R22 platform member store transfer audit.
++SET NAMES utf8mb4;
++
++SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT
++FROM information_schema.COLUMNS
++WHERE TABLE_SCHEMA=DATABASE()
++  AND TABLE_NAME='eb_user_belong_store'
++  AND COLUMN_NAME IN ('from_store_id','admin_id','reason','from_store_name','to_store_name','operator_name')
++ORDER BY ORDINAL_POSITION;
++
++SELECT
++  SUM(CASE WHEN COLUMN_NAME='from_store_id' THEN 1 ELSE 0 END) AS has_from_store_id,
++  SUM(CASE WHEN COLUMN_NAME='admin_id' THEN 1 ELSE 0 END) AS has_admin_id,
++  SUM(CASE WHEN COLUMN_NAME='reason' THEN 1 ELSE 0 END) AS has_reason
++  ,SUM(CASE WHEN COLUMN_NAME='from_store_name' THEN 1 ELSE 0 END) AS has_from_store_name
++  ,SUM(CASE WHEN COLUMN_NAME='to_store_name' THEN 1 ELSE 0 END) AS has_to_store_name
++  ,SUM(CASE WHEN COLUMN_NAME='operator_name' THEN 1 ELSE 0 END) AS has_operator_name
++FROM information_schema.COLUMNS
++WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='eb_user_belong_store';

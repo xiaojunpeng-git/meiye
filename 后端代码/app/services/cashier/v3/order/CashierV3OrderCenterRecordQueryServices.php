@@ -1,0 +1,2801 @@
+<?php
+
+namespace app\services\cashier\v3\order;
+
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
+use app\services\report\StoreReportNormalDataScopeServices;
+use app\services\product\product\SystemBalanceProjectServices;
+use think\facade\Db;
+
+/**
+ * 订单中心非销售类记录的只读投影。
+ *
+ * 每类记录直接读取其业务权威表，并始终由服务端 DataScope 收紧门店范围。
+ * 历史表缺少统一经营事实时只展示业务金额，不把旧字段包装成现金业绩。
+ */
+final class CashierV3OrderCenterRecordQueryServices
+{
+    public const CONTRACT_VERSION = 'cashier-v3.order-center.v3';
+    public const BUSINESS_TIMEZONE = 'Asia/Shanghai';
+    public const MAX_PAGE_SIZE = 100;
+
+    private const TYPES = [
+        'recharge',
+        'refund',
+        'debt',
+        'service',
+        'supplement',
+        'gift',
+        'card_operation',
+    ];
+
+    private const CARD_OPERATION_TYPES = [
+        'card_transfer',
+        'card_upgrade',
+        'card_disable',
+        'card_enable',
+        'card_extension',
+        'project_replacement',
+        'project_upgrade',
+        'card_to_balance',
+    ];
+
+    /** @var callable|null function(string $operation, array $context): array */
+    private $reader;
+
+    public function __construct($reader = null)
+    {
+        if ($reader !== null && !is_callable($reader)) {
+            throw new \InvalidArgumentException('order_center_record_reader_invalid');
+        }
+        $this->reader = $reader;
+    }
+
+    public function queryRecords(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $criteria = $this->criteria($payload, $dataScope);
+        if (!$dataScope->hasFeature('cashier.v3.order_center')
+            || $criteria['type'] === ''
+            || $criteria['allowedStoreIds'] === []) {
+            return $this->pagePayload($criteria, [], 0, 'permission_filtered');
+        }
+
+        if ($this->reader !== null) {
+            $result = call_user_func($this->reader, 'query', [
+                'criteria' => $criteria,
+                'operatorScope' => $operatorScope,
+                'dataScope' => $dataScope,
+            ]);
+            if (!is_array($result)) throw new \RuntimeException('order_center_record_reader_result_invalid');
+            $records = is_array($result['records'] ?? null) ? $result['records'] : [];
+            $total = max(0, (int)($result['total'] ?? count($records)));
+        } else {
+            [$records, $total] = $this->readType($criteria, $operatorScope);
+        }
+        return $this->pagePayload($criteria, $records, $total, 'authoritative_business_records');
+    }
+
+    public function augmentInitialPartition(
+        array $partition,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        // 导航只声明类型，不跨业务扫描数量；当前列表分页总数仍由各查询返回。
+        $partition['contractVersion'] = self::CONTRACT_VERSION;
+        $partition['businessTypes'] = [
+            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
+            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
+            ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
+            ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
+            ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
+            ['key' => 'service', 'label' => '服务记录', 'ready' => true],
+            ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
+            ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
+            ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
+        ];
+        $partition['recordsByType'] = array_merge([
+            'all' => [],
+            'sales' => [],
+            'recharge' => [],
+            'refund' => [],
+            'debt' => [],
+            'service' => [],
+            'supplement' => [],
+            'gift' => [],
+            'card_operation' => [],
+        ], is_array($partition['recordsByType'] ?? null) ? $partition['recordsByType'] : []);
+        $partition['pagesByType'] = array_merge([
+            'all' => $this->emptyPageMeta(),
+            'recharge' => $this->emptyPageMeta(),
+            'refund' => $this->emptyPageMeta(),
+            'debt' => $this->emptyPageMeta(),
+            'service' => $this->emptyPageMeta(),
+            'supplement' => $this->emptyPageMeta(),
+            'gift' => $this->emptyPageMeta(),
+            'card_operation' => $this->emptyPageMeta(),
+        ], is_array($partition['pagesByType'] ?? null) ? $partition['pagesByType'] : []);
+        $partition['statusOptionsByType'] = array_merge([
+            'all' => [],
+            'recharge' => $this->statusOptions('recharge'),
+            'refund' => $this->statusOptions('refund'),
+            'debt' => $this->statusOptions('debt'),
+            'service' => $this->statusOptions('service'),
+            'supplement' => $this->statusOptions('supplement'),
+            'gift' => $this->statusOptions('gift'),
+            'card_operation' => $this->statusOptions('card_operation'),
+        ], is_array($partition['statusOptionsByType'] ?? null) ? $partition['statusOptionsByType'] : []);
+        return $partition;
+    }
+
+    public function pagePartition(array $page): array
+    {
+        $type = (string)$page['recordType'];
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'dataStatus' => $page['dataStatus'],
+            'dataAsOf' => $page['dataAsOf'],
+            'businessTimezone' => self::BUSINESS_TIMEZONE,
+            'recordsByType' => [$type => $page['records']],
+            'pagesByType' => [$type => [
+                'total' => $page['total'],
+                'page' => $page['page'],
+                'pageSize' => $page['pageSize'],
+                'dataStatus' => $page['dataStatus'],
+                'paginationMode' => 'offset',
+                'hasMore' => $page['page'] * $page['pageSize'] < $page['total'],
+            ]],
+            'statusOptionsByType' => [$type => $page['statusOptions']],
+        ];
+    }
+
+    private function criteria(array $payload, CashierV3DataScopeContext $dataScope): array
+    {
+        $type = $this->scalar($payload['recordType'] ?? $payload['record_type'] ?? '');
+        if (!in_array($type, self::TYPES, true)) {
+            $type = '';
+        }
+        $keyword = $this->scalar($payload['keyword'] ?? $payload['search'] ?? '');
+        $keyword = function_exists('mb_substr')
+            ? mb_substr($keyword, 0, 100, 'UTF-8')
+            : substr($keyword, 0, 100);
+        $status = $this->scalar($payload['businessStatus'] ?? $payload['status'] ?? '');
+        $scopeMode = strtolower($this->scalar($payload['dataScope'] ?? $payload['data_scope'] ?? 'normal'));
+        if (!in_array($scopeMode, ['normal', 'all'], true)) {
+            $scopeMode = 'normal';
+        }
+        $validStatuses = array_column($this->statusOptions($type), 'value');
+        if (!in_array($status, $validStatuses, true)) {
+            $status = '';
+        }
+        $operationType = '';
+        if ($type === 'card_operation') {
+            $operationType = $this->cardOperationTypeFromLabel($this->topFilterValue($payload, 'operation_type'));
+            if ($operationType === '') {
+                $operationType = $this->cardOperationTypeFromLabel($keyword);
+                if ($operationType !== '') $keyword = '';
+            }
+        }
+        $requestedStores = $this->requestedStoreIds($payload);
+        $businessDateRange = $this->businessDateRange($payload);
+        return [
+            'type' => $type,
+            'page' => max(1, (int)($payload['page'] ?? 1)),
+            'pageSize' => min(self::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20))),
+            'keyword' => $keyword,
+            'status' => $status,
+            'dataScope' => $scopeMode,
+            'operationType' => $operationType,
+            'businessDateFrom' => $businessDateRange['from'],
+            'businessDateTo' => $businessDateRange['to'],
+            'topFilters' => $type === 'service' ? $this->serviceTopFilters($payload) : [],
+            // 报表下钻使用业绩事实的发生日期，而非服务记录原始日期；
+            // 冲销发生在后一天时仍须找回原服务记录，且门店权限照常收紧。
+            'servicePerformanceDrilldown' => $type === 'service'
+                ? $this->servicePerformanceDrilldown($payload) : null,
+            'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
+            'allowedStoreIds' => $this->canonicalStoreIds($dataScope->narrowVisibleStores($requestedStores)),
+            'tenantId' => $dataScope->tenantId(),
+        ];
+    }
+
+    /** @return array{from:string,to:string} */
+    private function businessDateRange(array $payload): array
+    {
+        $from = $this->validBusinessDate($payload['businessDateFrom'] ?? $payload['business_date_from'] ?? $payload['dateFrom'] ?? $payload['date_from'] ?? '');
+        $to = $this->validBusinessDate($payload['businessDateTo'] ?? $payload['business_date_to'] ?? $payload['dateTo'] ?? $payload['date_to'] ?? '');
+        foreach ((array)($payload['topFilters'] ?? $payload['top_filters'] ?? []) as $filter) {
+            if (!is_array($filter) || $this->scalar($filter['field'] ?? '') !== 'business_date') continue;
+            $value = $this->validBusinessDate($filter['value'] ?? '');
+            if ($value === '') continue;
+            $operator = strtolower($this->scalar($filter['operator'] ?? 'eq'));
+            if ($operator === 'gte') $from = $value;
+            elseif ($operator === 'lte') $to = $value;
+            elseif ($operator === 'eq') {
+                $from = $value;
+                $to = $value;
+            }
+        }
+        return ['from' => $from, 'to' => $to];
+    }
+
+    private function validBusinessDate($value): string
+    {
+        $date = $this->scalar($value);
+        return preg_match('/^\\d{4}-\\d{2}-\\d{2}$/D', $date) === 1 ? $date : '';
+    }
+
+    private function readType(array $criteria, CashierV3OperatorScope $scope): array
+    {
+        switch ($criteria['type']) {
+            case 'recharge':
+                return $this->readRecharge($criteria);
+            case 'supplement':
+                return $this->readSupplement($criteria);
+            case 'refund':
+                return $this->readRefund($criteria);
+            case 'debt':
+                return $this->readDebts($criteria);
+            case 'service':
+                return $this->readServices($criteria, $scope);
+            case 'gift':
+                return $this->readGift($criteria);
+            case 'card_operation':
+                return $this->readCardOperations($criteria, $scope);
+            default:
+                return [[], 0];
+        }
+    }
+
+    private function readRecharge(array $criteria): array
+    {
+        $tenantId = (string)($criteria['tenantId'] ?? '');
+        $query = Db::name('user_recharge')->alias('r')
+            ->leftJoin('user u', 'u.uid = r.uid')
+            ->leftJoin('system_store s', 's.id = r.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
+        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        // 历史充值用原支付/创建时间承接日期；不回写业务表，不产生 V3 资金事实。
+        $dateExpression = CashierV3HistoricalRechargeDate::sql();
+        foreach (['businessDateFrom' => '>=', 'businessDateTo' => '<='] as $key => $comparison) {
+            if (!empty($criteria[$key])) $query->whereRaw($dateExpression . ' ' . $comparison . ' ?', [$criteria[$key]]);
+        }
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
+        ]);
+        // “正常”是默认查询范围，不是业务状态选项；它与显式“已支付”一样
+        // 必须排除追加式作废/退款操作，否则已作废的原充值主表仍会混入正常列表。
+        if ($criteria['status'] === 'paid' || ($criteria['dataScope'] === 'normal' && $criteria['status'] === '')) {
+            $query->where('r.paid', 1)->where('r.terminal_action', 0)->where('r.refund_price', '<=', 0)
+                ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['refund', 'void']));
+        } elseif ($criteria['status'] === 'voided') {
+            $query->where(function ($statusQuery) use ($tenantId): void {
+                $statusQuery->where('r.terminal_action', '>', 0)
+                    ->whereExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']), 'OR');
+            });
+        } elseif ($criteria['status'] === 'refunded') {
+            $query->where('r.terminal_action', 0)
+                ->where(function ($statusQuery) use ($tenantId): void {
+                    $statusQuery->where('r.refund_price', '>', 0)
+                        ->whereExists($this->rechargeLifecycleOperationQuery($tenantId, ['refund']), 'OR');
+                })
+                ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
+        }
+        $total = (int)(clone $query)->count('r.id');
+        $rows = $this->pageRows($query, $criteria, 'business_date', 'r.id', implode(',', [
+            'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
+            'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
+            'r.business_source_primary_id', 'r.business_source_primary_name_snapshot',
+            'r.business_source_secondary_id', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
+            $dateExpression . ' AS business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
+            's.name AS store_name', 'st.staff_name',
+        ]));
+        $rechargeEconomics = $this->readRechargeEconomics($rows);
+        $rechargeSalespeople = $this->readRechargeSalespeople($rows, $tenantId);
+        $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
+        $balanceCategories = self::balanceCategoriesForStores($rows);
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations, $balanceCategories): array {
+            $time = (int)($row['pay_time'] ?: $row['add_time']);
+            $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
+            $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
+            $lifecycleOperation = (string)($rechargeLifecycleOperations[(int)$row['id']] ?? '');
+            return [
+                'id' => 'recharge:' . $row['id'],
+                'rechargeId' => (int)$row['id'],
+                'memberId' => (int)$row['uid'],
+                'rechargeOrderNo' => (string)$row['order_id'],
+                // 客户来源只读充值成功时的单据快照，不回查会员当前来源。
+                'source' => $this->businessSourceLabel($row),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
+                'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'storeName' => (string)$row['store_name'],
+                'rechargePlan' => '会员储值',
+                'productCategory' => $balanceCategories[(int)$row['store_id']] ?? '',
+                'productName' => '余额',
+                'rechargeAmount' => (string)$row['price'],
+                'giftAmount' => (string)$row['give_price'],
+                // Only V3 payment facts are the authoritative cash-performance
+                // source. A zero net amount remains ready when reversals offset
+                // a real V3 collection; legacy recharge columns never fill it.
+                // 纯赠金无收款事实是合法的 0 元结果，不应误报为经济数据未就绪。
+                'actualReceivedAmount' => $hasV3PaymentFacts
+                    ? $this->centsToMoney((int)$rechargeEconomics[$economicsKey])
+                    : ((string)$row['recharge_type'] === 'bonus_only' ? '0.00' : null),
+                'economicsDataStatus' => $hasV3PaymentFacts || (string)$row['recharge_type'] === 'bonus_only' ? 'ready' : 'not_ready',
+                'remark' => (string)$row['remarks'],
+                'paymentMethod' => $this->rechargePaymentLabel($row),
+                // user_recharge.staff_id is the operator, not the salesperson.
+                // V3 salespeople are read from immutable performance facts;
+                // legacy rows without that fact intentionally remain blank.
+                'salespersonName' => (string)($rechargeSalespeople[(int)$row['id']] ?? ''),
+                'operatorName' => (string)$row['staff_name'],
+                'paymentStatus' => (int)$row['paid'] === 1 ? '已支付' : '未支付',
+                'orderStatus' => $lifecycleOperation === 'void'
+                    ? '已作废'
+                    : ($lifecycleOperation === 'refund'
+                        ? '已退款作废'
+                        : ((int)$row['terminal_action'] > 0
+                            ? '已作废'
+                            : ((float)$row['refund_price'] > 0 ? '已退款' : '正常'))),
+                'paymentCompletedAt' => $this->dateTime($time),
+            ];
+        }, $rows), $total];
+    }
+
+    private function rechargeLifecycleOperationQuery(string $tenantId, array $operationTypes): callable
+    {
+        return static function ($operation) use ($tenantId, $operationTypes): void {
+            $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
+                ->whereRaw('rlo.source_order_id = CAST(r.id AS CHAR)')
+                ->where('rlo.tenant_id', $tenantId)
+                ->where('rlo.source_type', 'recharge')
+                ->where('rlo.status', 'succeeded')
+                ->whereIn('rlo.operation_type', $operationTypes);
+        };
+    }
+
+    /** @return array<int,string> keyed by recharge ID */
+    private function readRechargeLifecycleOperations(array $recharges, string $tenantId): array
+    {
+        $rechargeIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $recharges))));
+        if ($rechargeIds === []) return [];
+        $rows = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantId)
+            ->where('source_type', 'recharge')
+            ->where('status', 'succeeded')
+            ->whereIn('operation_type', ['refund', 'void'])
+            ->whereIn('source_order_id', array_map('strval', $rechargeIds))
+            ->field('source_order_id,operation_type')
+            ->select()
+            ->toArray();
+        $operations = [];
+        foreach ($rows as $row) {
+            $rechargeId = (int)($row['source_order_id'] ?? 0);
+            $operationType = (string)($row['operation_type'] ?? '');
+            if ($rechargeId <= 0 || !in_array($operationType, ['refund', 'void'], true)) continue;
+            if ($operationType === 'void' || !isset($operations[$rechargeId])) {
+                $operations[$rechargeId] = $operationType;
+            }
+        }
+        return $operations;
+    }
+
+    /**
+     * Reads the V3 cash-performance authority for the current recharge page.
+     * Payment reversals have signed amount_cents, so the effective-fact sum is
+     * the only valid net amount and must not filter to forward facts only.
+     *
+     * @return array<string,int> keyed by store ID and recharge order number
+     */
+    private function readRechargeEconomics(array $recharges): array
+    {
+        $storeIds = [];
+        $orderNos = [];
+        foreach ($recharges as $recharge) {
+            $storeId = (int)($recharge['store_id'] ?? 0);
+            $orderNo = trim((string)($recharge['order_id'] ?? ''));
+            if ($storeId <= 0 || $orderNo === '') continue;
+            $storeIds[$storeId] = $storeId;
+            $orderNos[$orderNo] = $orderNo;
+        }
+        if ($storeIds === [] || $orderNos === []) return [];
+
+        $facts = Db::name('cashier_v3_payment_fact')->alias('pf')
+            ->where('pf.source_document_type', 'recharge')
+            // 业务日期属于原充值单快照；作废反向事实按作废日入账，不能覆盖订单的原业务日期。
+            ->where('pf.fact_direction', 'forward')
+            ->where('pf.status', 'effective')
+            ->whereIn('pf.store_id', array_values($storeIds))
+            ->whereIn('pf.order_no_snapshot', array_values($orderNos))
+            ->field('pf.store_id,pf.order_no_snapshot,SUM(pf.amount_cents) AS actual_received_cents')
+            ->group('pf.store_id,pf.order_no_snapshot')
+            ->select()
+            ->toArray();
+
+        $economics = [];
+        foreach ($facts as $fact) {
+            $storeId = (int)($fact['store_id'] ?? 0);
+            $orderNo = trim((string)($fact['order_no_snapshot'] ?? ''));
+            if ($storeId <= 0 || $orderNo === '') continue;
+            $economics[$this->rechargeFactKey($storeId, $orderNo)] = (int)($fact['actual_received_cents'] ?? 0);
+        }
+        return $economics;
+    }
+
+    /** @return array<int,string> keyed by recharge ID */
+    private function readRechargeSalespeople(array $recharges, string $tenantId): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $recharges))));
+        if ($ids === []) return [];
+        // 调整销售人是追加式业务操作；最近一次成功操作的人员快照是当前归属。
+        // 纯赠金没有现金业绩事实，仍须显示已保存的人员，但不能伪造业绩事实。
+        $latest = (new CashierV3RechargePersonnelSnapshotReader())->latest($recharges, $tenantId);
+        $rows = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', $tenantId)
+            ->where('source_document_type', 'recharge')->where('performance_type', 'sales_performance_allocated')
+            ->where('fact_direction', 'forward')->where('status', 'effective')
+            ->whereIn('order_id', array_map(static function (int $id): string { return 'RCH:' . $id; }, $ids))
+            ->field('fact_id,order_id,employee_name_snapshot')->order('id', 'asc')->select()->toArray();
+        $names = [];
+        foreach ($rows as $row) {
+            // 订单详情展示的是原单快照，不是当期可计提业绩。作废会生成
+            // 反向业绩事实抵销统计，但不能抹掉原充值单的销售人审计痕迹。
+            $orderId = (string)($row['order_id'] ?? '');
+            $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if (!preg_match('/^RCH:([1-9][0-9]*)$/D', $orderId, $m) || $name === '') continue;
+            $id = (int)$m[1];
+            $names[$id] = $names[$id] ?? [];
+            if (!in_array($name, $names[$id], true)) $names[$id][] = $name;
+        }
+        $out = [];
+        foreach ($names as $id => $people) $out[$id] = implode('、', $people);
+        // 未调整的充值沿用原销售业绩快照；调整后的人员选择覆盖旧快照。
+        foreach ($latest as $id => $people) {
+            $peopleNames = array_values(array_unique(array_column($people, 'name')));
+            $out[$id] = implode('、', $peopleNames);
+        }
+        return $out;
+    }
+
+    private function rechargeFactKey(int $storeId, string $orderNo): string
+    {
+        return $storeId . "\0" . trim($orderNo);
+    }
+
+    private function readSupplement(array $criteria): array
+    {
+        $sources = [
+            $this->readV3SalesDebtRepayments($criteria),
+            $this->readV3RechargeDebtRepayments($criteria),
+            $this->readLegacySupplements($criteria),
+        ];
+        $total = array_sum(array_column($sources, 1));
+        $records = [];
+        foreach ($sources as $source) {
+            $records = array_merge($records, $source[0]);
+        }
+        usort($records, function (array $left, array $right): int {
+            $time = (int)$right['_sortTime'] <=> (int)$left['_sortTime'];
+            return $time !== 0 ? $time : strcmp((string)$right['id'], (string)$left['id']);
+        });
+        $offset = ($criteria['page'] - 1) * $criteria['pageSize'];
+        $records = array_slice($records, $offset, $criteria['pageSize']);
+        foreach ($records as &$record) unset($record['_sortTime']);
+        unset($record);
+        return [$records, $total];
+    }
+
+    /**
+     * V3 销售欠款补交的权威来源。销售补交独立落账，不写入旧 store_debt_repay。
+     */
+    private function readV3SalesDebtRepayments(array $criteria): array
+    {
+        $query = Db::name('cashier_v3_debt_repayment')->alias('r')
+            ->leftJoin('user u', 'u.uid = r.member_id')
+            ->leftJoin('system_store s', 's.id = r.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.operator_id')
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('r.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('r.status', ['succeeded', 'voided']);
+                else $q->where('r.status', 'succeeded');
+            });
+        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.repayment_no', 'r.debt_no', 'r.sales_order_no_snapshot',
+            'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        $total = (int)(clone $query)->count('r.id');
+
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.debt_no',
+            'r.sales_order_no_snapshot', 'r.repayment_amount_cents', 'r.status',
+            'r.business_source_primary_id', 'r.business_source_secondary_id',
+            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
+            'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at',
+            'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
+            'st.staff_name',
+        ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
+        if ($rows === []) return [[], $total];
+
+        $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'debt_repayment', $criteria['tenantId']);
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            (string)$criteria['tenantId'], array_column($rows, 'repayment_id'));
+
+        $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
+        $paymentMethods = [];
+        if ($repaymentIds !== []) {
+            $payments = Db::name('cashier_v3_debt_repayment_collection')
+                ->whereIn('repayment_id', $repaymentIds)
+                ->field('repayment_id,payment_line_no,payment_method,amount_cents')
+                ->order('repayment_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray();
+            foreach ($payments as $payment) {
+                $repaymentId = (string)($payment['repayment_id'] ?? '');
+                if ($repaymentId !== '') {
+                    $method = (string)($payment['payment_method'] ?? '');
+                    $label = $this->paymentLabel($method);
+                    // List, detail and receipt share this committed tender amount, not current wallet balance.
+                    if ($method === 'member_balance') $label .= ' ¥' . number_format((int)$payment['amount_cents'] / 100, 0, '.', ',');
+                    $paymentMethods[$repaymentId][] = $label;
+                }
+            }
+        }
+
+        $productNames = $this->supplementDebtProductNames($rows);
+        $productCategories = $this->supplementDebtProductCategories($rows);
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions, $productNames, $productCategories): array {
+            $repaymentId = (string)$row['repayment_id'];
+            return [
+                'id' => 'v3-sales-supplement:' . $repaymentId,
+                'supplementOrderNo' => (string)$row['repayment_no'],
+                'source' => $this->businessSourceLabel($row),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
+                'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
+                'debtNo' => (string)$row['debt_no'],
+                'sourceOrderNo' => (string)$row['sales_order_no_snapshot'],
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'debtSummary' => '销售欠款补交',
+                'productCategory' => (string)($productCategories[(int)$row['debt_id']] ?? '未分类'),
+                'productName' => (string)($productNames[(int)$row['debt_id']] ?? '销售订单欠款'),
+                'supplementAmount' => $this->centsToMoney((int)$row['repayment_amount_cents']),
+                'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
+                'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
+                'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
+                'attributionPeople' => $attributions[$repaymentId] ?? [],
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
+                'paymentCompletedAt' => $this->dateTime((int)$row['settled_at']),
+                '_sortTime' => (int)$row['settled_at'],
+            ];
+        }, $rows), $total];
+    }
+
+    /**
+     * V3 充值欠款补交的权威来源。不得为订单中心展示而回写旧 store_debt_repay。
+     */
+    private function readV3RechargeDebtRepayments(array $criteria): array
+    {
+        $query = Db::name('cashier_v3_recharge_debt_repayment')->alias('r')
+            ->leftJoin('store_debt d', 'd.id = r.debt_id')
+            ->leftJoin('user u', 'u.uid = r.member_id')
+            ->leftJoin('system_store s', 's.id = r.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.operator_id')
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('r.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('r.status', ['succeeded', 'voided']);
+                else $q->where('r.status', 'succeeded');
+            });
+        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.repayment_no', 'd.debt_no', 'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        $total = (int)(clone $query)->count('r.id');
+        // Read enough records from each authority for the requested global page, then merge by settled time.
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.amount_cents',
+            'r.business_source_primary_id', 'r.business_source_secondary_id',
+            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
+            'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
+            'd.order_sn', 'r.status', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
+            'st.staff_name',
+        ]))->order('r.settled_at', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
+        if ($rows === []) return [[], $total];
+
+        $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'recharge_debt_repayment', $criteria['tenantId']);
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            (string)$criteria['tenantId'], array_column($rows, 'repayment_id'));
+
+        $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
+        $paymentMethods = [];
+        if ($repaymentIds !== []) {
+            $payments = Db::name('cashier_v3_recharge_debt_repayment_payment')
+                ->whereIn('repayment_id', $repaymentIds)
+                ->field('repayment_id,payment_line_no,payment_method')
+                ->order('repayment_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray();
+            foreach ($payments as $payment) {
+                $repaymentId = (string)($payment['repayment_id'] ?? '');
+                if ($repaymentId !== '') $paymentMethods[$repaymentId][] = $this->paymentLabel((string)($payment['payment_method'] ?? ''));
+            }
+        }
+        $balanceCategories = self::balanceCategoriesForStores($rows);
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions, $balanceCategories): array {
+            $repaymentId = (string)$row['repayment_id'];
+            return [
+                'id' => 'v3-supplement:' . $repaymentId,
+                'supplementOrderNo' => (string)$row['repayment_no'],
+                'source' => $this->businessSourceLabel($row),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
+                'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
+                'debtNo' => (string)$row['debt_no'],
+                'sourceOrderNo' => (string)$row['order_sn'],
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'debtSummary' => '充值欠款补交',
+                'productCategory' => $balanceCategories[(int)$row['store_id']] ?? '',
+                'productName' => '余额',
+                'supplementAmount' => $this->centsToMoney((int)$row['amount_cents']),
+                'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
+                'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
+                'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
+                'attributionPeople' => $attributions[$repaymentId] ?? [],
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
+                'paymentCompletedAt' => $this->dateTime((int)$row['settled_at']),
+                '_sortTime' => (int)$row['settled_at'],
+            ];
+        }, $rows), $total];
+    }
+
+    private function readLegacySupplements(array $criteria): array
+    {
+        $query = Db::name('store_debt_repay')->alias('r')
+            ->leftJoin('cashier_v3_business_document_no bd', "bd.source_type = 'legacy_store_debt_repayment' AND bd.source_id = CAST(r.id AS CHAR) AND bd.document_type = 'debt_repayment' AND bd.tenant_id = '0'")
+            ->leftJoin('store_debt d', 'd.id = r.debt_id')
+            ->leftJoin('user u', 'u.uid = r.uid')
+            ->leftJoin('system_store s', 's.id = r.pay_store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
+        $this->applyStoreScope($query, 'r.pay_store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'r.add_time', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.repay_no', 'bd.document_no', 'd.debt_no', 'r.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        $total = (int)(clone $query)->count('r.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'r.id', 'r.debt_id', 'COALESCE(bd.document_no, r.repay_no) AS repay_no', 'r.order_sn', 'r.repay_amount', 'r.pay_type',
+            'r.pay_store_id', 'r.uid', 'r.staff_id', 'r.add_time', 'd.debt_no',
+            'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('r.add_time', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
+        $productNames = $this->supplementDebtProductNames($rows);
+        $productCategories = $this->supplementDebtProductCategories($rows);
+        return [array_map(function (array $row) use ($productNames, $productCategories): array {
+            return [
+                'id' => 'legacy-supplement:' . $row['id'],
+                'supplementOrderNo' => (string)$row['repay_no'],
+                'businessDate' => $this->date((int)$row['add_time']),
+                'debtNo' => (string)$row['debt_no'],
+                'sourceOrderNo' => (string)$row['order_sn'],
+                'memberId' => (int)$row['uid'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'debtSummary' => '欠款补交',
+                'productCategory' => (string)($productCategories[(int)$row['debt_id']] ?? '未分类'),
+                'productName' => (string)($productNames[(int)$row['debt_id']] ?? '销售订单欠款'),
+                'supplementAmount' => (string)$row['repay_amount'],
+                'paymentMethod' => $this->paymentLabel((string)$row['pay_type']),
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'paymentStatus' => '补交成功',
+                'paymentCompletedAt' => $this->dateTime((int)$row['add_time']),
+                '_sortTime' => (int)$row['add_time'],
+            ];
+        }, $rows), $total];
+    }
+
+    /**
+     * 补交列表与欠款列表共用同一份发卡/商品历史快照。
+     * 参数只能传入已经门店权限和日期过滤的补交行，避免投影服务扩大读取范围。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     * @return array<int,string>
+     */
+    private function supplementDebtProductNames(array $rows): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['debt_id'] ?? 0);
+        }, $rows))));
+        return $debtIds === []
+            ? []
+            : (new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
+    }
+
+    /**
+     * Resolve current platform categories only for the supplement rows already
+     * filtered by this query. The result is shared by screen and export output.
+     *
+     * @param array<int,array<string,mixed>> $rows
+     * @return array<int,string>
+     */
+    private function supplementDebtProductCategories(array $rows): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['debt_id'] ?? 0);
+        }, $rows))));
+        return $debtIds === []
+            ? []
+            : (new CashierV3MemberDebtProjectionServices())->categorySummariesForDebts($debtIds);
+    }
+
+    /** @return array<string,string> keyed by repayment id */
+    private function supplementSalespeople(array $repaymentIds, string $sourceDocumentType, string $tenantId): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('strval', $repaymentIds))));
+        if ($ids === []) return [];
+        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where('source_document_type', $sourceDocumentType)->whereIn('order_id', $ids)
+            ->where('performance_type', 'sales_performance_allocated')->where('fact_direction', 'forward')->where('status', 'effective')
+            ->field('fact_id,order_id,employee_id,employee_name_snapshot,role_snapshot,amount_cents,allocation_weight_numerator')->order('id asc')->select()->toArray();
+        $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
+        $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->where('fact_direction', 'reversal')->whereIn('reversal_of', $factIds)->column('reversal_of');
+        $reversed = array_fill_keys(array_map('strval', $reversed), true);
+        $names = [];
+        foreach ($rows as $row) {
+            if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
+            $id = trim((string)($row['order_id'] ?? '')); $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if ($id === '' || $name === '') continue;
+            $names[$id][] = self::supplementSalespersonLabel($row);
+        }
+        $out = [];
+        foreach ($names as $id => $values) $out[$id] = implode('、', array_values(array_unique($values)));
+        return $out;
+    }
+
+    /** 补交列表与导出共用最新完整版本；导购轮次只作本笔归属展示。 */
+    private static function supplementAttributionSummary(array $rows): string
+    {
+        $guides = $managers = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if ($name === '') continue;
+            if ((string)$row['role'] === 'guide') {
+                $round = (int)($row['guide_round_no'] ?? 0);
+                $guides[] = $name . ($round > 0 ? '（第' . $round . '轮）' : '（无轮次）');
+            } elseif ((string)$row['role'] === 'sales_manager') $managers[] = $name;
+        }
+        return implode('；', array_filter([
+            $guides ? '导购：' . implode('、', array_unique($guides)) : '',
+            $managers ? '销售经理：' . implode('、', array_unique($managers)) : '',
+        ]));
+    }
+
+    /** 人员金额取当前未冲销的业绩事实；历史无角色后缀只省略“售前”，不能省略金额。 */
+    private static function supplementSalespersonLabel(array $fact): string
+    {
+        $name = trim((string)($fact['employee_name_snapshot'] ?? ''));
+        $amount = '¥' . number_format((int)round((int)($fact['amount_cents'] ?? 0) / 100));
+        if (str_ends_with((string)($fact['role_snapshot'] ?? ''), ':presale')) {
+            return $name . '(售前,' . $amount . ')';
+        }
+        return $name . '(' . $amount . ')';
+    }
+
+    /**
+     * 欠款管理只读取欠款主表及 V3 authority/repaid facts。销售订单只作为
+     * authority 记录的来源快照，绝不用于临时汇总欠款余额。
+     */
+    private function readDebts(array $criteria): array
+    {
+        $query = Db::name('store_debt')->alias('d')
+            ->leftJoin('user u', 'u.uid = d.uid')
+            ->leftJoin('system_store s', 's.id = d.store_id')
+            ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id = d.id')
+            ->leftJoin('cashier_v3_recharge_debt_authority ra', 'ra.debt_id = d.id');
+        $this->applyStoreScope($query, 'd.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'd.add_time', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'd.debt_no', 'd.order_sn', 'a.sales_order_no_snapshot',
+            'ra.recharge_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        // 正常包含未结清和已结清，排除原单冲销与独立取消；全部保留历史。
+        if ($criteria['dataScope'] === 'normal') $query->whereIn('d.status', [0, 1]);
+        if ($criteria['status'] === 'outstanding') {
+            $query->where('d.status', 0);
+        } elseif ($criteria['status'] === 'settled') {
+            $query->where('d.status', 1);
+        } elseif ($criteria['status'] === 'cancelled') {
+            $query->where('d.status', 3);
+        }
+        // New V3 debts have either sales or recharge authority. Keep legacy
+        // store_debt readable as well, but label it rather than pretending it
+        // carries V3 source precision.
+        $total = (int)(clone $query)->count('d.id');
+        $rows = $this->pageRows($query, $criteria, 'd.add_time', 'd.id', implode(',', [
+            'd.id,d.debt_no,d.order_id,d.order_sn,d.uid,d.store_id,d.total_debt,d.repaid_debt,d.status,d.remark,d.add_time,d.update_time',
+            'u.real_name,u.nickname,u.phone,s.name AS store_name',
+            'a.sales_order_id,a.sales_order_no_snapshot,a.checkout_request_id',
+            'ra.recharge_id,ra.recharge_order_no_snapshot',
+        ]));
+        // 历史取消可有多轮，分页先按欠款主表完成，再批量取每笔最后一次审计。
+        // 仅 status=3 的最后一次取消参与当前金额/按钮，恢复的旧事实留在详情历史。
+        $latestByDebt = [];
+        $debtIds = array_values(array_unique(array_map(static function (array $row): int {
+            return (int)$row['id'];
+        }, $rows)));
+        if ($debtIds) {
+            $audits = Db::name('cashier_v3_debt_cancellation')->whereIn('debt_id', $debtIds)
+                ->order('debt_id asc,id desc')->select()->toArray();
+            foreach ($audits as $audit) {
+                $debtId = (int)$audit['debt_id'];
+                if (!isset($latestByDebt[$debtId])) $latestByDebt[$debtId] = $audit;
+            }
+        }
+        // Reuse the member debt summary after this page's store scope and
+        // pagination, so list/export never infer a historical name from today's catalog.
+        $summariesByDebt = (new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
+        // 旧卡退款已终止原权益，不能再恢复它的欠款；这里只判断按钮能力，
+        // 金额和历史仍由欠款事实读取，服务端恢复命令也会再次拒绝该状态。
+        $originIds = array_values(array_unique(array_column($rows, 'order_id')));
+        $refundedImportedOrders = $originIds ? Db::name('store_order')->whereIn('id', $originIds)
+            ->where('pay_type', 'migration')->where('channel_type', 'migration')->where('refund_status', 2)
+            ->column('id') : [];
+        return [array_map(function (array $row) use ($latestByDebt, $summariesByDebt, $refundedImportedOrders): array {
+            $cancel = (int)$row['status'] === 3 ? ($latestByDebt[(int)$row['id']] ?? []) : [];
+            $totalDebt = (string)($row['total_debt'] ?? '0.00');
+            $repaidDebt = (string)($row['repaid_debt'] ?? '0.00');
+            // 取消不增加已还金额。应收余额为零，免除金额另列历史事实。
+            $remaining = (int)$row['status'] >= 2 ? '0.00' : bcsub($totalDebt, $repaidDebt, 2);
+            $salesOrderNo = trim((string)($row['sales_order_no_snapshot'] ?? ''));
+            $rechargeOrderNo = trim((string)($row['recharge_order_no_snapshot'] ?? ''));
+            $sourceOrderNo = $salesOrderNo !== '' ? $salesOrderNo
+                : ($rechargeOrderNo !== '' ? $rechargeOrderNo : (string)($row['order_sn'] ?? ''));
+            $sourceType = $salesOrderNo !== '' ? '销售订单'
+                : ($rechargeOrderNo !== '' ? '充值订单' : '历史欠款');
+            return [
+                'id' => 'debt:' . (int)$row['id'],
+                'debtId' => (int)$row['id'],
+                'debtNo' => (string)$row['debt_no'],
+                'memberId' => (int)$row['uid'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)($row['phone'] ?? ''),
+                'sourceOrderNo' => $sourceOrderNo,
+                'sourceType' => $sourceType,
+                'productName' => $rechargeOrderNo !== '' ? '储值充值'
+                    : ($summariesByDebt[(int)$row['id']] ?? '销售订单欠款'),
+                'originalDebtAmount' => $totalDebt,
+                'repaidAmount' => $repaidDebt,
+                'remainingAmount' => $remaining,
+                'debtStatus' => [0 => '待补交', 1 => '已结清', 2 => '已失效', 3 => '已取消'][(int)$row['status']] ?? '已失效',
+                'cancelledAmount' => bcdiv((string)($cancel['cancelled_debt_cents'] ?? 0), '100', 2),
+                'cancellationId' => (string)($cancel['cancellation_id'] ?? ''),
+                'cancelReason' => (string)($cancel['reason_snapshot'] ?? ''),
+                'cancelOperator' => (string)($cancel['operator_name_snapshot'] ?? ''),
+                'cancelledAt' => empty($cancel['occurred_at']) ? '' : $this->dateTime((int)$cancel['occurred_at']),
+                'canCancel' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
+                'canRestore' => (int)$row['status'] === 3 && $cancel !== []
+                    && !in_array((int)$row['order_id'], array_map('intval', $refundedImportedOrders), true),
+                'storeName' => (string)($row['store_name'] ?? ''),
+                // 欠款主表没有独立的业务日字段；其入账时间就是该条欠款
+                // 事实的发生时间，筛选与列表展示必须使用同一来源。
+                'businessDate' => $this->date((int)($row['add_time'] ?? 0)),
+                'createdAt' => $this->dateTime((int)($row['add_time'] ?? 0)),
+                'updatedAt' => $this->dateTime((int)($row['update_time'] ?? 0)),
+                'remark' => (string)($row['remark'] ?? ''),
+                'canRepay' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
+            ];
+        }, $rows), $total];
+    }
+
+    private function readRefund(array $criteria): array
+    {
+        // Refund records are append-only V3 lifecycle facts.  The retired
+        // store_order_refund table is intentionally not a source or a
+        // compatibility projection for this workbench.
+        $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
+            ->leftJoin('cashier_v3_refund_adjustment ra', 'ra.operation_id = rlo.operation_id AND ra.tenant_id = rlo.tenant_id')
+            ->leftJoin('cashier_v3_sales_order_line refund_line', "rlo.source_type = 'document' AND refund_line.tenant_id = rlo.tenant_id AND refund_line.order_line_id = ra.source_line_id")
+            // The holder's issuance receipt is unique per tenant. It restores the
+            // customer-facing sale number for older refunds without rewriting facts.
+            ->leftJoin('cashier_v3_card_purchase_receipt cpr', "rlo.source_type = 'card' AND cpr.tenant_id = rlo.tenant_id AND cpr.card_holder_id = ra.card_holder_id AND cpr.legacy_order_id = rlo.source_order_id AND cpr.status = 'completed'")
+            ->leftJoin('cashier_v3_sales_order_line card_product', 'card_product.tenant_id = cpr.tenant_id AND card_product.order_line_id = cpr.sales_order_line_id')
+            ->leftJoin('cashier_v3_sales_order cso', 'cso.tenant_id = cpr.tenant_id AND cso.order_id = cpr.sales_order_id')
+            ->leftJoin('user u', 'u.uid = rlo.member_id')
+            ->leftJoin('system_store s', 's.id = rlo.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = rlo.operator_id')
+            ->where('rlo.tenant_id', (string)$criteria['tenantId'])
+            ->where('rlo.operation_type', 'refund');
+        // 正常数据及报表只包含生效退款；全部数据仍可追溯已作废的原记录。
+        if ($criteria['status'] === 'voided') $query->where('rlo.status', 'voided');
+        elseif ($criteria['status'] === 'completed' || $criteria['dataScope'] === 'normal') $query->where('rlo.status', 'succeeded');
+        else $query->whereIn('rlo.status', ['succeeded', 'voided']);
+        $this->applyStoreScope($query, 'rlo.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'rlo.business_date', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'rlo.operation_no', 'rlo.source_order_no_snapshot', 'cso.order_no', 'u.real_name', 'u.nickname', 'u.phone',
+            'rlo.reason_snapshot',
+        ]);
+        $total = (int)(clone $query)->count('rlo.id');
+        $rows = $this->pageRows($query, $criteria, 'rlo.settled_at', 'rlo.id', implode(',', [
+            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_id', 'rlo.source_order_no_snapshot', 'rlo.request_json',
+            'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
+            'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
+            's.name AS store_name', 'st.staff_name', 'cso.order_no AS card_sales_order_no',
+            'card_product.category_name_snapshot AS card_category_name,card_product.item_name_snapshot AS card_product_name',
+            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.card_holder_id AS refund_card_holder_id,ra.card_component_id,ra.catalog_item_id,ra.catalog_kind,ra.balance_credit_cents,ra.balance_debit_cents,ra.principal_debit_cents,ra.bonus_debit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents,ra.salespeople_snapshot_json',
+            'refund_line.category_name_snapshot AS adjustment_category_name,refund_line.item_type AS adjustment_item_type,refund_line.item_id AS adjustment_item_id,refund_line.card_purchase_snapshot_json AS adjustment_card_snapshot',
+        ]));
+        // The order center and reports classify the same refund from the same
+        // verified SKU or card-project IDs, including historical records.
+        $currentRefundCategories = (new \app\services\report\StoreRefundCurrentCategoryServices())->resolve($rows);
+        $balanceCategories = self::balanceCategoriesForStores($rows);
+        $refundAttribution = [];
+        $refundIds = array_values(array_unique(array_map(static fn(array $row): string => (string)$row['operation_id'], $rows)));
+        if ($refundIds !== []) {
+            // 归属快照只按当前页的退款操作号读取，列表与导出使用同一个投影。
+            foreach (Db::name(CashierV3RefundAttributionServices::TABLE)
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $refundIds)
+                ->field('operation_id,role,employee_id,employee_name_snapshot')->order('id asc')->select()->toArray() as $item) {
+                $refundAttribution[(string)$item['operation_id']][(string)$item['role']][] = $item;
+            }
+            // 改派版本是完整快照；即使人员被全部清空，也必须覆盖原始退款归属。
+            $versions = Db::name(CashierV3RefundAttributionServices::REVISION_TABLE)
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $refundIds)
+                ->field('operation_id,MAX(id) AS id')->group('operation_id')->select()->toArray();
+            foreach ($versions as $revision) {
+                $refundAttribution[(string)$revision['operation_id']] = [];
+            }
+            $revisionIds = array_map('intval', array_column($versions, 'id'));
+            if ($revisionIds !== []) {
+                foreach (Db::name(CashierV3RefundAttributionServices::REVISION_PERSON_TABLE)
+                    ->alias('person')->join(CashierV3RefundAttributionServices::REVISION_TABLE . ' revision',
+                        'revision.tenant_id=person.tenant_id AND revision.operation_id=person.operation_id AND revision.revision_no=person.revision_no')
+                    ->where('person.tenant_id', (string)$criteria['tenantId'])->whereIn('revision.id', $revisionIds)
+                    ->field('person.operation_id,person.role,person.employee_id,person.employee_name_snapshot')
+                    ->order('person.id asc')->select()->toArray() as $item) {
+                    $refundAttribution[(string)$item['operation_id']][(string)$item['role']][] = $item;
+                }
+            }
+        }
+        $importedIds = array_values(array_map(static fn(array $row): string => (string)$row['operation_id'],
+            array_filter($rows, static fn(array $row): bool => (string)$row['source_type'] === 'imported_card')));
+        $importedSnapshots = [];
+        if ($importedIds !== []) {
+            // 旧卡退款无统一退款 adjustment；按本页操作号批量读取最后一次改派快照。
+            $latest = Db::name('cashier_v3_refund_salesperson_revision')
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $importedIds)
+                ->field('operation_id,MAX(id) AS id')->group('operation_id')->select()->toArray();
+            $latestIds = array_map(static fn(array $row): int => (int)$row['id'], $latest);
+            if ($latestIds !== []) {
+                foreach (Db::name('cashier_v3_refund_salesperson_revision')
+                    ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('id', $latestIds)
+                    ->field('operation_id,new_snapshot_json')->select()->toArray() as $revision) {
+                    $importedSnapshots[(string)$revision['operation_id']] = (string)$revision['new_snapshot_json'];
+                }
+            }
+        }
+        $salesRefundLines = [];
+        $salesRefundIds = array_values(array_map(static fn(array $row): string => (string)$row['operation_id'],
+            array_filter($rows, static fn(array $row): bool => (string)$row['source_type'] === 'sales')));
+        if ($salesRefundIds !== []) {
+            // 整单退款可以包含多种商品；只批量读取当前页退款明细的原商品 ID。
+            foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
+                ->alias('rl')->leftJoin('cashier_v3_sales_order_line sale_line',
+                    'sale_line.tenant_id = rl.tenant_id AND sale_line.order_line_id = rl.sales_order_line_id')
+                ->where('rl.tenant_id', (string)$criteria['tenantId'])->whereIn('rl.operation_id', $salesRefundIds)
+                ->field('rl.operation_id,rl.item_name_snapshot,sale_line.item_type,sale_line.item_id,sale_line.card_purchase_snapshot_json')
+                ->order('rl.line_no asc')->order('rl.id asc')->select()->toArray() as $line) {
+                $salesRefundLines[(string)$line['operation_id']][] = $line;
+            }
+        }
+        $saleCategoryReader = new CashierV3SalesOrderQueryServices();
+        $saleCategoryInputs = $refundTypeByOperation = $documentCategories = [];
+        foreach ($rows as $row) {
+            $operationId = (string)$row['operation_id'];
+            $sourceType = (string)$row['source_type'];
+            if (!in_array($sourceType, ['sales', 'document'], true)) continue;
+            $refundTypeByOperation[$operationId] = $sourceType;
+            $lines = $sourceType === 'sales' ? ($salesRefundLines[$operationId] ?? []) : [[
+                'item_type' => (string)($row['adjustment_item_type'] ?? ''),
+                'item_id' => (string)($row['adjustment_item_id'] ?? ''),
+                'card_purchase_snapshot_json' => (string)($row['adjustment_card_snapshot'] ?? ''),
+            ]];
+            $items = [];
+            foreach ($lines as $line) {
+                $items[] = [
+                    'itemType' => strtolower((string)($line['item_type'] ?? '')) === 'card' ? '卡项' : '项目',
+                    '_categoryProductIds' => $saleCategoryReader->categoryProductIdsForAuthorityLine($line),
+                ];
+            }
+            $saleCategoryInputs[$operationId] = ['storeId' => (int)$row['store_id'], 'items' => $items];
+        }
+        if ($saleCategoryInputs !== []) {
+            $projected = $saleCategoryReader->attachCurrentItemCategories($saleCategoryInputs);
+            foreach ($projected as $operationId => $record) {
+                if (($refundTypeByOperation[$operationId] ?? '') === 'document') {
+                    $documentCategories[$operationId] = (string)($record['items'][0]['category'] ?? '');
+                } else {
+                    foreach ($record['items'] ?? [] as $index => $item) {
+                        $salesRefundLines[$operationId][$index]['current_category_name'] = (string)($item['category'] ?? '');
+                    }
+                }
+            }
+        }
+        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines, $currentRefundCategories, $balanceCategories, $documentCategories): array {
+            $snapshot = (string)$row['source_type'] === 'imported_card'
+                ? ($importedSnapshots[(string)$row['operation_id']] ?? '[]')
+                : (string)($row['salespeople_snapshot_json'] ?? '[]');
+            $salespeople = json_decode($snapshot, true);
+            $salespeople = is_array($salespeople) ? $salespeople : [];
+            // 列表和导出只使用退款保存的当前快照，不从原销售单回读人员。
+            $salespersonSummary = implode('、', array_map(static function (array $person): string {
+                return (string)($person['name'] ?? '') . '（-' . number_format((int)($person['performanceAmountCents'] ?? 0) / 100, 0, '.', ',') . '）';
+            }, $salespeople));
+            $attribution = $refundAttribution[(string)$row['operation_id']] ?? [];
+            $guideNames = array_column($attribution['guide'] ?? [], 'employee_name_snapshot');
+            $managerNames = array_column($attribution['sales_manager'] ?? [], 'employee_name_snapshot');
+            $attributionSummary = implode('；', array_filter([
+                $guideNames === [] ? '' : '导购:' . implode('、', $guideNames),
+                $managerNames === [] ? '' : '销售经理:' . implode('、', $managerNames),
+            ]));
+            $isManual = in_array((string)$row['source_type'], ['card', 'document', 'catalog', 'balance'], true);
+            $targetLabel = (string)$row['source_type'] === 'card' ? '卡项退款'
+                : ((string)$row['source_type'] === 'catalog' ? '无原单退款'
+                    : ((string)$row['source_type'] === 'balance' ? '余额退款' : '单据退款'));
+            $voidLabel = (int)($row['void_target'] ?? 0) === 1
+                ? ((string)$row['source_type'] === 'card' ? '作废本卡，剩余权益已关闭' : '作废明细，剩余价值已关闭')
+                : '不作废，可再次退款';
+            // 无原单只保存商品归因；没有可作废的销售明细或权益，也没有余额返还。
+            $summary = (string)$row['source_type'] === 'catalog'
+                ? '无原单退款（' . (string)($row['catalog_kind'] ?? '') . '）：' . (string)($row['adjustment_target_name'] ?? '')
+                    . '；' . (string)$row['reason_snapshot']
+                : ((string)$row['source_type'] === 'balance'
+                ? '余额退款：扣减余额 ¥' . number_format((int)round((int)($row['balance_debit_cents'] ?? 0) / 100), 0, '.', ',')
+                    . '（本金 ¥' . number_format((int)round((int)($row['principal_debit_cents'] ?? 0) / 100), 0, '.', ',')
+                    . '，赠金 ¥' . number_format((int)round((int)($row['bonus_debit_cents'] ?? 0) / 100), 0, '.', ',')
+                    . '）；' . (string)$row['reason_snapshot']
+                : ($isManual
+                ? $targetLabel . '：' . (string)($row['adjustment_target_name'] ?? '')
+                    . '；转入' . ((string)($row['balance_kind'] ?? '') === 'principal' ? '本金' : '赠金')
+                    . ' ¥' . number_format((int)round((int)($row['balance_credit_cents'] ?? 0) / 100), 0, '.', ',')
+                    . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
+                : (string)$row['reason_snapshot']));
+            $paths = array_column($currentRefundCategories[(string)$row['operation_id']] ?? [], 'path');
+            $row['current_product_category_name'] = implode('、', array_values(array_unique($paths)));
+            $row['current_document_category_name'] = (string)($documentCategories[(string)$row['operation_id']] ?? '');
+            $product = self::refundProductColumns($row, $salesRefundLines[(string)$row['operation_id']] ?? [], $balanceCategories);
+            return [
+                'id' => 'refund:' . (string)$row['operation_id'],
+                'refundOrderNo' => (string)$row['operation_no'],
+                // 这是退款自身的经营来源 K，不继承会员当前来源或原销售来源。
+                // 旧记录按同一已确认口径只读投影，不回写不可变历史事实。
+                'source' => 'K退款顾客',
+                'businessDate' => (string)$row['business_date'],
+                'sourceOrderNo' => (string)$row['source_type'] === 'card' && trim((string)($row['card_sales_order_no'] ?? '')) !== ''
+                    ? (string)$row['card_sales_order_no'] : (string)$row['source_order_no_snapshot'],
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'phone' => (string)$row['phone'],
+                'refundSummary' => $summary,
+                'productCategory' => $product['category'],
+                'productName' => $product['name'],
+                'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
+                'salespersonSummary' => $salespersonSummary,
+                'refundAttributionSummary' => $attributionSummary,
+                // 混合列表分列展示和筛选使用角色快照，不解析中文归属摘要。
+                'attributionPeople' => array_merge($attribution['guide'] ?? [], $attribution['sales_manager'] ?? []),
+                'refund_attribution_query_ids' => array_values(array_unique(array_map('strval', array_merge(
+                    array_column($attribution['guide'] ?? [], 'employee_id'),
+                    array_column($attribution['sales_manager'] ?? [], 'employee_id'))))),
+                'salesperson_query_ids' => array_values(array_unique(array_map(
+                    static fn(array $person): string => (string)($person['employeeId'] ?? ''), $salespeople))),
+                // R26 只登记退款统计与会员余额，不能暗示已调用支付渠道对外退款。
+                'refundMethod' => $isManual ? '手工登记' : ((string)$row['source_type'] === 'imported_card'
+                    ? '手工确认退款' : '原记账方式退回'),
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'refundStatus' => (string)$row['status'] === 'voided' ? '已作废' : '已退款',
+                'refundCompletedAt' => $this->dateTime((int)$row['settled_at']),
+                'refundSourceType' => (string)$row['source_type'],
+            ];
+        }, $rows), $total];
+    }
+
+    /** Refund names keep saved text; categories use verified current platform item IDs. */
+    private static function refundProductColumns(array $row, array $salesLines, array $balanceCategories = []): array
+    {
+        $sourceType = (string)$row['source_type'];
+        if ($sourceType === 'sales') {
+            $categories = [];
+            $names = [];
+            foreach ($salesLines as $line) {
+                $category = trim((string)($line['current_category_name'] ?? ''));
+                $name = trim((string)($line['item_name_snapshot'] ?? ''));
+                if ($category !== '') $categories[$category] = true;
+                if ($name !== '') $names[$name] = true;
+            }
+            return ['category' => implode('、', array_keys($categories)), 'name' => implode('、', array_keys($names))];
+        }
+        if ($sourceType === 'imported_card') {
+            $request = json_decode((string)($row['request_json'] ?? ''), true);
+            return ['category' => '', 'name' => is_array($request) ? trim((string)($request['cardName'] ?? '')) : ''];
+        }
+        if ($sourceType === 'card') {
+            // 卡壳的销售快照不是卡内项目分类；只展示可核实项目的当前平台分类。
+            return ['category' => trim((string)($row['current_product_category_name'] ?? '')),
+                'name' => trim((string)($row['card_product_name'] ?? ''))
+                    ?: trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        if ($sourceType === 'document') {
+            return ['category' => trim((string)($row['current_document_category_name'] ?? '')),
+                'name' => trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        if ($sourceType === 'catalog') {
+            return ['category' => trim((string)($row['current_product_category_name'] ?? '')),
+                'name' => trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        if ($sourceType === 'balance') return ['category' => $balanceCategories[(int)$row['store_id']] ?? '', 'name' => '余额'];
+        return ['category' => '', 'name' => ''];
+    }
+
+    /** Resolve each authorized store once; the same project category drives list and export. */
+    private static function balanceCategoriesForStores(array $rows): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'store_id')))));
+        if ($storeIds === []) return [];
+        $projectId = (new SystemBalanceProjectServices())->productId();
+        if ($projectId <= 0) return [];
+        $links = array_map(static fn(int $storeId): array => ['store_id' => $storeId, 'product_id' => $projectId], $storeIds);
+        $resolved = (new \app\services\report\StoreReportCurrentProductCategoryServices())->resolve($links);
+        $categories = [];
+        foreach ($storeIds as $index => $storeId) $categories[$storeId] = (string)($resolved[$index]['path'] ?? '');
+        return $categories;
+    }
+
+    /**
+     * 服务记录的最小粒度是一条已完成服务项目事实，而非销售订单或服务单表头。
+     * 核销快照和劳动业绩均由同一完成事务写入，只用于补充展示，不能反向决定服务是否存在。
+     */
+    private function readServices(
+        array $criteria,
+        CashierV3OperatorScope $scope
+    ): array {
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            // 现金项目优先使用同次销售单，纯权益结账使用同次来源选择；
+            // 预约直接结束服务没有结账单，来源留在服务事实自身。
+            // 不回读会员当前来源或原卡购买单，避免历史归因漂移。
+            ->leftJoin(
+                'cashier_v3_sales_order so',
+                'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id'
+            )
+            ->leftJoin(
+                'cashier_v3_checkout_business_source_selection bs',
+                'bs.tenant_id = sf.tenant_id AND bs.checkout_request_id = sf.checkout_request_id AND bs.checkout_kind = \'sale\''
+            )
+            ->leftJoin(
+                'cashier_v3_entitlement_writeoff_fact wf',
+                'wf.tenant_id = sf.tenant_id AND wf.checkout_request_id = sf.checkout_request_id AND wf.source_line_id = sf.source_line_id'
+            )
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation vo',
+                'vo.tenant_id = sf.tenant_id AND vo.service_fact_id = sf.id AND vo.status = \'succeeded\''
+            )
+            ->where('sf.tenant_id', $scope->tenantId())
+            ->where('sf.service_status', 'completed');
+        $this->applyStoreScope($query, 'sf.store_id', $criteria['allowedStoreIds']);
+        $performanceDrilldown = $criteria['servicePerformanceDrilldown'] ?? null;
+        if ($performanceDrilldown === null) {
+            $this->applyBusinessDateRange($query, 'sf.business_date', $criteria);
+        } else {
+            // 报表下钻只解释当前仍有效的服务。服务作废后，原服务和反向事实
+            // 都保留供审计，但该服务不能再从任何日期的经营报表下钻出来。
+            $query->whereNull('vo.id');
+            // EXISTS 保持一条服务项目事实只出现一次；按员工编号和事实日期精确筛选，
+            // 不用姓名快照做模糊匹配，也不因同一记录有多次调整而重复列表行。
+            $query->whereExists(function ($fact) use ($performanceDrilldown): void {
+                $fact->name('cashier_v3_performance_fact')->alias('pf')
+                    ->whereRaw('pf.tenant_id=sf.tenant_id AND pf.store_id=sf.store_id AND pf.checkout_request_id=sf.checkout_request_id AND pf.source_line_id=sf.source_line_id')
+                    ->where('pf.performance_type', 'labor_performance_allocated')
+                    ->where('pf.status', 'effective')
+                    ->where('pf.employee_id', $performanceDrilldown['employeeId']);
+                (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($fact, 'pf.tenant_id', 'pf.order_id');
+                $this->applyPerformanceDrilldownDate($fact, $performanceDrilldown, 'pf.business_date');
+            });
+            $query->where('sf.store_id', $performanceDrilldown['storeId']);
+        }
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'sf.service_record_no', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
+            'sf.store_name_snapshot', 'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json',
+            'wf.source_name_snapshot', 'wf.source_code_snapshot',
+            'so.order_no', 'so.business_source_label_snapshot', 'so.business_source_primary_name_snapshot',
+            'so.business_source_secondary_name_snapshot', 'bs.source_label_snapshot',
+            'bs.primary_source_name_snapshot', 'bs.secondary_source_name_snapshot',
+            'sf.business_source_label_snapshot', 'sf.business_source_primary_name_snapshot',
+            'sf.business_source_secondary_name_snapshot',
+        ]);
+        $this->applyServiceTopFilters($query, $criteria['topFilters']);
+        // “正常数据” is the default view and must contain completed service
+        // facts that have not been voided. “全部数据” is the explicit audit
+        // view where the status selector can narrow to completed/voided.
+        if (($criteria['dataScope'] ?? 'normal') !== 'all' && $criteria['status'] === '') {
+            $query->whereNull('vo.id');
+        }
+        if ($criteria['status'] !== '' && !in_array($criteria['status'], ['completed', 'voided', '已完成', '已作废'], true)) {
+            return [[], 0];
+        }
+        $total = (int)(clone $query)->count('sf.id');
+
+        $rows = $this->pageServiceRows($query, $criteria, implode(',', [
+            'sf.id', 'sf.service_fact_id', 'sf.service_record_no', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
+            'sf.business_date', 'sf.member_id', 'sf.member_name_snapshot', 'sf.project_id',
+            'sf.project_name_snapshot', 'sf.quantity', 'sf.project_count', 'sf.store_id', 'sf.store_name_snapshot',
+            'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
+            'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
+            'sf.detail_remark_snapshot',
+            'sf.business_source_label_snapshot AS service_source_label_snapshot',
+            'sf.business_source_primary_name_snapshot AS service_source_primary_name_snapshot',
+            'sf.business_source_secondary_name_snapshot AS service_source_secondary_name_snapshot',
+            'so.business_source_label_snapshot',
+            'so.business_source_primary_name_snapshot',
+            'so.business_source_secondary_name_snapshot',
+            'so.order_no AS sales_order_no',
+            'bs.source_label_snapshot AS checkout_source_label_snapshot',
+            'bs.primary_source_name_snapshot AS checkout_source_primary_name_snapshot',
+            'bs.secondary_source_name_snapshot AS checkout_source_secondary_name_snapshot',
+            'wf.source_name_snapshot AS source_name_snapshot',
+            'wf.source_code_snapshot AS source_code_snapshot',
+            'sf.labor_amount_cents', 'sf.labor_fee_amount_cents', 'sf.labor_mode',
+            'vo.id AS void_operation_id', 'vo.occurred_at AS voided_at', 'vo.reason_snapshot AS void_reason',
+            'vo.operator_name_snapshot AS void_operator_name', 'vo.operation_no AS void_operation_no',
+        ]));
+        $laborByLine = $this->laborPerformanceByServiceLine($rows, $scope->tenantId());
+        $consumptionByLine = $this->consumptionPerformanceByServiceLine($rows, $scope->tenantId());
+        $reportFactsByLine = $performanceDrilldown === null ? []
+            : $this->servicePerformanceFactsByLine($rows, $scope->tenantId(), $performanceDrilldown);
+
+        return [array_map(function (array $row) use ($laborByLine, $consumptionByLine, $reportFactsByLine, $performanceDrilldown): array {
+            $key = $this->serviceLineKey($row);
+            $labor = $laborByLine[$key] ?? [
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0, 'projectCountDecimal' => null,
+                'hasExplicitProjectCount' => false, 'names' => [],
+            ];
+            // A zero is a valid manually assigned project count.  The labor
+            // fact writer deliberately omits an all-zero allocation, so the
+            // immutable service snapshot must remain the fallback authority
+            // here; using `?: quantity` would incorrectly turn an explicit
+            // zero into the service quantity (usually 1).
+            $snapshotProjectCount = $this->snapshotProjectCount((string)($row['craftsmen_snapshot_json'] ?? ''));
+            // 调整后优先展示当前有效员工事实；原始 craftsmen 快照只用于
+            // 尚未形成可读业绩分配的历史服务记录。
+            $craftsmen = implode('、', $labor['names']);
+            if ($craftsmen === '') $craftsmen = $this->craftsmenSummary((string)$row['craftsmen_snapshot_json']);
+            $reportFacts = $reportFactsByLine[$key] ?? [];
+            $reportAmountCents = array_sum(array_column($reportFacts, 'amountCents'));
+            $reportLaborCents = array_sum(array_column($reportFacts, 'laborFeeCents'));
+            // 作废后当前有效人员分配归零，但历史日报仍包含作废前的正向事实。
+            // 报表下钻单独展示所点日期、所点员工的事实分配，不恢复为当前有效业绩。
+            $reportCraftsmen = $performanceDrilldown !== null && !empty($row['void_operation_id'])
+                ? $this->reportCraftsmenListAllocations($reportFacts) : [];
+            return [
+                'id' => 'service:' . $row['id'],
+                'serviceFactId' => (int)$row['id'],
+                // The member-detail writeoff tab displays the immutable visible
+                // service document number. ESF remains only an internal fallback
+                // for historical rows created before that number was allocated.
+                'serviceRecordNo' => (string)($row['service_record_no'] ?: $row['service_fact_id']),
+                'source' => $this->serviceBusinessSourceLabel($row),
+                // 本次没有销售订单时保持空值；原卡购买单并非本次服务销售单。
+                'salesOrderNo' => (string)($row['sales_order_no'] ?? ''),
+                'businessDate' => (string)$row['business_date'],
+                'memberId' => (int)$row['member_id'],
+                'memberName' => (string)$row['member_name_snapshot'],
+                'serviceProject' => (string)$row['project_name_snapshot'],
+                'detailRemark' => (string)($row['detail_remark_snapshot'] ?? ''),
+                'entitlementSource' => $this->serviceEntitlementSource($row),
+                'sourceCardName' => (string)$row['source_name_snapshot'],
+                'sourceCardNo' => (string)$row['source_code_snapshot'],
+                'usedTimes' => (int)$row['quantity'],
+                'storeName' => (string)$row['store_name_snapshot'],
+                'craftsmenSummary' => $craftsmen,
+                // This read-only display shape uses the effective employee
+                // fact first. Older all-zero facts have no allocation row, so
+                // only then may the immutable service snapshot fill the cell.
+                'craftsmenListAllocations' => $this->craftsmenListAllocations(
+                    $labor['allocations'] ?? [], (string)($row['craftsmen_snapshot_json'] ?? '')
+                ),
+                // A void is an adjustment fact. Keep the original service
+                // snapshot visible in the detail/list and expose the void
+                // audit fields separately; do not overwrite historical facts
+                // with the reversal amount.
+                'consumptionPerformanceAmount' => $this->centsToMoney((int)($consumptionByLine[$key] ?? 0)),
+                'laborPerformanceAmount' => $this->centsToMoney((int)$labor['amountCents']),
+                'laborFeeAmount' => $this->centsToMoney(
+                    (int)($labor['laborFeeCents'] ?? 0) > 0
+                        ? (int)$labor['laborFeeCents']
+                        : (int)($row['labor_fee_amount_cents'] ?? $row['labor_amount_cents'] ?? 0)
+                ),
+                'laborPerformanceType' => (string)($row['labor_mode'] ?? 'project_rule'),
+                'laborPerformanceTypeLabel' => $this->laborPerformanceTypeLabel((string)($row['labor_mode'] ?? 'project_rule')),
+                'laborPerformanceRatio' => $this->laborPerformanceRatio($labor['allocations'] ?? []),
+                'laborPerformanceAllocations' => ($labor['allocations'] ?? []),
+                'projectCount' => $this->projectCountText(
+                    !empty($labor['hasExplicitProjectCount'])
+                        ? ($labor['projectCountDecimal'] !== null
+                            ? (float)$labor['projectCountDecimal']
+                            : (int)$labor['projectCountHalfUnits'] / 2)
+                        : ($snapshotProjectCount['hasExplicitProjectCount']
+                            ? $snapshotProjectCount['projectCount']
+                            : (int)($row['project_count'] ?: $row['quantity'])),
+                ),
+                'operatorName' => (string)$row['operator_name_snapshot'],
+                'serviceStatus' => !empty($row['void_operation_id']) ? '已作废' : '已完成',
+                // 仅报表下钻附加所点单元格的事实贡献；普通订单列表仍展示当前
+                // 有效分配，历史冲销不覆盖原始服务记录及其现状。
+                'reportPerformanceAmount' => $performanceDrilldown === null ? null : $this->centsToMoney($reportAmountCents),
+                'reportLaborAmount' => $performanceDrilldown === null ? null : $this->centsToMoney($reportLaborCents),
+                'reportPerformanceFacts' => $reportFacts,
+                'reportCraftsmenListAllocations' => $reportCraftsmen,
+                'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
+                'voidedAt' => !empty($row['voided_at']) ? $this->dateTime((int)$row['voided_at']) : '',
+                'voidReason' => (string)($row['void_reason'] ?? ''),
+                'voidOperatorName' => (string)($row['void_operator_name'] ?? ''),
+                'voidOperationNo' => (string)($row['void_operation_no'] ?? ''),
+            ];
+        }, $rows), $total];
+    }
+
+    /** @return array{employeeId:int,storeId:int,from:string,to:string,dayOfMonth:int}|null */
+    private function servicePerformanceDrilldown(array $payload): ?array
+    {
+        $raw = $payload['servicePerformanceDrilldown'] ?? null;
+        if (!is_array($raw)) return null;
+        $employeeId = (int)($raw['employeeId'] ?? 0);
+        $storeId = (int)($raw['storeId'] ?? 0);
+        $from = $this->validBusinessDate($raw['from'] ?? '');
+        $to = $this->validBusinessDate($raw['to'] ?? '');
+        $day = (int)($raw['dayOfMonth'] ?? 0);
+        if ($employeeId <= 0 || $storeId <= 0 || $from === '' || $to === '' || $from > $to || $day < 0 || $day > 31) {
+            throw new \InvalidArgumentException('service_performance_drilldown_invalid');
+        }
+        return ['employeeId' => $employeeId, 'storeId' => $storeId, 'from' => $from, 'to' => $to, 'dayOfMonth' => $day];
+    }
+
+    private function applyPerformanceDrilldownDate($query, array $drilldown, string $field): void
+    {
+        $query->where($field, '>=', $drilldown['from'])->where($field, '<=', $drilldown['to']);
+        if ($drilldown['dayOfMonth'] > 0) {
+            $query->whereRaw('DAY(' . $field . ')=?', [$drilldown['dayOfMonth']]);
+        }
+    }
+
+    /**
+     * 按服务来源行取回报表同一批有效业绩事实，逐笔保留正向与冲销。
+     * 返回金额始终为分转换后的展示值，不拿订单页当前净额倒推历史日报。
+     */
+    private function servicePerformanceFactsByLine(array $serviceRows, string $tenantId, array $drilldown): array
+    {
+        if ($serviceRows === []) return [];
+        $checkoutIds = array_values(array_unique(array_column($serviceRows, 'checkout_request_id')));
+        $lineIds = array_values(array_unique(array_column($serviceRows, 'source_line_id')));
+        $query = Db::name('cashier_v3_performance_fact')->alias('pf')
+            ->where('pf.tenant_id', $tenantId)
+            ->where('pf.performance_type', 'labor_performance_allocated')
+            ->where('pf.status', 'effective')
+            ->where('pf.employee_id', $drilldown['employeeId'])
+            ->where('pf.store_id', $drilldown['storeId'])
+            ->whereIn('pf.checkout_request_id', $checkoutIds)
+            ->whereIn('pf.source_line_id', $lineIds);
+        $this->applyPerformanceDrilldownDate($query, $drilldown, 'pf.business_date');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $facts = $query->field('pf.store_id,pf.checkout_request_id,pf.source_line_id,pf.business_date,pf.fact_direction,pf.amount_cents,pf.labor_fee_amount_cents,pf.employee_name_snapshot,pf.role_snapshot')
+            ->order('pf.business_date', 'asc')->order('pf.id', 'asc')->select()->toArray();
+        $allowedLines = [];
+        foreach ($serviceRows as $row) $allowedLines[$this->serviceLineKey($row) . '|' . (int)$row['store_id']] = true;
+        $byLine = [];
+        foreach ($facts as $fact) {
+            $key = $this->serviceLineKey($fact);
+            if (!isset($allowedLines[$key . '|' . (int)$fact['store_id']])) continue;
+            $byLine[$key][] = [
+                'businessDate' => (string)$fact['business_date'],
+                'direction' => (string)$fact['fact_direction'] === 'reversal' ? '冲销' : '正常',
+                'amountCents' => (int)$fact['amount_cents'],
+                'amount' => $this->centsToMoney((int)$fact['amount_cents']),
+                'laborFeeCents' => (int)$fact['labor_fee_amount_cents'],
+                'laborFee' => $this->centsToMoney((int)$fact['labor_fee_amount_cents']),
+                'employeeName' => trim((string)$fact['employee_name_snapshot']),
+                'roleSnapshot' => (string)$fact['role_snapshot'],
+            ];
+        }
+        return $byLine;
+    }
+
+    /**
+     * 作废记录的报表人员栏只解释当前点击单元格的历史事实。取事实中的员工姓名
+     * 和点/轮快照，正负金额原样保留；不得从已归零的当前分配反推或重记业绩。
+     */
+    private function reportCraftsmenListAllocations(array $facts): array
+    {
+        if ($facts === []) return [];
+        $name = '';
+        $pointCustomer = null;
+        $amountCents = 0;
+        $laborCents = 0;
+        foreach ($facts as $fact) {
+            if ($name === '' && (string)($fact['employeeName'] ?? '') !== '') $name = (string)$fact['employeeName'];
+            if ($pointCustomer === null) {
+                $pointCustomer = $this->pointCustomerFromRoleSnapshot((string)($fact['roleSnapshot'] ?? ''));
+            }
+            $amountCents += (int)($fact['amountCents'] ?? 0);
+            $laborCents += (int)($fact['laborFeeCents'] ?? 0);
+        }
+        if ($name === '') return [];
+        return [[
+            'employeeName' => $name,
+            'isPointCustomer' => $pointCustomer ?? false,
+            'amount' => $this->centsToMoney($amountCents),
+            'laborFeeAmount' => $this->centsToMoney($laborCents),
+            'projectCount' => null,
+        ]];
+    }
+
+    /**
+     * Read the store's project consumption from the same effective performance
+     * fact type as 门店品项分析. A later craftsman allocation changes labor facts
+     * only; it must never turn the service record's 消耗业绩 into labor performance.
+     * Facts are matched to the service business day and normal-report visibility.
+     *
+     * @return array<string,int> Amount in cents, keyed by checkout/line identity.
+     */
+    private function consumptionPerformanceByServiceLine(array $serviceRows, string $tenantId): array
+    {
+        if ($serviceRows === [] || $tenantId === '') return [];
+        $checkoutIds = $lineIds = $dates = $serviceDates = [];
+        foreach ($serviceRows as $row) {
+            $key = $this->serviceLineKey($row);
+            $date = (string)($row['business_date'] ?? '');
+            if ($key === '' || $date === '') continue;
+            $serviceDates[$key] = $date;
+            $checkoutIds[(string)$row['checkout_request_id']] = (string)$row['checkout_request_id'];
+            $lineIds[(string)$row['source_line_id']] = (string)$row['source_line_id'];
+            $dates[$date] = $date;
+        }
+        if ($serviceDates === []) return [];
+        $query = Db::name('cashier_v3_performance_fact')->alias('pf')
+            ->where('pf.tenant_id', $tenantId)
+            ->where('pf.performance_type', 'consumption_performance_recorded')
+            ->where('pf.status', 'effective')
+            ->whereIn('pf.checkout_request_id', array_values($checkoutIds))
+            ->whereIn('pf.source_line_id', array_values($lineIds))
+            ->whereIn('pf.business_date', array_values($dates))
+            ->field('pf.checkout_request_id,pf.source_line_id,pf.business_date,pf.amount_cents');
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $normal->excludeVoidedRechargeOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $normal->excludeVoidedSupplementPaymentFacts($query, 'pf.tenant_id', 'pf.store_id', 'pf.order_id');
+        $normal->excludeVoidedSalesOrderServices($query, 'pf');
+        $amounts = [];
+        foreach ($query->select()->toArray() as $fact) {
+            $key = $this->serviceLineKey($fact);
+            if (!isset($serviceDates[$key]) || $serviceDates[$key] !== (string)$fact['business_date']) continue;
+            $amounts[$key] = ($amounts[$key] ?? 0) + (int)$fact['amount_cents'];
+        }
+        return $amounts;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $serviceRows
+     * @return array<string,array{amountCents:int,laborFeeCents:int,names:array<int,string>,allocations:array<int,array<string,mixed>>}>
+     */
+    private function laborPerformanceByServiceLine(array $serviceRows, string $tenantId): array
+    {
+        if ($serviceRows === [] || $tenantId === '') return [];
+        $checkoutIds = [];
+        $lineIds = [];
+        // Earlier reservation completions created labor facts before the
+        // point/round role was stored there. The completed service snapshot
+        // is immutable and authoritative for those records, so use it only
+        // as a historical compatibility projection while new labor facts
+        // carry the same role directly in role_snapshot.
+        $pointCustomerByLineAndEmployeeId = [];
+        foreach ($serviceRows as $row) {
+            $checkoutId = trim((string)($row['checkout_request_id'] ?? ''));
+            $lineId = trim((string)($row['source_line_id'] ?? ''));
+            if ($checkoutId === '' || $lineId === '') continue;
+            $checkoutIds[$checkoutId] = $checkoutId;
+            $lineIds[$lineId] = $lineId;
+            $key = $this->serviceLineKey($row);
+            foreach ((array)json_decode((string)($row['craftsmen_snapshot_json'] ?? '[]'), true) as $craftsman) {
+                if (!is_array($craftsman)) continue;
+                $employeeId = max(0, (int)($craftsman['employeeId'] ?? $craftsman['employee_id'] ?? 0));
+                if ($employeeId <= 0) continue;
+                if (array_key_exists('isPointCustomer', $craftsman)) {
+                    $pointCustomerByLineAndEmployeeId[$key][$employeeId] = (bool)$craftsman['isPointCustomer'];
+                } elseif (array_key_exists('is_point_customer', $craftsman)) {
+                    $pointCustomerByLineAndEmployeeId[$key][$employeeId] = (bool)$craftsman['is_point_customer'];
+                }
+            }
+        }
+        if ($checkoutIds === [] || $lineIds === []) return [];
+        $facts = Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id', $tenantId)
+            ->where('performance_type', 'labor_performance_allocated')
+            ->where('status', 'effective')
+            ->whereIn('checkout_request_id', array_values($checkoutIds))
+            ->whereIn('source_line_id', array_values($lineIds))
+            ->field('id,checkout_request_id,source_line_id,fact_direction,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
+            ->order('id', 'asc')
+            ->select()
+            ->toArray();
+        $grouped = [];
+        foreach ($facts as $fact) {
+            $key = $this->serviceLineKey($fact);
+            if ($key === '') continue;
+            $employeeId = (int)($fact['employee_id'] ?? 0);
+            if ($employeeId <= 0) continue;
+            $groupKey = $key . '|' . $employeeId;
+            if (!isset($grouped[$groupKey])) $grouped[$groupKey] = [
+                'key' => $key, 'employeeId' => $employeeId, 'employeeName' => '', 'employeeType' => '',
+                'roleSnapshot' => '', 'amountCents' => 0, 'laborFeeCents' => 0,
+                'projectCountHalfUnits' => 0, 'projectCountDecimal' => null, 'hasExplicitProjectCount' => false,
+                'allocationWeightNumerator' => 0, 'allocationWeightDenominator' => 0,
+                'hasExplicitAllocationWeight' => false,
+                'ruleCodeSnapshot' => '', 'ruleNameSnapshot' => '',
+                'ruleVersionSnapshot' => '',
+            ];
+            $grouped[$groupKey]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
+            $grouped[$groupKey]['laborFeeCents'] += (int)($fact['labor_fee_amount_cents'] ?? 0);
+            $grouped[$groupKey]['projectCountHalfUnits'] += (int)($fact['project_count_half_units'] ?? 0);
+            if ($fact['project_count_decimal'] !== null && $fact['project_count_decimal'] !== '') {
+                $grouped[$groupKey]['projectCountDecimal'] = (float)($grouped[$groupKey]['projectCountDecimal'] ?? 0)
+                    + (float)$fact['project_count_decimal'];
+            }
+            if ((string)($fact['fact_direction'] ?? '') === 'forward') {
+                $grouped[$groupKey]['employeeName'] = trim((string)($fact['employee_name_snapshot'] ?? ''));
+                $grouped[$groupKey]['employeeType'] = (string)($fact['employee_type_snapshot'] ?? '');
+                $grouped[$groupKey]['roleSnapshot'] = (string)($fact['role_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleCodeSnapshot'] = (string)($fact['rule_code_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleNameSnapshot'] = (string)($fact['rule_name_snapshot'] ?? '');
+                $grouped[$groupKey]['ruleVersionSnapshot'] = (string)($fact['rule_version_snapshot'] ?? '');
+                // The allocation denominator is part of the immutable fact.
+                // An independent position is deliberately stored as 100/100,
+                // while a normal split is stored as e.g. 50/100. Do not
+                // recalculate this against the line-wide amount: that would
+                // collapse independent and normal groups into 50/50.
+                $weightDenominator = (int)($fact['allocation_weight_denominator'] ?? 0);
+                $weightNumerator = (int)($fact['allocation_weight_numerator'] ?? 0);
+                if ($weightDenominator > 0 && $weightNumerator >= 0) {
+                    $grouped[$groupKey]['allocationWeightNumerator'] = $weightNumerator;
+                    $grouped[$groupKey]['allocationWeightDenominator'] = $weightDenominator;
+                    $grouped[$groupKey]['hasExplicitAllocationWeight'] = true;
+                }
+                $grouped[$groupKey]['hasExplicitProjectCount'] = $grouped[$groupKey]['hasExplicitProjectCount'] ||
+                    (string)($fact['rule_code_snapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
+                    || (int)($fact['project_count_half_units'] ?? 0) !== 0
+                    || ($fact['project_count_decimal'] !== null && $fact['project_count_decimal'] !== '');
+            }
+        }
+        $result = [];
+        foreach ($grouped as $allocation) {
+            if ((int)$allocation['amountCents'] === 0 && (int)$allocation['laborFeeCents'] === 0
+                && (int)$allocation['projectCountHalfUnits'] === 0
+                && $allocation['projectCountDecimal'] === null
+                && empty($allocation['hasExplicitProjectCount'])) continue;
+            $key = (string)$allocation['key'];
+            if (!isset($result[$key])) $result[$key] = [
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0, 'projectCountDecimal' => null,
+                'hasExplicitProjectCount' => false, 'names' => [], 'allocations' => [],
+            ];
+            $result[$key]['amountCents'] += (int)$allocation['amountCents'];
+            $result[$key]['laborFeeCents'] += (int)$allocation['laborFeeCents'];
+            $result[$key]['projectCountHalfUnits'] += (int)$allocation['projectCountHalfUnits'];
+            if ($allocation['projectCountDecimal'] !== null) {
+                $result[$key]['projectCountDecimal'] = (float)($result[$key]['projectCountDecimal'] ?? 0)
+                    + (float)$allocation['projectCountDecimal'];
+            }
+            $result[$key]['hasExplicitProjectCount'] = $result[$key]['hasExplicitProjectCount']
+                || !empty($allocation['hasExplicitProjectCount']);
+            $name = (string)$allocation['employeeName'];
+            $pointCustomer = $this->pointCustomerFromRoleSnapshot((string)$allocation['roleSnapshot']);
+            if ($pointCustomer === null) {
+                // 先尊重明确的历史点客快照，再按未选即轮的业务口径补齐。
+                $pointCustomer = $pointCustomerByLineAndEmployeeId[$key][(int)$allocation['employeeId']] ?? false;
+            }
+            $displayName = $this->craftsmanDisplayName($name, $pointCustomer);
+            if ($displayName !== '' && !in_array($displayName, $result[$key]['names'], true)) $result[$key]['names'][] = $displayName;
+            $baseAmount = max(0, (int)$result[$key]['amountCents']);
+            $result[$key]['allocations'][] = [
+                'employeeId' => (int)$allocation['employeeId'],
+                'employeeName' => $name,
+                'employeeType' => (string)$allocation['employeeType'],
+                'roleSnapshot' => (string)$allocation['roleSnapshot'],
+                'isPointCustomer' => $pointCustomer,
+                'allocationWeightNumerator' => !empty($allocation['hasExplicitAllocationWeight'])
+                    ? (int)$allocation['allocationWeightNumerator']
+                    : (int)$allocation['amountCents'],
+                'allocationWeightDenominator' => !empty($allocation['hasExplicitAllocationWeight'])
+                    ? max(1, (int)$allocation['allocationWeightDenominator'])
+                    : max(1, $baseAmount),
+                'allocationRatio' => '',
+                'allocationRatioPercent' => 0,
+                'amount' => $this->centsToMoney((int)$allocation['amountCents']),
+                'laborFeeAmount' => $this->centsToMoney((int)$allocation['laborFeeCents']),
+                'projectCount' => $this->projectCountText(
+                    $allocation['projectCountDecimal'] !== null
+                        ? (float)$allocation['projectCountDecimal']
+                        : (int)$allocation['projectCountHalfUnits'] / 2,
+                ),
+                'hasExplicitProjectCount' => !empty($allocation['hasExplicitProjectCount']),
+                'projectCountDecimal' => $allocation['projectCountDecimal'],
+                'projectCountHalfUnits' => (int)$allocation['projectCountHalfUnits'],
+                'ruleCodeSnapshot' => (string)$allocation['ruleCodeSnapshot'],
+                'ruleNameSnapshot' => (string)$allocation['ruleNameSnapshot'],
+                'ruleVersionSnapshot' => (string)$allocation['ruleVersionSnapshot'],
+            ];
+        }
+        foreach ($result as &$line) {
+            foreach ($line['allocations'] as &$allocation) {
+                $denominator = max(1, (int)($allocation['allocationWeightDenominator'] ?? 0));
+                $numerator = max(0, (int)($allocation['allocationWeightNumerator'] ?? 0));
+                $allocation['allocationRatio'] = $numerator . '/' . $denominator;
+                $allocation['allocationRatioPercent'] = round($numerator * 100 / $denominator, 2);
+            }
+            unset($allocation);
+        }
+        unset($line);
+        return $result;
+    }
+
+    /** @return bool|null null means an older fact with no role label. */
+    private function pointCustomerFromRoleSnapshot(string $roleSnapshot): ?bool
+    {
+        $role = strtolower(trim($roleSnapshot));
+        if ($role === '' || $role === 'craftsman') return null;
+        if (str_contains($role, 'point')) return true;
+        if (str_contains($role, 'round')) return false;
+        return null;
+    }
+
+    private function craftsmanDisplayName(string $name, ?bool $isPointCustomer): string
+    {
+        $name = trim($name);
+        if ($name === '' || $isPointCustomer === null) return $name;
+        return $name . ($isPointCustomer ? '（点）' : '（轮）');
+    }
+
+    /**
+     * Build a per-person list projection without changing the employee facts.
+     * Snapshot values only fill older missing facts/counts; an explicit zero
+     * from a later personnel adjustment must never become the old sale count.
+     *
+     * @param array<int,array<string,mixed>> $facts
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenListAllocations(array $facts, string $snapshotJson): array
+    {
+        $snapshotRows = json_decode($snapshotJson, true);
+        $snapshots = [];
+        if (is_array($snapshotRows)) {
+            foreach ($snapshotRows as $person) {
+                if (!is_array($person)) continue;
+                $employeeId = (int)($person['employeeId'] ?? $person['employee_id'] ?? 0);
+                if ($employeeId > 0) $snapshots[$employeeId] = $person;
+            }
+        }
+        $represented = [];
+        $hasAdjustment = false;
+        foreach ($facts as &$person) {
+            $employeeId = (int)($person['employeeId'] ?? 0);
+            $represented[$employeeId] = true;
+            $hasAdjustment = $hasAdjustment
+                || (string)($person['ruleCodeSnapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
+            $snapshot = $snapshots[$employeeId] ?? [];
+            if (empty($person['hasExplicitProjectCount'])) {
+                $count = $snapshot['projectCount'] ?? $snapshot['project_count_decimal']
+                    ?? $snapshot['project_count'] ?? null;
+                if ($count === null && isset($snapshot['projectCountHalfUnits'])) {
+                    $count = (float)$snapshot['projectCountHalfUnits'] / 2;
+                }
+                // No count in either authority is unknown, not an assigned zero.
+                $person['projectCount'] = $count !== null && is_numeric($count)
+                    ? $this->projectCountText($count) : null;
+            }
+        }
+        unset($person);
+        // A personnel adjustment replaces the old staff set. For ordinary
+        // checkout facts, the writer may omit an all-zero colleague; keep
+        // that colleague from the same immutable checkout snapshot.
+        if ($hasAdjustment) return $facts;
+        foreach ($snapshots as $employeeId => $person) {
+            if (isset($represented[$employeeId])) continue;
+            $count = $person['projectCount'] ?? $person['project_count_decimal']
+                ?? $person['project_count'] ?? null;
+            if ($count === null && isset($person['projectCountHalfUnits'])) {
+                $count = (float)$person['projectCountHalfUnits'] / 2;
+            }
+            $facts[] = [
+                'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
+                'isPointCustomer' => (bool)($person['isPointCustomer'] ?? $person['is_point_customer'] ?? false),
+                'amount' => isset($person['performanceAmountCents'])
+                    ? $this->centsToMoney((int)$person['performanceAmountCents']) : null,
+                'laborFeeAmount' => isset($person['laborFeeCents'])
+                    ? $this->centsToMoney((int)$person['laborFeeCents']) : null,
+                'projectCount' => $count !== null && is_numeric($count) ? $this->projectCountText($count) : null,
+            ];
+        }
+        return $facts;
+    }
+
+    private function laborPerformanceTypeLabel(string $mode): string
+    {
+        return [
+            'checkout_manual_override' => '本次手工费',
+            'project_rule' => '项目固定手工费',
+            'actual_entitlement_amount' => '按实际项目金额',
+            'project_configured_amount' => '按项目配置金额',
+        ][$mode] ?? ($mode !== '' ? $mode : '项目固定手工费');
+    }
+
+    private function laborPerformanceRatio(array $allocations): string
+    {
+        $parts = [];
+        foreach ($allocations as $allocation) {
+            $name = trim((string)($allocation['employeeName'] ?? '')) ?: '未命名手艺人';
+            $percent = (float)($allocation['allocationRatioPercent'] ?? 0);
+            $parts[] = $name . ' ' . rtrim(rtrim(number_format($percent, 2, '.', ''), '0'), '.') . '%';
+        }
+        return implode('、', $parts);
+    }
+
+    private function serviceLineKey(array $row): string
+    {
+        $checkoutId = trim((string)($row['checkout_request_id'] ?? ''));
+        $lineId = trim((string)($row['source_line_id'] ?? ''));
+        return $checkoutId === '' || $lineId === '' ? '' : $checkoutId . ':' . $lineId;
+    }
+
+    private function craftsmenSummary(string $json): string
+    {
+        $items = json_decode($json, true);
+        if (!is_array($items)) return '';
+        $names = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            $name = trim((string)(
+                $item['staff_name_snapshot']
+                ?? $item['staffName']
+                ?? $item['staff_name']
+                ?? $item['name']
+                ?? ''
+            ));
+            if ($name === '') continue;
+            // “点/轮” is frozen at checkout in the craftsmen snapshot. Never
+            // infer it from a current member or staff record when reading a
+            // historical completed service.
+            if (array_key_exists('isPointCustomer', $item)) {
+                $label = $name . ((bool)$item['isPointCustomer'] ? '（点）' : '（轮）');
+            } elseif (array_key_exists('is_point_customer', $item)) {
+                $label = $name . ((bool)$item['is_point_customer'] ? '（点）' : '（轮）');
+            } else {
+                $label = $name;
+            }
+            if (!in_array($label, $names, true)) $names[] = $label;
+        }
+        return implode('、', $names);
+    }
+
+    /**
+     * @return array{hasExplicitProjectCount:bool,projectCount:float}
+     */
+    private function snapshotProjectCount(string $json): array
+    {
+        $items = json_decode($json, true);
+        if (!is_array($items)) return ['hasExplicitProjectCount' => false, 'projectCount' => 0.0];
+        $total = 0.0;
+        $explicit = false;
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            if (array_key_exists('project_count_decimal', $item)
+                || array_key_exists('projectCount', $item)
+                || array_key_exists('project_count', $item)) {
+                $value = $item['project_count_decimal'] ?? $item['projectCount'] ?? $item['project_count'];
+                if (is_numeric($value) && (float)$value >= 0) {
+                    $total += (float)$value;
+                    $explicit = true;
+                }
+                continue;
+            }
+            if (array_key_exists('projectCountHalfUnits', $item) || array_key_exists('project_count_half_units', $item)) {
+                $value = $item['projectCountHalfUnits'] ?? $item['project_count_half_units'];
+                if (is_numeric($value) && (float)$value >= 0) {
+                    $total += (float)$value / 2;
+                    $explicit = true;
+                }
+            }
+        }
+        return ['hasExplicitProjectCount' => $explicit, 'projectCount' => $total];
+    }
+
+    private function serviceEntitlementSource(array $row): string
+    {
+        if ((string)($row['source_document_type'] ?? '') === 'sales_order') {
+            return '现金购买项目';
+        }
+        if ((int)($row['is_gift'] ?? 0) === 1) return '赠送权益';
+        $kind = trim((string)($row['source_kind'] ?? ''));
+        $labels = [
+            'time_card' => '时间卡权益',
+            'count_card' => '次数卡权益',
+            'custom_card' => '定制卡权益',
+            'gift' => '赠送权益',
+        ];
+        return $labels[$kind] ?? '卡项权益';
+    }
+
+    /** 本次充值/补交单的来源快照；历史空值不借原购单来源。 */
+    private function businessSourceLabel(array $row): string
+    {
+        foreach (['business_source_secondary_name_snapshot', 'business_source_primary_name_snapshot', 'business_source_label_snapshot'] as $key) {
+            $label = trim((string)($row[$key] ?? ''));
+            if ($label !== '') return $label;
+        }
+        return '';
+    }
+
+    /**
+     * 结账销售单、纯权益结账选择、预约服务事实依次作为来源权威快照。
+     * 三者均缺失的历史记录才显示“—”，不回读会员当前来源。
+     */
+    private function serviceBusinessSourceLabel(array $row): string
+    {
+        foreach ([
+            $row['business_source_secondary_name_snapshot'] ?? '',
+            $row['business_source_primary_name_snapshot'] ?? '',
+            $row['business_source_label_snapshot'] ?? '',
+            $row['checkout_source_secondary_name_snapshot'] ?? '',
+            $row['checkout_source_primary_name_snapshot'] ?? '',
+            $row['checkout_source_label_snapshot'] ?? '',
+            $row['service_source_secondary_name_snapshot'] ?? '',
+            $row['service_source_primary_name_snapshot'] ?? '',
+            $row['service_source_label_snapshot'] ?? '',
+        ] as $value) {
+            $label = trim((string)$value);
+            if ($label !== '') return $label;
+        }
+        return '';
+    }
+
+    /** @return array<string,string> */
+    private function serviceTopFilters(array $payload): array
+    {
+        $allowed = [
+            'service_record_no', 'source', 'sales_order_no', 'member_name', 'service_project',
+            'entitlement_source', 'source_card', 'source_card_no', 'craftsman',
+            'service_status',
+        ];
+        $filters = [];
+        foreach ((array)($payload['topFilters'] ?? $payload['top_filters'] ?? []) as $filter) {
+            if (!is_array($filter)) continue;
+            $field = $this->scalar($filter['field'] ?? '');
+            $value = $this->scalar($filter['value'] ?? '');
+            if ($value === '' || !in_array($field, $allowed, true) || isset($filters[$field])) continue;
+            if ($field === 'service_status' && !in_array($value, ['completed', 'voided', '已完成', '已作废'], true)) continue;
+            $filters[$field] = $value;
+        }
+        return $filters;
+    }
+
+    /** @return array<int,array{field:string,direction:string}> */
+    private function serviceSorts(array $payload): array
+    {
+        $allowed = [
+            'service_record_no', 'sales_order_no', 'business_date', 'member_name', 'service_project',
+            'used_times', 'service_completed_at',
+        ];
+        $sorts = [];
+        foreach ((array)($payload['sorts'] ?? []) as $sort) {
+            if (!is_array($sort) || count($sorts) >= 3) continue;
+            $field = $this->scalar($sort['field'] ?? '');
+            $direction = strtolower($this->scalar($sort['direction'] ?? ''));
+            if (!in_array($field, $allowed, true)
+                || !in_array($direction, ['asc', 'desc'], true)
+                || isset($sorts[$field])) continue;
+            $sorts[$field] = ['field' => $field, 'direction' => $direction];
+        }
+        return array_values($sorts);
+    }
+
+    private function applyServiceTopFilters($query, array $filters): void
+    {
+        $likeFields = [
+            'service_record_no' => 'sf.service_record_no',
+            // 与显示值同序选择历史快照，保证筛选、列表和导出不出现不同来源。
+            'source' => "COALESCE(NULLIF(so.business_source_secondary_name_snapshot, ''), NULLIF(so.business_source_primary_name_snapshot, ''), NULLIF(so.business_source_label_snapshot, ''), NULLIF(bs.secondary_source_name_snapshot, ''), NULLIF(bs.primary_source_name_snapshot, ''), NULLIF(bs.source_label_snapshot, ''), NULLIF(sf.business_source_secondary_name_snapshot, ''), NULLIF(sf.business_source_primary_name_snapshot, ''), sf.business_source_label_snapshot, '')",
+            'sales_order_no' => 'so.order_no',
+            'member_name' => 'sf.member_name_snapshot',
+            'service_project' => 'sf.project_name_snapshot',
+            'entitlement_source' => 'wf.source_name_snapshot',
+            'source_card' => 'wf.source_name_snapshot',
+            'source_card_no' => 'wf.source_code_snapshot',
+            'craftsman' => 'sf.craftsmen_snapshot_json',
+        ];
+        foreach ($filters as $field => $value) {
+            if ($field === 'service_status') {
+                if (in_array($value, ['voided', '已作废'], true)) {
+                    $query->whereNotNull('vo.id');
+                } else {
+                    $query->whereNull('vo.id');
+                }
+            } elseif (isset($likeFields[$field])) {
+                $this->whereUtf8Like(
+                    $query,
+                    $likeFields[$field],
+                    '%' . addcslashes($value, "\\%_") . '%'
+                );
+            }
+        }
+    }
+
+    private function pageServiceRows($query, array $criteria, string $fields): array
+    {
+        $columns = [
+            'service_record_no' => 'sf.service_record_no',
+            'sales_order_no' => 'so.order_no',
+            'business_date' => 'sf.business_date',
+            'member_name' => 'sf.member_name_snapshot',
+            'service_project' => 'sf.project_name_snapshot',
+            'used_times' => 'sf.quantity',
+            'service_completed_at' => 'sf.settled_at',
+        ];
+        foreach ($criteria['sorts'] as $sort) {
+            $query->order($columns[$sort['field']], $sort['direction']);
+        }
+        return $query->field($fields)
+            ->order('sf.settled_at', 'desc')
+            ->order('sf.id', 'desc')
+            ->page($criteria['page'], $criteria['pageSize'])
+            ->select()
+            ->toArray();
+    }
+
+    private function readGift(array $criteria): array
+    {
+        $sources = [
+            $this->readV3RechargeGifts($criteria),
+            $this->readV3DirectGifts($criteria),
+            $this->readLegacyGifts($criteria),
+        ];
+        $total = array_sum(array_column($sources, 1));
+        $records = [];
+        foreach ($sources as $source) {
+            $records = array_merge($records, $source[0]);
+        }
+        usort($records, function (array $left, array $right): int {
+            $time = (int)$right['_sortTime'] <=> (int)$left['_sortTime'];
+            return $time !== 0 ? $time : strcmp((string)$right['id'], (string)$left['id']);
+        });
+        $offset = ($criteria['page'] - 1) * $criteria['pageSize'];
+        $records = array_slice($records, $offset, $criteria['pageSize']);
+        foreach ($records as &$record) unset($record['_sortTime']);
+        unset($record);
+        return [$records, $total];
+    }
+
+    /**
+     * 充值套餐赠送以 V3 gift fact 为展示权威；一项项目或一张券均是一条可追溯记录。
+     */
+    private function readV3RechargeGifts(array $criteria): array
+    {
+        $query = Db::name('cashier_v3_gift_fact')->alias('gf')
+            ->join('cashier_v3_recharge_gift_authority ga', 'ga.gift_id = gf.source_id')
+            ->leftJoin('user u', 'u.uid = gf.member_id')
+            ->leftJoin('system_store s', 's.id = gf.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
+            ->where('gf.source_type', 'recharge_gift')
+            ->where('gf.status', 'effective')
+            ->where(function ($q) use ($criteria) {
+                if ($criteria['status'] === 'voided') $q->where('ga.status', 'voided');
+                elseif ($criteria['dataScope'] === 'all' && $criteria['status'] === '') $q->whereIn('ga.status', ['issued', 'voided']);
+                else $q->where('ga.status', 'issued');
+            });
+        $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'gf.settled_at', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'gf.gift_fact_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'gf.content_name_snapshot',
+            'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        if ($criteria['status'] === 'refunded') return [[], 0];
+        $total = (int)(clone $query)->count('gf.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
+            'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
+            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.recharge_order_no_snapshot', 'ga.status AS authority_status', 'u.real_name',
+            'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $snapshot = json_decode((string)$row['content_snapshot_json'], true);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            $kind = (string)$row['gift_kind'];
+            $time = (int)$row['settled_at'];
+            return [
+                'id' => 'v3-gift:' . (string)$row['gift_fact_id'],
+                'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
+                'businessDate' => $this->date($time),
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'giftSource' => '充值订单 ' . (string)$row['recharge_order_no_snapshot'],
+                'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
+                'giftContent' => (string)$row['content_name_snapshot'],
+                'giftQuantity' => (int)$row['quantity'],
+                'effectiveAt' => $this->dateTime($time),
+                'expiresAt' => (int)($snapshot['validityEnd'] ?? 0) > 0 ? $this->dateTime((int)$snapshot['validityEnd']) : null,
+                'giftStatus' => (string)($row['authority_status'] ?? '') === 'voided' ? '已作废' : '有效',
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'giftReason' => '充值套餐赠送',
+                'createdAt' => $this->dateTime($time),
+                '_sortTime' => $time,
+            ];
+        }, $rows), $total];
+    }
+
+    /**
+     * 独立赠送以 V3 gift fact 为唯一展示来源；兼容权益投影只供会员资产读取。
+     */
+    private function readV3DirectGifts(array $criteria): array
+    {
+        $query = Db::name('cashier_v3_gift_fact')->alias('gf')
+            ->join('cashier_v3_direct_gift_authority ga', 'ga.gift_id = gf.source_id')
+            // Each direct-gift item has its own expiry. Read that immutable item
+            // snapshot instead of inferring a line expiry from the parent gift.
+            ->leftJoin('cashier_v3_direct_gift_item gi', 'gi.gift_id = gf.source_id AND gi.item_id = gf.source_detail_id')
+            ->leftJoin('user u', 'u.uid = gf.member_id')
+            ->leftJoin('system_store s', 's.id = gf.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
+            ->where('gf.source_type', 'direct_gift')
+            ->where('gf.status', 'effective')
+            ->where(function ($q) use ($criteria) {
+                $allData = $criteria['dataScope'] === 'all' && $criteria['status'] === '';
+                if ($criteria['status'] === 'voided') {
+                    $q->where(function ($inner) {
+                        $inner->where('ga.status', 'voided')->whereOr('gi.status', 'voided');
+                    });
+                } elseif ($allData) {
+                    $q->where(function ($inner) {
+                        $inner->whereIn('ga.status', ['issued', 'voided'])
+                            ->whereIn('gi.status', ['issued', 'voided']);
+                    });
+                } else {
+                    $q->where('ga.status', 'issued')->where('gi.status', 'issued');
+                }
+            });
+        $this->applyStoreScope($query, 'gf.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'gf.settled_at', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'gf.gift_fact_id', 'ga.gift_no', 'ga.reason_snapshot', 'gf.content_name_snapshot',
+            'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        if ($criteria['status'] === 'refunded') return [[], 0];
+        $total = (int)(clone $query)->count('gf.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
+            'gf.quantity', 'gf.content_name_snapshot', 'gf.content_snapshot_json', 'gf.settled_at',
+            'gf.store_id', 'gf.member_id', 'gf.operator_id', 'ga.gift_no', 'ga.reason_snapshot', 'ga.validity_end AS authority_validity_end',
+            'gi.content_snapshot_json AS item_content_snapshot_json', 'ga.status AS authority_status', 'u.real_name',
+            'gi.status AS item_status', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('gf.settled_at', 'desc')->order('gf.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $snapshot = json_decode((string)($row['item_content_snapshot_json'] ?: $row['content_snapshot_json']), true);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            $kind = (string)$row['gift_kind'];
+            $time = (int)$row['settled_at'];
+            $validityEnd = (int)($snapshot['validityEnd'] ?? $snapshot['validity_end'] ?? 0);
+            if ($validityEnd <= 0) $validityEnd = (int)($row['authority_validity_end'] ?? 0);
+            return [
+                'id' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
+                // Lifecycle commands must use the immutable V3 gift fact identity,
+                // not the display number (a single gift number can contain
+                // multiple project/product rows).
+                'voidRecordId' => 'v3-direct-gift:' . (string)$row['gift_fact_id'],
+                // `record_id` is the hidden, stable key declared by the unified
+                // order-center contract. Keep it populated on the direct query
+                // path as well as on the export/provider path so the frontend
+                // never falls back to the human-facing ZS number.
+                'record_id' => 'gift:v3-direct-gift:' . (string)$row['gift_fact_id'],
+                'giftRecordNo' => trim((string)($row['gift_no'] ?? '')) ?: (string)$row['gift_fact_id'],
+                'businessDate' => $this->date($time),
+                'memberId' => (int)$row['member_id'],
+                'memberName' => $this->memberName($row),
+                'giftSource' => '独立赠送',
+                'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
+                'giftContent' => (string)$row['content_name_snapshot'],
+                'giftQuantity' => (int)$row['quantity'],
+                'effectiveAt' => $this->dateTime($time),
+                'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
+                'giftStatus' => (string)($row['authority_status'] ?? '') === 'voided'
+                    || (string)($row['item_status'] ?? '') === 'voided' ? '已作废' : '有效',
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'giftReason' => (string)$row['reason_snapshot'],
+                'createdAt' => $this->dateTime($time),
+                '_sortTime' => $time,
+            ];
+        }, $rows), $total];
+    }
+
+    private function readLegacyGifts(array $criteria): array
+    {
+        $query = Db::name('store_order_cart_info')->alias('ci')
+            ->join('store_order o', 'o.id = ci.oid')
+            ->leftJoin('user u', 'u.uid = o.uid')
+            ->leftJoin('system_store s', 's.id = o.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = o.staff_id')
+            ->where('ci.is_gift', 1)
+            ->where('o.paid', 1)
+            ->where('o.is_system_del', 0)
+            // V3 recharge gifts use the authority and fact tables above. Their projection rows
+            // remain for legacy benefit readers, but must not create duplicate order-center rows.
+            ->where('ci.cart_info', 'not like', '%cashier_v3_recharge_gift%')
+            ->where('ci.cart_info', 'not like', '%cashier_v3_direct_gift%');
+        $this->applyStoreScope($query, 'o.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(o.pay_time, 0), o.add_time)', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'o.order_id', 'u.real_name', 'u.nickname', 'u.phone', 'ci.cart_info',
+        ]);
+        if ($criteria['status'] === 'active') {
+            $query->where('o.refund_status', 0)->where('o.terminal_action', 0);
+        } elseif ($criteria['status'] === 'refunded') {
+            $query->where(function ($q) {
+                $q->where('o.refund_status', '>', 0)->whereOr('o.terminal_action', '>', 0);
+            });
+        }
+        $total = (int)(clone $query)->count('ci.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'ci.id', 'ci.oid', 'ci.cart_num', 'ci.product_type', 'ci.cart_info',
+            'ci.write_end', 'ci.is_writeoff', 'o.order_id', 'o.uid', 'o.store_id',
+            'o.refund_status', 'o.terminal_action', 'o.pay_time', 'o.add_time',
+            'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('o.pay_time', 'desc')->order('ci.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $product = $this->productSnapshot((string)$row['cart_info']);
+            $time = (int)($row['pay_time'] ?: $row['add_time']);
+            $refunded = (int)$row['refund_status'] > 0 || (int)$row['terminal_action'] > 0;
+            return [
+                'id' => 'gift:' . $row['id'],
+                'giftRecordNo' => 'GIFT-' . $row['id'],
+                'businessDate' => $this->date($time),
+                'memberId' => (int)$row['uid'],
+                'memberName' => $this->memberName($row),
+                'giftSource' => '销售订单 ' . (string)$row['order_id'],
+                'giftType' => (int)$row['product_type'] === 6 ? '赠送项目' : '赠送商品',
+                'giftContent' => $product['name'],
+                'giftQuantity' => (int)$row['cart_num'],
+                'effectiveAt' => $this->dateTime($time),
+                'expiresAt' => (int)$row['write_end'] > 0 ? $this->dateTime((int)$row['write_end']) : null,
+                'giftStatus' => $refunded ? '已失效' : ((int)$row['is_writeoff'] === 1 ? '已使用' : '有效'),
+                'storeName' => (string)$row['store_name'],
+                'operatorName' => (string)$row['staff_name'],
+                'giftReason' => '随单赠送',
+                'createdAt' => $this->dateTime($time),
+                '_sortTime' => $time,
+            ];
+        }, $rows), $total];
+    }
+
+    private function readCardOperations(
+        array $criteria,
+        CashierV3OperatorScope $scope
+    ): array {
+        $sources = [
+            $this->readV3CardOperations($criteria, $scope),
+            $this->readLegacyReplacements($criteria),
+            $this->readLegacyCardUpgrades($criteria),
+        ];
+        $total = array_sum(array_column($sources, 1));
+        $rows = [];
+        foreach ($sources as $source) {
+            $rows = array_merge($rows, $source[0]);
+        }
+        usort($rows, function (array $left, array $right): int {
+            $time = (int)$right['_sortTime'] <=> (int)$left['_sortTime'];
+            return $time !== 0 ? $time : strcmp((string)$right['id'], (string)$left['id']);
+        });
+        $offset = ($criteria['page'] - 1) * $criteria['pageSize'];
+        $rows = array_slice($rows, $offset, $criteria['pageSize']);
+        foreach ($rows as &$row) unset($row['_sortTime']);
+        unset($row);
+        return [$rows, $total];
+    }
+
+    private function readV3CardOperations(array $criteria, CashierV3OperatorScope $scope): array
+    {
+        $query = Db::name('cashier_v3_card_operation')->alias('c')
+            // A checkout request id is an idempotency/processing reference, not
+            // the customer-facing sales order number. Upgrade settlement is the
+            // authoritative bridge from a card operation to its sales order.
+            ->leftJoin('cashier_v3_card_operation_settlement s', 's.tenant_id = c.tenant_id AND s.operation_id = c.operation_id AND s.settlement_status = \'settled\'')
+            ->leftJoin('cashier_v3_sales_order o', 'o.tenant_id = s.tenant_id AND o.order_id = s.sales_order_id')
+            // The original operation is immutable; its successful reversal owns the visible status.
+            ->leftJoin('cashier_v3_order_center_void_operation v', "v.tenant_id = c.tenant_id AND v.record_id = CONCAT('card-operation:', c.id) AND v.source_kind = 'project_replacement' AND v.status = 'succeeded'")
+            ->where('c.tenant_id', $scope->tenantId())
+            ->whereIn('c.operation_type', self::CARD_OPERATION_TYPES);
+        if ($criteria['operationType'] !== '') {
+            $query->where('c.operation_type', $criteria['operationType']);
+        }
+        $this->applyStoreScope($query, 'c.store_id', $criteria['allowedStoreIds']);
+        $this->applyBusinessDateRange($query, 'c.business_date', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'c.operation_no', 'c.member_name_after_snapshot', 'c.card_name_snapshot',
+            'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.operator_name_snapshot',
+        ]);
+        if ($criteria['status'] !== '') {
+            if ($criteria['status'] === 'voided') {
+                $query->where('v.id', '>', 0);
+            } elseif ($criteria['status'] === 'completed') {
+                $query->whereIn('c.operation_status', ['completed', 'succeeded'])->whereNull('v.id');
+            } else {
+                $query->where('c.operation_status', $criteria['status'])->whereNull('v.id');
+            }
+        }
+        $total = (int)(clone $query)->count('c.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'c.id', 'c.operation_no', 'c.operation_type', 'c.operation_status', 'c.store_id',
+            'c.origin_member_id', 'c.member_id_before', 'c.member_id_after',
+            'c.store_name_snapshot', 'c.member_name_after_snapshot', 'c.card_name_snapshot',
+            'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.source_remaining_value_cents',
+            'c.settlement_delta_cents', 'o.order_no AS sales_order_no', 'c.reason_snapshot',
+            'c.operator_name_snapshot', 'c.business_date', 'c.occurred_at', 'c.settled_at',
+            'c.result_snapshot_json', 'v.id AS void_operation_id',
+        ]))->order('c.occurred_at', 'desc')->order('c.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $time = (int)($row['settled_at'] ?: $row['occurred_at']);
+            return $this->cardOperationRecord([
+                'id' => 'card-operation:' . $row['id'],
+                'operationNo' => $row['operation_no'],
+                'operationType' => $row['operation_type'],
+                'operationStatus' => (int)($row['void_operation_id'] ?? 0) > 0 ? 'voided' : $row['operation_status'],
+                'businessDate' => (string)$row['business_date'],
+                'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
+                'memberName' => $row['member_name_after_snapshot'],
+                'sourceCard' => $this->cardOperationSourceContent($row),
+                'targetContent' => $row['operation_type'] === 'card_to_balance'
+                    ? '会员赠金余额' : $row['target_catalog_name_snapshot'],
+                // Conversion is not an upgrade collection: show the transferred
+                // value without fabricating a payable delta or cash receipt.
+                'amount' => $this->centsToMoney((int)($row['operation_type'] === 'card_to_balance'
+                    ? $row['source_remaining_value_cents'] : $row['settlement_delta_cents'])),
+                'salesOrderNo' => $row['sales_order_no'],
+                'storeName' => $row['store_name_snapshot'],
+                'operatorName' => $row['operator_name_snapshot'],
+                'reason' => $row['reason_snapshot'],
+                'completedAt' => $time > 0 ? $this->dateTime($time) : null,
+                '_sortTime' => (int)$row['occurred_at'],
+            ]);
+        }, $rows), $total];
+    }
+
+    /**
+     * 项目替换的来源明细以操作完成时冻结的结果快照为准，避免卡内项目后续变化后
+     * 详情被改写；无有效明细或非替换操作时保持原有卡名展示。
+     */
+    private function cardOperationSourceContent(array $row): string
+    {
+        $cardName = trim((string)($row['card_name_snapshot'] ?? ''));
+        if ((string)($row['operation_type'] ?? '') !== 'project_replacement') {
+            return $cardName;
+        }
+        $snapshot = json_decode((string)($row['result_snapshot_json'] ?? ''), true);
+        $sourceLines = is_array($snapshot['replacementSnapshot']['sourceLines'] ?? null)
+            ? $snapshot['replacementSnapshot']['sourceLines']
+            : [];
+        $details = [];
+        foreach (array_slice($sourceLines, 0, 20) as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $name = trim((string)($line['projectName'] ?? ''));
+            $quantity = max(0, (int)($line['quantity'] ?? 0));
+            if ($name === '' || $quantity <= 0) {
+                continue;
+            }
+            $details[$name . "\0" . $quantity] = sprintf('%s × %d次', $name, $quantity);
+        }
+        $lines = $cardName === '' ? [] : [$cardName];
+        return implode("\n", array_merge($lines, array_values($details)));
+    }
+
+    private function readLegacyReplacements(array $criteria): array
+    {
+        if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'project_replacement') {
+            return [[], 0];
+        }
+        $query = Db::name('card_project_replacement')->alias('r')
+            ->leftJoin('user u', 'u.uid = r.uid')
+            ->leftJoin('system_store s', 's.id = r.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
+        $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'r.business_time', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'r.replacement_no', 'u.real_name', 'u.nickname', 'u.phone', 'r.snapshot_json',
+        ]);
+        if ($criteria['status'] === 'completed') $query->where('r.status', 0);
+        if ($criteria['status'] !== '' && $criteria['status'] !== 'completed') {
+            return [[], 0];
+        }
+        $total = (int)(clone $query)->count('r.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'r.id', 'r.replacement_no', 'r.oid', 'r.target_amount', 'r.snapshot_json',
+            'r.status', 'r.business_time', 'r.operate_time', 'u.real_name', 'u.nickname',
+            'u.uid', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('r.business_time', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $snapshot = json_decode((string)$row['snapshot_json'], true);
+            $sources = is_array($snapshot['sources'] ?? null) ? $snapshot['sources'] : [];
+            $sourceNames = [];
+            foreach ($sources as $source) {
+                $name = trim((string)($source['name'] ?? $source['product_name'] ?? ''));
+                if ($name !== '') $sourceNames[] = $name;
+            }
+            $target = is_array($snapshot['target'] ?? null) ? $snapshot['target'] : [];
+            return $this->cardOperationRecord([
+                'id' => 'legacy-replacement:' . $row['id'],
+                'operationNo' => $row['replacement_no'],
+                'operationType' => 'project_replacement',
+                'operationStatus' => 'completed',
+                'businessDate' => $this->date((int)$row['business_time']),
+                'memberId' => (int)($row['uid'] ?? 0),
+                'memberName' => $this->memberName($row),
+                'sourceCard' => implode('、', array_unique($sourceNames)),
+                'targetContent' => (string)($target['name'] ?? $target['product_name'] ?? ''),
+                'amount' => (string)$row['target_amount'],
+                'salesOrderNo' => (string)$row['oid'],
+                'storeName' => $row['store_name'],
+                'operatorName' => $row['staff_name'],
+                'reason' => (string)($snapshot['remark'] ?? ''),
+                'completedAt' => $this->dateTime((int)$row['operate_time']),
+                '_sortTime' => (int)$row['business_time'],
+            ]);
+        }, $rows), $total];
+    }
+
+    /**
+     * 升级事件归属于新卡成交单，不是旧卡购买日期/门店。多张旧卡升级同一新单只显示一次。
+     * 补差只取新单实付减已保存的升级抵扣，不用旧卡原价猜补差；没有抵扣证据则留空。
+     */
+    private function readLegacyCardUpgrades(array $criteria): array
+    {
+        if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'card_upgrade') return [[], 0];
+        $timeSql = 'COALESCE(NULLIF(target.pay_time, 0), target.add_time)';
+        $query = Db::name('store_order')->alias('target')
+            ->leftJoin('user u', 'u.uid = target.uid')
+            ->leftJoin('system_store s', 's.id = target.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = target.staff_id')
+            ->whereIn('target.id', function ($old) {
+                // 非相关子查询只扫描一次旧卡标记，避免无专用索引时逐目标单重扫。
+                $old->name('store_order')->where('card_upgrade_use_oid', '>', 0)->field('card_upgrade_use_oid');
+            })->where('target.paid', 1)->where('target.is_system_del', 0);
+        $this->applyStoreScope($query, 'target.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, $timeSql, $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], ['target.order_id', 'u.real_name', 'u.nickname', 'u.phone']);
+        if ($criteria['status'] === 'cancelled' || $criteria['status'] === 'voided') {
+            $query->where('target.terminal_action', '>', 0);
+        } elseif ($criteria['status'] === 'completed' || ($criteria['dataScope'] === 'normal' && $criteria['status'] === '')) {
+            $query->where('target.terminal_action', 0)->where('target.refund_status', 0);
+        } elseif ($criteria['status'] !== '') return [[], 0];
+        $total = (int)(clone $query)->count('target.id');
+        $rows = $query->field('target.id,target.order_id,target.pay_price,target.terminal_action,target.refund_status,'
+            . 'target.pay_time,target.add_time,target.uid,u.real_name,u.nickname,u.phone,s.name AS store_name,st.staff_name')
+            ->orderRaw($timeSql . ' DESC')->order('target.id', 'desc')
+            ->limit($criteria['page'] * $criteria['pageSize'])->select()->toArray();
+        $ids = array_column($rows, 'id');
+        if ($ids === []) return [[], $total];
+        $oldCards = $credits = [];
+        foreach (Db::name('store_order')->whereIn('card_upgrade_use_oid', $ids)
+            ->field('id,order_id,card_upgrade_use_oid')->order('id')->select()->toArray() as $old) {
+            $oldCards[(int)$old['card_upgrade_use_oid']][(int)$old['id']] = (string)$old['order_id'];
+        }
+        foreach (Db::name('combination_order')->whereIn('order_id', $ids)->where('type', 1)
+            ->where('active_pay', 3)->where('pay_sub_type', 'card_upgrade')
+            ->field('order_id,upgrade_old_oid,price')->select()->toArray() as $part) {
+            $targetId = (int)$part['order_id'];
+            if (!isset($oldCards[$targetId][(int)$part['upgrade_old_oid']]) || bccomp((string)$part['price'], '0', 2) < 0) continue;
+            $credits[$targetId] = bcadd($credits[$targetId] ?? '0', (string)$part['price'], 2);
+        }
+        return [array_map(function (array $row) use ($oldCards, $credits): array {
+            $id = (int)$row['id']; $time = (int)($row['pay_time'] ?: $row['add_time']);
+            $amount = isset($credits[$id]) && bccomp((string)$row['pay_price'], $credits[$id], 2) >= 0
+                ? bcsub((string)$row['pay_price'], $credits[$id], 2) : '';
+            return $this->cardOperationRecord([
+                'id'=>'legacy-card-upgrade-target:' . $id, 'operationNo'=>'UP-T-' . $id,
+                'operationType'=>'card_upgrade',
+                'operationStatus'=>(int)$row['terminal_action'] > 0 || (int)$row['refund_status'] === 2 ? 'cancelled' : 'completed',
+                'businessDate'=>$this->date($time), 'memberId'=>(int)$row['uid'], 'memberName'=>$this->memberName($row),
+                'sourceCard'=>'原卡订单 ' . implode('、', array_values($oldCards[$id] ?? [])),
+                'targetContent'=>'升级订单 ' . $row['order_id'], 'amount'=>$amount,
+                'salesOrderNo'=>(string)$row['order_id'], 'storeName'=>$row['store_name'], 'operatorName'=>$row['staff_name'],
+                'reason'=>'', 'completedAt'=>$this->dateTime($time), '_sortTime'=>$time,
+            ]);
+        }, $rows), $total];
+    }
+
+    private function cardOperationRecord(array $row): array
+    {
+        $type = (string)$row['operationType'];
+        return [
+            'id' => $row['id'],
+            'cardOperationNo' => (string)$row['operationNo'],
+            'businessDate' => (string)$row['businessDate'],
+            'memberName' => (string)$row['memberName'],
+            'memberId' => (int)($row['memberId'] ?? 0),
+            'operationType' => $type,
+            'operationTypeLabel' => $this->cardOperationLabel($type),
+            'sourceCard' => (string)$row['sourceCard'],
+            'targetContent' => (string)$row['targetContent'],
+            'operationAmount' => (string)$row['amount'],
+            'salesOrderNo' => (string)$row['salesOrderNo'],
+            'storeName' => (string)$row['storeName'],
+            'operatorName' => (string)$row['operatorName'],
+            'recordStatus' => $this->cardOperationStatusLabel((string)$row['operationStatus']),
+            'operationReason' => (string)$row['reason'],
+            'completedAt' => $row['completedAt'],
+            '_sortTime' => (int)$row['_sortTime'],
+        ];
+    }
+
+    private function pageRows($query, array $criteria, string $timeField, string $idField, string $fields): array
+    {
+        return $query->field($fields)
+            ->order($timeField, 'desc')
+            ->order($idField, 'desc')
+            ->page($criteria['page'], $criteria['pageSize'])
+            ->select()
+            ->toArray();
+    }
+
+    private function applyStoreScope($query, string $field, $allowedStoreIds): void
+    {
+        if ($allowedStoreIds !== null) {
+            $query->whereIn($field, $allowedStoreIds);
+        }
+    }
+
+    private function applyBusinessDateRange($query, string $field, array $criteria): void
+    {
+        $from = (string)($criteria['businessDateFrom'] ?? '');
+        $to = (string)($criteria['businessDateTo'] ?? '');
+        if ($from !== '') $query->where($field, '>=', $from);
+        if ($to !== '') $query->where($field, '<=', $to);
+    }
+
+    private function applyTimestampBusinessDateRange($query, string $field, array $criteria): void
+    {
+        $from = (string)($criteria['businessDateFrom'] ?? '');
+        $to = (string)($criteria['businessDateTo'] ?? '');
+        $zone = new \DateTimeZone(self::BUSINESS_TIMEZONE);
+        if ($from !== '') {
+            $start = new \DateTimeImmutable($from . ' 00:00:00', $zone);
+            $this->whereTimestampBoundary($query, $field, '>=', $start->getTimestamp());
+        }
+        if ($to !== '') {
+            $end = new \DateTimeImmutable($to . ' 23:59:59', $zone);
+            $this->whereTimestampBoundary($query, $field, '<=', $end->getTimestamp());
+        }
+    }
+
+    private function whereTimestampBoundary($query, string $field, string $operator, int $value): void
+    {
+        if (str_contains($field, '(')) {
+            $query->whereRaw($field . ' ' . $operator . ' ?', [$value]);
+            return;
+        }
+        $query->where($field, $operator, $value);
+    }
+
+    private function applyKeyword($query, string $keyword, array $fields): void
+    {
+        if ($keyword === '') return;
+        $like = '%' . addcslashes($keyword, "\\%_") . '%';
+        $query->where(function ($nested) use ($fields, $like) {
+            foreach ($fields as $index => $field) {
+                $this->whereUtf8Like($nested, $field, $like, $index !== 0);
+            }
+        });
+    }
+
+    /**
+     * 历史订单编号等字段仍是 ascii_bin，而姓名和项目名称是 utf8mb4。
+     * 关键词检索会把它们放在同一个 LIKE 条件组中，必须显式统一表达式
+     * 字符集，避免中文关键词触发 MySQL 的 Illegal mix of collations。
+     * $field 仅来自本类固定白名单，绝不接收客户端字段名。
+     */
+    private function whereUtf8Like($query, string $field, string $like, bool $or = false): void
+    {
+        $expression = 'CONVERT(' . $field . ' USING utf8mb4) COLLATE utf8mb4_general_ci LIKE ?';
+        if ($or) {
+            $query->whereOrRaw($expression, [$like]);
+            return;
+        }
+        $query->whereRaw($expression, [$like]);
+    }
+
+    private function pagePayload(array $criteria, array $records, int $total, string $status): array
+    {
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'recordType' => $criteria['type'],
+            'dataStatus' => $status,
+            'dataAsOf' => $this->dateTime(time(), DATE_ATOM),
+            'records' => $records,
+            'total' => max(0, $total),
+            'page' => (int)$criteria['page'],
+            'pageSize' => (int)$criteria['pageSize'],
+            'statusOptions' => $this->statusOptions($criteria['type']),
+        ];
+    }
+
+    private function emptyPageMeta(): array
+    {
+        return [
+            'total' => 0,
+            'page' => 1,
+            'pageSize' => 20,
+            'dataStatus' => 'not_loaded',
+            'paginationMode' => 'offset',
+            'hasMore' => false,
+        ];
+    }
+
+    private function statusOptions(string $type): array
+    {
+        $options = [['value' => '', 'label' => '全部']];
+        if ($type === 'recharge') {
+            return array_merge($options, [
+                ['value' => 'paid', 'label' => '已支付'],
+                ['value' => 'voided', 'label' => '已作废'],
+                ['value' => 'refunded', 'label' => '已退款'],
+            ]);
+        }
+        if ($type === 'refund') {
+            return array_merge($options, [
+                ['value' => 'completed', 'label' => '已退款'],
+                ['value' => 'voided', 'label' => '已作废'],
+            ]);
+        }
+        if ($type === 'debt') {
+            return array_merge($options, [
+                ['value' => 'outstanding', 'label' => '待补交'],
+                ['value' => 'settled', 'label' => '已结清'],
+                ['value' => 'cancelled', 'label' => '已取消'],
+            ]);
+        }
+        if ($type === 'gift') {
+            return array_merge($options, [
+                ['value' => 'active', 'label' => '有效'],
+                ['value' => 'voided', 'label' => '已作废'],
+                ['value' => 'refunded', 'label' => '已失效'],
+            ]);
+        }
+        if ($type === 'supplement') {
+            return array_merge($options, [
+                ['value' => 'succeeded', 'label' => '补交成功'],
+                ['value' => 'voided', 'label' => '已作废'],
+            ]);
+        }
+        if ($type === 'card_operation') {
+            return array_merge($options, [
+                ['value' => 'completed', 'label' => '已完成'],
+                ['value' => 'voided', 'label' => '已作废'],
+                ['value' => 'awaiting_checkout', 'label' => '待结账'],
+                ['value' => 'cancelled', 'label' => '已取消'],
+            ]);
+        }
+        if ($type === 'service') {
+            return array_merge($options, [
+                ['value' => 'completed', 'label' => '已完成'],
+                ['value' => 'voided', 'label' => '已作废'],
+            ]);
+        }
+        return $options;
+    }
+
+    /** @return int[]|null */
+    private function requestedStoreIds(array $payload)
+    {
+        if (!array_key_exists('storeIds', $payload) && !array_key_exists('store_ids', $payload)) {
+            return null;
+        }
+        $value = $payload['storeIds'] ?? $payload['store_ids'];
+        return is_array($value) ? ($this->canonicalStoreIds($value) ?: []) : [];
+    }
+
+    /** @return int[]|null */
+    private function canonicalStoreIds($ids)
+    {
+        if ($ids === null) return null;
+        $result = [];
+        foreach ((array)$ids as $id) {
+            if (is_bool($id) || is_array($id) || is_object($id)) continue;
+            $raw = trim((string)$id);
+            if (preg_match('/^[1-9][0-9]*$/D', $raw) !== 1) continue;
+            $result[(int)$raw] = (int)$raw;
+        }
+        ksort($result, SORT_NUMERIC);
+        return array_values($result);
+    }
+
+    private function scalar($value): string
+    {
+        return is_scalar($value) && !is_bool($value) ? trim((string)$value) : '';
+    }
+
+    private function memberName(array $row): string
+    {
+        return trim((string)($row['real_name'] ?: $row['nickname'] ?: ''));
+    }
+
+    private function productSnapshot(string $json): array
+    {
+        $decoded = json_decode($json, true);
+        $product = is_array($decoded['productInfo'] ?? null) ? $decoded['productInfo'] : [];
+        return ['name' => (string)($product['store_name'] ?? $product['name'] ?? '赠送内容')];
+    }
+
+    private function paymentLabel(string $code): string
+    {
+        // 订单中心以业务发生时的收款代码读取快照；V3 新方式在此转为经营人员可读名称，旧代码仍兼容。
+        $labels = [
+            'cash' => '现金',
+            'weixin' => '微信',
+            'wechat' => '微信',
+            'alipay' => '支付宝',
+            'unionpay' => '银联刷卡',
+            'dianping_voucher' => '大众验券',
+            'douyin_voucher' => '抖音验券',
+            'partner_collection' => '合作方收款',
+            'other_collection' => '其他收款',
+            'old_card_entry' => '旧数据录入',
+            'member_balance' => '余额支付',
+            'bank' => '银联刷卡',
+            'yue' => '余额',
+            'offline' => '线下记账',
+            'combination' => '组合支付',
+        ];
+        $normalized = strtolower(trim($code));
+        return $labels[$normalized] ?? ($code !== '' ? $code : '未标注');
+    }
+
+    /**
+     * V3 recharge commands persist every real collection method in
+     * combination_info. channel_type describes the member channel, not how
+     * this recharge was collected, so it must never win the display value.
+     */
+    private function rechargePaymentLabel(array $row): string
+    {
+        if ((string)($row['recharge_type'] ?? '') === 'bonus_only') return '无收款（仅赠送）';
+        $decoded = json_decode((string)($row['combination_info'] ?? ''), true);
+        $labels = [];
+        if (is_array($decoded)) {
+            foreach ($decoded as $line) {
+                if (!is_array($line)) continue;
+                $method = trim((string)($line['paymentMethod'] ?? $line['payment_method'] ?? ''));
+                if ($method !== '') {
+                    $labels[$method] = $this->paymentLabel($method);
+                    continue;
+                }
+                // 旧充值按当时的收款名称快照显示；不以现有字典或 type 数字猜渠道。
+                // 部分旧 JSON 二次转义了 Unicode，只解码一次，不执行任意内容。
+                $name = trim((string)($line['name'] ?? ''));
+                if (strpos($name, '\\u') !== false) {
+                    $decodedName = preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', static function (array $match): string {
+                        $value = json_decode('"' . $match[0] . '"');
+                        return is_string($value) ? $value : $match[0];
+                    }, $name);
+                    if (is_string($decodedName)) $name = $decodedName;
+                }
+                if ($name !== '') $labels['legacy:' . $name] = $name;
+            }
+        }
+        if ($labels !== []) return implode('、', array_values($labels));
+        return $this->paymentLabel((string)($row['recharge_type'] ?? ''));
+    }
+
+    private function cardOperationLabel(string $type): string
+    {
+        $labels = [
+            'card_transfer' => '卡转让',
+            'card_upgrade' => '卡升级',
+            'card_disable' => '卡停用',
+            'card_enable' => '卡启用',
+            'card_extension' => '卡延期',
+            'project_replacement' => '项目替换',
+            'project_upgrade' => '项目升级',
+            'card_to_balance' => '卡转余额',
+        ];
+        return $labels[$type] ?? $type;
+    }
+
+    private function cardOperationTypeFromLabel(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') return '';
+        foreach (self::CARD_OPERATION_TYPES as $type) {
+            if ($value === $type || $value === $this->cardOperationLabel($type)) return $type;
+        }
+        return '';
+    }
+
+    private function topFilterValue(array $payload, string $field): string
+    {
+        foreach ((array)($payload['topFilters'] ?? $payload['top_filters'] ?? []) as $filter) {
+            if (!is_array($filter) || (string)($filter['field'] ?? '') !== $field) continue;
+            return $this->scalar($filter['value'] ?? '');
+        }
+        return '';
+    }
+
+    private function cardOperationStatusLabel(string $status): string
+    {
+        $labels = [
+            'completed' => '已完成',
+            'succeeded' => '已完成',
+            'voided' => '已作废',
+            'awaiting_checkout' => '待结账',
+            'cancelled' => '已取消',
+            'failed' => '失败',
+        ];
+        return $labels[$status] ?? $status;
+    }
+
+    private function centsToMoney(int $cents): string
+    {
+        $negative = $cents < 0;
+        $cents = abs($cents);
+        $money = intdiv($cents, 100) . '.' . str_pad((string)($cents % 100), 2, '0', STR_PAD_LEFT);
+        return $negative ? '-' . $money : $money;
+    }
+
+    private function projectCountText($value): string
+    {
+        $text = rtrim(rtrim(number_format((float)$value, 6, '.', ''), '0'), '.');
+        return $text === '' ? '0' : $text;
+    }
+
+    private function date(int $timestamp): string
+    {
+        return $this->dateTime($timestamp, 'Y-m-d') ?: '';
+    }
+
+    private function dateTime(int $timestamp, string $format = 'Y-m-d H:i:s')
+    {
+        if ($timestamp <= 0) return null;
+        return (new \DateTimeImmutable('@' . $timestamp))
+            ->setTimezone(new \DateTimeZone(self::BUSINESS_TIMEZONE))
+            ->format($format);
+    }
+}

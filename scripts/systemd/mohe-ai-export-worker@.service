@@ -1,0 +1,21 @@
+[Unit]
+Description=Mohe AI independent Excel export worker (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@APP_ROOT@
+# Queue name is derived from this instance during installation. Never consume
+# another customer's queue or the ordinary report-export queue.
+ExecStart=@PHP_BIN@ think queue:work --queue=@QUEUE_NAME@ --timeout=245 --memory=512 --sleep=1 --tries=1 -q
+Restart=always
+RestartSec=5
+TimeoutStopSec=35
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mohe-ai-export-worker-%i
+
+[Install]
+WantedBy=multi-user.target

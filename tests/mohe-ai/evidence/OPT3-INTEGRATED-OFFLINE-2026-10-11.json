@@ -1,0 +1,1390 @@
+{
+  "started_at": "2026-10-11T22:05:58.058277+08:00",
+  "baseline_head": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "scope": "Isolated PHP7.4 pure fixtures and host Node synthetic contracts; no app bootstrap, live/local scripts, business requests, business DB or source edits.",
+  "php_isolation": {
+    "image": "mohe-app:local",
+    "network": "none",
+    "rootfs": "readonly",
+    "source": "readonly bind",
+    "tmp": "tmpfs",
+    "capabilities": "ALL dropped",
+    "no_new_privileges": true
+  },
+  "php_runtime": "PHP7.4.33",
+  "node_runtime": "v16.20.2",
+  "sources": [
+    "后端代码/app/services/ai/AiGatewayServices.php",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+    "后端代码/app/services/ai/execution/AiRunStore.php",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php",
+    "后端代码/app/command/MoheAiExecutionWorker.php",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php",
+    "前端代码/shared/mohe-ai/browser-entry.mjs",
+    "前端代码/shared/mohe-ai/device-session.mjs",
+    "前端代码/admin/src/pages/setting/moheAi/index.vue"
+  ],
+  "php_syntax": [
+    "后端代码/app/services/ai/AiGatewayServices.php",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+    "后端代码/app/services/ai/execution/AiRunStore.php",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php",
+    "后端代码/app/command/MoheAiExecutionWorker.php",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php"
+  ],
+  "tests_php": {
+    "opt3": [
+      "tests/mohe-ai/opt3-model-circuit.php",
+      "tests/mohe-ai/opt3-context-relation-contract.php",
+      "tests/mohe-ai/opt3-gateway-recovery.php",
+      "tests/mohe-ai/opt3-group-reconciliation.php",
+      "tests/mohe-ai/opt3-result-reference-detail.php",
+      "tests/mohe-ai/opt3-comparison-calendar.php",
+      "tests/mohe-ai/opt3-recommendation-recovery.php",
+      "tests/mohe-ai/opt3-worker-recovery.php",
+      "tests/mohe-ai/opt3-service-customer-aggregate.php"
+    ],
+    "existing": [
+      "tests/mohe-ai/state-admission-contract.php",
+      "tests/mohe-ai/async-execution-state-contract.php",
+      "tests/mohe-ai/gateway-integration.php",
+      "tests/mohe-ai/gateway-review-regressions.php",
+      "tests/mohe-ai/runtime-contract.php",
+      "tests/mohe-ai/query-context.php",
+      "tests/mohe-ai/context-delta-gateway.php",
+      "tests/mohe-ai/intent-understanding-contract.php"
+    ],
+    "legacy": [
+      "tests/cashier-v3/php/r51-service-customer-authority-contract.php",
+      "tests/cashier-v3/php/independent-service-customer-allocation.php",
+      "tests/cashier-v3/php/service-customer-snapshot-contract.php",
+      "tests/report-phase-six/php/service-contract.php"
+    ]
+  },
+  "tests_node": [
+    "tests/mohe-ai/device-session-contract.mjs",
+    "tests/mohe-ai/browser-entry-contract.mjs",
+    "tests/mohe-ai/browser-single-entry-contract.mjs",
+    "tests/mohe-ai/browser-transport-contract.mjs",
+    "tests/mohe-ai/browser-workflow-contract.mjs",
+    "tests/mohe-ai/browser-independent-export-contract.mjs",
+    "tests/mohe-ai/browser-guidance-contract.mjs",
+    "tests/mohe-ai/opt3-browser-failure-contract.mjs",
+    "tests/mohe-ai/browser-mobile-guidance-contract.mjs",
+    "tests/mohe-ai/order-export-snapshot.mjs"
+  ],
+  "excluded": [
+    "tests/mohe-ai/opt3-local-regression.php",
+    "tests/mohe-ai/opt3-service-customer-local.php",
+    "tests/cashier-v3/php/r51-unified-service-customer.php",
+    "all other live/local/readonly app-boot scripts"
+  ],
+  "sha256_before": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+    "前端代码/shared/mohe-ai/device-session.mjs": "a1a69e01fadd08c2128fdf98cac37fd620daabefb4ac54d9cdc738272f86f66a",
+    "前端代码/admin/src/pages/setting/moheAi/index.vue": "642fb3c9401a1c05ed65e910c20d0352db8dfc5e3eb4280aa8b71ce9703758fb",
+    "tests/mohe-ai/opt3-model-circuit.php": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+    "tests/mohe-ai/opt3-context-relation-contract.php": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+    "tests/mohe-ai/opt3-gateway-recovery.php": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+    "tests/mohe-ai/opt3-group-reconciliation.php": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+    "tests/mohe-ai/opt3-result-reference-detail.php": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+    "tests/mohe-ai/opt3-comparison-calendar.php": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+    "tests/mohe-ai/opt3-recommendation-recovery.php": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+    "tests/mohe-ai/opt3-worker-recovery.php": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826",
+    "tests/mohe-ai/opt3-service-customer-aggregate.php": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+    "tests/mohe-ai/state-admission-contract.php": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+    "tests/mohe-ai/async-execution-state-contract.php": "2e6196452d1d446418890cc49e134d397373e28cca8a7cf5fba012f29a1276b4",
+    "tests/mohe-ai/gateway-integration.php": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+    "tests/mohe-ai/gateway-review-regressions.php": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+    "tests/mohe-ai/runtime-contract.php": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+    "tests/mohe-ai/query-context.php": "b5a5f42a58ef6c234bde4946573f7bfc4273af646521f965fa58763761b70993",
+    "tests/mohe-ai/context-delta-gateway.php": "7c820cba72a63a26adebb6814ed52eead9f4319b6e99c04d395433a18cb1bc1b",
+    "tests/mohe-ai/intent-understanding-contract.php": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+    "tests/cashier-v3/php/r51-service-customer-authority-contract.php": "251803fa7efd7c6b5c317bc018d66410d980e51c1a6a3bb5b62246a56b1872f0",
+    "tests/cashier-v3/php/independent-service-customer-allocation.php": "933673751310b59c1a751d759442339922046202bcf1ee805be6b45d1c676c4d",
+    "tests/cashier-v3/php/service-customer-snapshot-contract.php": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+    "tests/report-phase-six/php/service-contract.php": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+    "tests/mohe-ai/device-session-contract.mjs": "61e5d6b67a94db25325bb736149020bfbc120008d85347e9ab048f594e74bdf4",
+    "tests/mohe-ai/browser-entry-contract.mjs": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+    "tests/mohe-ai/browser-single-entry-contract.mjs": "fb53a20e788c0105d89a8981b1dc847257c3d96cf10f26710f061a20d4d731ec",
+    "tests/mohe-ai/browser-transport-contract.mjs": "1af45e89ab80286396fca158ff10437d33a259b2cc9ab6a2fc2b5a0b9ad983a0",
+    "tests/mohe-ai/browser-workflow-contract.mjs": "72abfbfed572e713a8ffe5792a0e66160123fca7b8852d3951bdd4000d9640a5",
+    "tests/mohe-ai/browser-independent-export-contract.mjs": "bd66103a30a3138eae91b0608c56703f56785e71230e74b01306731dbe45b9ad",
+    "tests/mohe-ai/browser-guidance-contract.mjs": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8",
+    "tests/mohe-ai/opt3-browser-failure-contract.mjs": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+    "tests/mohe-ai/browser-mobile-guidance-contract.mjs": "699331271dfc9e088998ad69cf54f9c3ef12ca9479322cb810714b068872ab40",
+    "tests/mohe-ai/order-export-snapshot.mjs": "2810b198991288cbc08e8a213a211310b0fe2e38c509dbb49302ca35230c8490"
+  },
+  "results": [
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-context-relation-contract.php",
+      "exit_code": 0,
+      "elapsed_ms": 374,
+      "test_sha256_start": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+      "test_sha256_end": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+      "output_sha256": "70b60c168d9c01769f6da53230de35ebcc5d8af1e91f80d62996579318cfb218",
+      "output": "PASS OPT3 context relation contract checks=23\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-model-circuit.php",
+      "exit_code": 0,
+      "elapsed_ms": 404,
+      "test_sha256_start": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+      "test_sha256_end": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+      "output_sha256": "6e283afe94483fc52262bebdaa5d7bb3b4c8dc2761af4942aa21798b32b3bd37",
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS 132 state/model-circuit assertions, including independent-process half-open race.\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-group-reconciliation.php",
+      "exit_code": 0,
+      "elapsed_ms": 188,
+      "test_sha256_start": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+      "test_sha256_end": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+      "output_sha256": "5a97d829a54dbfc782f61f6a6e7b7f1cb735cb4e278e4c35b8b9f0826fc31977",
+      "output": "PASS OPT3 grouped reconciliation: independent ownership, shared cleanup, topic metadata and missing-metric fences\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-result-reference-detail.php",
+      "exit_code": 0,
+      "elapsed_ms": 114,
+      "test_sha256_start": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+      "test_sha256_end": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+      "output_sha256": "026448524b6fcd3f642c7ceec4c93640a9047ff6ac3d7eb2526a548e8ff45518",
+      "output": "PASS OPT3 result-reference detail checks=21\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-comparison-calendar.php",
+      "exit_code": 0,
+      "elapsed_ms": 117,
+      "test_sha256_start": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+      "test_sha256_end": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+      "output_sha256": "bcb1941e01a909fc35c32566c6ef164d07882a56dd6dc1e26bd246723976ef55",
+      "output": "PASS OPT3 ordered comparison calendar checks=11\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-gateway-recovery.php",
+      "exit_code": 0,
+      "elapsed_ms": 863,
+      "test_sha256_start": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+      "test_sha256_end": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+      "output_sha256": "0089fefc0d13563046c528aba93fd8dd9f19a5c40267f010884db79b4a558dca",
+      "output": "PASS OPT3 gateway recovery: member topic, metric delta, failure relation and transport audit (synthetic)\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-worker-recovery.php",
+      "exit_code": 0,
+      "elapsed_ms": 145,
+      "test_sha256_start": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826",
+      "test_sha256_end": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826",
+      "output_sha256": "46e7888c1746ee562511f6d77efbb8d06592f6cc0e34161566cc9c8ba5e3cbba",
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS OPT3 worker recovery 46 assertions\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-recommendation-recovery.php",
+      "exit_code": 0,
+      "elapsed_ms": 4544,
+      "test_sha256_start": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+      "test_sha256_end": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+      "output_sha256": "623546c20c59f1cf8aff989df33ca6c1d594d3e2af071f36ee800d7b567bd0ae",
+      "output": "OPT3_RECOMMENDATION_RESULT={\"pass\":true,\"checks\":33,\"failed\":[],\"observations\":[{\"case\":\"ordinary\",\"timeout_ms\":[30000],\"transport_calls\":1,\"status\":\"WAITING_CLARIFICATION\",\"reason\":\"\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":\"20\",\"output_tokens\":\"10\"},\"diagnostic\":null},{\"case\":\"short_remaining\",\"timeout_ms\":[1058],\"transport_calls\":1,\"status\":\"WAITING_CLARIFICATION\",\"reason\":\"\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":\"20\",\"output_tokens\":\"10\"},\"diagnostic\":null},{\"case\":\"unknown\",\"timeout_ms\":[30000],\"transport_calls\":1,\"status\":\"FAILED\",\"reason\":\"AI_MODEL_RESULT_UNKNOWN\",\"attempt\":{\"state\":\"UNKNOWN\",\"input_tokens\":null,\"output_tokens\":null},\"diagnostic\":{\"stage\":\"transport\",\"predicate\":\"timeout\",\"transport_errno\":28,\"http_status\":0,\"elapsed_ms\":0}},{\"case\":\"account_permission\",\"timeout_ms\":[30000],\"transport_calls\":1,\"status\":\"FAILED\",\"reason\":\"AI_MODEL_ACCOUNT_UNAVAILABLE\",\"attempt\":{\"state\":\"FAILED\",\"input_tokens\":null,\"output_tokens\":null},\"diagnostic\":{\"stage\":\"transport\",\"predicate\":\"http_rejected\",\"http_status\":401,\"elapsed_ms\":0}},{\"case\":\"provider_failure\",\"timeout_ms\":[30000],\"transport_calls\":1,\"status\":\"FAILED\",\"reason\":\"AI_MODEL_REQUEST_FAILED\",\"attempt\":{\"state\":\"FAILED\",\"input_tokens\":null,\"output_tokens\":null},\"diagnostic\":{\"stage\":\"transport\",\"predicate\":\"http_server\",\"http_status\":503,\"elapsed_ms\":0}},{\"case\":\"invalid_selection\",\"timeout_ms\":[30000],\"transport_calls\":1,\"status\":\"WAITING_CLARIFICATION\",\"reason\":\"\",\"attempt\":{\"state\":\"FAILED\",\"input_tokens\":null,\"output_tokens\":null},\"diagnostic\":null}],\"network\":\"synthetic curl; no network\"}\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/state-admission-contract.php",
+      "exit_code": 0,
+      "elapsed_ms": 114,
+      "test_sha256_start": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+      "test_sha256_end": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+      "output_sha256": "b8052d42353ab2a48e897ced4fb2f89b7068ae5564241b9259bec6fe5e5ed43c",
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS 6 admission/rate/diagnostic checks against actual transactional SQLite store.\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/async-execution-state-contract.php",
+      "exit_code": 0,
+      "elapsed_ms": 145,
+      "test_sha256_start": "2e6196452d1d446418890cc49e134d397373e28cca8a7cf5fba012f29a1276b4",
+      "test_sha256_end": "2e6196452d1d446418890cc49e134d397373e28cca8a7cf5fba012f29a1276b4",
+      "output_sha256": "65bfc6c7a547ec8b2e50330b0bb76a1ab9d4d9a4b7828ab393ef0a7ede55001f",
+      "output": "PASS async execution acceptance/replay contract\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/gateway-integration.php",
+      "exit_code": 255,
+      "elapsed_ms": 129,
+      "test_sha256_start": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+      "test_sha256_end": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+      "output_sha256": "bff5c05e580af70656bd3ed37c351b0c82119bcf63d85c0a9d902d755cd964f5",
+      "output": "\nFatal error: Uncaught ReflectionException: Trying to invoke private method app\\services\\ai\\execution\\AiRunStore::outcomeClass() from scope ReflectionMethod in /workspace/tests/mohe-ai/gateway-integration.php:56\nStack trace:\n#0 /workspace/tests/mohe-ai/gateway-integration.php(56): ReflectionMethod->invoke(NULL, Array)\n#1 {main}\n  thrown in /workspace/tests/mohe-ai/gateway-integration.php on line 56\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/gateway-review-regressions.php",
+      "exit_code": 255,
+      "elapsed_ms": 157,
+      "test_sha256_start": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+      "test_sha256_end": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+      "output_sha256": "8a48bbc7c88b1a9f5da2ed393794ae9953c39688c6c5c977c4d7131c0cd9dbe0",
+      "output": "\nFatal error: Uncaught ReflectionException: Trying to invoke private method app\\services\\ai\\AiGatewayServices::analysisObjectVocabulary() from scope ReflectionMethod in /workspace/tests/mohe-ai/gateway-review-regressions.php:459\nStack trace:\n#0 /workspace/tests/mohe-ai/gateway-review-regressions.php(459): ReflectionMethod->invoke(Object(app\\services\\ai\\AiGatewayServices), Array)\n#1 {main}\n  thrown in /workspace/tests/mohe-ai/gateway-review-regressions.php on line 459\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/runtime-contract.php",
+      "exit_code": 0,
+      "elapsed_ms": 124,
+      "test_sha256_start": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+      "test_sha256_end": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+      "output_sha256": "853bfc76ce457e5b3509496387a19d6fa04b36e689287b72ec4454e96803abee",
+      "output": "PASS default 180 seconds starts at create\nPASS 300 second registered profile accepted\nPASS fast 55 second workflow still tighter than Run\nPASS workflow bound may not spend finalization twice\nPASS workflow full path must fit declared bound\nPASS three parallel tools maximum accepted\nPASS four parallel tools rejected\nPASS over 300 seconds rejected\nPASS profile scalar strict run_execution_budget_ms\nPASS profile scalar strict tool_timeout_ms\nPASS profile scalar strict version\nPASS profile unknown field rejected\nPASS weak caller clock string rejected\nPASS tool per-call hard limit\nPASS model per-call hard limit\nPASS reserve cannot equal total\nPASS queue preparation and elapsed time consume original budget\nPASS input state is not mutated\nPASS stage tighter than global timeout\nPASS remaining minus finalization bounds call\nPASS model transport timeout preserves finalization reserve from live deadline\nPASS model transport timeout never exceeds stage or configured cap\nPASS binding uses the same bounded model window as other semantic stages\nPASS gateway derives model transport timeout at each provider send boundary\nPASS no new work at reserve boundary\nPASS finalization may use final millisecond\nPASS publish at deadline rejected\nPASS late consume clamps to zero never extends deadline\nPASS clock backwards rejected\nPASS state unknown fields rejected\nPASS state deadline tamper rejected\nPASS weak caller stage string rejected\nPASS only clarification pause freezes remainder\nPASS resume does not grant new duration\nPASS pause preserves all counters\nPASS second step shares original frozen profile\nPASS last permitted answer can execute without another step\nPASS fourth step exceeds default three\nPASS all clarification waits share ten minutes\nPASS no tool during clarification\nPASS clarification exactly 10 minutes expires\nPASS non-clarification cannot resume\nPASS 24h expiry hard boundary\nPASS counter cap reached tool_call_count\nPASS counter overrun tool_call_count\nPASS counter cap reached skill_execution_count\nPASS counter overrun skill_execution_count\nPASS counter cap reached node_visit_count\nPASS counter overrun node_visit_count\nPASS counter cap reached workflow_transition_count\nPASS counter overrun workflow_transition_count\nPASS counter cap reached supplement_count\nPASS counter overrun supplement_count\nPASS counter cap reached stage_count\nPASS counter overrun stage_count\nPASS counter cap reached model_recovery_count\nPASS counter overrun model_recovery_count\nPASS unknown counter rejected\nPASS counter cannot be decremented\nPASS weak caller counter string rejected\nPASS attempt needs registered stage\nPASS attempt needs shared recovery\nPASS one bounded recovery may receive a final independent admission review\nPASS seventh model attempt blocked\nPASS token hard cap model_input_tokens\nPASS token hard cap model_output_tokens\nPASS fifth person not mechanically rejected if physical slot available\nPASS policy explicitly requires actual atomic reservation\nPASS unknown physical stop never freed by Run timeout\nPASS provable release at short wait bound admitted\nPASS wait beyond workflow bound rejected\nPASS full downstream path must fit\nPASS full downstream exact fit permitted\nPASS existing recovery work protected\nPASS existing reservation not oversold\nPASS activity includes wait-for-file or clarification\nPASS unverified profile remains disabled\nPASS capacity profile mismatch rejected\nPASS reserved control capacity required\nPASS capacity rejects unknown fields\nPASS capacity rejects string counts\nPASS capacity rejects unsafe wait profile\nPASS release vector must cover physical occupied slots\nPASS zero release not accepted as physical stop evidence\nPASS capacity rejection neither increments nor clears\nPASS capacity stop neither increments nor clears\nPASS normal empty neither increments nor clears\nPASS partial query success clears user counter\nPASS complete query success clears user counter\nPASS real technical fault counted MODEL_TECHNICAL_FAILURE\nPASS real technical fault counted QUERY_TECHNICAL_FAILURE\nPASS real technical fault counted EXPRESSION_TECHNICAL_FAILURE\nPASS real technical fault counted PUBLICATION_TECHNICAL_FAILURE\nPASS real technical fault counted MODEL_UNKNOWN\nPASS real technical fault counted TOOL_UNKNOWN\nPASS export root cause not punished as query\nPASS independent export never clears query counter\nPASS wrong outcome cannot hide technical failure as capacity\nPASS no partial independent export\nPASS weak caller boolean rejected\nPASS capacity stop preserves terminal CANCELLED\nPASS capacity stop preserves terminal COMPLETED\nPASS capacity stop preserves terminal FAILED\nPASS admitted capacity stop is FAILED and cancels children\nPASS capacity rejected is not a Run state\nMOHE_AI_RUNTIME_CONTRACT=PASS passed=105 failed=0\nBOUNDARY=pure-policy-only; no-storage-atomicity/no-physical-cancellation/no-capacity-load-test/no-network/no-database\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/query-context.php",
+      "exit_code": 0,
+      "elapsed_ms": 160,
+      "test_sha256_start": "b5a5f42a58ef6c234bde4946573f7bfc4273af646521f965fa58763761b70993",
+      "test_sha256_end": "b5a5f42a58ef6c234bde4946573f7bfc4273af646521f965fa58763761b70993",
+      "output_sha256": "31d741dbbb713e5c4841a3fd37948695047608d3185fe5cdd122dc69332eaa65",
+      "output": "PASS intent context merger: 67 checks (synthetic protocol only)\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "opt3",
+      "test": "tests/mohe-ai/opt3-service-customer-aggregate.php",
+      "exit_code": 0,
+      "elapsed_ms": 7950,
+      "test_sha256_start": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+      "test_sha256_end": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+      "output_sha256": "23482311d77f1ee75450d1dab7cb8e682de9527485bbd74d17e971cc61fbf4b3",
+      "output": "{\"pressure\":\"one_customer\",\"services\":100000,\"joined_rows\":200000,\"elapsed_ms\":3841,\"peak_bytes\":6291456}\n{\"pressure\":\"many_customers\",\"services\":100000,\"joined_rows\":200000,\"elapsed_ms\":3964,\"peak_bytes\":8388608}\n{\"suite\":\"OPT3-service-customer-aggregate\",\"checks\":21,\"pass\":true}\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/intent-understanding-contract.php",
+      "exit_code": 255,
+      "elapsed_ms": 152,
+      "test_sha256_start": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+      "test_sha256_end": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+      "output_sha256": "59c3d8ca0b56373542b1225207b9eb97ce5c2a03eabfa382fa53dc667c629e27",
+      "output": "\nFatal error: Uncaught Error: Call to undefined function str_contains() in /workspace/tests/mohe-ai/intent-understanding-contract.php:125\nStack trace:\n#0 {main}\n  thrown in /workspace/tests/mohe-ai/intent-understanding-contract.php on line 125\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "legacy",
+      "test": "tests/cashier-v3/php/r51-service-customer-authority-contract.php",
+      "exit_code": 0,
+      "elapsed_ms": 108,
+      "test_sha256_start": "251803fa7efd7c6b5c317bc018d66410d980e51c1a6a3bb5b62246a56b1872f0",
+      "test_sha256_end": "251803fa7efd7c6b5c317bc018d66410d980e51c1a6a3bb5b62246a56b1872f0",
+      "output_sha256": "12e5d7d74c3cb2f8e2f82a3850bc74e22884dce2dddd19ac12b61e7c2d2c2fd1",
+      "output": "PASS SQL eligibility exists only in central authority\nPASS store visit authority uses frozen experience only\nPASS annual actual project mode preserves all service quantities\nPASS member visits and active-member metrics use store authority\nPASS experience and consultation retain actual experience facts\nPASS salary alone uses personnel authority\nPASS field customer visits and actual handwork facts remain separated\nPASS cross-industry first visit uses store projection\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "legacy",
+      "test": "tests/cashier-v3/php/independent-service-customer-allocation.php",
+      "exit_code": 0,
+      "elapsed_ms": 128,
+      "test_sha256_start": "933673751310b59c1a751d759442339922046202bcf1ee805be6b45d1c676c4d",
+      "test_sha256_end": "933673751310b59c1a751d759442339922046202bcf1ee805be6b45d1c676c4d",
+      "output_sha256": "454efd162cc3f38b9ee41f47996bd44e328f519e7aa8c8724c9798bc947e66bf",
+      "output": "PASS normal pair shares one visit; independent manager owns another\nPASS period people use the same frozen role groups\nPASS daily visits attach to one stable detail line per employee\nPASS period-deduplicated people reconcile with one stable detail line\nPASS persisted independent role without position_id owns a separate visit\nPASS persisted independent role also owns a separate person\nPASS contradictory frozen position cannot form an independent group\nPASS explicitly invalid position cannot form an independent group\nPASS replacement labor facts use frozen adjustment groups\nPASS replacement groups also reconcile period people\nPASS conflicting adjustment group fails closed\nPASS later adjustment replaces the reversed role group without double counting\nPASS friend not counted remains excluded\nPASS member self marked not counted is excluded for all staff groups\nPASS normal group keeps stable tenth-unit remainder\nPASS employees in one independent position share its single visit\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "legacy",
+      "test": "tests/cashier-v3/php/service-customer-snapshot-contract.php",
+      "exit_code": 255,
+      "elapsed_ms": 113,
+      "test_sha256_start": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+      "test_sha256_end": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+      "output_sha256": "8341e97cdad3ea9835ada95957a6610b169af192fd9ff6b6868eea3941b48064",
+      "output": "\nFatal error: Uncaught Error: Call to undefined function str_contains() in /workspace/tests/cashier-v3/php/service-customer-snapshot-contract.php:35\nStack trace:\n#0 {main}\n  thrown in /workspace/tests/cashier-v3/php/service-customer-snapshot-contract.php on line 35\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "legacy",
+      "test": "tests/report-phase-six/php/service-contract.php",
+      "exit_code": 255,
+      "elapsed_ms": 110,
+      "test_sha256_start": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+      "test_sha256_end": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+      "output_sha256": "8a72fb22a261ccda48956ded37e716f6f3ffeb1ecf35ba817e9b3b7ac667ecd2",
+      "output": "\nFatal error: Uncaught Error: Call to undefined function str_contains() in /workspace/tests/report-phase-six/php/service-contract.php:31\nStack trace:\n#0 {main}\n  thrown in /workspace/tests/report-phase-six/php/service-contract.php on line 31\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/device-session-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 102,
+      "test_sha256_start": "61e5d6b67a94db25325bb736149020bfbc120008d85347e9ab048f594e74bdf4",
+      "test_sha256_end": "61e5d6b67a94db25325bb736149020bfbc120008d85347e9ab048f594e74bdf4",
+      "output_sha256": "402734afcf08939e09a3aebbbe0382c5a8d867e46fd28302a88b44d613a3656a",
+      "output": "Device history / identity / retention / delivery / version ordering / context reference / single removal: PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "php",
+      "group": "existing",
+      "test": "tests/mohe-ai/context-delta-gateway.php",
+      "exit_code": 0,
+      "elapsed_ms": 6136,
+      "test_sha256_start": "7c820cba72a63a26adebb6814ed52eead9f4319b6e99c04d395433a18cb1bc1b",
+      "test_sha256_end": "7c820cba72a63a26adebb6814ed52eead9f4319b6e99c04d395433a18cb1bc1b",
+      "output_sha256": "5d5f97f61e750abfe38c2920fe9c7af5ee8cdc91b1fea3804d71132654266615",
+      "output": "PASS context delta gateway: 102 checks (SQLite, synthetic model/facts only)\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-single-entry-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 2415,
+      "test_sha256_start": "fb53a20e788c0105d89a8981b1dc847257c3d96cf10f26710f061a20d4d731ec",
+      "test_sha256_end": "fb53a20e788c0105d89a8981b1dc847257c3d96cf10f26710f061a20d4d731ec",
+      "output_sha256": "109562f0f33cd5663d0fd557ad8118eba9c1c5777ce1d907b0ccfe6670df1db1",
+      "output": "Browser single-entry runtime handoff: 7 checks PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-transport-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 40,
+      "test_sha256_start": "1af45e89ab80286396fca158ff10437d33a259b2cc9ab6a2fc2b5a0b9ad983a0",
+      "test_sha256_end": "1af45e89ab80286396fca158ff10437d33a259b2cc9ab6a2fc2b5a0b9ad983a0",
+      "output_sha256": "710d4226b8f44dc9e5ce8d8678a89d137d7b14c21b58f53e63961b3a6c9a90f8",
+      "output": "Browser transport no URL credentials: 11 checks PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-entry-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 5521,
+      "test_sha256_start": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+      "test_sha256_end": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+      "output_sha256": "0f79251222889f626b42e02655218f6a6008a56ce317304d7c4801c903145c44",
+      "output": "Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config/workspace: PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-independent-export-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 417,
+      "test_sha256_start": "bd66103a30a3138eae91b0608c56703f56785e71230e74b01306731dbe45b9ad",
+      "test_sha256_end": "bd66103a30a3138eae91b0608c56703f56785e71230e74b01306731dbe45b9ad",
+      "output_sha256": "8b6a890ec622c125f727901279223b49ce30a94b30a7c520daa7205f1fb87e90",
+      "output": "Browser independent Excel after answer: PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-guidance-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 3113,
+      "test_sha256_start": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8",
+      "test_sha256_end": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8",
+      "output_sha256": "826662788afc572ed5ded9f3956b9eee712432a4103fd34de2eb1386e8c1c098",
+      "output": "R5 browser guidance: 226 checks PASS (DOM + HTTP fixtures only; no model, customer data or real browser layout)\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/opt3-browser-failure-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 899,
+      "test_sha256_start": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+      "test_sha256_end": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+      "output_sha256": "31fad95f090b0c96947e7074b479ad12effddca345d71c87e3faf25e6bd5b3a6",
+      "output": "OPT3 platform failure messages / retry metadata / topic handoff / drawer compatibility: PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-mobile-guidance-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 209,
+      "test_sha256_start": "699331271dfc9e088998ad69cf54f9c3ef12ca9479322cb810714b068872ab40",
+      "test_sha256_end": "699331271dfc9e088998ad69cf54f9c3ef12ca9479322cb810714b068872ab40",
+      "output_sha256": "6beed5b68cba7d9b1127fdd7f355ff7309956babadd891dfd07aa928532217e3",
+      "output": "R5/R47 mobile production-controller: 218 checks PASS (TS-lowered controller + callback fixtures; not H5/native UI acceptance)\nR45 nested presentation, grouped facts and no additional requests: PASS\nR52 one-column composer menu, history isolation and clear confirmation: PASS\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/order-export-snapshot.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 179,
+      "test_sha256_start": "2810b198991288cbc08e8a213a211310b0fe2e38c509dbb49302ca35230c8490",
+      "test_sha256_end": "2810b198991288cbc08e8a213a211310b0fe2e38c509dbb49302ca35230c8490",
+      "output_sha256": "8984fd5438d2201377fbb5312f5886e002e5ef6994b13671b4cf69edf6ded275",
+      "output": "PASS actual PHP normalizer: legacy rejection, preserved dates, query/page scopes\nPASS order export snapshot: source unchanged, aliases converted, dates and other filters retained\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/AiGatewayServices.php",
+      "exit_code": 0,
+      "elapsed_ms": 288,
+      "test_sha256_start": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+      "test_sha256_end": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+      "output_sha256": "8e2745cab169b668c69c553835bc9a67b6136b956844d20125b9af0ac4249248",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/AiGatewayServices.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+      "exit_code": 0,
+      "elapsed_ms": 118,
+      "test_sha256_start": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+      "test_sha256_end": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+      "output_sha256": "d1c88355f6637464dd759f6eb072495d44c1c737262084c235b39d683c3b75c3",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/contract/AiIntentResultContract.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+      "exit_code": 0,
+      "elapsed_ms": 116,
+      "test_sha256_start": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+      "test_sha256_end": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+      "output_sha256": "1dca1fa721262f2614feb11c9196118c3e0141367a0dca6154e564835b8ba50c",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/execution/AiRunStore.php",
+      "exit_code": 0,
+      "elapsed_ms": 129,
+      "test_sha256_start": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+      "test_sha256_end": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+      "output_sha256": "57130553048cd93547206eb4684f649d15c41f6345ca9c853d68bdd22ba2c789",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/execution/AiRunStore.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "node",
+      "group": "frontend",
+      "test": "tests/mohe-ai/browser-workflow-contract.mjs",
+      "exit_code": 0,
+      "elapsed_ms": 6299,
+      "test_sha256_start": "72abfbfed572e713a8ffe5792a0e66160123fca7b8852d3951bdd4000d9640a5",
+      "test_sha256_end": "72abfbfed572e713a8ffe5792a0e66160123fca7b8852d3951bdd4000d9640a5",
+      "output_sha256": "eeaba081b5810493f0080e5a4a17f7b3f2aef5cd8e45b93ab4829e1d1aeb1888",
+      "output": "Browser workflow + transport: 42 checks PASS (DOM/HTTP fixtures, no live account)\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/model/SiliconFlowClient.php",
+      "exit_code": 0,
+      "elapsed_ms": 143,
+      "test_sha256_start": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+      "test_sha256_end": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+      "output_sha256": "41e5d03673a0f7c40a15abf99803b3de90c016b641e4af21914ae2a4a8409ee4",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/model/SiliconFlowClient.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php",
+      "exit_code": 0,
+      "elapsed_ms": 139,
+      "test_sha256_start": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+      "test_sha256_end": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+      "output_sha256": "5180d4ccf40b4d02542a4d34491033d2018404f5d12bdd37f75c0a6f8f423f4c",
+      "output": "No syntax errors detected in 后端代码/app/services/ai/execution/AiRunExecutionRuntime.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/command/MoheAiExecutionWorker.php",
+      "exit_code": 0,
+      "elapsed_ms": 150,
+      "test_sha256_start": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+      "test_sha256_end": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+      "output_sha256": "724178c91a84853d2bb0597c71f6f5b9563b8a06429b158834858a1b207687e1",
+      "output": "No syntax errors detected in 后端代码/app/command/MoheAiExecutionWorker.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php",
+      "exit_code": 0,
+      "elapsed_ms": 143,
+      "test_sha256_start": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+      "test_sha256_end": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+      "output_sha256": "35630f69cc8b7319e235fb34d433f4c0f485a7c77161001dc3128c07253bd54b",
+      "output": "No syntax errors detected in 后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/query/metric/MetricReadTransaction.php",
+      "exit_code": 0,
+      "elapsed_ms": 144,
+      "test_sha256_start": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+      "test_sha256_end": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+      "output_sha256": "f91644f04af34763455d17c6751fb0d35d0cae845bb01e55eaa2ccbe35adb485",
+      "output": "No syntax errors detected in 后端代码/app/services/query/metric/MetricReadTransaction.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "exit_code": 0,
+      "elapsed_ms": 151,
+      "test_sha256_start": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+      "test_sha256_end": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+      "output_sha256": "1d6be1b9bb1fcb44d2f56bb8a2fa881fc13924b3755b7a6f4535217b04aa3446",
+      "output": "No syntax errors detected in 后端代码/app/services/query/metric/RegisteredMetricReadServices.php\n",
+      "output_truncated": false
+    },
+    {
+      "kind": "syntax",
+      "group": "business_php",
+      "test": "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php",
+      "exit_code": 0,
+      "elapsed_ms": 113,
+      "test_sha256_start": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+      "test_sha256_end": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+      "output_sha256": "b96e4187470bb32e1bc5ef7cfbb710906eb0c248794574e8210a7513d3b0cc52",
+      "output": "No syntax errors detected in 后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php\n",
+      "output_truncated": false
+    }
+  ],
+  "commands": {
+    "php_base": [
+      "docker",
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--mount",
+      "type=bind,src=/Users/xiaojunpeng/Desktop/魔核/美业/美容源码,dst=/workspace,readonly",
+      "--workdir",
+      "/workspace",
+      "--entrypoint",
+      "php",
+      "mohe-app:local"
+    ],
+    "php_fixture_flags": [
+      "-d",
+      "auto_prepend_file=/workspace/tests/mohe-ai/fixture-autoload.php"
+    ],
+    "node": "/Users/xiaojunpeng/.local/node-v16.20.2-darwin-arm64/bin/node",
+    "php_fixture_timeout_seconds": 240,
+    "note": "Each PHP fixture runs in its own network-none read-only container with private tmpfs. Node contracts use synthetic mocks on host; order-export-snapshot invokes host PHP for pure snapshot normalizer."
+  },
+  "execution_started_at": "2026-10-11T22:08:05.341317+08:00",
+  "sha256_after": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+    "前端代码/shared/mohe-ai/device-session.mjs": "a1a69e01fadd08c2128fdf98cac37fd620daabefb4ac54d9cdc738272f86f66a",
+    "前端代码/admin/src/pages/setting/moheAi/index.vue": "642fb3c9401a1c05ed65e910c20d0352db8dfc5e3eb4280aa8b71ce9703758fb",
+    "tests/mohe-ai/opt3-model-circuit.php": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+    "tests/mohe-ai/opt3-context-relation-contract.php": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+    "tests/mohe-ai/opt3-gateway-recovery.php": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+    "tests/mohe-ai/opt3-group-reconciliation.php": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+    "tests/mohe-ai/opt3-result-reference-detail.php": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+    "tests/mohe-ai/opt3-comparison-calendar.php": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+    "tests/mohe-ai/opt3-recommendation-recovery.php": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+    "tests/mohe-ai/opt3-worker-recovery.php": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826",
+    "tests/mohe-ai/opt3-service-customer-aggregate.php": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+    "tests/mohe-ai/state-admission-contract.php": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+    "tests/mohe-ai/async-execution-state-contract.php": "2e6196452d1d446418890cc49e134d397373e28cca8a7cf5fba012f29a1276b4",
+    "tests/mohe-ai/gateway-integration.php": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+    "tests/mohe-ai/gateway-review-regressions.php": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+    "tests/mohe-ai/runtime-contract.php": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+    "tests/mohe-ai/query-context.php": "b5a5f42a58ef6c234bde4946573f7bfc4273af646521f965fa58763761b70993",
+    "tests/mohe-ai/context-delta-gateway.php": "7c820cba72a63a26adebb6814ed52eead9f4319b6e99c04d395433a18cb1bc1b",
+    "tests/mohe-ai/intent-understanding-contract.php": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+    "tests/cashier-v3/php/r51-service-customer-authority-contract.php": "251803fa7efd7c6b5c317bc018d66410d980e51c1a6a3bb5b62246a56b1872f0",
+    "tests/cashier-v3/php/independent-service-customer-allocation.php": "933673751310b59c1a751d759442339922046202bcf1ee805be6b45d1c676c4d",
+    "tests/cashier-v3/php/service-customer-snapshot-contract.php": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+    "tests/report-phase-six/php/service-contract.php": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+    "tests/mohe-ai/device-session-contract.mjs": "61e5d6b67a94db25325bb736149020bfbc120008d85347e9ab048f594e74bdf4",
+    "tests/mohe-ai/browser-entry-contract.mjs": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+    "tests/mohe-ai/browser-single-entry-contract.mjs": "fb53a20e788c0105d89a8981b1dc847257c3d96cf10f26710f061a20d4d731ec",
+    "tests/mohe-ai/browser-transport-contract.mjs": "1af45e89ab80286396fca158ff10437d33a259b2cc9ab6a2fc2b5a0b9ad983a0",
+    "tests/mohe-ai/browser-workflow-contract.mjs": "72abfbfed572e713a8ffe5792a0e66160123fca7b8852d3951bdd4000d9640a5",
+    "tests/mohe-ai/browser-independent-export-contract.mjs": "bd66103a30a3138eae91b0608c56703f56785e71230e74b01306731dbe45b9ad",
+    "tests/mohe-ai/browser-guidance-contract.mjs": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8",
+    "tests/mohe-ai/opt3-browser-failure-contract.mjs": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+    "tests/mohe-ai/browser-mobile-guidance-contract.mjs": "699331271dfc9e088998ad69cf54f9c3ef12ca9479322cb810714b068872ab40",
+    "tests/mohe-ai/order-export-snapshot.mjs": "2810b198991288cbc08e8a213a211310b0fe2e38c509dbb49302ca35230c8490"
+  },
+  "changed_during_verification": [],
+  "finished_at": "2026-10-11T22:08:26.951506+08:00",
+  "counts": {
+    "php": {
+      "total": 21,
+      "passed": 16,
+      "failed": 5
+    },
+    "node": {
+      "total": 10,
+      "passed": 10,
+      "failed": 0
+    },
+    "syntax": {
+      "total": 11,
+      "passed": 11,
+      "failed": 0
+    }
+  },
+  "source_lock_stable": true,
+  "legacy_fixture_host_classification": [
+    {
+      "test": "tests/mohe-ai/gateway-integration.php",
+      "host_php_version": "8.5.8",
+      "exit_code": 0,
+      "elapsed_ms": 3798,
+      "output": "Gateway integration: 183 checks PASS (SQLite + model/fact fixtures)\n",
+      "baseline_test_sha256": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+      "current_test_sha256": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+      "baseline_compatibility_lines": [
+        {
+          "line": 55,
+          "text": "verifyGateway((new ReflectionMethod(AiRunStore::class,'outcomeClass'))->invoke(null,"
+        },
+        {
+          "line": 174,
+          "text": "$fullUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_UNRESOLVED']);"
+        },
+        {
+          "line": 175,
+          "text": "$partialUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_PARTIAL']);"
+        },
+        {
+          "line": 176,
+          "text": "$technicalFailure=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_MODEL_INTENT_CONTRACT_INVALID']);"
+        },
+        {
+          "line": 177,
+          "text": "$failureCard=(new ReflectionMethod(AiGatewayServices::class,'failureGuidance'))->invoke($gateway,'AI_MODEL_INTENT_CONTRACT_INVALID');"
+        },
+        {
+          "line": 328,
+          "text": "$directCaps=(new ReflectionMethod(AiGatewayServices::class,'capabilities'))->invoke($gateway,$directContext);"
+        },
+        {
+          "line": 332,
+          "text": "$namedPlan=$directMethod->invoke($gateway,$namedQuestion,$directCaps,'screen','2026-09-08');"
+        },
+        {
+          "line": 337,
+          "text": "verifyGateway($directMethod->invoke($gateway,$unsafeQuestion,$directCaps,'screen','2026-09-08')===null,"
+        },
+        {
+          "line": 556,
+          "text": "$recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,"
+        },
+        {
+          "line": 564,
+          "text": "$recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,"
+        },
+        {
+          "line": 593,
+          "text": "$corrected=$mergeMethod->invoke($gateway,$correctionMeaning,$mergeBody,$correctionSafe);"
+        },
+        {
+          "line": 597,
+          "text": "$fresh=$mergeMethod->invoke($gateway,$correctionMeaning,$mergeBody,$correctionSafe);"
+        },
+        {
+          "line": 622,
+          "text": "$simpleCaps=$capabilityMethod->invoke($gateway,$semanticContext);"
+        },
+        {
+          "line": 628,
+          "text": "$simplePlan=$simpleMethod->invoke($gateway,$simpleMeaning,$simpleBody,$simpleCaps,'2026-10-02',null);"
+        },
+        {
+          "line": 635,
+          "text": "verifyGateway($simpleMethod->invoke($gateway,$simpleMeaning,$simpleBody,$simpleCaps,'2026-10-02',null)===null,"
+        }
+      ],
+      "classification": "PHP7.4 fixture compatibility failure (private reflection requires setAccessible / str_contains requires PHP8), host behavior verification recorded separately"
+    },
+    {
+      "test": "tests/mohe-ai/gateway-review-regressions.php",
+      "host_php_version": "8.5.8",
+      "exit_code": 0,
+      "elapsed_ms": 116,
+      "output": "gateway-review-regressions: 85 passed, 0 failed\n",
+      "baseline_test_sha256": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+      "current_test_sha256": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+      "baseline_compatibility_lines": [
+        {
+          "line": 236,
+          "text": "$aggregateNormalized=$aggregateStoreContext->invoke(null,$aggregateIntent,$aggregateUnderstanding,["
+        },
+        {
+          "line": 243,
+          "text": "$check($aggregateStoreContext->invoke(null,$selectionIntent,$aggregateUnderstanding,["
+        },
+        {
+          "line": 260,
+          "text": "$registeredObjectVocabulary=$objectVocabularyMethod->invoke($gatewayFixture,["
+        },
+        {
+          "line": 267,
+          "text": "$distributionFixed=$distribution->invoke($gatewayFixture,$distributionUnderstanding,$distributionQuestion,$objectVocabulary,$metricCodes);"
+        },
+        {
+          "line": 275,
+          "text": "$check(($distribution->invoke($gatewayFixture,$embeddedObject,$embeddedObjectQuestion,$objectVocabulary,$metricCodes)"
+        },
+        {
+          "line": 278,
+          "text": "$check(($distribution->invoke($gatewayFixture,$embeddedObject,$embeddedObjectQuestion,$registeredObjectVocabulary,$metricCodes)"
+        },
+        {
+          "line": 299,
+          "text": "$groupedContinuation=$distribution->invoke("
+        },
+        {
+          "line": 320,
+          "text": "$check($distribution->invoke("
+        },
+        {
+          "line": 324,
+          "text": "$splitContinuation=$distribution->invoke("
+        },
+        {
+          "line": 341,
+          "text": "$check($distribution->invoke($gatewayFixture,$objectDistributed,$objectDistributedQuestion,$objectVocabulary,$metricCodes)===$objectDistributed,"
+        },
+        {
+          "line": 347,
+          "text": "$reconciledMetrics=$reconcileMeasurements->invoke($gatewayFixture,$orphanMetric,$distributionQuestion,["
+        },
+        {
+          "line": 360,
+          "text": "$unregisteredReconciled=$reconcileMeasurements->invoke($gatewayFixture,$unregisteredEcho,$distributionQuestion,["
+        },
+        {
+          "line": 381,
+          "text": "$groupedEcho=$reconcileMeasurements->invoke($gatewayFixture,$groupedEcho,$splitQuestion,["
+        },
+        {
+          "line": 384,
+          "text": "$groupedEcho=$distribution->invoke($gatewayFixture,$groupedEcho,$splitQuestion,$objectVocabulary,$metricCodes);"
+        },
+        {
+          "line": 398,
+          "text": "$defaultObjects=$attachDefault->invoke($gatewayFixture,['status'=>'choose','objects'=>[$positionObject],'catalog_ref'=>'fixture'],"
+        },
+        {
+          "line": 401,
+          "text": "$explicitObjects=$attachDefault->invoke($gatewayFixture,['status'=>'choose','objects'=>[$positionObject],'catalog_ref'=>'fixture'],"
+        },
+        {
+          "line": 411,
+          "text": "$replacedCohort=$replaceCohort->invoke($gatewayFixture,$cohortIntent,"
+        },
+        {
+          "line": 414,
+          "text": "$retainedExplicit=$replaceCohort->invoke($gatewayFixture,$cohortIntent,"
+        },
+        {
+          "line": 422,
+          "text": "$candidate=$exactCandidate->invoke($gatewayFixture,["
+        },
+        {
+          "line": 458,
+          "text": "$objectVocabulary=$objectVocabularyMethod->invoke($gatewayWithoutDependencies,["
+        },
+        {
+          "line": 471,
+          "text": "$personReconciled=$reconcileObject->invoke("
+        },
+        {
+          "line": 485,
+          "text": "$splitObjectReconciled=$reconcileObject->invoke("
+        },
+        {
+          "line": 505,
+          "text": "$preservedConditions=$reconcileMetric->invoke($gatewayWithoutDependencies,$conditionUnderstanding,"
+        },
+        {
+          "line": 513,
+          "text": "$check($reconcileStated->invoke($gatewayWithoutDependencies,$aliasConditions,"
+        },
+        {
+          "line": 523,
+          "text": "$deduplicatedMetric=$reconcileMetric->invoke("
+        },
+        {
+          "line": 539,
+          "text": "$projectReconciled=$reconcileObject->invoke("
+        }
+      ],
+      "classification": "PHP7.4 fixture compatibility failure (private reflection requires setAccessible / str_contains requires PHP8), host behavior verification recorded separately"
+    },
+    {
+      "test": "tests/mohe-ai/intent-understanding-contract.php",
+      "host_php_version": "8.5.8",
+      "exit_code": 0,
+      "elapsed_ms": 171,
+      "output": "PASS intent understanding/binding separation: 263 checks\n",
+      "baseline_test_sha256": "b13b1b62c4a25b3f7cb00e5a31f0f017397be147901585cdbde31303e87be160",
+      "current_test_sha256": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+      "baseline_compatibility_lines": [
+        {
+          "line": 125,
+          "text": "&& str_contains(AiIntentUnderstandingContract::repairInstruction('groups'),'requirement_ids'),"
+        },
+        {
+          "line": 192,
+          "text": "&& str_contains(AiIntentGroupContract::repairInstruction('items'),'\"items\"'),"
+        },
+        {
+          "line": 210,
+          "text": "&& str_contains(AiIntentGroupContract::repairInstruction('collection_plan_shape'),'summary or breakdown must not become a ranking'),"
+        },
+        {
+          "line": 697,
+          "text": "$resolved=$calendarResolver->invoke($calendarGateway,$multiCalendar,"
+        },
+        {
+          "line": 717,
+          "text": "$check($calendarResolver->invoke($calendarGateway,$multiCalendar,['question'=>$questionText],'2026-09-26')===$multiCalendar,"
+        },
+        {
+          "line": 720,
+          "text": "$futureResolved=$calendarResolver->invoke($calendarGateway,$multiCalendar,"
+        },
+        {
+          "line": 1011,
+          "text": "$check(str_contains($bindingPrompt,'A named store is not a scope enum')"
+        },
+        {
+          "line": 1012,
+          "text": "&&str_contains($bindingPrompt,'omit it when understanding has no explicit scope requirement'),"
+        }
+      ],
+      "classification": "PHP7.4 fixture compatibility failure (private reflection requires setAccessible / str_contains requires PHP8), host behavior verification recorded separately"
+    },
+    {
+      "test": "tests/cashier-v3/php/service-customer-snapshot-contract.php",
+      "host_php_version": "8.5.8",
+      "exit_code": 0,
+      "elapsed_ms": 66,
+      "output": "PASS entitlement command carries a validated customer-count snapshot\nPASS entitlement service fact persists the snapshot in its immutable plan\nPASS paid project completion snapshots the locked sale-line setting\nPASS reservation completion writes the explicit self-service value\nPASS service completion event carries the same frozen setting\nPASS migration only adds the fact snapshot without historical writes\nservice-customer-snapshot-contract: 6 passed, 0 failed\n",
+      "baseline_test_sha256": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+      "current_test_sha256": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+      "baseline_compatibility_lines": [
+        {
+          "line": 35,
+          "text": "str_contains($kernel, \"'friendCountsAsCustomer' => \\$intentLine['friendCountsAsCustomer']\")"
+        },
+        {
+          "line": 36,
+          "text": "&& str_contains($kernel, \"'friend_counts_as_customer_invalid'\")"
+        },
+        {
+          "line": 37,
+          "text": "&& str_contains($direct, \"'friendCountsAsCustomer' => (bool)\\$intent['friendCountsAsCustomer']\"));"
+        },
+        {
+          "line": 39,
+          "text": "str_contains($plan, \"'friendCountsAsCustomer', 'isExperience'\")"
+        },
+        {
+          "line": 40,
+          "text": "&& str_contains($plan, \"'friend_counts_as_customer' => self::booleanInt(\")"
+        },
+        {
+          "line": 41,
+          "text": "&& str_contains($plan, \"'friend_counts_as_customer' => \\$line['friend_counts_as_customer']\")"
+        },
+        {
+          "line": 42,
+          "text": "&& str_contains($plan, \"\\$row['immutable_fingerprint'] = self::fingerprintValue(\\$row);\"));"
+        },
+        {
+          "line": 44,
+          "text": "str_contains($sale, \"'friend_counts_as_customer' => (int)\\$line['friend_counts_as_customer']\")"
+        },
+        {
+          "line": 45,
+          "text": "&& str_contains($sale, \"\\$row['immutable_fingerprint'] = self::fingerprint(\\$row);\"));"
+        },
+        {
+          "line": 47,
+          "text": "str_contains($reservation, \"'service_object' => 'SELF',\")"
+        },
+        {
+          "line": 48,
+          "text": "&& str_contains($reservation, \"'friend_counts_as_customer' => 1,\")"
+        },
+        {
+          "line": 49,
+          "text": "&& str_contains($reservation, \"\\$service['immutable_fingerprint'] = \\$this->fingerprint(\\$service);\"));"
+        },
+        {
+          "line": 51,
+          "text": "str_contains($events, \"'friendCountsAsCustomer' => (bool)\\$line['serviceSnapshot']['friendCountsAsCustomer']\"));"
+        },
+        {
+          "line": 53,
+          "text": "str_contains($migration, 'ADD COLUMN `friend_counts_as_customer` tinyint(3) unsigned NOT NULL DEFAULT')"
+        }
+      ],
+      "classification": "PHP7.4 fixture compatibility failure (private reflection requires setAccessible / str_contains requires PHP8), host behavior verification recorded separately"
+    },
+    {
+      "test": "tests/report-phase-six/php/service-contract.php",
+      "host_php_version": "8.5.8",
+      "exit_code": 0,
+      "elapsed_ms": 70,
+      "output": "PASS: stable report phase_six_garden_item_analysis\nPASS: platform permission dispatch phase_six_garden_item_analysis\nPASS: stable report phase_six_monthly_featured_item\nPASS: platform permission dispatch phase_six_monthly_featured_item\nPASS: stable report phase_six_headquarters_acquisition\nPASS: platform permission dispatch phase_six_headquarters_acquisition\nPASS: stable report phase_six_other_multi_payment\nPASS: platform permission dispatch phase_six_other_multi_payment\nPASS: stable report phase_six_salary_summary\nPASS: platform permission dispatch phase_six_salary_summary\nPASS: stable report phase_six_salary_detail\nPASS: platform permission dispatch phase_six_salary_detail\nPASS: stable report phase_six_training_employee\nPASS: platform permission dispatch phase_six_training_employee\nPASS: stable report phase_six_acquisition_source\nPASS: platform permission dispatch phase_six_acquisition_source\nPASS: stable report phase_six_human_store_health\nPASS: platform permission dispatch phase_six_human_store_health\nPASS: column contract includes business explanation and fixed layout\nPASS: reports read unified payment and sale dimension facts\nPASS: health report reads one current establishment value per store\nPASS: manual fields and project count are declared\nPASS: salary reports consume shared employee service-customer metrics\nPASS: salary service metrics preserve tenth-unit summary precision\nPASS: shared reader excludes friend-not-counted and keeps friend or guest records distinct\nPASS: zero-price completed services use only the immutable craftsmen snapshot and keep a zero-value detail row\nPASS: migration is additive and repeatable\nPASS: both store controllers integrate phase six service\nPASS: store endpoints reject platform-only reports\nPASS: platform, store and cashier endpoints preserve the salary employee-name filter\nPASS: target_amount submits integer cents\nPASS: target_amount reads back integer yuan\nPASS: target_amount exports cent precision\nPASS: target_amount preserves manual clear\nPASS: manual readback is scoped to the tenant, store and payment allocation\nPASS: manual values survive readback, clear explicitly and never cross store boundaries\nPASS: salary service metrics sum tenth-unit shares exactly\nPASS: salary project count reads saved decimals first and retains mixed/legacy half-unit fallback\nPASS: salary detail and summary exclude later terminal reversals without limiting the reversal date\nPASS: salary summary and detail expose the same partial employee-name text filter without a repeated visible title\nPASS: salary column-source descriptions use business language and explain filtering, voiding and card allocation\nPASS: salary project counts retain zero and all six supported decimal places\nPASS: salary project-count summary never rounds each row to a half project\nPASS: salary categories use current two-level config, retain zero-sale columns and never resurrect old categories\nPASS: third-level sale fact rolls into its visible second-level category\nPASS: category drilldown preserves each card component in cents instead of repeating the full card price\nPASS: category drilldown reconciles unclassified remainder with the summary\nPASS: salary employee columns and exact category drilldown are declared for all three endpoints\nPASS: card employee performance is allocated in cents with stable final-category remainder\nPASS: missing card component facts never use the card outer category\nPASS phase-six backend contract\n",
+      "baseline_test_sha256": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+      "current_test_sha256": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+      "baseline_compatibility_lines": [
+        {
+          "line": 31,
+          "text": "assertPhaseSix(str_contains($service, \"'{$code}'\") && str_contains($service, \"'{$title}'\"), \"stable report {$code}\");"
+        },
+        {
+          "line": 32,
+          "text": "assertPhaseSix(str_contains($controller, \"'{$code}'\"), \"platform permission dispatch {$code}\");"
+        },
+        {
+          "line": 34,
+          "text": "assertPhaseSix(str_contains($service, 'source_explanation') && str_contains($service, 'table_layout'), 'column contract includes business explanation and fixed layout');"
+        },
+        {
+          "line": 35,
+          "text": "assertPhaseSix(str_contains($service, 'cashier_v3_payment_sale_allocation_fact') && str_contains($service, 'cashier_v3_report_sale_dimension_fact'), 'reports read unified payment and sale dimension facts');"
+        },
+        {
+          "line": 36,
+          "text": "assertPhaseSix(str_contains($service, 'cashier_v3_report_beautician_establishment') && str_contains($service, 'beautician_fill_rate'), 'health report reads one current establishment value per store');"
+        },
+        {
+          "line": 37,
+          "text": "assertPhaseSix(str_contains($service, 'manualColumn') && str_contains($service, 'project_count'), 'manual fields and project count are declared');"
+        },
+        {
+          "line": 39,
+          "text": "str_contains($service, 'service_visit_count') && str_contains($service, 'service_people_count')"
+        },
+        {
+          "line": 40,
+          "text": "&& str_contains($service, 'ServiceCustomerMetricReadServices') && str_contains($service, 'salaryFactsWithServiceCustomerMetrics'),"
+        },
+        {
+          "line": 44,
+          "text": "str_contains($service, \"['service_visit_count','service_people_count']\") && str_contains($service, 'round((float)$v*10)')"
+        },
+        {
+          "line": 45,
+          "text": "&& str_contains($service, 'tenth($sum)'),"
+        },
+        {
+          "line": 49,
+          "text": "str_contains($serviceCustomerReader, 'friend_counts_as_customer') && str_contains($serviceCustomerReader, 'ServiceCustomerEligibility::allows(')"
+        },
+        {
+          "line": 50,
+          "text": "&& str_contains($serviceCustomerReader, \"'record:' . \\$serviceFactId\"),"
+        },
+        {
+          "line": 54,
+          "text": "str_contains($serviceCustomerReader, 'snapshotEmployees') && str_contains($serviceCustomerReader, \"'had_labor_fact' => false\")"
+        },
+        {
+          "line": 55,
+          "text": "&& str_contains($serviceCustomerReader, \"(int)\\$service['labor_amount_cents'] !== 0\")"
+        },
+        {
+          "line": 56,
+          "text": "&& str_contains($service, 'detail_context_by_labor_key') && str_contains($service, \"'service-customer:'\"),"
+        },
+        {
+          "line": 59,
+          "text": "assertPhaseSix(str_contains($migration, 'uk_tenant_store') && str_contains($migration, 'project_count') && str_contains($migration, 'mentor_employee_id'), 'migration is additive and repeatable');"
+        },
+        {
+          "line": 60,
+          "text": "assertPhaseSix(str_contains($store, 'StoreUnifiedReportPhaseSixServices') && str_contains($cashier, 'StoreUnifiedReportPhaseSixServices'), 'both store controllers integrate phase six service');"
+        },
+        {
+          "line": 61,
+          "text": "assertPhaseSix(str_contains($store, 'platformOnlyReportCodes') && str_contains($cashier, 'platformOnlyReportCodes'), 'store endpoints reject platform-only reports');"
+        },
+        {
+          "line": 63,
+          "text": "str_contains($controller, \"['employee_name', '']\")"
+        },
+        {
+          "line": 64,
+          "text": "&& str_contains($store, \"['employee_name','']\")"
+        },
+        {
+          "line": 65,
+          "text": "&& str_contains($cashier, \"['employee_name', '']\"),"
+        },
+        {
+          "line": 75,
+          "text": "$column = $manualColumn->invoke($phaseSix, $moneyField, '金额', '手动补充金额');"
+        },
+        {
+          "line": 77,
+          "text": "assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '89100') === '891', \"{$moneyField} reads back integer yuan\");"
+        },
+        {
+          "line": 78,
+          "text": "assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '89123', true) === '891.23', \"{$moneyField} exports cent precision\");"
+        },
+        {
+          "line": 79,
+          "text": "assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '') === '', \"{$moneyField} preserves manual clear\");"
+        },
+        {
+          "line": 81,
+          "text": "assertPhaseSix(str_contains($service, \"withManualAnnotations(\\$report, \\$result, \\$stores, !empty(\\$input['_internal_all']))\")"
+        },
+        {
+          "line": 82,
+          "text": "&& str_contains($service, \"->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)\")"
+        },
+        {
+          "line": 83,
+          "text": "&& str_contains($service, \"->whereIn('store_id', \\$stores)->whereIn('subject_key', array_keys(\\$keys))\")"
+        },
+        {
+          "line": 84,
+          "text": "&& str_contains($service, \"'annotation_subject_key' => 'phase_six:payment:'\"),"
+        },
+        {
+          "line": 87,
+          "text": "$projected = $projectManualRows->invoke($phaseSix, ["
+        },
+        {
+          "line": 106,
+          "text": "$tenthSummary = $result->invoke($phaseSix, '服务客数十分位合计', [["
+        },
+        {
+          "line": 121,
+          "text": "str_contains($service, 'pf.project_count_decimal')"
+        },
+        {
+          "line": 122,
+          "text": "&& str_contains($service, \"!empty(\\$row['has_project_count_decimal'])\")"
+        },
+        {
+          "line": 123,
+          "text": "&& str_contains($service, '$halfUnits*500000')"
+        },
+        {
+          "line": 124,
+          "text": "&& str_contains($service, \"\\$grouped[\\$key]['legacy_project_count_half_units']\"),"
+        },
+        {
+          "line": 128,
+          "text": "str_contains($service, 'reversedPerformanceFactIds($rows)')"
+        },
+        {
+          "line": 129,
+          "text": "&& str_contains($service, 'reversedPerformanceFactIds($salesRows)')"
+        },
+        {
+          "line": 130,
+          "text": "&& str_contains($service, \"->whereIn('reversal_of',array_keys(\\$forwardIds))\")"
+        },
+        {
+          "line": 135,
+          "text": "$filteredSalaryRows = $salaryFilter->invoke($phaseSix, ["
+        },
+        {
+          "line": 140,
+          "text": "&& str_contains($service, \"'key'=>'employee_name','label'=>'员工','show_label'=>false,'aria_label'=>'员工姓名'\")"
+        },
+        {
+          "line": 141,
+          "text": "&& str_contains($service, \"'placeholder'=>'输入员工姓名'\"),"
+        },
+        {
+          "line": 146,
+          "text": "&& str_contains($service, '页面可输入姓名中的任意文字进行筛选')"
+        },
+        {
+          "line": 147,
+          "text": "&& str_contains($service, '卡项按卡内项目当前分类和原有金额比例拆分')"
+        },
+        {
+          "line": 148,
+          "text": "&& str_contains($service, '售前销售人分得的业绩显示“售前”；其他销售和服务读取关联商品的当前分类')"
+        },
+        {
+          "line": 149,
+          "text": "&& !str_contains($service, \"'business_date','日期','事实业务日期。'\")"
+        },
+        {
+          "line": 150,
+          "text": "&& !str_contains($service, \"'cash_amount','现金业绩','销售明细现金业绩分摊事实。'\"),"
+        },
+        {
+          "line": 156,
+          "text": "$projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '6.6')) === '6.6'"
+        },
+        {
+          "line": 157,
+          "text": "&& $projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '0')) === '0'"
+        },
+        {
+          "line": 158,
+          "text": "&& $projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '0.333333')) === '0.333333',"
+        },
+        {
+          "line": 161,
+          "text": "$projectSummary = $result->invoke($phaseSix, '工资项目数合计', [["
+        },
+        {
+          "line": 169,
+          "text": "$categoryProjection = $categoryDefinitions->invoke($phaseSix, ["
+        },
+        {
+          "line": 189,
+          "text": "$splitColumns = $projectCategoryMoney->invoke($phaseSix, $splitSale, $categoryProjection['targets']);"
+        },
+        {
+          "line": 193,
+          "text": "$unclassifiedColumns = $projectCategoryMoney->invoke($phaseSix,"
+        },
+        {
+          "line": 198,
+          "text": "str_contains($service, \"'employee_name','员工','按门店和员工汇总\")"
+        },
+        {
+          "line": 199,
+          "text": "&& str_contains($service, \"'employee_name','员工','该笔项目的服务员工\")"
+        },
+        {
+          "line": 200,
+          "text": "&& str_contains($service, \"'position_name','岗位','显示该员工目前在这家门店的有效岗位\")"
+        },
+        {
+          "line": 201,
+          "text": "&& str_contains($service, \"'salary_metric_key'=>\\$metricKey\")"
+        },
+        {
+          "line": 202,
+          "text": "&& str_contains($service, \"'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id']\")"
+        },
+        {
+          "line": 203,
+          "text": "&& str_contains($service, \"'report'=>'phase_six_salary_detail'\")"
+        },
+        {
+          "line": 204,
+          "text": "&& str_contains($controller, \"['salary_employee_id', 0]\")"
+        },
+        {
+          "line": 205,
+          "text": "&& str_contains($controller, \"['document_no', '']\")"
+        },
+        {
+          "line": 206,
+          "text": "&& str_contains($controller, \"['salary_metric_key', '']\")"
+        },
+        {
+          "line": 207,
+          "text": "&& str_contains($store, \"['salary_employee_id',0]\")"
+        },
+        {
+          "line": 208,
+          "text": "&& str_contains($store, \"['document_no','']\")"
+        },
+        {
+          "line": 209,
+          "text": "&& str_contains($store, \"['salary_metric_key','']\")"
+        },
+        {
+          "line": 210,
+          "text": "&& str_contains($cashier, \"['salary_employee_id', 0]\"),"
+        },
+        {
+          "line": 214,
+          "text": "$cardParts = $allocateCategories->invoke($phaseSix,"
+        },
+        {
+          "line": 221,
+          "text": "$missingCardParts = $allocateCategories->invoke($phaseSix,"
+        }
+      ],
+      "classification": "PHP7.4 fixture compatibility failure (private reflection requires setAccessible / str_contains requires PHP8), host behavior verification recorded separately"
+    }
+  ],
+  "sha256_after_host_classification": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+    "前端代码/shared/mohe-ai/device-session.mjs": "a1a69e01fadd08c2128fdf98cac37fd620daabefb4ac54d9cdc738272f86f66a",
+    "前端代码/admin/src/pages/setting/moheAi/index.vue": "642fb3c9401a1c05ed65e910c20d0352db8dfc5e3eb4280aa8b71ce9703758fb",
+    "tests/mohe-ai/opt3-model-circuit.php": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+    "tests/mohe-ai/opt3-context-relation-contract.php": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+    "tests/mohe-ai/opt3-gateway-recovery.php": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+    "tests/mohe-ai/opt3-group-reconciliation.php": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+    "tests/mohe-ai/opt3-result-reference-detail.php": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+    "tests/mohe-ai/opt3-comparison-calendar.php": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+    "tests/mohe-ai/opt3-recommendation-recovery.php": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+    "tests/mohe-ai/opt3-worker-recovery.php": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826",
+    "tests/mohe-ai/opt3-service-customer-aggregate.php": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+    "tests/mohe-ai/state-admission-contract.php": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+    "tests/mohe-ai/async-execution-state-contract.php": "2e6196452d1d446418890cc49e134d397373e28cca8a7cf5fba012f29a1276b4",
+    "tests/mohe-ai/gateway-integration.php": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030",
+    "tests/mohe-ai/gateway-review-regressions.php": "1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288",
+    "tests/mohe-ai/runtime-contract.php": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+    "tests/mohe-ai/query-context.php": "b5a5f42a58ef6c234bde4946573f7bfc4273af646521f965fa58763761b70993",
+    "tests/mohe-ai/context-delta-gateway.php": "7c820cba72a63a26adebb6814ed52eead9f4319b6e99c04d395433a18cb1bc1b",
+    "tests/mohe-ai/intent-understanding-contract.php": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+    "tests/cashier-v3/php/r51-service-customer-authority-contract.php": "251803fa7efd7c6b5c317bc018d66410d980e51c1a6a3bb5b62246a56b1872f0",
+    "tests/cashier-v3/php/independent-service-customer-allocation.php": "933673751310b59c1a751d759442339922046202bcf1ee805be6b45d1c676c4d",
+    "tests/cashier-v3/php/service-customer-snapshot-contract.php": "5ec404f11a08f2ced5b63ed5997d1fff71dc4e16a772974cbb4433278b2e5096",
+    "tests/report-phase-six/php/service-contract.php": "2062db9e15071ae80cdbe8ab992f929fffd209cf4ec2fa2246f4dd42ca30ad22",
+    "tests/mohe-ai/device-session-contract.mjs": "61e5d6b67a94db25325bb736149020bfbc120008d85347e9ab048f594e74bdf4",
+    "tests/mohe-ai/browser-entry-contract.mjs": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+    "tests/mohe-ai/browser-single-entry-contract.mjs": "fb53a20e788c0105d89a8981b1dc847257c3d96cf10f26710f061a20d4d731ec",
+    "tests/mohe-ai/browser-transport-contract.mjs": "1af45e89ab80286396fca158ff10437d33a259b2cc9ab6a2fc2b5a0b9ad983a0",
+    "tests/mohe-ai/browser-workflow-contract.mjs": "72abfbfed572e713a8ffe5792a0e66160123fca7b8852d3951bdd4000d9640a5",
+    "tests/mohe-ai/browser-independent-export-contract.mjs": "bd66103a30a3138eae91b0608c56703f56785e71230e74b01306731dbe45b9ad",
+    "tests/mohe-ai/browser-guidance-contract.mjs": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8",
+    "tests/mohe-ai/opt3-browser-failure-contract.mjs": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+    "tests/mohe-ai/browser-mobile-guidance-contract.mjs": "699331271dfc9e088998ad69cf54f9c3ef12ca9479322cb810714b068872ab40",
+    "tests/mohe-ai/order-export-snapshot.mjs": "2810b198991288cbc08e8a213a211310b0fe2e38c509dbb49302ca35230c8490"
+  },
+  "changed_during_host_classification": [],
+  "classification_finished_at": "2026-10-11T22:09:08.793121+08:00",
+  "summary": {
+    "opt3_php74": "9/9 PASS",
+    "all_php74": "16/21 PASS; 5 existing fixture runtime compatibility failures retained",
+    "node": "10/10 PASS",
+    "business_php74_syntax": "11/11 PASS",
+    "legacy_host_classification": "5/5 PASS on PHP 8.5.8",
+    "fingerprints": "All 45 tracked source/test hashes unchanged throughout container and host verification",
+    "scope_limit": "Synthetic/contract verification only; does not substitute for live business acceptance",
+    "no_source_edits": true,
+    "no_business_requests": true,
+    "no_business_database_access": true
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "task": "M010-00001",
+  "state": "awaiting_product_manager_acceptance",
+  "createdAt": "2026-10-21T18:59:24.979Z",
+  "baselineHead": "05c61feb3080bbe6e7f8192f02eaa0d924a2b73b",
+  "initialHead": "58bc3513a0ea94beb09d8ea7460c86bcd5e78e1c",
+  "baselineAdvance": {
+    "commit": "05c61feb",
+    "scope": "member therapist list only; affected backend/cashier source unchanged"
+  },
+  "patchSha256": "8ec66f1046562e79163f73ea1cda6d3f9eb40d7d045d36c3a9938cb64778d764",
+  "patchId": "8ec66f10",
+  "files": [
+    {
+      "path": "tests/cashier-v3/php/custom-card-configuration-contract.php",
+      "sha256": "388d0acdd64ea97fdc2b61384151100cb00b0a01589bd10bd221c88ce8315312",
+      "group": "automated-test"
+    },
+    {
+      "path": "tests/cashier-v3/php/m010-custom-card-concurrency.php",
+      "sha256": "c7202e2a6002852820e130f2a70e4a96c21275e60307d8caf6811531673e1df6",
+      "group": "automated-test"
+    },
+    {
+      "path": "tests/cashier-v3/php/m010-custom-card-template-local.php",
+      "sha256": "eebb46783e75118572009d6ad48f5805228ee57e29fb1214368f79697a9ef5fc",
+      "group": "automated-test"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php",
+      "sha256": "1cb16fe37ad28e620ed9e7d71c9d0bd868e8649403c862b0b4442c32d63c6d5c",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php",
+      "sha256": "98f2adf20e41847b71742f20489160092d8d61fe0cae7867963ed523fc3b6a73",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CustomCardTemplateServices.php",
+      "sha256": "77298de1fd5c89e3b231b57af06800e399835c8963c9ebe8c0cf6137d54e21e8",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php",
+      "sha256": "49aa233602ddf9fe4c00185ec6b893cd1b6e78bdcdfed4dbbe5a50e310993bae",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+      "sha256": "7e9bcd50c554318a6d58ff4f833a86030859207c77e4ba20de3bd3a7f51f2414",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php",
+      "sha256": "e092d522cd82cb55a2a641f729b0c98d7f960825e8e7d94930a896d6652714db",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php",
+      "sha256": "9765f3c54fd38697bbfcce898deabd3ccadadc98fdc22441bae3519271b9bb73",
+      "group": "backend"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php",
+      "sha256": "3eb62cf66e3705f7c6b0adae17488520f7150f939e18fad973f1184c57eeda09",
+      "group": "backend"
+    }
+  ],
+  "sourceTrees": {
+    "backend": "5dc63387d1438260fb7dda19817e92f2d5f695c8"
+  },
+  "checks": {
+    "lintFiles": 11,
+    "diffCheck": "pass",
+    "unrelatedStagedDiffUnchanged": true,
+    "baselineFailureCount": 7,
+    "newFailureCount": 0,
+    "coreServiceAssertions": 37,
+    "concurrencyAssertions": 3
+  },
+  "evidenceFiles": [
+    {
+      "path": "baseline-c2-entitlement-completion-contract.php.log",
+      "sha256": "6cde344d17ac75d75f696a46adf4cf5dbd5fa191cab6e26abe34de7fe457a6c5"
+    },
+    {
+      "path": "baseline-checkout-snapshot-direct-authority-contract.php.log",
+      "sha256": "14b2b3ddfedd01b526be3fe50814ee2aefca58cb91769e3253bd374eb0f306df"
+    },
+    {
+      "path": "baseline-member-entitlement-whole-yuan-contract.php.log",
+      "sha256": "66dba92bc6e7c1c1c6f507fb691867eefc477e613a996ad6520e6bec6a427f78"
+    },
+    {
+      "path": "baseline-probe-m010-custom-card-template-local.php.log",
+      "sha256": "cad1cb4323caef8a7003180b689e65431fb3219e40ec7396ff87c44934acd92c"
+    },
+    {
+      "path": "candidate-c2-catalog-writer-lock-contract.php.log",
+      "sha256": "34bc6a4ed11b8646f8c2def87b5bee73bd20f63b915a7b0b8e03d79824179f77"
+    },
+    {
+      "path": "candidate-c2-checkout-settlement-contract.php.log",
+      "sha256": "36fc23b765d96b09bc879b4137b4a0d4d4b1c02792f95272ecc1e947d7880c21"
+    },
+    {
+      "path": "candidate-c2-entitlement-completion-contract.php.log",
+      "sha256": "6cde344d17ac75d75f696a46adf4cf5dbd5fa191cab6e26abe34de7fe457a6c5"
+    },
+    {
+      "path": "candidate-card-operation-kernel-contract.php.log",
+      "sha256": "2c587412b4d94e1481d10339df92c1ad5aeaa8e0d6500c233bdb4d112f102232"
+    },
+    {
+      "path": "candidate-card-purchase-issuance-contract.php.log",
+      "sha256": "b3891c96c8f3c053c84889bdcf2dc42db7a24553224ba9db64c63581c40621b7"
+    },
+    {
+      "path": "candidate-checkout-snapshot-direct-authority-contract.php.log",
+      "sha256": "14b2b3ddfedd01b526be3fe50814ee2aefca58cb91769e3253bd374eb0f306df"
+    },
+    {
+      "path": "candidate-checkout-submit-failure-envelope-contract.php.log",
+      "sha256": "51e14f7549210b8e4e773dd11e6c2372e901f646290e27eeb08263efd563b3dc"
+    },
+    {
+      "path": "candidate-custom-card-configuration-contract.php.log",
+      "sha256": "2177cc083afb6f8c6eb2f5b8518900f6ba96c8274401cfb835487815e291f5a3"
+    },
+    {
+      "path": "candidate-m010-custom-card-concurrency.php.log",
+      "sha256": "ce1f3b3b69987f2fcb5d3650dcecc71702be16903071b4d1528165e80de355d2"
+    },
+    {
+      "path": "candidate-m010-custom-card-template-local.php.log",
+      "sha256": "ceddc625596159cf22650b99243ca02a0a90c1fb01e271df1c553a3d0cad13bd"
+    },
+    {
+      "path": "candidate-member-entitlement-whole-yuan-contract.php.log",
+      "sha256": "66dba92bc6e7c1c1c6f507fb691867eefc477e613a996ad6520e6bec6a427f78"
+    },
+    {
+      "path": "candidate-sale-off-shelf-contract.php.log",
+      "sha256": "7fa5bb9320cbc147f5574d660caf48064cd39dd769a4f32a5128a78ceff56f80"
+    },
+    {
+      "path": "candidate-sales-order-void-restored-state-contract.php.log",
+      "sha256": "f57c2b3a019db35fa398a85a542429813e7c90b72166143065562d668cf49692"
+    },
+    {
+      "path": "cleanup.json",
+      "sha256": "c53a6febc5ae188cee74572569ed10de9d4a1279342f84ad6acdfaea2f282c39"
+    },
+    {
+      "path": "fixed.patch",
+      "sha256": "8ec66f1046562e79163f73ea1cda6d3f9eb40d7d045d36c3a9938cb64778d764"
+    },
+    {
+      "path": "results.json",
+      "sha256": "26aa8ccaaf924b8a7fcaa2067d5dde8d8a6444e46d717cba38d335ba6969088e"
+    },
+    {
+      "path": "verification.json",
+      "sha256": "dc6c4635f4bf293c9e104c6d6b174a30657dbd1705ce6301243134391ef2b2f3"
+    }
+  ],
+  "onlineOperations": "none in implementation turn; prior 008 read-only diagnosis only",
+  "commit": null,
+  "deployment": null,
+  "push": false
+}

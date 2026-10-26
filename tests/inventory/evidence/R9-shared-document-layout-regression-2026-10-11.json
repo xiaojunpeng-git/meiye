@@ -1,0 +1,257 @@
+{
+  "baseline_head": "2ce93d0fb8a80c5262ce75afa31b35f93762d62c",
+  "total": 40,
+  "baseline_failures": [
+    "tests/inventory/js/inventory-api-contract.mjs",
+    "tests/inventory/js/request-dialog-contract.mjs",
+    "tests/inventory/js/inventory-stock-list-scroll-contract.mjs",
+    "tests/inventory/js/presale-claim-platform-contract.mjs",
+    "tests/inventory/js/store-menu-contract.mjs",
+    "tests/inventory/js/inventory-v3-c3-contract.mjs",
+    "tests/inventory/js/document-lifecycle-frontend-contract.mjs",
+    "tests/inventory/js/inventory-hide-unused-data-scope-contract.mjs"
+  ],
+  "new_failures": [],
+  "results": [
+    {
+      "file": "tests/inventory/js/outbound-export-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-catalog-batch-entry.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-date-picker-only-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/stock-transfer-form-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-api-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/inventory-api-contract.mjs:86\nawait api.cancelCrossTransfer(29)\n          ^\n\nTypeError: api.cancelCrossTransfer is not a function\n    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/inventory-api-contract.mjs:86:11\n"
+    },
+    {
+      "file": "tests/inventory/js/count-submission-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-batch-entry-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/salon-optional-project-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/expiry-risk-frontend-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/request-dialog-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/request-dialog-contract.mjs:13\n  throw new Error('跨店调拨必须区分门店旧契约和平台来源字段')\n        ^\n\nError: 跨店调拨必须区分门店旧契约和平台来源字段\n    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/request-dialog-contract.mjs:13:9\n    at ModuleJob.run (node:internal/modules/esm/module_job:193:25)\n    at async Promise.all (index 0)\n    at async ESMLoader.import (node:internal/modules/esm/loader:530:24)\n    at async loadESM (node:internal/process/esm_loader:91:5)\n    at async handleMainPromise (node:internal/modules/run_main:65:12)\n"
+    },
+    {
+      "file": "tests/inventory/js/inventory-unit-column-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/movement-business-display-render.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/cross-transfer-draft-edit-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-period-controls-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-stock-list-scroll-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "inventory stock list scroll contract failed: 1/5\n"
+    },
+    {
+      "file": "tests/inventory/js/operation-audit-columns-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-physical-authority-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/presale-claim-platform-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "PASS platform page is a valid Vue SFC\nPASS Vue 2 organization/store scope picker is a valid Vue SFC\nPASS organization filter uses the standard Vue 2 organization/store scope picker\nPASS Vue 2 scope picker follows the standard two-column organization/store interaction\nPASS page supports repeated claim, detail, and void actions\nPASS platform API module targets all four presale claim routes\nPASS scope route is registered before the dynamic presale-claim detail route\nPASS stock route reuses the existing inventory menu authorization\nPASS backend claim and void require existing platform warehouse-manage capability\nPASS platform presale list resolves organization scope through the application container\nPASS migration keeps API grants separate and reuses the existing stock menu grant\nPASS store page supports the same repeated claim and void lifecycle\nPASS store transport uses the session token and never shared cookies\nPASS store page labels post-refund presale lines as closed and keeps them unavailable\nPASS store defaults to all available presale lines and only shows sales dates for other statuses\nPASS presale list filters sales dates on the server under the same access scope\nPASS store and platform preserve named presale list query parameters\nPASS insufficient stock keeps the claim form and opens a blocking alert\nPASS store route is guarded by the existing inventory outbound feature\nPASS presale claim creates an outbound fact before deducting stock in the same transaction\nFAIL inventory detail labels presale claim movements as outbound documents\n"
+    },
+    {
+      "file": "tests/inventory/js/count-date-ui-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-flexible-import-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/document-line-remark-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-editor-action-bar-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/store-menu-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "PASS inventory menu is present in the shared store navigation\nPASS inventory menu uses confirmed label and Vue3 entry\nPASS inventory parent follows the cashier workbench gate while subentries have individual permissions\nFAIL inventory group is rendered inside the shared store shell navigation\nPASS cashier directly mounts the shared Vue3 inventory workbench instead of an iframe or preview port\nPASS cashier supplies its current Store V3 session directly to the mounted inventory workbench\nPASS a late embedded session refreshes store scope dashboard and the active inventory list\nPASS inventory menu defaults collapsed and expands a flat function grid when clicked\nPASS inventory opens inside the store work area with the first permitted function selected by default\nPASS current cashier entries remain individually gated and omit the closed movement entry\nPASS login bootstrap preserves every server-granted inventory permission after reload\nPASS store inventory scope derives its displayed store name from the trusted warehouse response\nPASS inventory rows no longer forge a store operator and transfer is explicitly cross-store\nPASS unimplemented exports are not exposed as clickable actions\nPASS inventory stock hides store settings while preserving platform settings and the same query region\nPASS inventory query errors render only real messages and list filters do not expose scan entry\nPASS inventory stock defaults to product name and a real numeric quantity range\nPASS permission-filtered inventory cost does not disable safe unified-query capabilities\nPASS embedded platform pages hide the duplicate inventory navigation and narrow stock only by store\nFAIL platform HQ operations bind catalog, inbound, and transfer to one selected headquarters location\nPASS request detail and edit are "
+    },
+    {
+      "file": "tests/inventory/js/recipe-list-search-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-worksheet-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-v3-c3-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "node:internal/process/esm_loader:97\n    internalBinding('errors').triggerUncaughtException(\n                              ^\n\nAssertionError [ERR_ASSERTION]: 调拨编辑列不包含成本和金额\n    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/inventory-v3-c3-contract.mjs:26:8\n    at ModuleJob.run (node:internal/modules/esm/module_job:193:25)\n    at async Promise.all (index 0)\n    at async ESMLoader.import (node:internal/modules/esm/loader:530:24)\n    at async loadESM (node:internal/process/esm_loader:91:5)\n    at async handleMainPromise (node:internal/modules/run_main:65:12) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: '<script setup>\\n' +\n    \"import { computed, nextTick, ref, watch } from 'vue'\\n\" +\n    \"import { AlertTriangle, Barcode, FileSpreadsheet, Plus, QrCode, Search, Trash2, X } from '@lucide/vue'\\n\" +\n    \"import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'\\n\" +\n    \"import InventoryProductSelector from './InventoryProductSelector.vue'\\n\" +\n    \"import InventoryStoreSelector from './InventoryStoreSelector.vue'\\n\" +\n    \"import { inventoryStatusLabel } from '../statusLabels'\\n\" +\n    \"import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorksheet'\\n\" +\n    \"import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'\\n\" +\n    \"import { validateInboundDates } from '../inboundDateValidation'\\n\" +\n    '\\n' +\n    'const props = defineProps({\\n' +\n    \"  pageKey: { type: String, default: '' },\\n\" +\n    \"  modalKind: { type: String, default: ''"
+    },
+    {
+      "file": "tests/inventory/js/document-lifecycle-frontend-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/document-lifecycle-frontend-contract.mjs:33\nawait store.api.reverseCrossTransfer(10, command)\n                ^\n\nTypeError: store.api.reverseCrossTransfer is not a function\n    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/inventory/js/document-lifecycle-frontend-contract.mjs:33:17\n"
+    },
+    {
+      "file": "tests/inventory/js/inventory-hide-unused-data-scope-contract.mjs",
+      "baseline": 1,
+      "current": 1,
+      "first_error": "node:internal/process/esm_loader:97\n    internalBinding('errors').triggerUncaughtException(\n                              ^\n\nAssertionError [ERR_ASSERTION]: The input did not match the regular expression /pageCode: operationalQueryPage\\.value\\.pageCode,\\s*\\/\\/[^\\n]*\\n\\s*dataScope: 'normal'/. Input:\n\n'<script setup>\\n' +\n  \"import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'\\n\" +\n  'import {\\n' +\n  '  AlertTriangle, ArrowDownToLine, ArrowUpFromLine,\\n' +\n  '  Boxes, ChartNoAxesCombined, ChevronRight, ClipboardCheck,\\n' +\n  '  Clock3, FileClock, FileSpreadsheet, FlaskConical, LayoutDashboard,\\n' +\n  '  Package2, Plus, QrCode, Search,\\n' +\n  '  SlidersHorizontal, Warehouse, X\\n' +\n  \"} from '@lucide/vue'\\n\" +\n  \"import InventoryBusinessModal from './components/InventoryBusinessModal.vue'\\n\" +\n  \"import InventoryOutboundExport from './components/InventoryOutboundExport.vue'\\n\" +\n  \"import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOperationalUnifiedQueryToolbar.vue'\\n\" +\n  \"import InventoryRecipeModal from './components/InventoryRecipeModal.vue'\\n\" +\n  \"import InventoryStoreSelector from './components/InventoryStoreSelector.vue'\\n\" +\n  \"import { formatIntegerQuantity } from './quantityFormat'\\n\" +\n  \"import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'\\n\" +\n  \"import { createDocumentDetailReader } from './documentDetailReader'\\n\" +\n  \"import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'\\n\" +\n  \"import { inventoryStatusLabel } from './statusLabels'\\n\" +\n  \"import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './"
+    },
+    {
+      "file": "tests/inventory/js/stock-quantity-presets-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-store-name-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/stock-settings-entry-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inbound-date-validation-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/transfer-confirmation-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/status-label-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/platform-statistics-frontend-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/recipe-frontend-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/stock-request-list-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/inventory-grouped-document-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/count-draft-list-visibility-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    },
+    {
+      "file": "tests/inventory/js/stock-summary-row-contract.mjs",
+      "baseline": 0,
+      "current": 0,
+      "first_error": ""
+    }
+  ]
+}

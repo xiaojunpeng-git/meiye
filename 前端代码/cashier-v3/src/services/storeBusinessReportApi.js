@@ -1,0 +1,101 @@
+import { readStoreV3SessionToken } from './storeV3SessionToken.js'
+
+export const STORE_BUSINESS_REPORT_RUNTIME = Object.freeze({
+  STORE: 'store',
+  PLATFORM: 'platform'
+})
+
+function isPlatformRuntime(runtime) {
+  return runtime === STORE_BUSINESS_REPORT_RUNTIME.PLATFORM
+}
+
+function readPlatformAdminToken() {
+  try {
+    const matched = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
+    return matched ? decodeURIComponent(matched[1]).trim() : ''
+  } catch (_) {
+    return ''
+  }
+}
+
+function endpoint(runtime, suffix) {
+  return isPlatformRuntime(runtime)
+    ? `/adminapi/report/${suffix}`
+    : `/cashierapi/v3/report/${suffix}`
+}
+
+async function request(runtime, path, query = {}) {
+  const url = new URL(path, window.location.origin)
+  if (url.origin !== window.location.origin) throw new Error('经营报表接口必须与当前页面同源。')
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  })
+  const platform = isPlatformRuntime(runtime)
+  const token = platform ? readPlatformAdminToken() : readStoreV3SessionToken()
+  const response = await fetch(url.href, {
+    method: 'GET', credentials: platform ? 'same-origin' : 'omit', cache: 'no-store',
+    headers: { Accept: 'application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) }
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || !payload || Number(payload.status || 200) !== 200) {
+    throw new Error(String(payload?.msg || payload?.message || '经营报表读取失败，请稍后重试。'))
+  }
+  return payload.data || payload
+}
+
+export const queryStoreBusinessReportCatalog = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/catalog'))
+export const queryStoreBusinessReportScope = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/scope'))
+export const queryStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/query'), query)
+export const exportStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/export'), query)
+
+/** XLSX downloads use the same authenticated export endpoint and server-side report scope as JSON exports. */
+export async function exportStoreBusinessReportXlsx(query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) {
+  const url = new URL(endpoint(runtime, 'unified/export'), window.location.origin)
+  if (url.origin !== window.location.origin) throw new Error('经营报表接口必须与当前页面同源。')
+  Object.entries({ ...query, format: 'xlsx' }).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  })
+  const platform = isPlatformRuntime(runtime)
+  const token = platform ? readPlatformAdminToken() : readStoreV3SessionToken()
+  const response = await fetch(url.href, {
+    method: 'GET', credentials: platform ? 'same-origin' : 'omit', cache: 'no-store',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(token ? { 'Authori-zation': `Bearer ${token}` } : {})
+    }
+  })
+  if (!response.ok || !String(response.headers.get('content-type') || '').includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(String(payload?.msg || payload?.message || '报表 XLSX 导出失败，请稍后重试。'))
+  }
+  return response.blob()
+}
+
+/** 品项分析沿用原入口和固定业务白名单。 */
+export function exportStoreItemAnalysisXlsx(query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) {
+  if (query.report !== 'store_item_analysis') throw new Error('当前报表不支持 XLSX 导出。')
+  return exportStoreBusinessReportXlsx(query, runtime)
+}
+export const queryStoreBusinessReportPersonnel = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => {
+  if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'unified/personnel'), query)
+  throw new Error('当前门店端人员选择器应由收银会话服务处理。')
+}
+export const queryStoreBusinessReportCategories = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => {
+  if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'operations/categories'))
+  throw new Error('商品分类选择器仅由平台报表运行时读取。')
+}
+export const listStoreBusinessReportAnnotations = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'operations/annotations'), query)
+
+async function write(runtime, path, body = {}) {
+  const platform = isPlatformRuntime(runtime)
+  const token = platform ? readPlatformAdminToken() : readStoreV3SessionToken()
+  const response = await fetch(path, {
+    method: 'POST', credentials: platform ? 'same-origin' : 'omit', cache: 'no-store',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || !payload || Number(payload.status || 200) !== 200) throw new Error(String(payload?.msg || '保存报表补充内容失败。'))
+  return payload.data || payload
+}
+export const saveStoreBusinessReportAnnotation = (body = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => write(runtime, endpoint(runtime, 'operations/annotation'), body)

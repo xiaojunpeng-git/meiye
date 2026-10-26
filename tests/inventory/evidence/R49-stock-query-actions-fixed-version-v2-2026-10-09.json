@@ -1,0 +1,74 @@
+{
+  "task": "R49-00001",
+  "version": "V2",
+  "baselineHead": "b9547566d0a35db9fdff83e8c84fa77eefbc3fa5",
+  "scope": [
+    "hide store stock query settings",
+    "place query after maximum and reset after query"
+  ],
+  "status": "pending_product_manager_acceptance",
+  "files": [
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "5d2d1a4629202e84b22f8f66a380fe70958e3357eb47c8a5dc21cac133105aa2"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue",
+      "sha256": "0ecb30572fef3b823a57e209990d150d3cdc735cedbc6523bf41f854e58ede37"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/styles/unified-query.css",
+      "sha256": "ee3e291e66b83cc21318ffaf02556b6235801173e8bacf40f58d8589d569174e"
+    },
+    {
+      "path": "tests/inventory/js/store-menu-contract.mjs",
+      "sha256": "c36015f16442f44e405efa405486ca904b30c345903b502e5725d2eea6d9efb7"
+    },
+    {
+      "path": "tests/inventory/js/stock-settings-entry-contract.mjs",
+      "sha256": "0b24c67663886f355d673b5c72719d4976ada2f127389815c07766ed74f3a8a9"
+    },
+    {
+      "path": "tests/unified-query/js/query-actions-after-fields-contract.mjs",
+      "sha256": "9c75646ddcdb5a54f3bf41c62cac33c2f00146540fbcd21eacc066efeddb0f51"
+    }
+  ],
+  "trackedPatchSha256": "00fe063dd201dddae0ec3c458237e701694263bd41bd028ee8a02c991885fe07",
+  "untrackedFilesIncludedByHash": true,
+  "evidence": [
+    {
+      "path": "tests/inventory/evidence/R49-stock-query-actions-selftest-2026-10-09.md",
+      "sha256": "79b89a2768f476f8d8fe5516f22b070e1e1e2a035afe1d2637c5e6e8c9306029"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-query-actions-desktop-2026-10-09.png",
+      "sha256": "b0915260e3a778801313ec1afe1fb91687164adb553f7cb41d5c168f6036cdb2"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-query-actions-detail-2026-10-09.png",
+      "sha256": "9a0aedbed7d84bee933eb4bc239de1be934e164320b08e77336f32f19ab7cf38"
+    }
+  ],
+  "localBuild": {
+    "source": "前端代码/inventory-vue3",
+    "command": "npm run build",
+    "release8080": false,
+    "assets": [
+      {
+        "path": "前端代码/inventory-vue3/dist/index.html",
+        "sha256": "d366ae05ff71bcb5c920c9c9542a668531d67507f36225f6df4cf646a5708c1f"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-93dc6d53.css",
+        "sha256": "93dc6d53b5e6b6b5a84f8ae8e71011e6158871b4d29ebf98cf1979287f34a174"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-30aa4995.js",
+        "sha256": "eb49c97332bf3e8c17de83383038694af3c32ffeddedcf52554b5dfac80adf4d"
+      }
+    ]
+  },
+  "commit": false,
+  "deployed": false,
+  "pushed": false
+}

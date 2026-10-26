@@ -1,0 +1,25 @@
+{
+  "site": "008",
+  "at": "2026-10-22T02:34:41.674Z",
+  "result": "PASS",
+  "entries": [
+    {
+      "name": "formal",
+      "url": "https://008.cc3798.com/view_cashier_v3/",
+      "status": 200,
+      "frontendUnchanged": true,
+      "assets": [
+        {
+          "path": "/view_cashier_v3/assets/index-24ae7b5e.js",
+          "status": 200,
+          "sha256": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c"
+        },
+        {
+          "path": "/view_cashier_v3/assets/index-00e0c3b9.css",
+          "status": 200,
+          "sha256": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      ]
+    }
+  ]
+}

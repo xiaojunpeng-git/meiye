@@ -1,0 +1,24 @@
+{
+  "task": "008 roster import round 1",
+  "target_instance": "008.cc3798.com",
+  "baseline_head": "d81e1eae07cb386654bc297a3d839f0b1958e206",
+  "baseline_branch": "release/store-cashier-c14-main",
+  "plan_sha256": "cbb5eab2ebef313bccf826ab04784a100f1cb9f0da59b2a2b0bcde6a8d0a1647",
+  "files_sha256": {
+    "后端代码/app/services/organization/OrganizationScopeService.php": "b84db3e758cd5af1a22049691f9079d1e206fd3c80925fcc1d5266de5bc29f27",
+    "scripts/import/customer_008_roster_prepare.py": "f6a28b4f9ce6b7932185a410dc7752ee7ee56d7544a16d74177c98507d427f2d",
+    "scripts/import/customer_008_roster_apply.php": "b8294d3b99ff15537abd0b30346419eebb67057fd091b8c627459ad542a6700d",
+    "tests/customer-008/test_roster_prepare.py": "fc3ac8780b11083e1a301ae102eb46ad9f4904ceb7a7e1b5e06579402c4a7b5a",
+    "tests/customer-008/evidence/2026-10-12-roster-import-round1-preflight.md": "f1cadc07f5964a7140bdd07542958522442f1ec6bd3fa7b8619d3d0709489256"
+  },
+  "patch_fingerprint_sha256": "2de8526844645390f9b9e0fd25bba0b5f4675bce4625ad2da845124001613a86",
+  "selftest": {
+    "spreadsheet_boundary_cases": "4 passed",
+    "php_lint": "2 passed",
+    "isolated_mysql_apply": "passed",
+    "sample_login_success": "33/33",
+    "store_to_platform_denied": "23/23",
+    "live_008_import": "pending_pm_acceptance"
+  },
+  "status": "开发与本地自测完成，待产品经理确认验收；008 未写入"
+}

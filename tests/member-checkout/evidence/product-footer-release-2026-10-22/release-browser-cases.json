@@ -1,0 +1,984 @@
+{
+  "result": "PASS",
+  "cases": [
+    {
+      "routeName": "product",
+      "width": 320,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 114,
+          "right": 310,
+          "top": 772.5,
+          "bottom": 804.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 764,
+        "bottom": 812,
+        "height": 48,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 320,
+      "theme": "#7B2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(123, 41, 65)",
+          "color": "rgb(255, 255, 255)",
+          "left": 114,
+          "right": 310,
+          "top": 772.5,
+          "bottom": 804.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 764,
+        "bottom": 812,
+        "height": 48,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 320,
+      "theme": "#42CA4D",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(66, 202, 77)",
+          "color": "rgb(255, 255, 255)",
+          "left": 114,
+          "right": 310,
+          "top": 772.5,
+          "bottom": 804.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 764,
+        "bottom": 812,
+        "height": 48,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 375,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 138,
+          "right": 363,
+          "top": 765,
+          "bottom": 803,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 755,
+        "bottom": 812,
+        "height": 57,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 375,
+      "theme": "#7B2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(123, 41, 65)",
+          "color": "rgb(255, 255, 255)",
+          "left": 138,
+          "right": 363,
+          "top": 765,
+          "bottom": 803,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 755,
+        "bottom": 812,
+        "height": 57,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 375,
+      "theme": "#42CA4D",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(66, 202, 77)",
+          "color": "rgb(255, 255, 255)",
+          "left": 138,
+          "right": 363,
+          "top": 765,
+          "bottom": 803,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 755,
+        "bottom": 812,
+        "height": 57,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "checkout",
+      "width": 320,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 203,
+          "right": 308,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(233, 51, 35), rgb(233, 51, 35) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(233, 51, 35)",
+        "rgb(233, 51, 35)",
+        "rgb(233, 51, 35)"
+      ]
+    },
+    {
+      "routeName": "checkout",
+      "width": 320,
+      "theme": "#7b2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(123, 41, 65)",
+          "color": "rgb(255, 255, 255)",
+          "left": 203,
+          "right": 308,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(123, 41, 65), rgb(123, 41, 65) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(123, 41, 65)",
+        "rgb(123, 41, 65)",
+        "rgb(123, 41, 65)"
+      ]
+    },
+    {
+      "routeName": "checkout",
+      "width": 320,
+      "theme": "#42ca4d",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(66, 202, 77)",
+          "color": "rgb(255, 255, 255)",
+          "left": 203,
+          "right": 308,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(66, 202, 77), rgb(66, 202, 77) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(66, 202, 77)",
+        "rgb(66, 202, 77)",
+        "rgb(66, 202, 77)"
+      ]
+    },
+    {
+      "routeName": "checkout",
+      "width": 375,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 258,
+          "right": 363,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(233, 51, 35), rgb(233, 51, 35) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(233, 51, 35)",
+        "rgb(233, 51, 35)",
+        "rgb(233, 51, 35)"
+      ]
+    },
+    {
+      "routeName": "checkout",
+      "width": 375,
+      "theme": "#7b2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(123, 41, 65)",
+          "color": "rgb(255, 255, 255)",
+          "left": 258,
+          "right": 363,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(123, 41, 65), rgb(123, 41, 65) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(123, 41, 65)",
+        "rgb(123, 41, 65)",
+        "rgb(123, 41, 65)"
+      ]
+    },
+    {
+      "routeName": "checkout",
+      "width": 375,
+      "theme": "#42ca4d",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "提交订单",
+          "bg": "rgb(66, 202, 77)",
+          "color": "rgb(255, 255, 255)",
+          "left": 258,
+          "right": 363,
+          "top": 766.5,
+          "bottom": 802.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 756,
+        "bottom": 812,
+        "height": 56,
+        "safe": 0
+      },
+      "header": "linear-gradient(rgb(66, 202, 77), rgb(66, 202, 77) 52%, rgba(0, 0, 0, 0))",
+      "amounts": [
+        "rgb(66, 202, 77)",
+        "rgb(66, 202, 77)",
+        "rgb(66, 202, 77)"
+      ]
+    },
+    {
+      "routeName": "result",
+      "width": 320,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(233, 51, 35, 0.1)",
+          "color": "rgb(233, 51, 35)",
+          "left": 22,
+          "right": 298,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(233, 51, 35, 0.1)",
+          "color": "rgb(233, 51, 35)",
+          "left": 22,
+          "right": 298,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(233, 51, 35), rgb(233, 51, 35) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    },
+    {
+      "routeName": "result",
+      "width": 320,
+      "theme": "#7b2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(123, 41, 65, 0.1)",
+          "color": "rgb(123, 41, 65)",
+          "left": 22,
+          "right": 298,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(123, 41, 65, 0.1)",
+          "color": "rgb(123, 41, 65)",
+          "left": 22,
+          "right": 298,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(123, 41, 65), rgb(123, 41, 65) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    },
+    {
+      "routeName": "result",
+      "width": 320,
+      "theme": "#42ca4d",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(66, 202, 77, 0.1)",
+          "color": "rgb(66, 202, 77)",
+          "left": 22,
+          "right": 298,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(66, 202, 77, 0.1)",
+          "color": "rgb(66, 202, 77)",
+          "left": 22,
+          "right": 298,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(66, 202, 77), rgb(66, 202, 77) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    },
+    {
+      "routeName": "result",
+      "width": 375,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(233, 51, 35, 0.1)",
+          "color": "rgb(233, 51, 35)",
+          "left": 22,
+          "right": 353,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(233, 51, 35, 0.1)",
+          "color": "rgb(233, 51, 35)",
+          "left": 22,
+          "right": 353,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(233, 51, 35), rgb(233, 51, 35) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    },
+    {
+      "routeName": "result",
+      "width": 375,
+      "theme": "#7b2941",
+      "expected": "rgb(123, 41, 65)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(123, 41, 65, 0.1)",
+          "color": "rgb(123, 41, 65)",
+          "left": 22,
+          "right": 353,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(123, 41, 65, 0.1)",
+          "color": "rgb(123, 41, 65)",
+          "left": 22,
+          "right": 353,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(123, 41, 65), rgb(123, 41, 65) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    },
+    {
+      "routeName": "result",
+      "width": 375,
+      "theme": "#42ca4d",
+      "expected": "rgb(66, 202, 77)",
+      "buttons": [
+        {
+          "text": "查看订单",
+          "bg": "rgba(66, 202, 77, 0.1)",
+          "color": "rgb(66, 202, 77)",
+          "left": 22,
+          "right": 353,
+          "top": 365,
+          "bottom": 403,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        },
+        {
+          "text": "我的项目",
+          "bg": "rgba(66, 202, 77, 0.1)",
+          "color": "rgb(66, 202, 77)",
+          "left": 22,
+          "right": 353,
+          "top": 412,
+          "bottom": 450,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": null,
+      "header": "linear-gradient(rgb(66, 202, 77), rgb(66, 202, 77) 52%, rgba(0, 0, 0, 0))",
+      "amounts": []
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/member/commerce/quote",
+      "method": "POST"
+    }
+  ],
+  "errors": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "network": "All API requests mocked locally; no order creation/payment/cancellation"
+}

@@ -1,0 +1,6 @@
+{
+	"contractVersion": "mobile-auth-v1",
+	"error": {
+		"code": "LEGACY_PHONE_CONFLICT"
+	}
+}

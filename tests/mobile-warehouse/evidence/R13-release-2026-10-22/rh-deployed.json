@@ -1,0 +1,10 @@
+{
+  "commit": "878a597a8d519fa5a6b8fd25de5aa1f064b34309",
+  "backup": "/www/backups/rh.cc3798.com/20261022-r13-878a597a",
+  "expected": {
+    "app/services/mobile/dashboard/MobileMerchantDashboardServices.php": "9573ca2b41676e7ceb01f6512f2cc15dc7cf62c5ea94f9632d86ee4efa013358",
+    "app/services/report/GroupManagementDashboardServices.php": "026e188f9f39f361962194c35f8e69113925cfde553d9ffe96bf59d5c5d241ff"
+  },
+  "output": "No syntax errors detected in /www/backups/rh.cc3798.com/20261022-r13-878a597a/candidate-0.php\nNo syntax errors detected in /www/backups/rh.cc3798.com/20261022-r13-878a597a/candidate-1.php\nruihao swoole started pid=10179 port=20800\n",
+  "database_writes": 0
+}

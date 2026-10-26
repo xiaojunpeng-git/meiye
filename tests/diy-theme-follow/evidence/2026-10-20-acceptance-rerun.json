@@ -1,0 +1,30 @@
+{
+  "task": "M008-R3-001",
+  "acceptedPatch": "fb9dcd13b92f58704d8075eb663759a88779f474ccf38cdcbbaa4abf8206f8b9",
+  "acceptance": "Product manager explicitly accepted fixed version; precise local commit only. No deployment, push, production decoration write, or mini-program upload.",
+  "sourceFingerprintsUnchanged": true,
+  "rerunTests": [
+    "contract.cjs PASS",
+    "browser.cjs PASS",
+    "git diff --check PASS"
+  ],
+  "evidenceNote": "Browser rerun regenerated screenshots at the same paths; screenshot bytes may vary between captures. Original fixed-version hashes remain a historical record, not updated to imply new acceptance. Source files and accepted patch are unchanged; current generated evidence hashes are listed below.",
+  "currentEvidence": [
+    {
+      "file": "tests/diy-theme-follow/evidence/browser-result.json",
+      "sha256": "118c9e33ecb7d20d906cb858b04ae29b6c672b1bf7d8920171a6e60634733c8f",
+      "originalSha256": "118c9e33ecb7d20d906cb858b04ae29b6c672b1bf7d8920171a6e60634733c8f"
+    },
+    {
+      "file": "tests/diy-theme-follow/evidence/theme-320.png",
+      "sha256": "c799bf80d0bd0df549d028b027756c04bf4e31ad63c13dd63b4cb481aa546cca",
+      "originalSha256": "055947319e830cebf1f208adf4ea31af9a581a7a18cf39320b16e9a951ce57a3"
+    },
+    {
+      "file": "tests/diy-theme-follow/evidence/theme-375.png",
+      "sha256": "f74a5625ec2b5c75433880da91a773ae4bf0889cd72247792fed185b9cd2a15d",
+      "originalSha256": "f74a5625ec2b5c75433880da91a773ae4bf0889cd72247792fed185b9cd2a15d"
+    }
+  ],
+  "unrelatedStagingSha256": "33fe873c38db4dd2b8d9e57c6730539fdefa8795b78f5929dd8698427241d44c"
+}

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang=zh-CN>
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,maximum-scale=1,minimum-scale=1">
+		<title>商城</title>
+		<meta name="Copyright" content="helang">
+		<link rel="shortcut icon" type="image/png" href="">
+		<meta name="keywords" content="">
+		<meta name="description" content="">
+		<style type="text/css">
+			body{
+				margin: 0;
+				background-color: #f3f3f3;
+			}
+			iframe{
+				width: 375px;
+				height: 667px;
+				background-color: #fff;
+				box-sizing: content-box;
+				border: none;
+			}
+			
+			@media screen and (min-width: 450px) {
+			    iframe {
+					position: fixed;
+					top: 0;
+					right: 0;
+					bottom: 0;
+					left: 0;
+					margin: auto;
+			        border: rgba(0,0,0,0.1) solid 1px;
+			        border-radius: 4px;
+			    }
+			}
+		</style>
+		<script type="text/javascript">
+			window.isPC = true;
+			/* 会员 H5 与平台端可共域，预览 iframe 只接受本站 /pages/ 路由，绝不回落到平台根路径。 */
+			/* 同源跳转通常带完整 Referer，可让桌面预览回到用户原本打开的会员页。 */
+			var requested = new URLSearchParams(window.location.search).get('member_path') || document.referrer || '/pages/index/index';
+			var target = new URL(requested, window.location.origin);
+			if (target.origin !== window.location.origin || target.pathname.indexOf('/pages/') !== 0) {
+				target = new URL('/pages/index/index', window.location.origin);
+			}
+			var standalonePath = target.pathname + target.search + target.hash;
+			target.searchParams.set('type', '1');
+
+			window.onload = function(){
+				document.getElementById('member-frame').src = target.pathname + target.search + target.hash;
+				/* 监听电脑浏览器窗口尺寸改变 */
+				window.onresize = function(){
+					/* 缩到手机宽度时回到原会员路由，不能跳到属于平台端的站点根路径。 */
+					if(window.innerWidth <= 420){
+						window.location.replace(standalonePath);
+					}
+				}
+			}
+		</script>
+	</head>
+	<body>
+		<iframe id="member-frame" title="会员端预览"></iframe>
+	</body>
+</html>

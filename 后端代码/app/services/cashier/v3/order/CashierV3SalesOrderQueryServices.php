@@ -1,0 +1,3221 @@
+<?php
+
+namespace app\services\cashier\v3\order;
+
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
+use app\services\report\StoreReportNormalDataScopeServices;
+use app\services\report\StoreReportCurrentProductCategoryServices;
+use think\facade\Db;
+
+/**
+ * 销售订单历史只读模型。
+ *
+ * 第一阶段只读取 order_type=0 的已结算旧销售主单与订单行快照。旧订单表
+ * 没有统一收款／经营事实的完整口径，因此所有经营金额保持 not_ready，禁止
+ * 把 pay_price 直接包装成现金业绩、销售额或应收金额。
+ */
+final class CashierV3SalesOrderQueryServices
+{
+    public const CONTRACT_VERSION = 'cashier-v3.order-center.v3';
+    public const ECONOMICS_STATUS = 'not_ready';
+    public const BUSINESS_TIMEZONE = 'Asia/Shanghai';
+    public const KEYWORD_SEARCH_WINDOW_DAYS = 366;
+    public const MAX_PAGE_SIZE = 100;
+    public const CURSOR_TTL_SECONDS = 1800;
+    private const CURSOR_VERSION = 2;
+    private const PRIMARY_SALE_CART_TYPES = [0, 3];
+
+    /** @var callable|null function(string $operation, array $criteria): array */
+    private $reader;
+    /** @var callable|null function(): int */
+    private $clock;
+    /** @var CashierV3SalesOrderCursorCodec|null */
+    private $cursorCodec;
+
+    public function __construct(
+        callable $reader = null,
+        callable $clock = null,
+        CashierV3SalesOrderCursorCodec $cursorCodec = null
+    )
+    {
+        $this->reader = $reader;
+        $this->clock = $clock;
+        $this->cursorCodec = $cursorCodec;
+    }
+
+    public function querySalesOrders(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $memberDetailAllStores = false
+    ): array {
+        // Only the member-detail caller may request a member-locked cross-store
+        // history. Normal order-center lists and order mutations retain their scope.
+        $criteria = $this->listCriteria($payload, $operatorScope, $dataScope, $memberDetailAllStores);
+        if ($criteria['allowedStoreIds'] === [] || !$dataScope->hasFeature('cashier.v3.order_center')) {
+            return $this->emptyPage($criteria, 'permission_filtered');
+        }
+
+        // New cashier orders have no legacy store_order mirror. The V3 sales
+        // order, line, and collection records are therefore the only source
+        // that can faithfully show a newly settled checkout.
+        if ($this->reader === null) {
+            return $this->queryAuthoritySalesOrders($payload, $criteria, $operatorScope, $dataScope);
+        }
+
+        $criteria = $this->resolveQueryCursor($criteria, $payload, $operatorScope, $dataScope);
+        if ($criteria['snapshotMaxOrderId'] === 0) {
+            return $this->emptyPage($criteria, 'partial_legacy_snapshot');
+        }
+
+        $raw = $this->read('list', $criteria);
+        $rows = is_array($raw['rows'] ?? null) ? array_values($raw['rows']) : [];
+        $lineRows = is_array($raw['lineRows'] ?? null) ? array_values($raw['lineRows']) : [];
+        $v3ByOrder = is_array($raw['v3ByOrder'] ?? null) ? $raw['v3ByOrder'] : [];
+        $total = max(0, (int)($raw['total'] ?? 0));
+        $hasMore = ($raw['hasMore'] ?? false) === true;
+        if (count($rows) > (int)$criteria['pageSize']) {
+            throw new \RuntimeException('sales_order_reader_page_size_invalid');
+        }
+        if ($total < count($rows)) {
+            throw new \RuntimeException('sales_order_reader_total_invalid');
+        }
+        if ($hasMore && count($rows) !== (int)$criteria['pageSize']) {
+            throw new \RuntimeException('sales_order_reader_has_more_invalid');
+        }
+
+        $this->assertRowsAuthorized($rows, $criteria, true);
+        usort($rows, [self::class, 'compareSettledRows']);
+        $linesByOrder = $this->groupLineRows($lineRows, array_column($rows, 'id'));
+        $this->assertPrimaryLinesPresent($rows, $linesByOrder);
+        $records = [];
+        foreach ($rows as $row) {
+            $records[] = $this->mapOrder(
+                $row,
+                $linesByOrder[(int)$row['id']] ?? [],
+                false,
+                is_array($v3ByOrder[(int)$row['id']] ?? null) ? $v3ByOrder[(int)$row['id']] : []
+            );
+        }
+
+        $criteria = $this->withPaginationCursors($criteria, $rows, $hasMore);
+
+        return $this->pagePayload($criteria, $records, $total, 'partial_legacy_snapshot');
+    }
+
+    public function salesOrderDetail(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ) {
+        $criteria = $this->detailCriteria($payload, $operatorScope, $dataScope);
+        if ($criteria === null
+            || $criteria['allowedStoreIds'] === []
+            || !$dataScope->hasFeature('cashier.v3.order_center')) {
+            return null;
+        }
+
+        if ($this->reader === null) {
+            return $this->authoritySalesOrderDetail($criteria);
+        }
+
+        $raw = $this->read('detail', $criteria);
+        $row = is_array($raw['row'] ?? null) ? $raw['row'] : null;
+        if ($row === null) {
+            return null;
+        }
+        $this->assertRowsAuthorized([$row], $criteria, false);
+        $lineRows = is_array($raw['lineRows'] ?? null) ? array_values($raw['lineRows']) : [];
+        $linesByOrder = $this->groupLineRows($lineRows, [(int)$row['id']]);
+        $this->assertPrimaryLinesPresent([$row], $linesByOrder);
+        $v3ByOrder = is_array($raw['v3ByOrder'] ?? null) ? $raw['v3ByOrder'] : [];
+        return $this->mapOrder(
+            $row,
+            $linesByOrder[(int)$row['id']] ?? [],
+            true,
+            is_array($v3ByOrder[(int)$row['id']] ?? null) ? $v3ByOrder[(int)$row['id']] : []
+        );
+    }
+
+    /** 根快照只声明订单中心入口；记录由当前页签按默认当天或指定日期按需读取。 */
+    public function initialPartitionMetadata(): array
+    {
+        $statusOptions = $this->statusOptions();
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'availability' => [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'status' => 'on_demand',
+                'dataLoaded' => false,
+                'businessFactsIncluded' => false,
+            ],
+            'dataStatus' => 'not_loaded',
+            'businessTypes' => [[
+                'key' => 'sales',
+                'label' => '消费订单',
+                'ready' => true,
+            ]],
+            'statusOptions' => $statusOptions,
+            'statusOptionsByType' => ['sales' => $statusOptions],
+            'salesOrders' => [],
+            'recordsByType' => ['sales' => []],
+            'pagesByType' => [
+                'sales' => [
+                    'total' => 0,
+                    'page' => 1,
+                    'pageSize' => 20,
+                    'dataStatus' => 'not_loaded',
+                    'hasMore' => false,
+                ],
+            ],
+            'total' => 0,
+            'page' => 1,
+            'pageSize' => 20,
+            'salesOrderDetail' => null,
+        ];
+    }
+
+    private function listCriteria(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        bool $memberDetailAllStores = false
+    ): array {
+        $nowTimestamp = $this->nowTimestamp();
+        $page = max(1, (int)($payload['page'] ?? 1));
+        $pageSize = min(self::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20)));
+        $keyword = $this->scalarString($payload['keyword'] ?? $payload['search'] ?? '');
+        if (function_exists('mb_substr')) {
+            $keyword = mb_substr($keyword, 0, 100, 'UTF-8');
+        } else {
+            $keyword = substr($keyword, 0, 100);
+        }
+        $status = $this->scalarString($payload['status'] ?? '');
+        if ($status === '') {
+            $status = $this->scalarString($payload['businessStatus'] ?? '');
+        }
+        if (!in_array($status, [
+            '', 'normal', 'refund_pending', 'refunded', 'partially_refunded',
+            'cancelled', 'voided',
+        ], true)) {
+            $status = '';
+        }
+        $dateFrom = $this->validBusinessDate($payload['dateFrom'] ?? $payload['businessDateFrom'] ?? '');
+        $dateTo = $this->validBusinessDate($payload['dateTo'] ?? $payload['businessDateTo'] ?? '');
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        $recordType = $this->scalarString($payload['recordType'] ?? $payload['record_type'] ?? 'sales');
+        $memberFilterPresent = array_key_exists('memberId', $payload) || array_key_exists('member_id', $payload);
+        $memberId = $memberFilterPresent
+            ? $this->positiveInteger($payload['memberId'] ?? $payload['member_id'])
+            : null;
+        $requestedStores = $this->requestedStoreIds($payload);
+        $allowedStores = $recordType === 'sales'
+            ? $dataScope->narrowVisibleStores($requestedStores)
+            : [];
+        if ($memberFilterPresent && $memberId === null) {
+            $allowedStores = [];
+        }
+        if ($memberDetailAllStores && $memberId !== null && $recordType === 'sales'
+            && $operatorScope->tenantId() !== ''
+            && $operatorScope->tenantId() === $dataScope->tenantId()
+            && $operatorScope->storeId() === $dataScope->forcedStoreId()
+            && $dataScope->allowsStore($operatorScope->storeId())
+            && in_array($dataScope->authorizationMode(), [CashierV3DataScopeContext::MODE_ALL, CashierV3DataScopeContext::MODE_STORES], true)) {
+            // This is a read-only, exact-member projection after member-detail
+            // visibility was checked; no other sales-order query gets this scope.
+            $allowedStores = null;
+        }
+        $salesPerformanceDrilldown = $recordType === 'sales'
+            ? $this->salesPerformanceDrilldown($payload) : null;
+
+        return [
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'keyword' => $keyword,
+            'status' => $status,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'memberId' => $memberId,
+            // 报表下钻只能由服务端验证过的人员、门店和事实日期组成；普通
+            // 订单查询保持 null，不改变既有销售日期筛选与分页行为。
+            'salesPerformanceDrilldown' => $salesPerformanceDrilldown,
+            'allowedStoreIds' => $this->canonicalStoreIds($allowedStores),
+            'operatorStoreId' => $operatorScope->storeId(),
+            'operatorId' => $operatorScope->operatorId(),
+            'tenantId' => $operatorScope->tenantId(),
+            'authorizationMode' => $dataScope->authorizationMode(),
+            'requiredOrderType' => 0,
+            'excludeDebtRepay' => true,
+            'requirePaid' => true,
+            'requireSettledAt' => true,
+            'includeCancelledSoftDeleted' => true,
+            'excludeSplitParent' => true,
+            'allowedNegativePids' => [-2],
+            'primarySaleCartTypes' => self::PRIMARY_SALE_CART_TYPES,
+            'excludeGiftLines' => true,
+            'preserveOrdersWithGiftEntitlementLines' => true,
+            'businessTimezone' => self::BUSINESS_TIMEZONE,
+            'nowTimestamp' => $nowTimestamp,
+            'queryCutoffTimestamp' => null,
+            'snapshotMaxOrderId' => null,
+            'keywordWindowStartTimestamp' => null,
+            'afterPayTime' => null,
+            'afterOrderId' => null,
+            'cursorIssuedAt' => null,
+            'cursorExpiresAt' => null,
+            'currentCursor' => null,
+            'nextCursor' => null,
+            'hasMore' => false,
+            'sort' => [['pay_time', 'desc'], ['id', 'desc']],
+        ];
+    }
+
+    private function detailCriteria(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ) {
+        $basePayload = [
+            'recordType' => 'sales',
+            'page' => 1,
+            'pageSize' => 1,
+        ];
+        if (array_key_exists('storeIds', $payload)) {
+            $basePayload['storeIds'] = $payload['storeIds'];
+        } elseif (array_key_exists('store_ids', $payload)) {
+            $basePayload['store_ids'] = $payload['store_ids'];
+        }
+        $base = $this->listCriteria($basePayload, $operatorScope, $dataScope);
+        $idValue = $payload['orderId'] ?? $payload['salesOrderId'] ?? $payload['id'] ?? null;
+        $authorityOrderId = $this->scalarString($idValue);
+        $id = $this->positiveInteger($idValue);
+        $orderNo = $this->scalarString($payload['salesOrderNo'] ?? $payload['orderNo'] ?? '');
+        // 预约直通服务的组 ID 含冒号；只给规范 service: 前缀放行，
+        // 明细仍受后续租户及门店查询约束，不能据此扩大可操作订单范围。
+        $validAuthorityOrderId = preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) === 1
+            || CashierV3EntitlementCheckoutIdentity::requestIdFromServiceOrderId($authorityOrderId) !== '';
+        if ($id === null
+            && !$validAuthorityOrderId
+            && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $orderNo) !== 1) {
+            return null;
+        }
+        $base['orderId'] = $id;
+        // 纯权益组使用服务请求标识，仍由同一个租户/门店权限查询读取详情。
+        $base['authorityOrderId'] = $id === null && $validAuthorityOrderId
+            ? $authorityOrderId : '';
+        $base['orderNo'] = $id === null ? $orderNo : '';
+        return $base;
+    }
+
+    /** @return int[]|null */
+    private function requestedStoreIds(array $payload)
+    {
+        $present = array_key_exists('storeIds', $payload) || array_key_exists('store_ids', $payload);
+        if (!$present) {
+            return null;
+        }
+        $value = $payload['storeIds'] ?? $payload['store_ids'];
+        if (!is_array($value)) {
+            return [];
+        }
+        return $this->canonicalStoreIds($value) ?: [];
+    }
+
+    /** @return array{employeeId:int,storeId:int,from:string,to:string,dayOfMonth:int}|null */
+    private function salesPerformanceDrilldown(array $payload): ?array
+    {
+        $raw = $payload['salesPerformanceDrilldown'] ?? null;
+        if (!is_array($raw)) return null;
+        $employeeId = $this->positiveInteger($raw['employeeId'] ?? null);
+        $storeId = $this->positiveInteger($raw['storeId'] ?? null);
+        $from = $this->validBusinessDate($raw['from'] ?? '');
+        $to = $this->validBusinessDate($raw['to'] ?? '');
+        $day = $this->nonNegativeInteger($raw['dayOfMonth'] ?? null);
+        if ($employeeId === null || $storeId === null || $from === '' || $to === '' || $from > $to
+            || $day === null || $day > 31) {
+            throw new \InvalidArgumentException('sales_performance_drilldown_invalid');
+        }
+        return ['employeeId'=>$employeeId,'storeId'=>$storeId,'from'=>$from,'to'=>$to,'dayOfMonth'=>$day];
+    }
+
+    /** @return int[]|null */
+    private function canonicalStoreIds($storeIds)
+    {
+        if ($storeIds === null) {
+            return null;
+        }
+        $normalized = [];
+        foreach ((array)$storeIds as $storeId) {
+            $id = $this->positiveInteger($storeId);
+            if ($id !== null) {
+                $normalized[$id] = $id;
+            }
+        }
+        ksort($normalized, SORT_NUMERIC);
+        return array_values($normalized);
+    }
+
+    private function positiveInteger($value)
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            return null;
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^[1-9][0-9]*$/D', $raw) !== 1) {
+            return null;
+        }
+        $value = (int)$raw;
+        return $value > 0 && (string)$value === $raw ? $value : null;
+    }
+
+    private function nonNegativeInteger($value)
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            return null;
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(0|[1-9][0-9]*)$/D', $raw) !== 1) {
+            return null;
+        }
+        $integer = (int)$raw;
+        return $integer >= 0 && (string)$integer === $raw ? $integer : null;
+    }
+
+    private function scalarString($value): string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            return '';
+        }
+        return trim((string)$value);
+    }
+
+    private function nowTimestamp(): int
+    {
+        $now = $this->clock === null ? time() : call_user_func($this->clock);
+        $now = $this->positiveInteger($now);
+        if ($now === null) {
+            throw new \RuntimeException('sales_order_clock_invalid');
+        }
+        return $now;
+    }
+
+    private function resolveQueryCursor(
+        array $criteria,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        foreach (['querySnapshot', 'queryCutoffTimestamp', 'snapshotMaxOrderId'] as $legacyKey) {
+            if (array_key_exists($legacyKey, $payload)) {
+                throw new \InvalidArgumentException('sales_order_legacy_snapshot_rejected');
+            }
+        }
+
+        $now = (int)$criteria['nowTimestamp'];
+        $fingerprint = $this->cursorFingerprint($criteria, $operatorScope, $dataScope);
+        $token = $this->scalarString($payload['queryCursor'] ?? $payload['query_cursor'] ?? '');
+        // 第一页本身就是新查询快照的起点，不需要也不应复用旧游标。
+        // 写命令成功后前端状态可能短暂携带写入前游标；首页强制
+        // 重建快照可避免将已成功的人员修改误报为失败。第二页起仍
+        // 必须验证签名、筛选指纹、权限版本和页码，不放宽翻页边界。
+        if ((int)$criteria['page'] === 1) $token = '';
+        if ($token === '') {
+            if ((int)$criteria['page'] !== 1) {
+                throw new \InvalidArgumentException('sales_order_query_cursor_required');
+            }
+            $criteria['queryCutoffTimestamp'] = $now;
+            $snapshotCriteria = $criteria;
+            $raw = $this->read('snapshot', $snapshotCriteria);
+            $maxOrderId = $this->nonNegativeInteger($raw['maxOrderId'] ?? null);
+            if ($maxOrderId === null) {
+                throw new \RuntimeException('sales_order_reader_snapshot_invalid');
+            }
+            $criteria['snapshotMaxOrderId'] = $maxOrderId;
+            $criteria['cursorIssuedAt'] = $now;
+            $criteria['cursorExpiresAt'] = $now + self::CURSOR_TTL_SECONDS;
+            $criteria['currentCursor'] = $this->issueCursor($criteria, $fingerprint, 1, null, null);
+        } else {
+            $decoded = $this->cursorCodec()->decode($token);
+            $this->assertCursorPayload($decoded, $fingerprint, (int)$criteria['page'], $now);
+            $criteria['queryCutoffTimestamp'] = (int)$decoded['cutoff'];
+            $criteria['snapshotMaxOrderId'] = (int)$decoded['maxOrderId'];
+            $criteria['afterPayTime'] = (int)$decoded['afterPayTime'] > 0
+                ? (int)$decoded['afterPayTime']
+                : null;
+            $criteria['afterOrderId'] = (int)$decoded['afterOrderId'] > 0
+                ? (int)$decoded['afterOrderId']
+                : null;
+            $criteria['cursorIssuedAt'] = (int)$decoded['issuedAt'];
+            $criteria['cursorExpiresAt'] = (int)$decoded['expiresAt'];
+            $criteria['currentCursor'] = $token;
+        }
+
+        if ($criteria['keyword'] !== '') {
+            $criteria['keywordWindowStartTimestamp'] = max(
+                1,
+                (int)$criteria['queryCutoffTimestamp'] - (self::KEYWORD_SEARCH_WINDOW_DAYS * 86400) + 1
+            );
+        }
+        $criteria['cursorFingerprint'] = $fingerprint;
+        return $criteria;
+    }
+
+    private function cursorFingerprint(
+        array $criteria,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        $payload = [
+            'contract' => self::CONTRACT_VERSION,
+            'tenantId' => $operatorScope->tenantId(),
+            'organizationId' => $operatorScope->organizationId(),
+            'operatorId' => $operatorScope->operatorId(),
+            'forcedStoreId' => $operatorScope->storeId(),
+            'authorizationMode' => $dataScope->authorizationMode(),
+            'permissionVersion' => $dataScope->permissionVersion(),
+            'allowedStoreIds' => $criteria['allowedStoreIds'],
+            'keyword' => $criteria['keyword'],
+            'status' => $criteria['status'],
+            'memberId' => $criteria['memberId'],
+            'dateFrom' => $criteria['dateFrom'],
+            'dateTo' => $criteria['dateTo'],
+            'salesPerformanceDrilldown' => $criteria['salesPerformanceDrilldown'],
+            'pageSize' => (int)$criteria['pageSize'],
+            'orderType' => 0,
+            'primarySaleCartTypes' => self::PRIMARY_SALE_CART_TYPES,
+        ];
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($json)) {
+            throw new \RuntimeException('sales_order_cursor_fingerprint_failed');
+        }
+        return hash('sha256', $json);
+    }
+
+    private function issueCursor(
+        array $criteria,
+        string $fingerprint,
+        int $targetPage,
+        $afterPayTime,
+        $afterOrderId
+    ): string {
+        return $this->cursorCodec()->encode([
+            'version' => self::CURSOR_VERSION,
+            'fingerprint' => $fingerprint,
+            'issuedAt' => (int)$criteria['cursorIssuedAt'],
+            'expiresAt' => (int)$criteria['cursorExpiresAt'],
+            'cutoff' => (int)$criteria['queryCutoffTimestamp'],
+            'maxOrderId' => (int)$criteria['snapshotMaxOrderId'],
+            'page' => $targetPage,
+            'afterPayTime' => $afterPayTime === null ? 0 : (int)$afterPayTime,
+            'afterOrderId' => $afterOrderId === null ? 0 : (int)$afterOrderId,
+        ]);
+    }
+
+    private function assertCursorPayload(array $payload, string $fingerprint, int $page, int $now): void
+    {
+        $required = [
+            'version', 'fingerprint', 'issuedAt', 'expiresAt', 'cutoff',
+            'maxOrderId', 'page', 'afterPayTime', 'afterOrderId',
+        ];
+        $keys = array_keys($payload);
+        sort($keys);
+        $expectedKeys = $required;
+        sort($expectedKeys);
+        if ($keys !== $expectedKeys
+            || (int)($payload['version'] ?? 0) !== self::CURSOR_VERSION
+            || !hash_equals($fingerprint, (string)($payload['fingerprint'] ?? ''))
+            || $this->positiveInteger($payload['issuedAt'] ?? null) === null
+            || $this->positiveInteger($payload['expiresAt'] ?? null) === null
+            || $this->positiveInteger($payload['cutoff'] ?? null) === null
+            || $this->nonNegativeInteger($payload['maxOrderId'] ?? null) === null
+            || $this->positiveInteger($payload['page'] ?? null) !== $page
+            || $this->nonNegativeInteger($payload['afterPayTime'] ?? null) === null
+            || $this->nonNegativeInteger($payload['afterOrderId'] ?? null) === null) {
+            throw new \InvalidArgumentException('sales_order_query_cursor_invalid');
+        }
+        $issuedAt = (int)$payload['issuedAt'];
+        $expiresAt = (int)$payload['expiresAt'];
+        $cutoff = (int)$payload['cutoff'];
+        $afterPayTime = (int)$payload['afterPayTime'];
+        $afterOrderId = (int)$payload['afterOrderId'];
+        if ($issuedAt > $now + 5
+            || $expiresAt < $now
+            || $expiresAt - $issuedAt !== self::CURSOR_TTL_SECONDS
+            || $cutoff > $issuedAt
+            || (($afterPayTime === 0) !== ($afterOrderId === 0))
+            || ($page === 1 && ($afterPayTime !== 0 || $afterOrderId !== 0))
+            || ($page > 1 && ($afterPayTime === 0 || $afterOrderId === 0))) {
+            throw new \InvalidArgumentException('sales_order_query_cursor_invalid');
+        }
+    }
+
+    private function withPaginationCursors(array $criteria, array $rows, bool $hasMore): array
+    {
+        $criteria['hasMore'] = $hasMore;
+        if ($hasMore && $rows) {
+            $last = $rows[count($rows) - 1];
+            $criteria['nextCursor'] = $this->issueCursor(
+                $criteria,
+                (string)$criteria['cursorFingerprint'],
+                (int)$criteria['page'] + 1,
+                (int)($last['pay_time'] ?? 0),
+                (int)($last['id'] ?? 0)
+            );
+        }
+        return $criteria;
+    }
+
+    private function cursorCodec(): CashierV3SalesOrderCursorCodec
+    {
+        if ($this->cursorCodec === null) {
+            $this->cursorCodec = CashierV3SalesOrderCursorCodec::production();
+        }
+        return $this->cursorCodec;
+    }
+
+    private function read(string $operation, array $criteria): array
+    {
+        if ($this->reader !== null) {
+            $result = call_user_func($this->reader, $operation, $criteria);
+            if (!is_array($result)) {
+                throw new \RuntimeException('sales_order_reader_result_invalid');
+            }
+            return $result;
+        }
+        return $this->readDatabase($operation, $criteria);
+    }
+
+    /**
+     * V3 sales orders are authoritative for every new checkout. Do not wait
+     * for a legacy order projection that V3 deliberately does not write.
+     */
+    private function queryAuthoritySalesOrders(
+        array $payload,
+        array $criteria,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $criteria = $this->resolveAuthorityQueryCursor($criteria, $payload, $operatorScope, $dataScope);
+        if ((int)$criteria['snapshotMaxOrderId'] === 0
+            || !in_array((string)$criteria['status'], ['', 'normal', 'refunded', 'voided'], true)) {
+            return $this->authorityPagePayload($criteria, [], 0);
+        }
+
+        $base = $this->authorityOrderQuery($criteria);
+        $total = (int)(clone $base)->count('o.id');
+        $rows = $base->field($this->authorityOrderFields())
+            ->order('o.settled_at', 'desc')
+            ->order('o.id', 'desc')
+            ->limit((int)$criteria['pageSize'] + 1)
+            ->select()
+            ->toArray();
+        $hasMore = count($rows) > (int)$criteria['pageSize'];
+        if ($hasMore) {
+            $rows = array_slice($rows, 0, (int)$criteria['pageSize']);
+        }
+
+        $snapshots = $this->authoritySnapshots($rows);
+        $records = [];
+        foreach ($rows as $row) {
+            $orderId = (string)($row['order_id'] ?? '');
+            if ($orderId === '' || !isset($snapshots[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_snapshot_incomplete');
+            }
+            $records[] = $this->mapAuthorityOrder($snapshots[$orderId], false);
+        }
+
+        $criteria['hasMore'] = $hasMore;
+        if ($hasMore && $rows) {
+            $last = $rows[count($rows) - 1];
+            $criteria['nextCursor'] = $this->issueCursor(
+                $criteria,
+                (string)$criteria['cursorFingerprint'],
+                (int)$criteria['page'] + 1,
+                (int)$last['settled_at'],
+                (int)$last['id']
+            );
+        }
+        return $this->authorityPagePayload($criteria, $records, $total);
+    }
+
+    private function authoritySalesOrderDetail(array $criteria)
+    {
+        $query = $this->authorityOrderBaseQuery($criteria);
+        $authorityOrderId = (string)($criteria['authorityOrderId'] ?? '');
+        if ($authorityOrderId !== '') {
+            $query->where('o.order_id', $authorityOrderId);
+        } else {
+            $orderNo = (string)($criteria['orderNo'] ?? '');
+            if ($orderNo === '') {
+                return null;
+            }
+            $query->where('o.order_no', $orderNo);
+        }
+        $row = $query->field($this->authorityOrderFields())->find();
+        $row = $row ? (is_array($row) ? $row : $row->toArray()) : null;
+        if ($row === null) {
+            return null;
+        }
+        $snapshots = $this->authoritySnapshots([$row]);
+        $orderId = (string)$row['order_id'];
+        if (!isset($snapshots[$orderId])) return null;
+        $detail = $this->mapAuthorityOrder($snapshots[$orderId], true);
+        // 小票联系方式使用订单所属门店的当前资料；先通过订单权限查询，
+        // 不使用客户端门店ID、不改变历史门店名称快照，也不回写订单事实。
+        $store = Db::name('system_store')->where('id', (int)$row['store_id'])
+            ->field('address,detailed_address')->find();
+        $region = trim((string)($store['address'] ?? ''));
+        $address = trim((string)($store['detailed_address'] ?? ''));
+        // 历史资料的详细地址可能已包含地区，打印时避免重复拼接。
+        $detail['storeAddress'] = $region !== '' && strpos($address, $region) !== 0
+            ? $region . $address : $address;
+        return $detail;
+    }
+
+    private function resolveAuthorityQueryCursor(
+        array $criteria,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        foreach (['querySnapshot', 'queryCutoffTimestamp', 'snapshotMaxOrderId'] as $legacyKey) {
+            if (array_key_exists($legacyKey, $payload)) {
+                throw new \InvalidArgumentException('sales_order_legacy_snapshot_rejected');
+            }
+        }
+        $now = (int)$criteria['nowTimestamp'];
+        $fingerprint = $this->cursorFingerprint($criteria, $operatorScope, $dataScope);
+        $token = $this->scalarString($payload['queryCursor'] ?? $payload['query_cursor'] ?? '');
+        // 权威订单投影与历史投影使用同一首页语义：首页总是
+        // 新快照，仅后续页依赖并严格验证不透明签名游标。
+        if ((int)$criteria['page'] === 1) $token = '';
+        if ($token === '') {
+            if ((int)$criteria['page'] !== 1) {
+                throw new \InvalidArgumentException('sales_order_query_cursor_required');
+            }
+            $criteria['queryCutoffTimestamp'] = $now;
+            $criteria['snapshotMaxOrderId'] = max(0, (int)$this->authorityOrderBaseQuery($criteria)->max('o.id'));
+            $criteria['cursorIssuedAt'] = $now;
+            $criteria['cursorExpiresAt'] = $now + self::CURSOR_TTL_SECONDS;
+            $criteria['currentCursor'] = $this->issueCursor($criteria, $fingerprint, 1, null, null);
+        } else {
+            $decoded = $this->cursorCodec()->decode($token);
+            $this->assertCursorPayload($decoded, $fingerprint, (int)$criteria['page'], $now);
+            $criteria['queryCutoffTimestamp'] = (int)$decoded['cutoff'];
+            $criteria['snapshotMaxOrderId'] = (int)$decoded['maxOrderId'];
+            $criteria['afterPayTime'] = (int)$decoded['afterPayTime'] > 0 ? (int)$decoded['afterPayTime'] : null;
+            $criteria['afterOrderId'] = (int)$decoded['afterOrderId'] > 0 ? (int)$decoded['afterOrderId'] : null;
+            $criteria['cursorIssuedAt'] = (int)$decoded['issuedAt'];
+            $criteria['cursorExpiresAt'] = (int)$decoded['expiresAt'];
+            $criteria['currentCursor'] = $token;
+        }
+        if ($criteria['keyword'] !== '') {
+            $criteria['keywordWindowStartTimestamp'] = max(1, (int)$criteria['queryCutoffTimestamp'] - (self::KEYWORD_SEARCH_WINDOW_DAYS * 86400) + 1);
+        }
+        $criteria['cursorFingerprint'] = $fingerprint;
+        return $criteria;
+    }
+
+    private function authorityOrderBaseQuery(array $criteria)
+    {
+        $query = Db::table($this->salesAndServiceHeaders($criteria) . ' o')
+            ->where('o.tenant_id', (string)$criteria['tenantId'])
+            ->where('o.order_status', 'settled')
+            ->where('o.order_direction', 'forward')
+            ->where('o.settled_at', '>', 0);
+        if ($criteria['allowedStoreIds'] !== null) {
+            $query->whereIn('o.store_id', $criteria['allowedStoreIds']);
+        }
+        if ($criteria['memberId'] !== null) {
+            $query->where('o.member_id', (int)$criteria['memberId']);
+        }
+        $drilldown = $criteria['salesPerformanceDrilldown'] ?? null;
+        if ($drilldown === null) {
+            if (($criteria['dateFrom'] ?? '') !== '') $query->where('o.business_date', '>=', $criteria['dateFrom']);
+            if (($criteria['dateTo'] ?? '') !== '') $query->where('o.business_date', '<=', $criteria['dateTo']);
+        } else {
+            // 报表按业绩事实的业务日期统计，退款或人员调整可能晚于原订单日；
+            // 因此从同一事实精确找来源订单，不能再用订单日期二次裁剪。
+            $query->whereExists(function ($fact) use ($drilldown): void {
+                $fact->name('cashier_v3_performance_fact')->alias('report_sales_pf')
+                    ->whereRaw('report_sales_pf.tenant_id=o.tenant_id')
+                    ->whereRaw('report_sales_pf.order_id=o.order_id')
+                    ->where('report_sales_pf.performance_type', 'sales_performance_allocated')
+                    ->where('report_sales_pf.status', 'effective')
+                    ->where('report_sales_pf.employee_id', $drilldown['employeeId'])
+                    ->where('report_sales_pf.store_id', $drilldown['storeId'])
+                    ->where('report_sales_pf.business_date', '>=', $drilldown['from'])
+                    ->where('report_sales_pf.business_date', '<=', $drilldown['to']);
+                if ($drilldown['dayOfMonth'] > 0) {
+                    $fact->whereRaw('DAY(report_sales_pf.business_date)=?', [$drilldown['dayOfMonth']]);
+                }
+                // 与汇总 Reader 一致：整单作废的正向和反向事实都只留审计，
+                // 不允许从经营报表重新下钻出来。
+                (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts(
+                    $fact, 'report_sales_pf.tenant_id', 'report_sales_pf.order_id'
+                );
+            });
+        }
+        return $query;
+    }
+
+    /**
+     * 纯权益结账只有服务事实，没有销售资金单。这里只合并只读单据索引，
+     * 按同一结账请求分组；已存在销售单的混合结账由原销售单承载，禁止重复。
+     * 奇偶 ID 仅用于有签名的分页锚点，不作为任何写命令的资源 ID。
+     */
+    private function salesAndServiceHeaders(array $criteria): string
+    {
+        $columns = explode(',', str_replace('o.', '', $this->authorityOrderFields()));
+        $salesFields = [];
+        $serviceFields = [];
+        foreach ($columns as $column) {
+            $salesFields[] = $column === 'id' ? 's.id * 2 AS id'
+                : ($column === 'entitlement_only' ? '0 AS entitlement_only' : 's.' . $column);
+            if ($column === 'id') $value = 'MIN(sf.id) * 2 + 1';
+            elseif ($column === 'order_id') $value = "CONCAT('service:', sf.checkout_request_id)";
+            elseif ($column === 'order_no') $value = "MIN(COALESCE(NULLIF(sf.service_record_no,''),sf.service_fact_id))";
+            elseif ($column === 'order_version' || $column === 'entitlement_only') $value = '1';
+            elseif (strpos($column, 'business_source_') === 0) {
+                // 纯权益没有销售资金单。普通结账以选择表为来源权威；预约直接完成
+                // 没有选择表，必须回退到服务事实自己的发生时快照，不能误显示为空来源。
+                $sourceColumns = [
+                    'business_source_primary_id' => 'primary_source_id',
+                    'business_source_secondary_id' => 'secondary_source_id',
+                    'business_source_primary_name_snapshot' => 'primary_source_name_snapshot',
+                    'business_source_secondary_name_snapshot' => 'secondary_source_name_snapshot',
+                    'business_source_label_snapshot' => 'source_label_snapshot',
+                ];
+                $fallback = substr($column, -3) === '_id' ? '0' : "''";
+                $selectionColumn = $sourceColumns[$column];
+                $serviceColumn = 'sf.' . $column;
+                $value = substr($column, -3) === '_id'
+                    ? 'COALESCE(MAX(NULLIF(bs.' . $selectionColumn . ',0)),MAX(NULLIF(' . $serviceColumn . ',0)),' . $fallback . ')'
+                    : "COALESCE(NULLIF(MAX(bs.{$selectionColumn}),''),NULLIF(MAX({$serviceColumn}),''),{$fallback})";
+            }
+            elseif (in_array($column, ['original_amount_cents','discount_amount_cents','sale_amount_cents'], true)) $value = '0';
+            elseif ($column === 'order_note') $value = "''";
+            else $value = 'MIN(sf.' . $column . ')';
+            $serviceFields[] = $value . ' AS ' . $column;
+        }
+        $sales = Db::name('cashier_v3_sales_order')->alias('s')
+            ->where('s.tenant_id', $criteria['tenantId'])->where('s.order_status', 'settled')->where('s.order_direction', 'forward');
+        $services = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->leftJoin('cashier_v3_checkout_business_source_selection bs', "bs.checkout_request_id=sf.checkout_request_id AND bs.tenant_id=sf.tenant_id AND bs.store_id=sf.store_id AND bs.checkout_kind='sale'")
+            ->where('sf.tenant_id', $criteria['tenantId'])->where('sf.service_status', 'completed')
+            ->where('sf.checkout_request_id', '<>', '')
+            ->whereNotExists(function ($q): void {
+                $q->name('cashier_v3_sales_order')->alias('existing_sale')
+                    ->whereRaw('existing_sale.tenant_id=sf.tenant_id AND existing_sale.checkout_request_id=sf.checkout_request_id')
+                    ->where('existing_sale.order_status', 'settled')->where('existing_sale.order_direction', 'forward');
+            });
+        // 权限和日期下推到两个源，避免为当前门店页面物化整个实例历史。
+        foreach ([[$sales, 's'], [$services, 'sf']] as [$query, $alias]) {
+            if ($criteria['allowedStoreIds'] !== null) $query->whereIn($alias . '.store_id', $criteria['allowedStoreIds']);
+            if ($criteria['memberId'] !== null) $query->where($alias . '.member_id', (int)$criteria['memberId']);
+            if (empty($criteria['salesPerformanceDrilldown'])) {
+                if (!empty($criteria['dateFrom'])) $query->where($alias . '.business_date', '>=', $criteria['dateFrom']);
+                if (!empty($criteria['dateTo'])) $query->where($alias . '.business_date', '<=', $criteria['dateTo']);
+            }
+        }
+        // 统一外层字段保留原来的状态、权限和游标过滤契约。
+        return '(' . $sales->field(implode(',', $salesFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")->buildSql(false)
+            . ' UNION ALL ' . $services->field(implode(',', $serviceFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
+                ->group('sf.tenant_id,sf.checkout_request_id')->buildSql(false) . ')';
+    }
+
+    private function authorityOrderQuery(array $criteria)
+    {
+        $query = $this->authorityOrderBaseQuery($criteria)
+            ->where('o.settled_at', '<=', (int)$criteria['queryCutoffTimestamp'])
+            ->where('o.id', '<=', (int)$criteria['snapshotMaxOrderId']);
+        $this->applyAuthorityStatusFilter($query, (string)$criteria['status']);
+        if ($criteria['afterPayTime'] !== null && $criteria['afterOrderId'] !== null) {
+            $query->where(function ($anchor) use ($criteria) {
+                $anchor->where('o.settled_at', '<', (int)$criteria['afterPayTime'])
+                    ->whereOr(function ($sameSecond) use ($criteria) {
+                        $sameSecond->where('o.settled_at', (int)$criteria['afterPayTime'])
+                            ->where('o.id', '<', (int)$criteria['afterOrderId']);
+                    });
+            });
+        }
+        if ($criteria['keyword'] !== '') {
+            $like = '%' . addcslashes((string)$criteria['keyword'], "\\%_") . '%';
+            $query->where('o.settled_at', '>=', (int)$criteria['keywordWindowStartTimestamp'])
+                ->where(function ($nested) use ($like) {
+                    $this->whereUtf8Like($nested, 'o.order_no', $like);
+                    $this->whereUtf8Like($nested, 'o.member_name_snapshot', $like, true);
+                    // 服务单据支持按任一服务编号或项目查到整组，不能只匹配首行编号。
+                    $nested->whereOr(function ($serviceMatch) use ($like): void {
+                        $serviceMatch->whereExists(function ($service) use ($like): void {
+                            $service->name('cashier_v3_entitlement_service_fact')->alias('search_sf')
+                                ->whereRaw('search_sf.tenant_id=o.tenant_id AND search_sf.checkout_request_id=o.checkout_request_id')
+                                ->where(function ($names) use ($like): void {
+                                    $this->whereUtf8Like($names, 'search_sf.project_name_snapshot', $like);
+                                    $this->whereUtf8Like($names, 'search_sf.service_record_no', $like, true);
+                                });
+                        });
+                    });
+                    $nested
+                        ->whereOr(function ($lineMatch) use ($like) {
+                            $lineMatch->whereExists(function ($line) use ($like) {
+                                $line->name('cashier_v3_sales_order_line')->alias('l')
+                                    ->whereRaw('l.order_id = o.order_id')
+                                    ->where('l.line_status', 'settled')
+                                    ->where('l.line_direction', 'forward');
+                                $this->whereUtf8Like($line, 'l.item_name_snapshot', $like);
+                            });
+                        })
+                        ->whereOr(function ($personMatch) use ($like) {
+                            $personMatch->whereExists(function ($person) use ($like) {
+                                $person->name('cashier_v3_performance_fact')->alias('pf')
+                                    ->whereRaw('pf.order_id = o.order_id')
+                                    ->where('pf.fact_direction', 'forward')
+                                    ->where('pf.status', 'effective');
+                                $this->whereUtf8Like($person, 'pf.employee_name_snapshot', $like);
+                            });
+                        });
+                });
+        }
+        return $query;
+    }
+
+    private function applyAuthorityStatusFilter($query, string $status): void
+    {
+        if ($status === '') {
+            return;
+        }
+        // 纯权益的正常/作废取服务事实，不能借用不存在的销售冲销记录。
+        $query->where(function ($scope) use ($status): void {
+            $scope->where(function ($sales) use ($status): void {
+                $sales->where('o.entitlement_only', 0);
+                $this->applySalesOnlyStatusFilter($sales, $status);
+            })->whereOr(function ($service) use ($status): void {
+                $service->where('o.entitlement_only', 1);
+                if (!in_array($status, ['normal', 'voided'], true)) {
+                    $service->whereRaw('1=0');
+                    return;
+                }
+                $hasActive = function ($active): void {
+                    $active->name('cashier_v3_entitlement_service_fact')->alias('active_sf')
+                        ->whereRaw('active_sf.tenant_id=o.tenant_id AND active_sf.checkout_request_id=o.checkout_request_id')
+                        ->where('active_sf.service_status', 'completed')
+                        ->whereNotExists(function ($void): void {
+                            $void->name('cashier_v3_service_record_void_operation')->alias('active_vo')
+                                ->whereRaw('active_vo.tenant_id=active_sf.tenant_id AND active_vo.service_fact_id=active_sf.id')
+                                ->where('active_vo.status', 'succeeded');
+                        });
+                };
+                if ($status === 'normal') $service->whereExists($hasActive);
+                else $service->whereNotExists($hasActive);
+            });
+        });
+    }
+
+    /** 正式销售单仍沿用销售生命周期状态；与纯服务状态分开。 */
+    private function applySalesOnlyStatusFilter($query, string $status): void
+    {
+        if ($status === 'normal') {
+            $query->whereNotExists(function ($operation) {
+                $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('olo')
+                    ->whereRaw('olo.source_order_id = o.order_id')
+                    ->whereRaw('olo.tenant_id = o.tenant_id')
+                    ->where('olo.source_type', 'sales')
+                    ->where('olo.status', 'succeeded')
+                    ->whereIn('olo.operation_type', ['refund', 'void']);
+            });
+            return;
+        }
+        $operationType = $status === 'voided' ? 'void' : 'refund';
+        $query->whereExists(function ($operation) use ($operationType) {
+            $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('olo')
+                ->whereRaw('olo.source_order_id = o.order_id')
+                ->whereRaw('olo.tenant_id = o.tenant_id')
+                ->where('olo.source_type', 'sales')
+                ->where('olo.status', 'succeeded')
+                ->where('olo.operation_type', $operationType);
+        });
+    }
+
+    private function authorityOrderFields(): string
+    {
+        return implode(',', [
+            'o.id,o.order_id,o.order_no,o.tenant_id,o.store_id,o.store_name_snapshot',
+            'o.member_id,o.member_name_snapshot,o.operator_id,o.operator_name_snapshot',
+            'o.checkout_request_id,o.business_date,o.business_timezone,o.occurred_at,o.settled_at,o.recorded_at',
+            'o.business_source_primary_id,o.business_source_primary_name_snapshot',
+            'o.business_source_secondary_id,o.business_source_secondary_name_snapshot,o.business_source_label_snapshot',
+            // order_note is an order-header snapshot. The authority mapper
+            // already exposes it as orderNote, so the base projection must
+            // select it for both list and detail reads; otherwise a freshly
+            // settled order silently appears to have no main-order remark.
+            'o.original_amount_cents,o.discount_amount_cents,o.sale_amount_cents,o.order_version,o.order_note',
+            'o.entitlement_only',
+        ]);
+    }
+
+    private function readDatabase(string $operation, array $criteria): array
+    {
+        $query = Db::name('store_order')->alias('o')
+            ->where('o.order_type', 0)
+            ->where('o.is_debt_repay', 0)
+            ->where('o.paid', 1)
+            ->where('o.pay_time', '>', 0)
+            ->where('o.is_system_del', 0)
+            ->where(function ($nested) {
+                $nested->where('o.pid', '>=', 0)->whereOr('o.pid', -2);
+            })
+            ->whereExists(function ($primaryLine) {
+                $primaryLine->name('store_order_cart_info')->alias('primary_ci')
+                    ->whereRaw('primary_ci.oid = o.id')
+                    ->whereRaw('IFNULL(primary_ci.cart_type, 0) IN (0,3)')
+                    ->whereRaw('IFNULL(primary_ci.is_gift, 0) = 0');
+            });
+        if ($criteria['allowedStoreIds'] !== null) {
+            $query->whereIn('o.store_id', $criteria['allowedStoreIds']);
+        }
+        if ($criteria['memberId'] !== null) {
+            $query->where('o.uid', (int)$criteria['memberId']);
+        }
+        if ($operation === 'snapshot') {
+            $query->where('o.pay_time', '<=', (int)$criteria['queryCutoffTimestamp']);
+            return ['maxOrderId' => max(0, (int)$query->max('o.id'))];
+        }
+        if ($operation === 'detail') {
+            if ($criteria['orderId'] !== null) {
+                $query->where('o.id', $criteria['orderId']);
+            } else {
+                $query->where('o.order_id', $criteria['orderNo']);
+            }
+        } else {
+            $query->where('o.pay_time', '<=', (int)$criteria['queryCutoffTimestamp'])
+                ->where('o.id', '<=', (int)$criteria['snapshotMaxOrderId']);
+            $keyword = (string)$criteria['keyword'];
+            if ($keyword !== '') {
+                $like = '%' . addcslashes($keyword, "\\%_") . '%';
+                $query->where('o.pay_time', '>=', (int)$criteria['keywordWindowStartTimestamp'])
+                    ->where(function ($nested) use ($like) {
+                        $this->whereUtf8Like($nested, 'o.order_id', $like);
+                        $this->whereUtf8Like($nested, 'o.real_name', $like, true);
+                        $this->whereUtf8Like($nested, 'o.user_phone', $like, true);
+                        $nested
+                            ->whereOr(function ($lineMatch) use ($like) {
+                                $lineMatch->whereExists(function ($searchLine) use ($like) {
+                                    $searchLine->name('store_order_cart_info')->alias('search_ci')
+                                        ->whereRaw('search_ci.oid = o.id')
+                                        ->whereRaw('IFNULL(search_ci.cart_type, 0) IN (0,3)')
+                                        ->whereRaw('IFNULL(search_ci.is_gift, 0) = 0');
+                                    $this->whereUtf8Like($searchLine, 'search_ci.cart_info', $like);
+                                });
+                            });
+                    });
+            }
+            $this->applyStatusFilter($query, (string)$criteria['status']);
+        }
+
+        $fields = implode(',', [
+            'o.id', 'o.order_id', 'o.uid', 'o.real_name', 'o.user_phone',
+            'o.store_id', 'o.order_type', 'o.is_debt_repay', 'o.paid',
+            'o.is_del', 'o.is_system_del', 'o.pid',
+            'o.terminal_action', 'o.refund_status', 'o.status', 'o.total_num',
+            'o.add_time', 'o.pay_time', 'o.remark', 'o.order_note', 'o.total_price', 'o.pay_price',
+            'o.cash_pay_price', 'o.debt_amount',
+        ]);
+        if ($operation === 'detail') {
+            $row = $query->field($fields)->find();
+            $row = $row ? (is_array($row) ? $row : $row->toArray()) : null;
+            $lineRows = $row ? $this->databaseLineRows([(int)$row['id']]) : [];
+            return [
+                'row' => $row,
+                'lineRows' => $lineRows,
+                'v3ByOrder' => $this->databaseV3Snapshots($lineRows),
+            ];
+        }
+
+        // total 在键集锚点之前计算，表示首页冻结插入集合中的当前筛选总数。
+        $total = (int)(clone $query)->count('o.id');
+        if ($criteria['afterPayTime'] !== null && $criteria['afterOrderId'] !== null) {
+            $afterPayTime = (int)$criteria['afterPayTime'];
+            $afterOrderId = (int)$criteria['afterOrderId'];
+            $query->where(function ($anchor) use ($afterPayTime, $afterOrderId) {
+                $anchor->where('o.pay_time', '<', $afterPayTime)
+                    ->whereOr(function ($sameSecond) use ($afterPayTime, $afterOrderId) {
+                        $sameSecond->where('o.pay_time', $afterPayTime)
+                            ->where('o.id', '<', $afterOrderId);
+                    });
+            });
+        }
+        $limit = (int)$criteria['pageSize'] + 1;
+        $rows = $query->field($fields)
+            ->order('o.pay_time', 'desc')
+            ->order('o.id', 'desc')
+            ->limit($limit)
+            ->select()
+            ->toArray();
+        $hasMore = count($rows) > (int)$criteria['pageSize'];
+        if ($hasMore) {
+            $rows = array_slice($rows, 0, (int)$criteria['pageSize']);
+        }
+        $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'id')))));
+        $lineRows = $this->databaseLineRows($ids);
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'hasMore' => $hasMore,
+            'lineRows' => $lineRows,
+            'v3ByOrder' => $this->databaseV3Snapshots($lineRows),
+        ];
+    }
+
+    private function applyStatusFilter($query, string $status): void
+    {
+        if ($status === 'normal') {
+            $query->where('o.is_del', 0)
+                ->where('o.refund_status', 0)
+                ->whereRaw('IFNULL(o.terminal_action, 0) <> 2');
+        } elseif ($status === 'refund_pending') {
+            $query->whereIn('o.refund_status', [1, 4])
+                ->whereRaw('IFNULL(o.terminal_action, 0) <> 2');
+        } elseif ($status === 'refunded') {
+            $query->where('o.refund_status', 2)
+                ->whereRaw('IFNULL(o.terminal_action, 0) <> 2');
+        } elseif ($status === 'partially_refunded') {
+            $query->where('o.refund_status', 3)
+                ->whereRaw('IFNULL(o.terminal_action, 0) <> 2');
+        } elseif ($status === 'cancelled') {
+            $query->where('o.is_del', 1)
+                ->where('o.refund_status', 0)
+                ->whereRaw('IFNULL(o.terminal_action, 0) <> 2');
+        } elseif ($status === 'voided') {
+            $query->where('o.terminal_action', 2);
+        }
+    }
+
+    /**
+     * 订单编号存在 ascii_bin 历史列，关键词可为中文。统一转换 LIKE 两边
+     * 的表达式，避免同一 OR 查询组中发生字符集／排序规则冲突。
+     * 调用处字段均为本服务固定 SQL 字段，不接受客户端输入。
+     */
+    private function whereUtf8Like($query, string $field, string $like, bool $or = false): void
+    {
+        $expression = 'CONVERT(' . $field . ' USING utf8mb4) COLLATE utf8mb4_general_ci LIKE ?';
+        if ($or) {
+            $query->whereOrRaw($expression, [$like]);
+            return;
+        }
+        $query->whereRaw($expression, [$like]);
+    }
+
+    private function databaseLineRows(array $orderIds): array
+    {
+        if (!$orderIds) {
+            return [];
+        }
+        return Db::name('store_order_cart_info')
+            ->whereIn('oid', $orderIds)
+            ->whereRaw('IFNULL(cart_type, 0) IN (0,3)')
+            ->whereRaw('IFNULL(is_gift, 0) = 0')
+            ->field(
+                'id,oid,cart_num,product_type,cart_type,is_gift,cart_info,'
+                . 'cash_pay_amount,debt_amount,yue_pay_amount'
+            )
+            ->order('oid', 'asc')
+            ->order('id', 'asc')
+            ->select()
+            ->toArray();
+    }
+
+    /**
+     * Enrich only rows that carry an immutable V3 sales-order identity in the
+     * legacy projection. Historical orders remain on the explicit not_ready
+     * economics contract.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function databaseV3Snapshots(array $lineRows): array
+    {
+        $salesOrderIdByLegacyOrder = [];
+        $salesLineIdByLegacyLine = [];
+        foreach ($lineRows as $line) {
+            $snapshot = $this->decodeCartSnapshot($line['cart_info'] ?? []);
+            $salesOrderId = trim((string)($snapshot['salesOrderId'] ?? ''));
+            $salesOrderLineId = trim((string)($snapshot['salesOrderLineId'] ?? ''));
+            if ($salesOrderId === '' || $salesOrderLineId === '') {
+                continue;
+            }
+            $legacyOrderId = (int)($line['oid'] ?? 0);
+            $legacyLineId = (int)($line['id'] ?? 0);
+            if ($legacyOrderId <= 0 || $legacyLineId <= 0) {
+                throw new \RuntimeException('sales_order_v3_projection_identity_invalid');
+            }
+            if (isset($salesOrderIdByLegacyOrder[$legacyOrderId])
+                && $salesOrderIdByLegacyOrder[$legacyOrderId] !== $salesOrderId) {
+                throw new \RuntimeException('sales_order_v3_projection_order_conflict');
+            }
+            $salesOrderIdByLegacyOrder[$legacyOrderId] = $salesOrderId;
+            $salesLineIdByLegacyLine[$legacyLineId] = $salesOrderLineId;
+        }
+        if ($salesOrderIdByLegacyOrder === []) {
+            return [];
+        }
+
+        $salesOrderIds = array_values(array_unique(array_values($salesOrderIdByLegacyOrder)));
+        $headers = Db::name('cashier_v3_sales_order')
+            ->whereIn('order_id', $salesOrderIds)
+            ->where('order_status', 'settled')
+            ->where('order_direction', 'forward')
+            ->field(
+                'order_id,order_no,tenant_id,store_id,store_name_snapshot,member_id,member_name_snapshot,'
+                . 'operator_id,operator_name_snapshot,business_date,business_timezone,occurred_at,settled_at,'
+                . 'recorded_at,source_document_type,source_document_id,source_document_no_snapshot,'
+                . 'business_source_primary_id,business_source_primary_name_snapshot,'
+                . 'business_source_secondary_id,business_source_secondary_name_snapshot,business_source_label_snapshot,'
+                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,order_version,order_note'
+            )
+            ->select()
+            ->toArray();
+        $headersById = [];
+        foreach ($headers as $header) {
+            $headersById[(string)$header['order_id']] = $header;
+        }
+        $snapshotTenantId = trim((string)($headers[0]['tenant_id'] ?? ''));
+
+        $formalLines = Db::name('cashier_v3_sales_order_line')
+            ->whereIn('order_id', $salesOrderIds)
+            ->where('line_status', 'settled')
+            ->where('line_direction', 'forward')
+            ->field(
+                'order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,'
+                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,'
+                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,card_purchase_snapshot_json,line_version'
+            )
+            ->select()
+            ->toArray();
+        $formalLinesById = [];
+        foreach ($formalLines as $formalLine) {
+            $formalLinesById[(string)$formalLine['order_line_id']] = $formalLine;
+        }
+
+        $batches = Db::name('cashier_v3_payment_collection_batch')
+            ->whereIn('sales_order_id', $salesOrderIds)
+            ->where('batch_status', 'settled')
+            ->where('batch_direction', 'forward')
+            ->field(
+                'batch_id,sales_order_id,collected_amount_cents,cash_performance_amount_cents,'
+                . 'receivable_amount_cents,business_date,business_timezone,occurred_at,settled_at,recorded_at'
+            )
+            ->select()
+            ->toArray();
+        $batchByOrder = [];
+        foreach ($batches as $batch) {
+            $orderId = (string)$batch['sales_order_id'];
+            if (isset($batchByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_v3_payment_batch_conflict');
+            }
+            $batchByOrder[$orderId] = $batch;
+        }
+
+        $collections = Db::name('cashier_v3_payment_collection')
+            ->whereIn('sales_order_id', $salesOrderIds)
+            ->where('collection_status', 'settled')
+            ->where('collection_direction', 'forward')
+            ->field(
+                'collection_id,sales_order_id,payment_line_no,payment_method,'
+                . 'payment_method_name_snapshot,amount_cents,external_transaction_no_snapshot,'
+                . 'remark_snapshot,occurred_at,settled_at'
+            )
+            ->order('sales_order_id', 'asc')
+            ->order('payment_line_no', 'asc')
+            ->select()
+            ->toArray();
+        $collectionsByOrder = [];
+        foreach ($collections as $collection) {
+            $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
+        }
+
+        $performanceRows = Db::name('cashier_v3_performance_fact')
+            ->whereIn('order_id', $salesOrderIds)
+            ->where('fact_type', 'sales_performance_allocated')
+            ->where('performance_type', 'sales_performance_allocated')
+            ->where('status', 'effective')
+            ->where('fact_direction', 'forward')
+            ->field(
+                'fact_id,order_id,source_line_id,employee_id,employee_name_snapshot,'
+                . 'employee_type_snapshot,allocation_weight_numerator,allocation_weight_denominator,'
+                . 'allocation_base_amount_cents,amount_cents,role_snapshot,rule_code_snapshot'
+            )
+            ->order('id', 'asc')
+            ->select()
+            ->toArray();
+        $salespeopleByOrderAndLine = [];
+        foreach ($performanceRows as $performance) {
+            $salespeopleByOrderAndLine[(string)$performance['order_id']]
+                [(string)$performance['source_line_id']][] = $performance;
+        }
+        $guidesByOrderAndLine = [];
+        foreach (Db::name('cashier_v3_customer_guide_round_fact')
+            ->where('tenant_id', $snapshotTenantId)->whereIn('order_id', $salesOrderIds)->where('status', 'effective')
+            ->field('order_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $guidesByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['guide_employee_id'], 'employeeId' => (int)$fact['guide_employee_id'],
+                'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no'],
+            ];
+        }
+        $salesManagersByOrderAndLine = [];
+        foreach (Db::name('cashier_v3_sales_manager_fact')
+            ->where('tenant_id', $snapshotTenantId)->whereIn('order_id', $salesOrderIds)->where('status', 'effective')
+            ->field('order_id,source_line_id,sales_manager_employee_id,sales_manager_name_snapshot')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $salesManagersByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['sales_manager_employee_id'], 'employeeId' => (int)$fact['sales_manager_employee_id'],
+                'name' => (string)$fact['sales_manager_name_snapshot'],
+            ];
+        }
+
+        $result = [];
+        foreach ($salesOrderIdByLegacyOrder as $legacyOrderId => $salesOrderId) {
+            if (!isset($headersById[$salesOrderId], $batchByOrder[$salesOrderId])) {
+                throw new \RuntimeException('sales_order_v3_authority_snapshot_incomplete');
+            }
+            $linkedLines = [];
+            foreach ($lineRows as $line) {
+                if ((int)($line['oid'] ?? 0) !== (int)$legacyOrderId) {
+                    continue;
+                }
+                $legacyLineId = (int)($line['id'] ?? 0);
+                $formalLineId = (string)($salesLineIdByLegacyLine[$legacyLineId] ?? '');
+                if ($formalLineId === '' || !isset($formalLinesById[$formalLineId])) {
+                    throw new \RuntimeException('sales_order_v3_line_snapshot_incomplete');
+                }
+                $checkoutLineId = trim((string)($formalLinesById[$formalLineId]['checkout_line_id'] ?? ''));
+                $guideFacts = $guidesByOrderAndLine[$salesOrderId][$formalLineId] ?? [];
+                if ($guideFacts === [] && $checkoutLineId !== '') {
+                    $guideFacts = $guidesByOrderAndLine[$salesOrderId][$checkoutLineId] ?? [];
+                }
+                $salesManagerFacts = $salesManagersByOrderAndLine[$salesOrderId][$formalLineId] ?? [];
+                if ($salesManagerFacts === [] && $checkoutLineId !== '') {
+                    $salesManagerFacts = $salesManagersByOrderAndLine[$salesOrderId][$checkoutLineId] ?? [];
+                }
+                $linkedLines[$legacyLineId] = [
+                    'authority' => $formalLinesById[$formalLineId],
+                    'salespeople' => $salespeopleByOrderAndLine[$salesOrderId][$formalLineId] ?? [],
+                    'salesManagers' => $salesManagerFacts,
+                    'guides' => $guideFacts,
+                ];
+            }
+            $result[(int)$legacyOrderId] = [
+                'header' => $headersById[$salesOrderId],
+                'batch' => $batchByOrder[$salesOrderId],
+                'collections' => $collectionsByOrder[$salesOrderId] ?? [],
+                'lines' => $linkedLines,
+            ];
+        }
+        return $result;
+    }
+
+    /** @return array<string,array<string,mixed>> keyed by V3 order_id */
+    private function authoritySnapshots(array $headers): array
+    {
+        if ($headers === []) {
+            return [];
+        }
+        $headersByOrder = [];
+        foreach ($headers as $header) {
+            $orderId = trim((string)($header['order_id'] ?? ''));
+            if ($orderId === '') {
+                throw new \RuntimeException('sales_order_authority_id_invalid');
+            }
+            $headersByOrder[$orderId] = $header;
+        }
+        $orderIds = array_keys($headersByOrder);
+        $tenantIds = array_values(array_unique(array_map(static function (array $header): string {
+            return trim((string)($header['tenant_id'] ?? ''));
+        }, $headers)));
+        if (count($tenantIds) !== 1 || $tenantIds[0] === '') {
+            throw new \RuntimeException('sales_order_authority_tenant_scope_invalid');
+        }
+        // Checkout events are the authoritative composition index.  Read it
+        // once so optional domains (debt and refund details) are not queried
+        // for a plain product sale.  Empty event history keeps the legacy
+        // fallback conservative and lets the domain query its own facts.
+        $eventTypesByOrder = [];
+        $requestToOrder = [];
+        foreach ($headersByOrder as $headerOrderId => $header) {
+            $headerRequestId = trim((string)($header['checkout_request_id'] ?? ''));
+            if ($headerRequestId !== '') $requestToOrder[$headerRequestId] = $headerOrderId;
+        }
+        $requestIds = array_values(array_unique(array_filter(array_map(function (array $header): string {
+            return trim((string)($header['checkout_request_id'] ?? ''));
+        }, $headers))));
+        $eventQuery = Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
+            ->where('tenant_id', $tenantIds[0] ?? '')
+            ->where(function ($nested) use ($orderIds, $requestIds): void {
+                if ($requestIds !== []) $nested->whereIn('source_id', $requestIds);
+                if ($orderIds !== []) {
+                    if ($requestIds !== []) $nested->whereOr(function ($aggregate) use ($orderIds): void {
+                        $aggregate->whereIn('aggregate_id', $orderIds);
+                    });
+                    else $nested->whereIn('aggregate_id', $orderIds);
+                }
+            })
+            ->field('aggregate_id,source_id,event_type')
+            ->select()
+            ->toArray();
+        foreach ($eventQuery as $eventRow) {
+            $eventType = trim((string)($eventRow['event_type'] ?? ''));
+            $aggregateId = trim((string)($eventRow['aggregate_id'] ?? ''));
+            $sourceId = trim((string)($eventRow['source_id'] ?? ''));
+            $sourceOrderId = $sourceId !== '' ? ($requestToOrder[$sourceId] ?? '') : '';
+            if ($sourceOrderId !== '' && isset($headersByOrder[$sourceOrderId])) {
+                $eventTypesByOrder[$sourceOrderId][$eventType] = true;
+            }
+            if ($aggregateId !== '' && isset($headersByOrder[$aggregateId])) {
+                $eventTypesByOrder[$aggregateId][$eventType] = true;
+            }
+        }
+        $linesByOrder = [];
+        foreach (Db::name('cashier_v3_sales_order_line')
+            ->whereIn('order_id', $orderIds)
+            ->where('line_status', 'settled')
+            ->where('line_direction', 'forward')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,coupon_payment_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
+            ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
+            $linesByOrder[(string)$line['order_id']][] = $line;
+        }
+        // 销售单是混合结账的资金单据，服务事实是项目履约单据。列表只在
+        // 同一 checkout_request_id 下合并展示两者；权益服务行不得进入销售金额、
+        // 欠款、退款范围或商品数量计算。
+        $serviceFactsByOrder = [];
+        $serviceFactIds = [];
+        if ($requestIds !== []) {
+            $serviceRows = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+                // 原始核销快照只作历史兜底；已追加的金额更正事实由下方读模型覆盖。
+                ->leftJoin('cashier_v3_entitlement_writeoff_fact wf', 'wf.tenant_id=sf.tenant_id AND wf.checkout_request_id=sf.checkout_request_id AND wf.source_line_id=sf.source_line_id')
+                ->leftJoin(
+                    'cashier_v3_service_record_void_operation vo',
+                    "vo.tenant_id=sf.tenant_id AND vo.service_fact_id=sf.id AND vo.status='succeeded'"
+                )
+                ->where('sf.tenant_id', $tenantIds[0])
+                ->whereIn('sf.checkout_request_id', $requestIds)
+                ->where('sf.service_status', 'completed')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.entitlement_instance_type,wf.source_name_snapshot,wf.source_code_snapshot,wf.actual_entitlement_amount_cents,wf.total_purchase_times_snapshot,wf.consumed_times_before_snapshot,wf.quantity AS writeoff_quantity,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->order('sf.id', 'asc')->select()->toArray();
+            if ($serviceRows !== []) {
+                // R32 历史更正以不可变正反事实入账，原核销快照不能覆盖。
+                // 按本页结账请求批量取更正后的项目金额，避免逐行查询和重新计算购卡价。
+                $correctedAmounts = Db::name('cashier_v3_performance_fact')
+                    ->where('tenant_id', $tenantIds[0])
+                    ->whereIn('checkout_request_id', $requestIds)
+                    ->where('performance_type', 'consumption_performance_recorded')
+                    ->where('status', 'effective')->where('fact_direction', 'forward')
+                    ->where('rule_code_snapshot', 'SHARED-CARD-PURCHASE-REPAIR-R32')
+                    ->field('id,checkout_request_id,source_line_id,amount_cents')
+                    ->order('id', 'desc')->select()->toArray();
+                $serviceRows = $this->applyCorrectedEntitlementAmounts($serviceRows, $correctedAmounts);
+            }
+            foreach ($serviceRows as $serviceRow) {
+                $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
+                if ($orderId === '' || !isset($headersByOrder[$orderId])) continue;
+                $serviceFactsByOrder[$orderId][] = $serviceRow;
+                $serviceFactIds[] = (int)$serviceRow['id'];
+            }
+        }
+        $batchesByOrder = [];
+        foreach (Db::name('cashier_v3_payment_collection_batch')
+            ->whereIn('sales_order_id', $orderIds)
+            ->where('batch_status', 'settled')
+            ->where('batch_direction', 'forward')
+            ->field('batch_id,sales_order_id,collected_amount_cents,cash_performance_amount_cents,receivable_amount_cents,settled_at')
+            ->select()->toArray() as $batch) {
+            $orderId = (string)$batch['sales_order_id'];
+            if (isset($batchesByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_payment_batch_conflict');
+            }
+            $batchesByOrder[$orderId] = $batch;
+        }
+        $collectionsByOrder = [];
+        foreach (Db::name('cashier_v3_payment_collection')
+            ->whereIn('sales_order_id', $orderIds)
+            ->where('collection_status', 'settled')
+            ->where('collection_direction', 'forward')
+            ->field('collection_id,sales_order_id,checkout_payment_draft_id,payment_line_no,payment_method,payment_method_name_snapshot,amount_cents,external_transaction_no_snapshot,remark_snapshot,occurred_at')
+            ->order('sales_order_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray() as $collection) {
+            $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
+        }
+        $requestsById = [];
+        $nonCashEntriesByRequest = [];
+        if ($requestIds !== []) {
+            foreach (Db::name('cashier_v3_checkout_request')->whereIn('request_id', $requestIds)
+                ->field('request_id,debt_amount_cents,balance_deduction_amount_cents,selected_payment_amount_cents')->select()->toArray() as $request) {
+                $requestsById[(string)$request['request_id']] = $request;
+            }
+            // A committed draft without a matching collection row is the
+            // non-cash settlement authority. Historical other-collection
+            // drafts with real collection rows remain cash under their facts.
+            foreach (Db::name('cashier_v3_checkout_payment_draft')->whereIn('request_id', $requestIds)
+                ->whereIn('payment_method', ['old_card_entry', 'other_collection'])->where('draft_status', 'committed')
+                ->field('request_id,payment_draft_id,payment_method,amount_cents,remark,operation_occurred_at')
+                ->select()->toArray() as $entry) {
+                $nonCashEntriesByRequest[(string)$entry['request_id']][] = $entry;
+            }
+        }
+        // A card/project upgrade is a formal sale of the target item.  Its
+        // old entitlement value is neither a discount nor cash collection;
+        // the immutable settlement record is the only authority for that
+        // third settlement component.
+        $upgradeSettlementsByOrder = [];
+        foreach (Db::name('cashier_v3_card_operation_settlement')
+            ->where('tenant_id', $tenantIds[0])
+            ->whereIn('sales_order_id', $orderIds)
+            ->field('sales_order_id,operation_id,operation_type,entitlement_credit_cents,cash_delta_cents,settlement_status')
+            ->order('id', 'asc')->select()->toArray() as $settlement) {
+            $orderId = (string)$settlement['sales_order_id'];
+            if (isset($upgradeSettlementsByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_upgrade_settlement_conflict');
+            }
+            $upgradeSettlementsByOrder[$orderId] = $settlement;
+        }
+        // A multi-card upgrade deliberately has no card-operation/version
+        // ledger. Its single immutable upgrade snapshot is the authority for
+        // the third settlement component, so normalize it only for the
+        // order-centre read model. The snapshot itself is never updated by
+        // this projection or by a later lifecycle reversal.
+        $multiCardUpgrades = Db::name('cashier_v3_multi_card_upgrade')
+            ->where('tenant_id', $tenantIds[0])
+            ->whereIn('sales_order_id', $orderIds)
+            ->field('sales_order_id,upgrade_id,target_sale_amount_cents,entitlement_credit_cents,excess_writeoff_cents,upgrade_status')
+            ->order('id', 'asc')->select()->toArray();
+        $multiCardUpgradeSources = [];
+        $multiCardUpgradeIds = array_values(array_unique(array_filter(array_map(static function (array $upgrade): string {
+            return trim((string)($upgrade['upgrade_id'] ?? ''));
+        }, $multiCardUpgrades))));
+        if ($multiCardUpgradeIds !== []) {
+            foreach (Db::name('cashier_v3_multi_card_upgrade_source')
+                ->whereIn('upgrade_id', $multiCardUpgradeIds)
+                ->field('upgrade_id,line_no,source_card_name_snapshot,source_card_no_snapshot,source_remaining_value_cents,credit_cents,excess_writeoff_cents')
+                ->order('upgrade_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $source) {
+                $multiCardUpgradeSources[(string)$source['upgrade_id']][] = $source;
+            }
+        }
+        foreach ($multiCardUpgrades as $upgrade) {
+            $orderId = (string)$upgrade['sales_order_id'];
+            if (isset($upgradeSettlementsByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_upgrade_settlement_conflict');
+            }
+            $targetAmount = max(0, (int)$upgrade['target_sale_amount_cents']);
+            $creditAmount = max(0, (int)$upgrade['entitlement_credit_cents']);
+            $upgradeSettlementsByOrder[$orderId] = [
+                'sales_order_id' => $orderId,
+                'operation_id' => (string)$upgrade['upgrade_id'],
+                'operation_type' => 'card_upgrade',
+                'entitlement_credit_cents' => $creditAmount,
+                // This is the pre-coupon/pre-price-change cash component,
+                // matching the regular upgrade settlement contract.
+                'cash_delta_cents' => max(0, $targetAmount - $creditAmount),
+                'settlement_status' => (string)$upgrade['upgrade_status'],
+                // The source rows are immutable snapshots made at successful
+                // settlement. They are display-only evidence for the order
+                // detail and never reopen card versions or current balances.
+                'source_cards' => $multiCardUpgradeSources[(string)$upgrade['upgrade_id']] ?? [],
+                'excess_writeoff_cents' => max(0, (int)$upgrade['excess_writeoff_cents']),
+            ];
+        }
+        $salespeopleByOrderAndLine = [];
+        $craftsmenByOrderAndLine = [];
+        $guidesByOrderAndLine = [];
+        $salesManagersByOrderAndLine = [];
+        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0], $serviceFactIds, $requestIds) as $fact) {
+            $lineKey = (string)$fact['source_line_id'];
+            $factOrderId = $requestToOrder[(string)($fact['checkout_request_id'] ?? '')] ?? (string)$fact['order_id'];
+            if ((string)$fact['performance_type'] === 'sales_performance_allocated') {
+                $salespeopleByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
+            } elseif ((string)$fact['performance_type'] === 'labor_performance_allocated') {
+                $craftsmenByOrderAndLine[$factOrderId][$lineKey][] = $fact;
+            }
+        }
+        // 纯权益导购事实归属服务回执，而列表的只读服务单 ID 是按结账请求合成的。
+        // 两种关联键只在本页已授权请求内归一，避免跨门店或同会员其他单据串行。
+        foreach (Db::name('cashier_v3_customer_guide_round_fact')
+            ->where('tenant_id', $tenantIds[0])->where('status', 'effective')
+            ->where(function ($guideScope) use ($orderIds, $requestIds): void {
+                $guideScope->whereIn('order_id', $orderIds);
+                if ($requestIds !== []) $guideScope->whereOr('checkout_request_id', 'in', $requestIds);
+            })
+            ->field('order_id,checkout_request_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $factOrderId = $requestToOrder[(string)($fact['checkout_request_id'] ?? '')] ?? (string)$fact['order_id'];
+            $guidesByOrderAndLine[$factOrderId][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['guide_employee_id'], 'employeeId' => (int)$fact['guide_employee_id'],
+                'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no'],
+            ];
+        }
+        foreach (Db::name('cashier_v3_sales_manager_fact')
+            ->whereIn('order_id', $orderIds)->where('tenant_id', $tenantIds[0])->where('status', 'effective')
+            ->field('order_id,source_line_id,sales_manager_employee_id,sales_manager_name_snapshot')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $salesManagersByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+                'id' => (string)$fact['sales_manager_employee_id'], 'employeeId' => (int)$fact['sales_manager_employee_id'],
+                'name' => (string)$fact['sales_manager_name_snapshot'],
+            ];
+        }
+        $operationsByOrder = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantIds[0])->where('source_type', 'sales')
+            ->whereIn('source_order_id', $orderIds)->where('status', 'succeeded')
+            ->field('operation_id,operation_no,source_order_id,operation_type,reason_snapshot,cash_refund_cents,reversed_cash_cents,restored_principal_cents,restored_bonus_cents,operator_id,business_date,occurred_at,status')
+            ->order('id', 'asc')->select()->toArray() as $operation) {
+            $operationsByOrder[(string)$operation['source_order_id']][] = $operation;
+        }
+        $refundLinesByOperation = [];
+        $refundOrderIds = [];
+        foreach ($operationsByOrder as $orderId => $operations) {
+            foreach ($operations as $operation) {
+                if ((string)($operation['operation_type'] ?? '') === 'refund') {
+                    $refundOrderIds[] = $orderId;
+                    break;
+                }
+            }
+        }
+        if ($refundOrderIds !== []) {
+            foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
+                ->where('tenant_id', $tenantIds[0])->whereIn('source_order_id', array_values(array_unique($refundOrderIds)))->where('status', 'succeeded')
+                ->field('operation_id,refund_line_id,sales_order_line_id,line_no,item_type_snapshot,item_name_snapshot,original_quantity,selected_sale_amount_cents,cash_refund_cents,restored_principal_cents,restored_bonus_cents,total_refund_cents,occurred_at')
+                ->order('id', 'asc')->select()->toArray() as $refundLine) {
+                $refundLinesByOperation[(string)$refundLine['operation_id']][] = $refundLine;
+            }
+        }
+        foreach ($operationsByOrder as $orderId => $operations) {
+            foreach ($operations as $index => $operation) {
+                $operations[$index]['refund_lines'] = $refundLinesByOperation[(string)$operation['operation_id']] ?? [];
+            }
+            $operationsByOrder[$orderId] = $operations;
+        }
+        $debtAuthoritiesByOrder = [];
+        $debtOrderIds = [];
+        foreach ($orderIds as $orderId) {
+            $eventSetComplete = isset($eventTypesByOrder[$orderId]['checkout.completed']);
+            if (!$eventSetComplete
+                || isset($eventTypesByOrder[$orderId]['debt.recorded'])
+                || isset($eventTypesByOrder[$orderId]['debt.repaid'])) {
+                $debtOrderIds[] = $orderId;
+            }
+        }
+        if ($debtOrderIds !== []) {
+            foreach (Db::name('cashier_v3_debt_authority')
+                ->whereIn('sales_order_id', $debtOrderIds)
+                ->field('debt_id,debt_no,sales_order_id,sales_order_no_snapshot,member_id,created_at,updated_at')
+                ->order('id', 'asc')->select()->toArray() as $debtAuthority) {
+                $debtAuthoritiesByOrder[(string)$debtAuthority['sales_order_id']][] = $debtAuthority;
+            }
+        }
+        $snapshots = [];
+        foreach ($headersByOrder as $orderId => $header) {
+            if (!empty($header['entitlement_only'])) {
+                // 纯权益只是零资金展示适配，不创建销售单或收款批次。
+                $linesByOrder[$orderId] = [];
+                $batchesByOrder[$orderId] = ['receivable_amount_cents' => 0, 'cash_performance_amount_cents' => 0,
+                    'collected_amount_cents' => 0, 'settled_at' => (int)$header['settled_at']];
+            } elseif (empty($linesByOrder[$orderId]) || !isset($batchesByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_snapshot_incomplete');
+            }
+            $requestId = trim((string)($header['checkout_request_id'] ?? ''));
+            if (empty($header['entitlement_only']) && $requestId !== '' && !isset($requestsById[$requestId])) {
+                throw new \RuntimeException('sales_order_authority_checkout_request_missing');
+            }
+            $snapshots[$orderId] = [
+                'header' => $header,
+                'batch' => $batchesByOrder[$orderId],
+                'request' => !empty($header['entitlement_only']) || $requestId === '' ? [] : $requestsById[$requestId],
+                'nonCashEntries' => $nonCashEntriesByRequest[$requestId] ?? [],
+                'lines' => $linesByOrder[$orderId],
+                'serviceFacts' => $serviceFactsByOrder[$orderId] ?? [],
+                'collections' => $collectionsByOrder[$orderId] ?? [],
+                'salespeopleByLine' => $salespeopleByOrderAndLine[$orderId] ?? [],
+                'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
+                'guidesByLine' => $guidesByOrderAndLine[$orderId] ?? [],
+                'salesManagersByLine' => $salesManagersByOrderAndLine[$orderId] ?? [],
+                'lifecycleOperations' => $operationsByOrder[$orderId] ?? [],
+                'upgradeSettlement' => $upgradeSettlementsByOrder[$orderId] ?? [],
+                'debtAuthorities' => $debtAuthoritiesByOrder[$orderId] ?? [],
+                'eventTypes' => array_keys($eventTypesByOrder[$orderId] ?? []),
+            ];
+        }
+        return $snapshots;
+    }
+
+    private function mapAuthorityOrder(array $snapshot, bool $detail): array
+    {
+        $header = $snapshot['header'];
+        $batch = $snapshot['batch'];
+        $request = $snapshot['request'];
+        // The batch receivable includes both accounting collections and the
+        // member-balance deduction. Debt and upgrade credit are excluded.
+        // The formal sales order still records the full settled sale amount.
+        $cashReceivableCents = (int)$batch['receivable_amount_cents'];
+        $receivableCents = (int)$header['sale_amount_cents'];
+        $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
+        $debtCents = (int)($request['debt_amount_cents'] ?? 0);
+        $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
+        $collectedDraftIds = array_fill_keys(array_map(static function (array $collection): string {
+            return (string)($collection['checkout_payment_draft_id'] ?? '');
+        }, (array)$snapshot['collections']), true);
+        $nonCashEntries = array_values(array_filter((array)($snapshot['nonCashEntries'] ?? []),
+            static function (array $entry) use ($collectedDraftIds): bool {
+                return !isset($collectedDraftIds[(string)$entry['payment_draft_id']]);
+            }));
+        $legacyEntries = array_values(array_filter($nonCashEntries, static function (array $entry): bool {
+            return (string)$entry['payment_method'] === 'old_card_entry';
+        }));
+        $nonCashCents = array_sum(array_map(static function (array $entry): int {
+            return (int)$entry['amount_cents'];
+        }, $nonCashEntries));
+        $legacyEntryCents = count($legacyEntries) === 1 ? (int)$legacyEntries[0]['amount_cents'] : 0;
+        $legacyEntryValid = $legacyEntries === [] || (
+            count($legacyEntries) === 1
+            && count($nonCashEntries) === 1
+            && $legacyEntryCents > 0
+            && (int)($request['selected_payment_amount_cents'] ?? -1) === $legacyEntryCents
+            && $cashPerformanceCents === 0
+            && $balanceCents === 0
+            && $snapshot['collections'] === []
+        );
+        $couponDiscountCents = 0;
+        $couponPaymentCents = 0;
+        $priceChangeDiscountCents = 0;
+        foreach ((array)($snapshot['lines'] ?? []) as $line) {
+            $coupon = max(0, (int)($line['coupon_discount_cents'] ?? 0));
+            $discount = max(0, (int)($line['discount_amount_cents'] ?? 0));
+            $couponDiscountCents += $coupon;
+            $couponPaymentCents += max(0, (int)($line['coupon_payment_cents'] ?? 0));
+            $priceChangeDiscountCents += max(0, $discount - $coupon);
+        }
+        // The formal sale keeps the card's pre-voucher purchase value; the
+        // order list's receivable remains the amount owed after voucher.
+        $receivableCents -= $couponPaymentCents;
+        $headerDiscountCents = max(0, (int)($header['discount_amount_cents'] ?? 0));
+        // card_operation_settlement.cash_delta_cents is the immutable cash
+        // delta before order-level discounts (coupon/price-change).  The
+        // formal sales order is recorded after those discounts, so include
+        // the snapshot discount when validating the upgrade component.
+        $discountCents = max($headerDiscountCents, $couponDiscountCents + $priceChangeDiscountCents);
+        $upgradeSettlement = is_array($snapshot['upgradeSettlement'] ?? null)
+            ? $snapshot['upgradeSettlement'] : [];
+        $entitlementCreditCents = (int)($upgradeSettlement['entitlement_credit_cents'] ?? 0);
+        $hasUpgradeSettlement = $upgradeSettlement !== [];
+        $upgradeType = (string)($upgradeSettlement['operation_type'] ?? '');
+        $upgradeTypeLabel = (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
+            ? ($upgradeType === 'project_upgrade' ? '项目升级' : ($upgradeType === 'card_upgrade' ? '卡升级' : ''))
+            : '';
+        $upgradeSettlementValid = !$hasUpgradeSettlement || (
+            (string)($upgradeSettlement['settlement_status'] ?? '') === 'settled'
+            && in_array((string)($upgradeSettlement['operation_type'] ?? ''), ['card_upgrade', 'project_upgrade'], true)
+            && $entitlementCreditCents >= 0
+            && (int)($upgradeSettlement['cash_delta_cents'] ?? -1) === $receivableCents + $discountCents - $entitlementCreditCents
+        );
+        $settlementEquationValid = $upgradeSettlementValid && $legacyEntryValid
+            && $entitlementCreditCents >= 0
+            && (int)$batch['collected_amount_cents'] === $cashPerformanceCents
+            && $nonCashCents >= 0
+            && $cashPerformanceCents + $nonCashCents === (int)($request['selected_payment_amount_cents'] ?? -1)
+            && $debtCents >= 0
+            && $balanceCents >= 0
+            && $cashReceivableCents >= 0
+            && $cashPerformanceCents + $nonCashCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
+            && $cashReceivableCents + $debtCents + $entitlementCreditCents === $receivableCents
+            && $cashPerformanceCents + $nonCashCents + $balanceCents === $cashReceivableCents;
+        if (!$settlementEquationValid) {
+            // A bad historical snapshot must stay visible for reconciliation,
+            // but cannot make unrelated business records disappear or expose
+            // untrustworthy amounts as normal settlement data.
+            $receivableCents = 0;
+            $cashPerformanceCents = 0;
+            $debtCents = 0;
+            $balanceCents = 0;
+        }
+        $items = [];
+        $purchaseLineIds = [];
+        $serviceFactsBySourceLine = [];
+        foreach ((array)($snapshot['serviceFacts'] ?? []) as $serviceFact) {
+            $sourceLineId = trim((string)($serviceFact['source_line_id'] ?? ''));
+            if ($sourceLineId !== '') $serviceFactsBySourceLine[$sourceLineId] = $serviceFact;
+        }
+        $salespersonNames = [];
+        foreach ($snapshot['lines'] as $line) {
+            $lineId = (string)$line['order_line_id'];
+            $purchaseLineIds[$lineId] = true;
+            $checkoutLineId = trim((string)($line['checkout_line_id'] ?? ''));
+            $salesManagers = $snapshot['salesManagersByLine'][$lineId] ?? [];
+            if ($salesManagers === [] && $checkoutLineId !== '') {
+                $salesManagers = $snapshot['salesManagersByLine'][$checkoutLineId] ?? [];
+            }
+            $guides = $snapshot['guidesByLine'][$lineId] ?? [];
+            if ($guides === [] && $checkoutLineId !== '') {
+                $guides = $snapshot['guidesByLine'][$checkoutLineId] ?? [];
+            }
+            $items[] = $this->mapAuthorityLine(
+                $line,
+                $snapshot['salespeopleByLine'][$lineId] ?? [],
+                $snapshot['craftsmenByLine'][$lineId] ?? [],
+                $salesManagers,
+                $guides,
+                $serviceFactsBySourceLine[$lineId] ?? null
+            );
+            foreach ($snapshot['salespeopleByLine'][$lineId] ?? [] as $person) {
+                $name = $this->salespersonDisplayName($person);
+                if ($name !== '') $salespersonNames[$name] = true;
+            }
+        }
+        // 直接购买项目会同时产生服务事实，但它仍是上面的“购买”行。
+        // 只有没有对应正式销售明细的服务事实，才作为“权益”行附加展示。
+        foreach ((array)($snapshot['serviceFacts'] ?? []) as $serviceFact) {
+            $sourceLineId = trim((string)($serviceFact['source_line_id'] ?? ''));
+            if ($sourceLineId === '' || isset($purchaseLineIds[$sourceLineId])) continue;
+            $items[] = $this->mapEntitlementServiceLine(
+                $serviceFact,
+                $snapshot['craftsmenByLine'][$sourceLineId] ?? [],
+                $snapshot['guidesByLine'][$sourceLineId] ?? []
+            );
+        }
+        $itemNames = array_values(array_unique(array_filter(array_map(function (array $item): string {
+            return trim((string)$item['name']);
+        }, $items))));
+        $itemSummary = implode('、', array_slice($itemNames, 0, 3));
+        if (count($itemNames) > 3) $itemSummary .= ' 等' . count($itemNames) . '项';
+        $paymentNames = [];
+        foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
+        foreach ($nonCashEntries as $entry) {
+            $paymentNames[(string)$entry['payment_method'] === 'old_card_entry' ? '旧数据录入' : '其他收款'] = true;
+        }
+        if ($balanceCents > 0) $paymentNames['余额支付'] = true;
+        if ($couponPaymentCents > 0) $paymentNames['抵用券抵付'] = true;
+        $memberName = trim((string)$header['member_name_snapshot']);
+        $operations = (array)($snapshot['lifecycleOperations'] ?? []);
+        $terminal = null;
+        foreach ($operations as $operation) {
+            if (in_array((string)$operation['operation_type'], ['refund', 'void'], true)) $terminal = $operation;
+        }
+        $refundLineCount = $terminal && (string)$terminal['operation_type'] === 'refund'
+            ? count((array)($terminal['refund_lines'] ?? [])) : 0;
+        $refundTotalCents = 0;
+        foreach ((array)($terminal['refund_lines'] ?? []) as $refundLine) $refundTotalCents += (int)($refundLine['total_refund_cents'] ?? 0);
+        $purchaseLineCount = count((array)$snapshot['lines']);
+        $isPartialRefund = $terminal && (string)$terminal['operation_type'] === 'refund'
+            && ($refundLineCount < $purchaseLineCount || $refundTotalCents < (int)$header['sale_amount_cents']);
+        $orderStatus = !$settlementEquationValid
+            ? '数据异常'
+            : ($terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : ($isPartialRefund ? '部分退款' : '已退款')) : '正常');
+        $paymentStatus = !$settlementEquationValid
+            ? '数据异常'
+            : ($debtCents > 0 ? '部分支付（含欠款）' : '已支付');
+        $economicsStatus = $settlementEquationValid ? 'ready' : 'integrity_failed';
+        $mapped = [
+            'id' => (string)$header['order_id'], 'orderId' => (string)$header['order_id'],
+            // 订单中心可由旧订单投影展示，但所有退款、作废、备注和人员
+            // 调整命令必须绑定 V3 销售订单资源，而不是浏览器展示行 ID。
+            'lifecycleOrderId' => (string)$header['order_id'],
+            'revision' => 1 + count($operations),
+            'salesOrderNo' => (string)$header['order_no'], 'sales_order_no' => (string)$header['order_no'],
+            // 主项标签只来自已结算的升级事实，避免根据商品名称猜测升级类型。
+            'upgradeType' => $upgradeType,
+            'upgradeTypeLabel' => $upgradeTypeLabel,
+            'memberId' => (int)$header['member_id'], 'memberName' => $memberName !== '' ? $memberName : '游客',
+            'member_name' => $memberName !== '' ? $memberName : '游客', 'phone' => '',
+            'isGuest' => (int)$header['member_id'] <= 0,
+            'storeId' => (int)$header['store_id'], 'storeName' => (string)$header['store_name_snapshot'],
+            'storeSnapshotStatus' => 'ready', 'businessDate' => (string)$header['business_date'],
+            'business_date' => (string)$header['business_date'], 'businessTimezone' => (string)$header['business_timezone'],
+            'businessDateBasis' => 'v3_sales_order_authority',
+            'occurredAt' => $this->formatTimestamp((int)$header['occurred_at'], 'Y-m-d H:i:s'),
+            'paymentCompletedAt' => $this->formatTimestamp((int)$batch['settled_at'], 'Y-m-d H:i:s'),
+            'settledAt' => $this->formatTimestamp((int)$header['settled_at'], 'Y-m-d H:i:s'),
+            'itemSummary' => $itemSummary, 'item_summary' => $itemSummary,
+            // 权益服务行只是关联展示，订单商品数仍以正式销售行为准。
+            'itemCount' => array_sum(array_map(static function (array $line): int { return (int)$line['quantity']; }, (array)$snapshot['lines'])),
+            'item_count' => array_sum(array_map(static function (array $line): int { return (int)$line['quantity']; }, (array)$snapshot['lines'])),
+            'orderStatus' => $orderStatus, 'order_status' => $orderStatus,
+            'paymentStatus' => $paymentStatus, 'payment_status' => $paymentStatus,
+            'receivableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'receivable_amount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'amountBeforeCoupon' => $settlementEquationValid ? $this->moneyFromCents($receivableCents + $couponDiscountCents + $couponPaymentCents) : null,
+            'discountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            'discount_amount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            // 列表的优惠券取正式销售明细快照之和，不把它再计作收款或欠款。
+            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
+            'coupon_discount_amount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
+            'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'debt_amount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
+            'actual_received_amount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
+            'paymentMethod' => implode('、', array_keys($paymentNames)), 'payment_method' => implode('、', array_keys($paymentNames)),
+            'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
+            'orderNote' => (string)($header['order_note'] ?? ''),
+            'source' => $this->businessSourceLabel($header),
+            // 更正命令比较原始快照；列表占位符“—”不能冒充已保存的来源。
+            'sourceExpectedValue' => $this->businessSourceLabel($header, false),
+            'businessSourcePrimaryId' => (int)$header['business_source_primary_id'],
+            'businessSourceSecondaryId' => (int)$header['business_source_secondary_id'],
+            'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
+            'dataIntegrityStatus' => $settlementEquationValid ? 'valid' : 'settlement_equation_invalid',
+            'contractVersion' => self::CONTRACT_VERSION,
+            'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order', 'correct-sales-order-attribution'] : array_values(array_filter([
+                'correct-sales-order-attribution',
+                'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
+                'update-sales-order-note',
+                'reopen-sales-order',
+                // 游客没有会员欠款账户，不能进入补交链路。
+                (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
+                // 旧消费订单退款暂不开放；历史退款仍可查，统一退款入口接通后另行启用。
+                // 作废仍是严格的全量回滚路径，具体资格由服务端二次校验。
+                'void-sales-order',
+            ]))),
+        ];
+        // 查询列表也需要明细行来保持“正常列表”的分组展示；明细页继续复用同一份权威快照。
+        $mapped['items'] = $items;
+        if (!empty($header['entitlement_only'])) {
+            // 服务单据可复用详情/打印，作废走服务冲销；不授予销售资金操作。
+            $mapped['entitlementOnly'] = true;
+            // 纯权益单即使只有一条服务也按结账请求整单作废。显式返回权威组标识，
+            // 避免浏览器从展示用订单 ID 或服务记录号反推写命令的作用范围。
+            $mapped['checkoutRequestId'] = (string)$header['checkout_request_id'];
+            $mapped['lifecycleOrderId'] = '';
+            $mapped['businessDateBasis'] = 'v3_service_fact';
+            $mapped['paymentStatus'] = $mapped['payment_status'] = '无需收款';
+            $allVoided = $items !== [] && count(array_filter($items, static function (array $item): bool {
+                return !empty($item['voidedAt']);
+            })) === count($items);
+            // 纯服务单按结账请求或预约完成事件整组更正，避免同次服务各行出现不同日期或来源。
+            // 纯权益的导购改派走服务行事实，不误授销售主单的人员调整动作。
+            $mapped['availableActions'] = $allVoided ? [] : [
+                'correct-service-order-date', 'correct-service-order-attribution', 'correct-service-order-guide',
+            ];
+            $mapped['orderStatus'] = $mapped['order_status'] = $allVoided ? '已作废' : '正常';
+        }
+        // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
+        $mapped['paymentDetails'] = !$settlementEquationValid ? [] : array_map(function (array $collection): array {
+            return [
+                'id' => (string)$collection['collection_id'],
+                'paymentMethodCode' => (string)$collection['payment_method'],
+                'methodName' => $this->paymentMethodName($collection),
+                'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
+                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'],
+                'remark' => (string)$collection['remark_snapshot'],
+                'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }, $snapshot['collections']);
+        foreach ($settlementEquationValid ? $nonCashEntries : [] as $entry) {
+            $method = (string)$entry['payment_method'];
+            $mapped['paymentDetails'][] = [
+                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => $method,
+                'methodName' => $method === 'old_card_entry' ? '旧数据录入' : '其他收款',
+                'amount' => $this->moneyFromCents((int)$entry['amount_cents']),
+                'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
+                'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }
+        if ($settlementEquationValid && $balanceCents > 0) {
+            // A balance debit is committed in the checkout transaction, but is
+            // not a payment-collection row or cash-performance amount.
+            $mapped['paymentDetails'][] = [
+                'id' => 'balance:' . (string)$header['checkout_request_id'],
+                'paymentMethodCode' => 'member_balance', 'methodName' => '余额支付',
+                'amount' => $this->moneyFromCents($balanceCents),
+                'externalTransactionNo' => '', 'remark' => '',
+                'occurredAt' => $this->formatTimestamp((int)$batch['settled_at'], 'Y-m-d H:i:s'),
+            ];
+        }
+        if (!$detail) return $mapped;
+        // The order note is a sales-order header fact. Do not replace it with
+        // payment collection remarks when opening the detail projection.
+        $mapped['orderNote'] = (string)($header['order_note'] ?? '');
+        $mapped['amountSummary'] = [
+            'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
+            'priceChangeDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($priceChangeDiscountCents) : null,
+            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
+            'otherDiscountAmount' => $settlementEquationValid
+                ? $this->moneyFromCents(max(0, $headerDiscountCents - $priceChangeDiscountCents - $couponDiscountCents)) : null,
+            'entitlementCreditAmount' => $settlementEquationValid ? $this->moneyFromCents($entitlementCreditCents) : null,
+            'payableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
+            'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
+            'balancePaymentAmount' => $settlementEquationValid ? $this->moneyFromCents($balanceCents) : null,
+            'dataStatus' => $economicsStatus,
+        ];
+        $mapped['paymentDetailsDataStatus'] = $economicsStatus;
+        $mapped['cardBatches'] = [];
+        $operationRecords = array_map(function (array $operation): array {
+            $labels = ['personnel_adjustment' => '人员调整', 'refund' => '退款', 'void' => '作废', 'reopen' => '重开'];
+            $type = (string)$operation['operation_type'];
+            $status = (string)$operation['status'];
+            return ['id' => (string)$operation['operation_id'], 'operationNo' => (string)$operation['operation_no'],
+                'operationType' => (string)$operation['operation_type'], 'status' => $status,
+                'statusLabel' => $this->operationStatusLabel($status),
+                'actionLabel' => $labels[$type] ?? '订单操作',
+                'reason' => (string)$operation['reason_snapshot'], 'content' => (string)$operation['reason_snapshot'],
+                'cashRefundAmount' => $this->moneyFromCents((int)$operation['cash_refund_cents']),
+                'reversedCashAmount' => $this->moneyFromCents((int)$operation['reversed_cash_cents']),
+                'restoredPrincipalAmount' => $this->moneyFromCents((int)$operation['restored_principal_cents']),
+                'restoredBonusAmount' => $this->moneyFromCents((int)$operation['restored_bonus_cents']),
+                'refundLines' => array_map(function (array $line): array {
+                    return [
+                        'id' => (string)$line['refund_line_id'], 'orderLineId' => (string)$line['sales_order_line_id'],
+                        'itemName' => (string)$line['item_name_snapshot'], 'itemType' => (string)$line['item_type_snapshot'],
+                        'quantity' => (int)$line['original_quantity'], 'saleAmount' => $this->moneyFromCents((int)$line['selected_sale_amount_cents']),
+                        'cashRefundAmount' => $this->moneyFromCents((int)$line['cash_refund_cents']),
+                        'restoredPrincipalAmount' => $this->moneyFromCents((int)$line['restored_principal_cents']),
+                        'restoredBonusAmount' => $this->moneyFromCents((int)$line['restored_bonus_cents']),
+                        'totalRefundAmount' => $this->moneyFromCents((int)$line['total_refund_cents']),
+                    ];
+                }, (array)($operation['refund_lines'] ?? [])),
+                'operatorId' => (int)$operation['operator_id'], 'operatorName' => '操作人#' . (int)$operation['operator_id'],
+                'businessDate' => (string)$operation['business_date'],
+                'occurredAt' => $this->formatTimestamp((int)$operation['occurred_at'], 'Y-m-d H:i:s')];
+        }, $operations);
+        $upgradeRecord = [];
+        if ($hasUpgradeSettlement) {
+            $operationId = (string)($upgradeSettlement['operation_id'] ?? '');
+            $operation = null;
+            foreach ($operations as $candidate) {
+                if ((string)($candidate['operation_id'] ?? '') === $operationId) {
+                    $operation = $candidate;
+                    break;
+                }
+            }
+            $upgradeRecord[] = [
+                'id' => $operationId,
+                'recordId' => $operationId,
+                'recordNo' => (string)($operation['operation_no'] ?? $operationId),
+                'operationType' => (string)($upgradeSettlement['operation_type'] ?? 'card_upgrade'),
+                'status' => (string)($upgradeSettlement['settlement_status'] ?? 'settled'),
+                'statusLabel' => '已完成',
+                'amount' => $this->moneyFromCents((int)($upgradeSettlement['cash_delta_cents'] ?? 0)),
+                'entitlementCreditAmount' => $this->moneyFromCents((int)($upgradeSettlement['entitlement_credit_cents'] ?? 0)),
+                'excessWriteoffAmount' => $this->moneyFromCents((int)($upgradeSettlement['excess_writeoff_cents'] ?? 0)),
+                'sourceCards' => array_map(function (array $source): array {
+                    return [
+                        'lineNo' => (int)($source['line_no'] ?? 0),
+                        'name' => (string)($source['source_card_name_snapshot'] ?? ''),
+                        'cardNo' => (string)($source['source_card_no_snapshot'] ?? ''),
+                        'remainingValue' => $this->moneyFromCents((int)($source['source_remaining_value_cents'] ?? 0)),
+                        'creditAmount' => $this->moneyFromCents((int)($source['credit_cents'] ?? 0)),
+                        'excessWriteoffAmount' => $this->moneyFromCents((int)($source['excess_writeoff_cents'] ?? 0)),
+                    ];
+                }, (array)($upgradeSettlement['source_cards'] ?? [])),
+            ];
+        }
+        $debtRecords = array_map(function (array $debt) use ($debtCents): array {
+            return [
+                'id' => (string)($debt['debt_id'] ?? ''),
+                'recordId' => (string)($debt['debt_id'] ?? ''),
+                'recordNo' => (string)($debt['debt_no'] ?? ''),
+                'salesOrderNo' => (string)($debt['sales_order_no_snapshot'] ?? ''),
+                'status' => 'open',
+                'statusLabel' => '待还款',
+                'amount' => $this->moneyFromCents($debtCents),
+            ];
+        }, (array)($snapshot['debtAuthorities'] ?? []));
+        $mapped['related'] = [
+            'debtSettlements' => $debtRecords,
+            'refunds' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'refund'; })),
+            'voids' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'void'; })),
+            'reopenings' => array_values(array_filter($operationRecords, static function (array $row): bool { return $row['operationType'] === 'reopen'; })),
+            'upgrades' => $upgradeRecord, 'gifts' => [], 'services' => [], 'writeoffs' => [], 'operationLogs' => $operationRecords,
+        ];
+        $refundLineDetails = [];
+        foreach ($operationRecords as $operation) {
+            if ($operation['operationType'] !== 'refund') continue;
+            foreach ((array)($operation['refundLines'] ?? []) as $refundLine) {
+                $refundLineDetails[] = $refundLine;
+            }
+        }
+        $mapped['refundLineDetails'] = $refundLineDetails;
+        $mapped['relatedDataStatus'] = 'ready';
+        return $mapped;
+    }
+
+    private function operationStatusLabel(string $status): string
+    {
+        return [
+            'succeeded' => '已完成',
+            'success' => '已完成',
+            'failed' => '失败',
+            'conflict' => '版本冲突',
+            'result_unknown' => '结果未知',
+            'pending' => '处理中',
+            'processing' => '处理中',
+        ][$status] ?? (preg_match('/[\\x{4e00}-\\x{9fff}]/u', $status) === 1 ? $status : '处理中');
+    }
+
+    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = [], array $salesManagers = [], array $guides = [], ?array $serviceFact = null): array
+    {
+        $quantity = max(0, (int)$line['quantity']);
+        $type = strtolower((string)$line['item_type']) === 'card' ? '卡项' : (strtolower((string)$line['item_type']) === 'project' ? '项目' : '商品');
+        return [
+            'id' => (string)$line['order_line_id'], 'orderItemId' => (string)$line['order_line_id'], 'itemType' => $type,
+            // 直接购买项目即使产生了服务记录，交易性质仍是购买，不标成权益。
+            'businessTag' => '购买',
+            'name' => (string)$line['item_name_snapshot'], 'purchaseSpec' => '', 'quantity' => $quantity,
+            '_categoryProductIds' => $this->categoryProductIdsForAuthorityLine($line),
+            '_categorySkuIds' => $this->categorySkuIdsForAuthorityLine($line),
+            'unitPrice' => $quantity > 0 ? $this->moneyFromCents((int)$line['original_amount_cents']) / $quantity : null,
+            'originalAmount' => $this->moneyFromCents((int)$line['original_amount_cents']),
+            'priceChangeDiscountAmount' => $this->moneyFromCents(max(0, (int)($line['discount_amount_cents'] ?? 0) - (int)($line['coupon_discount_cents'] ?? 0))),
+            'couponDiscountAmount' => $this->moneyFromCents((int)($line['coupon_discount_cents'] ?? 0) + (int)($line['coupon_payment_cents'] ?? 0)),
+            'couponName' => (string)($line['coupon_name_snapshot'] ?? ''),
+            // 列表“金额”是用券前成交金额；应收仍是用券后的结算金额。
+            'amountBeforeCoupon' => $this->moneyFromCents((int)$line['sale_amount_cents'] + (int)($line['coupon_discount_cents'] ?? 0)),
+            'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents'] - (int)($line['coupon_payment_cents'] ?? 0)),
+            'debtAmount' => $this->moneyFromCents((int)($line['debt_amount_cents'] ?? 0)),
+            'actualReceivedAmount' => null, 'economicsDataStatus' => 'ready', 'snapshotStatus' => 'ready',
+            // 购买次数只读取销售明细在结账时冻结的购卡快照；绝不从当前
+            // 剩余权益、当前卡项配置或服务记录反推，避免历史订单被后续
+            // 核销、作废以外的配置变更改写。
+            'cardPurchaseTimes' => $type === '卡项'
+                ? $this->cardPurchaseTimesSnapshot($line['card_purchase_snapshot_json'] ?? null)
+                : [],
+            // These labels must come from the order-line snapshot, not current service settings.
+            'serviceRecipientType' => (string)($line['service_object'] ?? ''),
+            'friendCountsAsCustomer' => (int)($line['friend_counts_as_customer'] ?? 1) === 1,
+            'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
+            // Product presale is a frozen sales-line choice, not a product-name
+            // property or the current claim balance; sibling lines stay independent.
+            'isPresale' => $type === '商品' && (int)($line['is_presale'] ?? 0) === 1,
+            // Only an explicit frozen zero means no outbound. Missing history,
+            // non-products and later stock/claim activity cannot imply this label.
+            'isNoOutbound' => $type === '商品' && in_array($line['inventory_outbound_required'] ?? null, [0, '0'], true),
+            'detailRemark' => (string)($line['detail_remark_snapshot'] ?? ''),
+            'salespeople' => array_map(function (array $person): array {
+                return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
+                    'employeeType' => (string)$person['employee_type_snapshot'], 'roleSnapshot' => (string)($person['role_snapshot'] ?? ''), 'allocationWeight' => (int)$person['allocation_weight_numerator'],
+                    'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'],
+                    'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                    'performanceAmountCents' => max(0, (int)$person['amount_cents']),
+                    'performanceAmountManual' => strpos((string)($person['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
+                ];
+            }, $salespeople),
+            'craftsmen' => $this->salesLineCraftsmen($craftsmen, $line),
+            'craftsmenListAllocations' => $this->craftsmenDisplayAllocations(
+                $craftsmen,
+                (string)($serviceFact['craftsmen_snapshot_json'] ?? $line['craftsmen_snapshot_json'] ?? '')
+            ),
+            'serviceFactId' => $serviceFact !== null ? (int)($serviceFact['id'] ?? 0) : null,
+            'serviceRecordNo' => $serviceFact !== null
+                ? (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')) : '',
+            'serviceStatus' => $serviceFact !== null ? (string)($serviceFact['service_status'] ?? '') : '',
+            'voidedAt' => $serviceFact !== null && !empty($serviceFact['void_operation_id'])
+                ? (int)($serviceFact['voided_at'] ?? 0) : null,
+            'salesManagers' => array_values($salesManagers),
+            'guides' => array_values($guides),
+        ];
+    }
+
+    /**
+     * 权益行是同次结账中已完成的服务事实，不是销售明细。因此它只提供
+     * 展示核销权益单次金额和总金额，以及该服务行自身的导购归属；
+     * 销售应付/收款仍为空，不进入销售合计。
+     */
+    private function mapEntitlementServiceLine(array $serviceFact, array $craftsmen, array $guides = []): array
+    {
+        $quantity = max(0, (int)$serviceFact['quantity']);
+        $actualCents = isset($serviceFact['actual_entitlement_amount_cents']) ? max(0, (int)$serviceFact['actual_entitlement_amount_cents']) : null;
+        $remainingTimes = isset($serviceFact['total_purchase_times_snapshot'], $serviceFact['consumed_times_before_snapshot'])
+            ? max(
+                0,
+                (int)$serviceFact['total_purchase_times_snapshot']
+                    - (int)$serviceFact['consumed_times_before_snapshot']
+                    - max(0, (int)($serviceFact['writeoff_quantity'] ?? $quantity))
+            )
+            : null;
+        // 权益服务事实保存的是服务核销快照，早期直通结算使用 snake_case；
+        // 它不是销售明细的结账快照，不能交给 salesLineCraftsmen 的兜底解码。
+        $snapshotJson = (string)($serviceFact['craftsmen_snapshot_json'] ?? '');
+        return [
+            'id' => 'service:' . (int)$serviceFact['id'],
+            'orderItemId' => '',
+            'itemType' => '项目',
+            'businessTag' => '权益',
+            'name' => (string)$serviceFact['project_name_snapshot'],
+            '_categoryProductIds' => array_filter([(int)($serviceFact['project_id'] ?? 0)]),
+            // 项目 ID 来自已授权服务事实；跨门店核销仍保留来源门店商品 ID。
+            '_categoryVerifiedFactItems' => true,
+            // 卡名称和卡号只取本次核销冻结的卡来源；独立赠送不是卡，不能借用当前卡档冒充历史来源。
+            'cardName' => (string)($serviceFact['entitlement_instance_type'] ?? '') === 'card_holder'
+                ? (string)($serviceFact['source_name_snapshot'] ?? '') : '',
+            'cardNo' => (string)($serviceFact['entitlement_instance_type'] ?? '') === 'card_holder'
+                ? (string)($serviceFact['source_code_snapshot'] ?? '') : '',
+            'purchaseSpec' => '',
+            'quantity' => max(0, (int)$serviceFact['quantity']),
+            // 票据展示本次核销后的冻结余次，不读取会随后续核销变化的当前会员权益。
+            'remainingTimes' => $remainingTimes,
+            'unitPrice' => $actualCents !== null && $quantity > 0 ? $this->moneyFromCents(intdiv($actualCents + intdiv($quantity, 2), $quantity)) : null,
+            'entitlementAmount' => $actualCents !== null ? $this->moneyFromCents($actualCents) : null,
+            'originalAmount' => null,
+            'priceChangeDiscountAmount' => null,
+            'couponDiscountAmount' => null,
+            'couponName' => '',
+            'payableAmount' => null,
+            'debtAmount' => null,
+            'actualReceivedAmount' => null,
+            'economicsDataStatus' => 'not_applicable',
+            'snapshotStatus' => 'ready',
+            // Entitlement service has its own completed-service snapshot rather than a sales line.
+            'serviceRecipientType' => (string)($serviceFact['service_object'] ?? ''),
+            'friendCountsAsCustomer' => (int)($serviceFact['friend_counts_as_customer'] ?? 1) === 1,
+            'isExperience' => (int)($serviceFact['is_experience'] ?? 0) === 1,
+            'detailRemark' => (string)($serviceFact['detail_remark_snapshot'] ?? ''),
+            'salespeople' => [],
+            'salesManagers' => [],
+            'guides' => array_values($guides),
+            'craftsmen' => $craftsmen === []
+                ? $this->craftsmenForEntitlementServiceFact($snapshotJson)
+                : $this->salesLineCraftsmen($craftsmen, []),
+            'craftsmenListAllocations' => $this->craftsmenDisplayAllocations(
+                $craftsmen,
+                $snapshotJson
+            ),
+            'serviceFactId' => (int)$serviceFact['id'],
+            'serviceRecordNo' => (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')),
+            'serviceStatus' => (string)($serviceFact['service_status'] ?? ''),
+            'voidedAt' => !empty($serviceFact['void_operation_id']) ? (int)($serviceFact['voided_at'] ?? 0) : null,
+        ];
+    }
+
+    /**
+     * 只覆盖同一结账请求、同一服务行的展示金额；旧快照和其他权益行保持原值。
+     * 更正事实按 ID 倒序传入，重复更正时以最新有效正向事实为准。
+     *
+     * @param array<int,array<string,mixed>> $serviceRows
+     * @param array<int,array<string,mixed>> $corrections
+     * @return array<int,array<string,mixed>>
+     */
+    private function applyCorrectedEntitlementAmounts(array $serviceRows, array $corrections): array
+    {
+        $amounts = [];
+        foreach ($corrections as $correction) {
+            $requestId = (string)($correction['checkout_request_id'] ?? '');
+            $lineId = (string)($correction['source_line_id'] ?? '');
+            if ($requestId === '' || $lineId === '' || isset($amounts[$requestId][$lineId])) continue;
+            $amounts[$requestId][$lineId] = max(0, (int)$correction['amount_cents']);
+        }
+        foreach ($serviceRows as &$serviceRow) {
+            $requestId = (string)($serviceRow['checkout_request_id'] ?? '');
+            $lineId = (string)($serviceRow['source_line_id'] ?? '');
+            if (isset($amounts[$requestId][$lineId])) {
+                $serviceRow['actual_entitlement_amount_cents'] = $amounts[$requestId][$lineId];
+            }
+        }
+        unset($serviceRow);
+        return $serviceRows;
+    }
+
+    /**
+     * Personnel adjustments and the R32 shared-card correction replace the
+     * displayed assignment. Refund and void reversals affect accounting totals
+     * but preserve the last salesperson/craftsman snapshot on the source order.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function effectivePersonnelFacts(array $orderIds, string $tenantId, array $serviceFactIds = [], array $requestIds = []): array
+    {
+        $adjustmentCommandKeys = [];
+        foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('tenant_id', $tenantId)->where('source_type', 'sales')
+            ->whereIn('source_order_id', $orderIds)->where('operation_type', 'personnel_adjustment')
+            ->where('status', 'succeeded')->field('command_idempotency_key')->select()->toArray() as $operation) {
+            $commandKey = trim((string)($operation['command_idempotency_key'] ?? ''));
+            if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
+        }
+        // 服务记录修改与销售单人员修改使用不同操作表，但都以
+        // reversal_of 替换旧事实。合并展示时必须同时识别两类命令，
+        // 否则修改手艺人后会把新旧人员一起显示。
+        if ($serviceFactIds !== []) {
+            foreach (Db::name('cashier_v3_service_record_adjustment_operation')
+                ->where('tenant_id', $tenantId)->whereIn('service_fact_id', array_values(array_unique($serviceFactIds)))
+                ->where('status', 'succeeded')->field('command_idempotency_key')->select()->toArray() as $operation) {
+                $commandKey = trim((string)($operation['command_idempotency_key'] ?? ''));
+                if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
+            }
+        }
+        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($orderIds, $requestIds): void {
+                $query->whereIn('order_id', $orderIds);
+                if ($requestIds !== []) $query->whereOr('checkout_request_id', 'in', $requestIds);
+            })
+            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
+            ->where('status', 'effective')
+            ->whereIn('fact_direction', ['forward', 'reversal'])
+            ->field('id,fact_id,order_id,checkout_request_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
+            ->order('id', 'asc')->select()->toArray();
+        return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function displayedPersonnelFacts(array $rows, array $adjustmentCommandKeys): array
+    {
+        $reversed = [];
+        foreach ($rows as $row) {
+            $commandKey = (string)($row['command_idempotency_key'] ?? '');
+            if ((string)$row['fact_direction'] === 'reversal'
+                // R47 moved an adjustment fact from its edit date back to the sale date by
+                // writing a reversal plus replacement. Treat that chain as a terminal
+                // personnel correction; refund/void reversals must still preserve the
+                // original order snapshot shown here.
+                && (isset($adjustmentCommandKeys[$commandKey])
+                    || strpos($commandKey, 'r47_personnel_date:') === 0
+                    || (string)($row['rule_code_snapshot'] ?? '') === 'SHARED-CARD-PURCHASE-REPAIR-R32')
+                && (string)($row['reversal_of'] ?? '') !== '') {
+                $reversed[(string)$row['reversal_of']] = true;
+            }
+        }
+        return array_values(array_filter($rows, static function (array $row) use ($reversed): bool {
+            return (string)$row['fact_direction'] === 'forward' && !isset($reversed[(string)$row['fact_id']]);
+        }));
+    }
+
+    private function authorityPagePayload(array $criteria, array $records, int $total): array
+    {
+        $payload = $this->pagePayload($criteria, $records, $total, 'authority_v3');
+        $payload['economicsDataStatus'] = 'ready';
+        return $payload;
+    }
+
+    private function assertRowsAuthorized(array $rows, array $criteria, bool $listQuery): void
+    {
+        foreach ($rows as $row) {
+            $pid = (int)($row['pid'] ?? -999);
+            $authorized = is_array($row)
+                && (int)($row['id'] ?? 0) > 0
+                && (int)($row['order_type'] ?? -1) === 0
+                && (int)($row['is_debt_repay'] ?? 1) === 0
+                && (int)($row['paid'] ?? 0) === 1
+                && (int)($row['pay_time'] ?? 0) > 0
+                && in_array((int)($row['is_del'] ?? -1), [0, 1], true)
+                && (int)($row['is_system_del'] ?? 1) === 0
+                && ($pid >= 0 || $pid === -2);
+            if ($authorized && $criteria['allowedStoreIds'] !== null) {
+                $authorized = in_array((int)($row['store_id'] ?? 0), $criteria['allowedStoreIds'], true);
+            }
+            if ($authorized && !$listQuery) {
+                $authorized = $criteria['orderId'] !== null
+                    ? (int)$row['id'] === (int)$criteria['orderId']
+                    : (string)($row['order_id'] ?? '') === (string)$criteria['orderNo'];
+            }
+            if ($authorized && $listQuery) {
+                $authorized = (int)$row['pay_time'] <= (int)$criteria['queryCutoffTimestamp']
+                    && (int)$row['id'] <= (int)$criteria['snapshotMaxOrderId']
+                    && ($criteria['status'] === '' || $this->rowStatusCode($row) === $criteria['status']);
+                if ($authorized && $criteria['afterPayTime'] !== null && $criteria['afterOrderId'] !== null) {
+                    $payTime = (int)$row['pay_time'];
+                    $id = (int)$row['id'];
+                    $authorized = $payTime < (int)$criteria['afterPayTime']
+                        || ($payTime === (int)$criteria['afterPayTime']
+                            && $id < (int)$criteria['afterOrderId']);
+                }
+                if ($authorized && $criteria['keyword'] !== '') {
+                    $authorized = (int)$row['pay_time'] >= (int)$criteria['keywordWindowStartTimestamp'];
+                }
+            }
+            if (!$authorized) {
+                throw new \RuntimeException('sales_order_reader_scope_violation');
+            }
+        }
+    }
+
+    private static function compareSettledRows(array $left, array $right): int
+    {
+        $timeCompare = (int)($right['pay_time'] ?? 0) <=> (int)($left['pay_time'] ?? 0);
+        return $timeCompare !== 0
+            ? $timeCompare
+            : ((int)($right['id'] ?? 0) <=> (int)($left['id'] ?? 0));
+    }
+
+    private function groupLineRows(array $lineRows, array $allowedOrderIds): array
+    {
+        $allowed = array_fill_keys(array_map('intval', $allowedOrderIds), true);
+        $grouped = [];
+        foreach ($lineRows as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $orderId = (int)($line['oid'] ?? 0);
+            $cartType = (int)($line['cart_type'] ?? 0);
+            $isGift = (int)($line['is_gift'] ?? 0);
+            if ($orderId <= 0
+                || !isset($allowed[$orderId])
+                || !in_array($cartType, self::PRIMARY_SALE_CART_TYPES, true)
+                || $isGift !== 0) {
+                continue;
+            }
+            $grouped[$orderId][] = $line;
+        }
+        return $grouped;
+    }
+
+    private function assertPrimaryLinesPresent(array $rows, array $linesByOrder): void
+    {
+        foreach ($rows as $row) {
+            $orderId = (int)($row['id'] ?? 0);
+            if ($orderId <= 0 || empty($linesByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_reader_primary_line_violation');
+            }
+        }
+    }
+
+    private function mapOrder(array $row, array $lineRows, bool $detail, array $v3 = []): array
+    {
+        $v3Header = is_array($v3['header'] ?? null) ? $v3['header'] : [];
+        $v3Batch = is_array($v3['batch'] ?? null) ? $v3['batch'] : [];
+        $v3Ready = $v3Header !== [] && $v3Batch !== [];
+        if ($v3Ready) {
+            $this->assertV3SnapshotMatchesLegacy($row, $v3Header, $v3Batch);
+        }
+        $items = [];
+        foreach ($lineRows as $line) {
+            $legacyLineId = (int)($line['id'] ?? 0);
+            $items[] = $this->mapLine(
+                $line,
+                is_array($v3['lines'][$legacyLineId] ?? null) ? $v3['lines'][$legacyLineId] : []
+            );
+        }
+        $names = array_values(array_filter(array_map(function (array $item): string {
+            return trim((string)($item['name'] ?? ''));
+        }, $items)));
+        $payTime = (int)($row['pay_time'] ?? 0);
+        $memberName = trim((string)($row['real_name'] ?? ''));
+        $status = $this->orderStatus($row);
+        $itemCount = 0;
+        foreach ($items as $item) {
+            $itemCount += max(0, (int)($item['quantity'] ?? 0));
+        }
+        $summaryNames = array_slice(array_values(array_unique($names)), 0, 3);
+        $itemSummary = implode('、', $summaryNames);
+        if (count(array_unique($names)) > count($summaryNames)) {
+            $itemSummary .= ' 等' . count(array_unique($names)) . '项';
+        }
+        $collections = $v3Ready && is_array($v3['collections'] ?? null)
+            ? array_values($v3['collections']) : [];
+        $salespersonNames = [];
+        foreach ($items as $item) {
+            foreach (($item['salespeople'] ?? []) as $salesperson) {
+                $name = $this->salespersonDisplayName($salesperson);
+                if ($name !== '') {
+                    $salespersonNames[$name] = true;
+                }
+            }
+        }
+        $paymentNames = [];
+        foreach ($collections as $collection) {
+            $paymentNames[$this->paymentMethodName($collection)] = true;
+        }
+        $receivable = $v3Ready ? $this->moneyFromCents((int)$v3Batch['receivable_amount_cents']) : null;
+        $actualReceived = $v3Ready
+            ? $this->moneyFromCents((int)$v3Batch['cash_performance_amount_cents']) : null;
+        $debt = $v3Ready ? $this->decimalMoney($row['debt_amount'] ?? '0') : null;
+        $balancePayment = $v3Ready ? $receivable - $actualReceived - $debt : null;
+        if ($v3Ready && $balancePayment < 0) {
+            throw new \RuntimeException('sales_order_v3_settlement_equation_invalid');
+        }
+        // 旧订单若关联 V3 正式明细，也只从冻结的分金额度汇总优惠券。
+        $legacyCouponDiscountCents = 0;
+        if ($v3Ready) {
+            foreach ($lineRows as $legacyLine) {
+                $legacyLineId = (int)($legacyLine['id'] ?? 0);
+                $v3Line = (array)($v3['lines'][$legacyLineId] ?? []);
+                $authority = is_array($v3Line['authority'] ?? null) ? $v3Line['authority'] : [];
+                $legacyCouponDiscountCents += (int)($authority['coupon_discount_cents'] ?? 0);
+            }
+        }
+
+        $mapped = [
+            'id' => (string)(int)$row['id'],
+            'orderId' => (int)$row['id'],
+            // 旧订单列表的 id 仅供详情定位；V3 生命周期命令必须使用
+            // 对应权威销售单 order_id，否则客户端会取到错误版本并冲突。
+            'lifecycleOrderId' => $v3Ready ? (string)$v3Header['order_id'] : '',
+            'salesOrderNo' => $v3Ready
+                ? (string)$v3Header['order_no'] : (string)($row['order_id'] ?? ''),
+            'sales_order_no' => $v3Ready
+                ? (string)$v3Header['order_no'] : (string)($row['order_id'] ?? ''),
+            'memberId' => (int)($row['uid'] ?? 0),
+            'memberName' => $v3Ready
+                ? ((string)$v3Header['member_name_snapshot'] !== ''
+                    ? (string)$v3Header['member_name_snapshot'] : '游客')
+                : ($memberName !== '' ? $memberName : '游客'),
+            'member_name' => $v3Ready
+                ? ((string)$v3Header['member_name_snapshot'] !== ''
+                    ? (string)$v3Header['member_name_snapshot'] : '游客')
+                : ($memberName !== '' ? $memberName : '游客'),
+            'phone' => (string)($row['user_phone'] ?? ''),
+            'isGuest' => (int)($row['uid'] ?? 0) <= 0,
+            'storeId' => (int)($row['store_id'] ?? 0),
+            'storeName' => $v3Ready ? (string)$v3Header['store_name_snapshot'] : null,
+            'storeSnapshotStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
+            'businessDate' => $v3Ready
+                ? (string)$v3Header['business_date'] : $this->formatTimestamp($payTime, 'Y-m-d'),
+            'business_date' => $v3Ready
+                ? (string)$v3Header['business_date'] : $this->formatTimestamp($payTime, 'Y-m-d'),
+            'businessTimezone' => $v3Ready
+                ? (string)$v3Header['business_timezone'] : self::BUSINESS_TIMEZONE,
+            'businessDateBasis' => $v3Ready ? 'v3_sales_order_authority' : 'legacy_payment_completed_at',
+            // 旧单没有 V3 occurred_at，以原订单创建时间追溯实际下单；不可用支付时间冒充。
+            'occurredAt' => $v3Ready
+                ? $this->formatTimestamp((int)$v3Header['occurred_at'], 'Y-m-d H:i:s')
+                : $this->formatTimestamp((int)($row['add_time'] ?? 0), 'Y-m-d H:i:s'),
+            'paymentCompletedAt' => $v3Ready
+                ? $this->formatTimestamp((int)$v3Batch['settled_at'], 'Y-m-d H:i:s')
+                : $this->formatTimestamp($payTime, 'Y-m-d H:i:s'),
+            'settledAt' => $v3Ready
+                ? $this->formatTimestamp((int)$v3Header['settled_at'], 'Y-m-d H:i:s')
+                : $this->formatTimestamp($payTime, 'Y-m-d H:i:s'),
+            'itemSummary' => $itemSummary,
+            'item_summary' => $itemSummary,
+            'itemCount' => $itemCount,
+            'item_count' => $itemCount,
+            'orderStatus' => $status,
+            'order_status' => $status,
+            'paymentStatus' => '已支付',
+            'payment_status' => '已支付',
+            'receivableAmount' => $receivable,
+            'receivable_amount' => $receivable,
+            'amountBeforeCoupon' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Batch['receivable_amount_cents'] + $legacyCouponDiscountCents) : null,
+            'discountAmount' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Header['discount_amount_cents']) : null,
+            'discount_amount' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Header['discount_amount_cents']) : null,
+            'couponDiscountAmount' => $v3Ready ? $this->moneyFromCents($legacyCouponDiscountCents) : null,
+            'coupon_discount_amount' => $v3Ready ? $this->moneyFromCents($legacyCouponDiscountCents) : null,
+            'debtAmount' => $debt,
+            'debt_amount' => $debt,
+            'actualReceivedAmount' => $actualReceived,
+            'actual_received_amount' => $actualReceived,
+            'paymentMethod' => $v3Ready ? implode('、', array_keys($paymentNames)) : null,
+            'payment_method' => $v3Ready ? implode('、', array_keys($paymentNames)) : null,
+            'salespersonSummary' => $v3Ready ? implode('、', array_keys($salespersonNames)) : null,
+            'cashierName' => $v3Ready ? (string)$v3Header['operator_name_snapshot'] : null,
+            'source' => $v3Ready ? $this->businessSourceLabel($v3Header) : null,
+            'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
+            'cashPerformanceDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
+            'contractVersion' => self::CONTRACT_VERSION,
+            'availableActions' => [],
+        ];
+        // 列表投影保留同一批商品明细，前端只做表格展示，不重新计算金额。
+        $mapped['items'] = $items;
+        // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
+        $mapped['paymentDetails'] = !$v3Ready ? [] : array_map(function (array $collection): array {
+            return [
+                'id' => (string)$collection['collection_id'],
+                'paymentMethodCode' => (string)$collection['payment_method'],
+                'methodName' => $this->paymentMethodName($collection),
+                'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
+                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'],
+                'remark' => (string)$collection['remark_snapshot'],
+                'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }, $collections);
+        if (!$detail) {
+            return $mapped;
+        }
+
+        // 订单备注与每笔记账收款的 remark_snapshot 是两个不同事实，
+        // 详情只能读取订单自身 order_note，不能把收款备注冒充订单备注。
+        $mapped['orderNote'] = (string)($row['order_note'] ?? '');
+        $mapped['amountSummary'] = [
+            'originalAmount' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Header['original_amount_cents']) : null,
+            'priceChangeDiscountAmount' => null,
+            'couponDiscountAmount' => null,
+            'otherDiscountAmount' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Header['discount_amount_cents']) : null,
+            'payableAmount' => $receivable,
+            'debtAmount' => $debt,
+            'actualReceivedAmount' => $actualReceived,
+            'balancePaymentAmount' => $v3Ready ? $balancePayment : null,
+            'dataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
+        ];
+        $mapped['paymentDetails'] = array_map(function (array $collection): array {
+            return [
+                'id' => (string)$collection['collection_id'],
+                'paymentMethodCode' => (string)$collection['payment_method'],
+                'methodName' => $this->paymentMethodName($collection),
+                'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
+                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'],
+                'remark' => (string)$collection['remark_snapshot'],
+                'occurredAt' => $this->formatTimestamp(
+                    (int)$collection['occurred_at'],
+                    'Y-m-d H:i:s'
+                ),
+            ];
+        }, $collections);
+        $mapped['paymentDetailsDataStatus'] = $v3Ready ? 'ready' : self::ECONOMICS_STATUS;
+        $mapped['cardBatches'] = [];
+        $mapped['related'] = [
+            'debtSettlements' => [],
+            'refunds' => [],
+            'voids' => [],
+            'reopenings' => [],
+            'upgrades' => [],
+            'gifts' => [],
+            'services' => [],
+            'writeoffs' => [],
+            'operationLogs' => [],
+        ];
+        $mapped['relatedDataStatus'] = $v3Ready ? 'ready' : self::ECONOMICS_STATUS;
+        return $mapped;
+    }
+
+    private function mapLine(array $line, array $v3 = []): array
+    {
+        $snapshot = $this->decodeCartSnapshot($line['cart_info'] ?? []);
+        $authority = is_array($v3['authority'] ?? null) ? $v3['authority'] : [];
+        $v3Ready = $authority !== [];
+        $product = is_array($snapshot['productInfo'] ?? null) ? $snapshot['productInfo'] : [];
+        $attr = is_array($product['attrInfo'] ?? null) ? $product['attrInfo'] : [];
+        $name = $v3Ready
+            ? trim((string)$authority['item_name_snapshot'])
+            : trim((string)($product['store_name'] ?? $product['title'] ?? $snapshot['name'] ?? ''));
+        $productType = (int)($product['product_type'] ?? $line['product_type'] ?? 0);
+        $authorityType = strtolower(trim((string)($authority['item_type'] ?? '')));
+        $type = $v3Ready
+            ? ($authorityType === 'card' ? '卡项' : ($authorityType === 'project' ? '项目' : '商品'))
+            : (in_array($productType, [4, 5], true)
+                ? '卡项'
+                : ($productType === 6 ? '项目' : '商品'));
+        $quantity = $v3Ready
+            ? max(0, (int)$authority['quantity']) : max(0, (int)($line['cart_num'] ?? 0));
+        $originalAmount = $v3Ready
+            ? $this->moneyFromCents((int)$authority['original_amount_cents']) : null;
+        $payableAmount = $v3Ready
+            ? $this->moneyFromCents((int)$authority['sale_amount_cents']) : null;
+        $salespeople = [];
+        foreach (($v3['salespeople'] ?? []) as $person) {
+            if (!is_array($person)) {
+                continue;
+            }
+            $salespeople[] = [
+                'id' => (string)$person['fact_id'],
+                'employeeId' => (int)$person['employee_id'],
+                'name' => (string)$person['employee_name_snapshot'],
+                'employeeType' => (string)$person['employee_type_snapshot'],
+                // Historical list rows still pass through mapLine; keep the
+                // persisted presale role so their label does not depend on a
+                // mutable product or current personnel selection.
+                'roleSnapshot' => (string)($person['role_snapshot'] ?? ''),
+                'allocationWeight' => (int)$person['allocation_weight_numerator'],
+                'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'],
+                'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                'performanceAmountCents' => max(0, (int)$person['amount_cents']),
+                'performanceAmountManual' => strpos((string)($person['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
+            ];
+        }
+
+        return [
+            'id' => $v3Ready
+                ? (string)$authority['order_line_id'] : (string)(int)($line['id'] ?? 0),
+            'orderItemId' => (int)($line['id'] ?? 0),
+            'itemType' => $type,
+            'name' => $name,
+            '_categoryProductIds' => $type === '卡项'
+                ? $this->cardComponentProductIds($authority['card_purchase_snapshot_json'] ?? null)
+                : array_filter([(int)($v3Ready ? ($authority['item_id'] ?? 0) : ($line['product_id'] ?? 0))]),
+            '_categorySkuIds' => $type === '卡项'
+                ? $this->cardComponentSkuIds($authority['card_purchase_snapshot_json'] ?? null) : [],
+            'purchaseSpec' => trim((string)($attr['suk'] ?? '')),
+            'quantity' => $quantity,
+            'unitPrice' => $v3Ready && $quantity > 0 ? $originalAmount / $quantity : null,
+            'originalAmount' => $originalAmount,
+            'priceChangeDiscountAmount' => null,
+            'couponDiscountAmount' => $v3Ready
+                ? $this->moneyFromCents((int)($authority['coupon_discount_cents'] ?? 0)) : null,
+            'amountBeforeCoupon' => $v3Ready
+                ? $this->moneyFromCents((int)$authority['sale_amount_cents'] + (int)($authority['coupon_discount_cents'] ?? 0)) : null,
+            'payableAmount' => $payableAmount,
+            'debtAmount' => $v3Ready ? $this->decimalMoney($line['debt_amount'] ?? '0') : null,
+            'actualReceivedAmount' => $v3Ready
+                ? $this->decimalMoney($line['cash_pay_amount'] ?? '0') : null,
+            'cardPurchaseTimes' => $type === '卡项' && $v3Ready
+                ? $this->cardPurchaseTimesSnapshot($authority['card_purchase_snapshot_json'] ?? null)
+                : [],
+            'serviceRecipientType' => $v3Ready ? (string)($authority['service_object'] ?? '') : '',
+            'friendCountsAsCustomer' => $v3Ready ? (int)($authority['friend_counts_as_customer'] ?? 1) === 1 : null,
+            'isExperience' => $v3Ready && (int)($authority['is_experience'] ?? 0) === 1,
+            // Legacy rows may display presale only when linked to a formal V3
+            // line. Missing snapshots must not be guessed from cart/catalog data.
+            'isPresale' => $v3Ready && $type === '商品' && (int)($authority['is_presale'] ?? 0) === 1,
+            // Legacy rows need a formal V3 snapshot; never infer from cart data
+            // or the absence of stock movements for the current product.
+            'isNoOutbound' => $v3Ready && $type === '商品' && in_array($authority['inventory_outbound_required'] ?? null, [0, '0'], true),
+            'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
+            'snapshotStatus' => $name === '' ? 'invalid' : 'ready',
+            'salespeople' => $salespeople,
+            'salesManagers' => array_values((array)($v3['salesManagers'] ?? [])),
+            'guides' => array_values((array)($v3['guides'] ?? [])),
+            'craftsmen' => $v3Ready ? $this->craftsmenForLine($authority) : [],
+        ];
+    }
+
+    /** 卡项的分类只能来自购买时记录的内含项目 ID，不能使用卡项外壳的分类。 */
+    private function cardComponentProductIds($rawSnapshot): array
+    {
+        $snapshot = is_string($rawSnapshot) ? json_decode($rawSnapshot, true) : null;
+        if (!is_array($snapshot)) return [];
+        $ids = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) continue;
+            $id = (int)($component['productId'] ?? 0);
+            if ($id > 0) $ids[$id] = $id;
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * 旧自定义卡快照只冻结规格 ID；规格仍须回到所属商品再读取当前平台分类。
+     * 这里只接受成交行的服务端快照，不能把客户端传入的规格 ID 当作分类权限依据。
+     */
+    private function cardComponentSkuIds($rawSnapshot): array
+    {
+        $snapshot = is_string($rawSnapshot) ? json_decode($rawSnapshot, true) : null;
+        if (!is_array($snapshot)) return [];
+        $ids = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) continue;
+            $id = (int)($component['skuId'] ?? 0);
+            if ($id > 0) $ids[$id] = $id;
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * An authority sale line identifies its current category through the
+     * purchased item, or through frozen inner-project IDs for a card. Refund
+     * lists reuse this identity rule so a card shell cannot become the category.
+     */
+    public function categoryProductIdsForAuthorityLine(array $line): array
+    {
+        return strtolower((string)($line['item_type'] ?? '')) === 'card'
+            ? $this->cardComponentProductIds($line['card_purchase_snapshot_json'] ?? null)
+            : array_values(array_filter([(int)($line['item_id'] ?? 0)]));
+    }
+
+    /** @return int[] Authoritative component SKU IDs used only when an old card snapshot has no product IDs. */
+    public function categorySkuIdsForAuthorityLine(array $line): array
+    {
+        return strtolower((string)($line['item_type'] ?? '')) === 'card'
+            ? $this->cardComponentSkuIds($line['card_purchase_snapshot_json'] ?? null)
+            : [];
+    }
+
+    /**
+     * 混合订单页的商品分类按已授权订单批量解析当前商品/项目档案。
+     * 只返回分类文本；内部来源 ID 不进入前端与导出合同。
+     */
+    public function attachCurrentItemCategories(array $records): array
+    {
+        $links = $verifiedFactLinks = $skuLinks = [];
+        foreach ($records as $record) {
+            $storeId = (int)($record['storeId'] ?? 0);
+            foreach ((array)($record['items'] ?? []) as $item) {
+                foreach ((array)($item['_categoryProductIds'] ?? []) as $productId) {
+                    $productId = (int)$productId;
+                    if ($storeId > 0 && $productId > 0) {
+                        $key = $storeId . ':' . $productId;
+                        $link = ['store_id' => $storeId, 'product_id' => $productId];
+                        if (!empty($item['_categoryVerifiedFactItems'])) $verifiedFactLinks[$key] = $link;
+                        else $links[$key] = $link;
+                    }
+                }
+                foreach ((array)($item['_categorySkuIds'] ?? []) as $skuId) {
+                    $skuId = (int)$skuId;
+                    if ($storeId > 0 && $skuId > 0) {
+                        $skuLinks[$storeId . ':' . $skuId] = ['store_id' => $storeId, 'sku_id' => $skuId];
+                    }
+                }
+            }
+        }
+        $resolver = new StoreReportCurrentProductCategoryServices();
+        $categories = $links ? $resolver->resolve($links) : [];
+        // 服务事实已经由执行门店和数据权限裁剪；跨门店权益必须按事实保存的来源商品身份解析。
+        $verifiedFactCategories = $verifiedFactLinks ? $resolver->resolveVerifiedFactItems($verifiedFactLinks) : [];
+        $skuCategories = $skuLinks ? $resolver->resolveSkus($skuLinks) : [];
+        foreach ($records as &$record) {
+            $storeId = (int)($record['storeId'] ?? 0);
+            if (!is_array($record['items'] ?? null)) continue;
+            foreach ($record['items'] as &$item) {
+                $paths = [];
+                foreach ((array)($item['_categoryProductIds'] ?? []) as $productId) {
+                    $source = !empty($item['_categoryVerifiedFactItems']) ? $verifiedFactCategories : $categories;
+                    $category = $source[$storeId . ':' . (int)$productId] ?? null;
+                    // A card component must itself be a project or ordinary product.
+                    if ($category === null || (($item['itemType'] ?? '') === '卡项'
+                        && in_array((int)$category['product_type'], [4, 5], true))) continue;
+                    $paths[(string)$category['path']] = true;
+                }
+                foreach ((array)($item['_categorySkuIds'] ?? []) as $skuId) {
+                    $category = $skuCategories[$storeId . ':' . (int)$skuId] ?? null;
+                    if ($category === null || (($item['itemType'] ?? '') === '卡项'
+                        && in_array((int)$category['product_type'], [4, 5], true))) continue;
+                    $paths[(string)$category['path']] = true;
+                }
+                $item['category'] = $paths ? implode('、', array_keys($paths)) : '未分类';
+                unset($item['_categoryProductIds'], $item['_categorySkuIds'], $item['_categoryVerifiedFactItems']);
+            }
+            unset($item);
+        }
+        unset($record);
+        return $records;
+    }
+
+    /**
+     * Map the immutable card-purchase snapshot to the small, display-only
+     * purchase-count contract consumed by the order detail. This method
+     * deliberately returns no current balance, remaining count, catalogue
+     * identity or raw snapshot so this historical read model cannot be
+     * mistaken for the live entitlement authority.
+     */
+    private function cardPurchaseTimesSnapshot($rawSnapshot): array
+    {
+        if (!is_string($rawSnapshot) || trim($rawSnapshot) === '') {
+            return [];
+        }
+        $snapshot = json_decode($rawSnapshot, true);
+        if (!is_array($snapshot) || array_values($snapshot) === $snapshot) {
+            return [];
+        }
+        $ruleType = trim((string)($snapshot['ruleType'] ?? ''));
+        $components = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) {
+                continue;
+            }
+            $name = trim((string)($component['nameSnapshot'] ?? ''));
+            $times = max(0, (int)($component['writeTimes'] ?? 0));
+            if ($name === '' || $times <= 0) {
+                continue;
+            }
+            $components[] = ['name' => $name, 'times' => $times];
+        }
+        // “任选次数”是一个共享次数池，不能错误地展示成每个内含项目
+        // 各自拥有该次数；按时长卡不存在可展示的购买次数。
+        if ($ruleType === 'choice_count') {
+            $sharedTimes = max(0, (int)($snapshot['sharedTimes'] ?? 0));
+            return $sharedTimes > 0
+                ? ['mode' => 'shared', 'times' => $sharedTimes, 'components' => $components]
+                : [];
+        }
+        if ($ruleType === 'time') {
+            return [];
+        }
+        return $components === [] ? [] : ['mode' => 'independent', 'components' => $components];
+    }
+
+    private function craftsmenForLine(array $line): array
+    {
+        try {
+            return CashierV3CheckoutCraftsmenSnapshot::decode(
+                $line['craftsmen_snapshot_json'] ?? null
+            );
+        } catch (\Throwable $exception) {
+            throw new \RuntimeException('sales_order_craftsmen_snapshot_invalid');
+        }
+    }
+
+    /**
+     * 只读兼容服务事实的三种不可变人员快照：早期仅身份的 camelCase、
+     * 直通结算的 snake_case 和标准结账的 camelCase。转换只影响展示，
+     * 缺失的业绩/权重不推断，也不回写事实或借当前员工资料补人。
+     * 真正缺字段/损坏的快照仍报错，不能把历史人员静默清空。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenForEntitlementServiceFact(string $snapshotJson): array
+    {
+        try {
+            return CashierV3CheckoutCraftsmenSnapshot::decode($snapshotJson);
+        } catch (\InvalidArgumentException $exception) {
+            // Only the known persisted service-fact schema may use this adapter.
+        }
+        $rows = json_decode($snapshotJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($rows)
+            || array_keys($rows) !== ($rows === [] ? [] : range(0, count($rows) - 1))) {
+            throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+        }
+        $mapped = [];
+        $seenStaffIds = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+            }
+            // 最早的服务事实只有身份快照；保留实际存在的字段，不伪造门店、
+            // 人员权重或业绩金额。空的点/轮标记也不能解释为已选择轮客。
+            if (isset($row['staffId'], $row['employeeId'], $row['name'])
+                && array_key_exists('isPrimary', $row)) {
+                $staffId = (int)$row['staffId'];
+                if ($staffId <= 0 || (int)$row['employeeId'] <= 0
+                    || trim((string)$row['name']) === ''
+                    || !is_bool($row['isPrimary'])
+                    || $row['isPrimary'] !== ($index === 0)
+                    || isset($seenStaffIds[$staffId])) {
+                    throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+                }
+                $seenStaffIds[$staffId] = true;
+                $person = [
+                    'id' => $staffId, 'staffId' => $staffId,
+                    'employeeId' => (int)$row['employeeId'],
+                    'name' => (string)$row['name'],
+                    'isPrimary' => $row['isPrimary'],
+                ];
+                if (array_key_exists('isPointCustomer', $row)) {
+                    $person['isPointCustomer'] = (bool)$row['isPointCustomer'];
+                }
+                $mapped[] = $person;
+                continue;
+            }
+            foreach (['staff_id', 'employee_id', 'staff_name_snapshot', 'store_id', 'sequence', 'is_primary', 'labor_weight'] as $key) {
+                if (!array_key_exists($key, $row)) {
+                    throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+                }
+            }
+            $staffId = (int)$row['staff_id'];
+            if ($staffId <= 0 || isset($seenStaffIds[$staffId])) {
+                throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+            }
+            $seenStaffIds[$staffId] = true;
+            $mappedRow = [
+                'id' => $staffId,
+                'staffId' => $staffId,
+                'employeeId' => (int)$row['employee_id'],
+                'storeId' => (int)$row['store_id'],
+                'name' => (string)$row['staff_name_snapshot'],
+                'isPrimary' => (int)$row['is_primary'] === 1,
+                'sequence' => (int)$row['sequence'],
+                'laborWeight' => (int)$row['labor_weight'],
+                'isPointCustomer' => !empty($row['is_point_customer']),
+            ];
+            if (array_key_exists('project_count_decimal', $row)) {
+                $mappedRow['projectCount'] = (string)$row['project_count_decimal'];
+            } elseif (array_key_exists('project_count_half_units', $row)) {
+                $mappedRow['projectCountHalfUnits'] = (int)$row['project_count_half_units'];
+            }
+            $mapped[] = $mappedRow;
+        }
+        // 最早的服务事实不是标准结账快照，不能强行要求当时尚不存在的字段。
+        if ($mapped !== [] && !isset($mapped[0]['storeId'])) return $mapped;
+        try {
+            return CashierV3CheckoutCraftsmenSnapshot::normalize($mapped);
+        } catch (\InvalidArgumentException $exception) {
+            throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid', 0, $exception);
+        }
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function salesLineCraftsmen(array $facts, array $line): array
+    {
+        if ($facts === []) return $this->craftsmenForLine($line);
+        return array_map(function (array $person): array {
+            return [
+                'id' => (string)$person['fact_id'],
+                'employeeId' => (int)$person['employee_id'],
+                'name' => (string)$person['employee_name_snapshot'],
+                'isPointCustomer' => $this->pointCustomerFromRole((string)($person['role_snapshot'] ?? '')),
+                'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
+            ];
+        }, $facts);
+    }
+
+    /**
+     * 产出与“服务记录”列相同的每人展示契约。有效业绩事实是当前权威，
+     * 结账快照只在历史事实缺失时补齐人员类型和项目数。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenDisplayAllocations(array $facts, string $snapshotJson): array
+    {
+        $snapshotRows = json_decode($snapshotJson, true);
+        $snapshots = [];
+        if (is_array($snapshotRows)) {
+            foreach ($snapshotRows as $person) {
+                if (!is_array($person)) continue;
+                $employeeId = (int)($person['employeeId'] ?? $person['employee_id'] ?? 0);
+                if ($employeeId > 0) $snapshots[$employeeId] = $person;
+            }
+        }
+        if ($facts === []) {
+            $fallback = [];
+            foreach ($snapshots as $employeeId => $person) {
+                $fallback[] = $this->craftsmanAllocationFromSnapshot($employeeId, $person);
+            }
+            return $fallback;
+        }
+        return array_map(function (array $person) use ($snapshots): array {
+            $employeeId = (int)($person['employee_id'] ?? 0);
+            $snapshot = $snapshots[$employeeId] ?? [];
+            $projectCount = $person['project_count_decimal'] ?? null;
+            if ($projectCount === null || $projectCount === '') {
+                $halfUnits = (int)($person['project_count_half_units'] ?? 0);
+                $projectCount = $halfUnits !== 0 ? $halfUnits / 2 : ($snapshot['projectCount'] ?? $snapshot['project_count'] ?? null);
+            }
+            $point = $this->pointCustomerFromRole((string)($person['role_snapshot'] ?? ''));
+            if ($point === null && array_key_exists('isPointCustomer', $snapshot)) $point = (bool)$snapshot['isPointCustomer'];
+            return [
+                'employeeId' => $employeeId,
+                'employeeName' => (string)($person['employee_name_snapshot'] ?? ''),
+                'employeeType' => (string)($person['employee_type_snapshot'] ?? ''),
+                // 明确点/轮事实优先，历史缺省只补轮客，不重写金额事实。
+                'isPointCustomer' => $point ?? (bool)($snapshot['is_point_customer'] ?? false),
+                'amount' => $this->moneyFromCents((int)($person['amount_cents'] ?? 0)),
+                'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
+                'projectCount' => $this->projectCountDisplay($projectCount),
+            ];
+        }, $facts);
+    }
+
+    /** @return array<string,mixed> */
+    private function craftsmanAllocationFromSnapshot(int $employeeId, array $person): array
+    {
+        $projectCount = $person['projectCount'] ?? $person['project_count_decimal'] ?? $person['project_count'] ?? null;
+        if ($projectCount === null && isset($person['projectCountHalfUnits'])) $projectCount = (float)$person['projectCountHalfUnits'] / 2;
+        if ($projectCount === null && isset($person['project_count_half_units'])) $projectCount = (float)$person['project_count_half_units'] / 2;
+        return [
+            'employeeId' => $employeeId,
+            // 服务事实按原始人员/金额快照展示，不能由当前员工档案或销售行快照反推。
+            'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? $person['staff_name_snapshot'] ?? ''),
+            'employeeType' => (string)($person['employeeType'] ?? $person['employee_type_snapshot'] ?? ''),
+            'isPointCustomer' => (bool)($person['isPointCustomer'] ?? $person['is_point_customer'] ?? false),
+            'amount' => isset($person['performanceAmountCents']) || isset($person['amount_cents'])
+                ? $this->moneyFromCents((int)($person['performanceAmountCents'] ?? $person['amount_cents'])) : null,
+            'laborFeeAmount' => isset($person['laborFeeCents']) || isset($person['labor_fee_cents'])
+                ? $this->moneyFromCents((int)($person['laborFeeCents'] ?? $person['labor_fee_cents'])) : null,
+            'projectCount' => $this->projectCountDisplay($projectCount),
+        ];
+    }
+
+    private function pointCustomerFromRole(string $role): ?bool
+    {
+        $role = strtolower(trim($role));
+        if ($role === '' || $role === 'craftsman') return null;
+        if (strpos($role, 'point') !== false) return true;
+        if (strpos($role, 'round') !== false) return false;
+        return null;
+    }
+
+    /** @param mixed $value */
+    private function projectCountDisplay($value): ?string
+    {
+        if ($value === null || $value === '' || !is_numeric($value)) return null;
+        $number = round((float)$value, 6);
+        if (abs($number - round($number)) < 0.000001) return (string)(int)round($number);
+        return rtrim(rtrim(number_format($number, 6, '.', ''), '0'), '.');
+    }
+
+    private function assertV3SnapshotMatchesLegacy(array $legacy, array $header, array $batch): void
+    {
+        $receivable = (int)($batch['receivable_amount_cents'] ?? -1);
+        $collected = (int)($batch['collected_amount_cents'] ?? -1);
+        $cashPerformance = (int)($batch['cash_performance_amount_cents'] ?? -1);
+        $debt = $this->decimalToCents($legacy['debt_amount'] ?? '0');
+        $balance = $receivable - $collected - $debt;
+        if ((int)($legacy['store_id'] ?? 0) !== (int)($header['store_id'] ?? -1)
+            || (int)($legacy['uid'] ?? 0) !== (int)($header['member_id'] ?? -1)
+            || (string)($header['order_id'] ?? '') !== (string)($batch['sales_order_id'] ?? '')
+            || (int)($header['sale_amount_cents'] ?? -1) !== $receivable
+            || $collected < 0
+            || $cashPerformance !== $collected
+            || $debt < 0
+            || $balance < 0) {
+            throw new \RuntimeException('sales_order_v3_authority_snapshot_mismatch');
+        }
+    }
+
+    private function decodeCartSnapshot($snapshot): array
+    {
+        if (is_string($snapshot)) {
+            $snapshot = json_decode($snapshot, true);
+        }
+        return is_array($snapshot) ? $snapshot : [];
+    }
+
+    private function paymentMethodName(array $collection): string
+    {
+        $snapshot = trim((string)($collection['payment_method_name_snapshot'] ?? ''));
+        $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
+        // 旧配置曾把 other_collection 命名为“现金”。展示权威代码的含义，
+        // 同时保留原名称以便追溯；不修改已结算收款或其不可变快照。
+        if ($code === 'other_collection' && $snapshot === '现金') {
+            return '其他收款（原记录：现金）';
+        }
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+        $labels = [
+            'cash' => '现金',
+            'unionpay' => '银联',
+            'wechat' => '微信',
+            'alipay' => '支付宝',
+            'dianping_voucher' => '大众验券',
+            'douyin_voucher' => '抖音验券',
+            'partner' => '合作方收款',
+            'partner_collection' => '合作方收款',
+            'other' => '其他收款',
+            'other_collection' => '其他收款',
+        ];
+        return $labels[$code] ?? ($code !== '' ? $code : '未知收款方式');
+    }
+
+    /**
+     * 销售来源由结账时选定的快照决定。二级来源被选择时优先显示它，
+     * 否则显示一级来源；列表为空时显示占位符，更正比较时保留原始空值。
+     */
+    private function businessSourceLabel(array $header, bool $displayFallback = true): string
+    {
+        foreach ([
+            $header['business_source_secondary_name_snapshot'] ?? '',
+            $header['business_source_primary_name_snapshot'] ?? '',
+            $header['business_source_label_snapshot'] ?? '',
+        ] as $value) {
+            $label = trim((string)$value);
+            if ($label !== '') {
+                return $label;
+            }
+        }
+        return $displayFallback ? '—' : '';
+    }
+
+    private function moneyFromCents(int $cents): float
+    {
+        return $cents / 100;
+    }
+
+    private function decimalMoney($value): float
+    {
+        return $this->decimalToCents($value) / 100;
+    }
+
+    private function decimalToCents($value): int
+    {
+        $value = trim((string)$value);
+        if (!preg_match('/^([0-9]+)(?:\.([0-9]{1,2}))?$/D', $value, $matches)) {
+            throw new \RuntimeException('sales_order_v3_legacy_money_invalid');
+        }
+        $fraction = str_pad((string)($matches[2] ?? ''), 2, '0');
+        $cents = bcmul((string)$matches[1], '100', 0);
+        return (int)bcadd($cents, $fraction, 0);
+    }
+
+    private function rowStatusCode(array $row): string
+    {
+        if ((int)($row['terminal_action'] ?? 0) === 2) {
+            return 'voided';
+        }
+        $refundStatus = (int)($row['refund_status'] ?? 0);
+        if (in_array($refundStatus, [1, 4], true)) {
+            return 'refund_pending';
+        }
+        if ($refundStatus === 2) {
+            return 'refunded';
+        }
+        if ($refundStatus === 3) {
+            return 'partially_refunded';
+        }
+        if ((int)($row['is_del'] ?? 0) === 1) {
+            return 'cancelled';
+        }
+        return 'normal';
+    }
+
+    private function orderStatus(array $row): string
+    {
+        $labels = [
+            'normal' => '正常',
+            'refund_pending' => (int)($row['refund_status'] ?? 0) === 1 ? '申请退款' : '退款中',
+            'refunded' => '已退款作废',
+            'partially_refunded' => '部分退款',
+            'cancelled' => '已取消',
+            'voided' => '已作废',
+        ];
+        return $labels[$this->rowStatusCode($row)] ?? '状态异常';
+    }
+
+    private function pagePayload(array $criteria, array $records, int $total, string $dataStatus): array
+    {
+        return [
+            'contractVersion' => self::CONTRACT_VERSION,
+            'dataStatus' => $dataStatus,
+            'economicsDataStatus' => self::ECONOMICS_STATUS,
+            'dataAsOf' => $this->formatTimestamp((int)$criteria['nowTimestamp'], DATE_ATOM),
+            'businessTimezone' => self::BUSINESS_TIMEZONE,
+            'records' => $records,
+            'total' => $total,
+            'page' => (int)$criteria['page'],
+            'pageSize' => (int)$criteria['pageSize'],
+            'isLoading' => false,
+            'statusOptions' => $this->statusOptions(),
+            'paginationMode' => 'keyset',
+            'paginationCursor' => [
+                'current' => $criteria['currentCursor'],
+                'next' => $criteria['nextCursor'],
+            ],
+            'hasMore' => ($criteria['hasMore'] ?? false) === true,
+            'freshnessPolicy' => [
+                'membership' => 'insertions_frozen_at_first_page',
+                'status' => 'current_at_page_read',
+            ],
+            'performancePolicy' => [
+                'maxPageSize' => self::MAX_PAGE_SIZE,
+                'keywordSearchWindowDays' => self::KEYWORD_SEARCH_WINDOW_DAYS,
+                'keywordWindowApplied' => $criteria['keyword'] !== '',
+                'keywordWindowStartAt' => $criteria['keywordWindowStartTimestamp'] === null
+                    ? null
+                    : $this->formatTimestamp((int)$criteria['keywordWindowStartTimestamp'], DATE_ATOM),
+            ],
+        ];
+    }
+
+    private function emptyPage(array $criteria, string $dataStatus): array
+    {
+        return $this->pagePayload($criteria, [], 0, $dataStatus);
+    }
+
+    private function statusOptions(): array
+    {
+        return [
+            ['value' => '', 'label' => '全部'],
+            ['value' => 'normal', 'label' => '正常'],
+            ['value' => 'refund_pending', 'label' => '退款中'],
+            ['value' => 'refunded', 'label' => '已退款作废'],
+            ['value' => 'partially_refunded', 'label' => '部分退款'],
+            ['value' => 'cancelled', 'label' => '已取消'],
+            ['value' => 'voided', 'label' => '已作废'],
+        ];
+    }
+
+    private function validBusinessDate($value): string
+    {
+        $value = trim((string)$value);
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1 ? $value : '';
+    }
+
+    private function salespersonDisplayName(array $person): string
+    {
+        $name = trim((string)($person['employee_name_snapshot'] ?? $person['name'] ?? ''));
+        if ($name === '') return '';
+        $role = strtolower(trim((string)($person['role_snapshot'] ?? $person['roleSnapshot'] ?? '')));
+        if ($role === '') $role = strtolower(trim((string)($person['employee_type_snapshot'] ?? $person['employeeType'] ?? '')));
+        if (str_contains($role, 'presale') || str_contains($role, 'pre_sale') || str_contains($role, '售前')) return $name . '（售前）';
+        if (str_contains($role, 'postsale') || str_contains($role, 'post_sale') || str_contains($role, '售后')) return $name . '（售后）';
+        return $name;
+    }
+
+    private function formatTimestamp(int $timestamp, string $format)
+    {
+        if ($timestamp <= 0) {
+            return null;
+        }
+        $date = (new \DateTimeImmutable('@' . $timestamp))
+            ->setTimezone(new \DateTimeZone(self::BUSINESS_TIMEZONE));
+        return $date->format($format);
+    }
+}

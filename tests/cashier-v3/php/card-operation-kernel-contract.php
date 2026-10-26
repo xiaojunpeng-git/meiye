@@ -1,0 +1,334 @@
+<?php
+
+$backendRoot = is_file('/var/www/html/app/services/cashier/v3/CashierV3ResultCode.php')
+    ? '/var/www/html'
+    : dirname(__DIR__, 3) . '/后端代码';
+require_once $backendRoot . '/app/services/cashier/v3/CashierV3ResultCode.php';
+require_once $backendRoot . '/app/services/cashier/v3/CashierV3CommandException.php';
+require_once $backendRoot . '/app/services/cashier/v3/card/CashierV3CardOperationReadinessGuard.php';
+require_once $backendRoot . '/app/services/cashier/v3/card/CashierV3CardOperationKernel.php';
+
+use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\card\CashierV3CardOperationReadinessGuard;
+use app\services\cashier\v3\card\CashierV3CardOperationKernel;
+
+$failed = 0;
+function check_card_operation($condition, $name)
+{
+    global $failed;
+    if (!$condition) {
+        $failed++;
+        fwrite(STDERR, "FAIL: {$name}\n");
+    }
+}
+
+$source = [
+    'holderId' => 10,
+    'holderVersion' => 7,
+    'originOrderId' => 100,
+    'originMemberId' => 1,
+    'currentMemberId' => 1,
+    'cardStatus' => 'enabled',
+    'cardName' => '测试次卡',
+    'cardNo' => 'K100',
+    'effectiveWriteStart' => 0,
+    'effectiveWriteEnd' => 1798761600,
+    'remainingValueCents' => 12000,
+    'projects' => [[
+        'detailId' => 301,
+        'detailVersion' => 3,
+        'projectId' => 401,
+        'remainingTimes' => 4,
+        'remainingValueCents' => 8000,
+    ]],
+];
+$context = [
+    'tenantId' => 'tenant-1', 'organizationId' => 'org-1', 'storeId' => 1,
+    'operatorId' => 9, 'businessDate' => '2026-07-30', 'businessTimezone' => 'Asia/Shanghai',
+    'occurredAt' => 1785369600, 'recordedAt' => 1785369600,
+];
+
+$transfer = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_transfer', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-TRANSFER-0001', 'reason' => '会员本人申请',
+], $source, ['memberId' => 2, 'memberName' => '新会员'], $context);
+check_card_operation($transfer['operationStatus'] === 'succeeded', 'transfer is direct');
+check_card_operation($transfer['stateMutation']['currentMemberId'] === 2, 'transfer changes current owner only');
+check_card_operation($transfer['sourceCard']['originMemberId'] === 1, 'transfer preserves origin member snapshot');
+
+$extension = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_extension', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-EXTENSION-0001', 'reason' => '活动延期', 'newWriteEnd' => 1801353600,
+], $source, [], $context);
+check_card_operation($extension['stateMutation']['effectiveWriteEnd'] === 1801353600, 'extension updates effective end');
+check_card_operation(
+    ($extension['resultSnapshot']['operationStatus'] ?? '') === 'succeeded'
+    && (int)($extension['resultSnapshot']['stateMutation']['effectiveWriteEnd'] ?? 0) === 1801353600,
+    'operation result snapshot freezes the accepted state transition'
+);
+
+$disable = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_disable', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-DISABLE-0001', 'reason' => '客户要求暂停',
+], $source, [], $context);
+check_card_operation($disable['stateMutation']['cardStatus'] === 'disabled', 'disable changes state');
+
+$replacement = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-REPLACEMENT-0001', 'reason' => '项目调整',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'targetQuantity' => 3,
+], $source, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation($replacement['operationStatus'] === 'succeeded', 'replacement is direct');
+check_card_operation($replacement['lines'][0]['quantityAfter'] === 2, 'replacement quantity is frozen');
+$debtLimitedSource = $source;
+$debtLimitedSource['projects'][0]['remainingTimes'] = 10;
+$debtLimitedSource['projects'][0]['debtLimitedRemainingTimes'] = 5;
+$debtLimitedSource['projects'][0]['totalTimes'] = 10;
+$debtLimitedSource['projects'][0]['totalValueCents'] = 100000;
+$debtLimitedSource['projects'][0]['remainingValueCents'] = 100000;
+foreach (['project_replacement', 'project_upgrade'] as $limitedType) {
+    $limitedRejected = false;
+    try {
+        CashierV3CardOperationKernel::plan([
+            'operationType' => $limitedType, 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+            'idempotencyKey' => 'DEBT-LIMIT-' . $limitedType, 'reason' => '债务限制回归',
+            'projectLines' => [['sourceDetailId' => 301, 'quantity' => 6]],
+        ], $debtLimitedSource, ['catalogId' => 501, 'catalogName' => '目标项目', 'priceCents' => 100000], $context);
+    } catch (CashierV3CommandException $error) {
+        $limitedRejected = strpos($error->getMessage(), '当前可用 5 次') !== false;
+    }
+    check_card_operation($limitedRejected, $limitedType . ' rejects quantity beyond paid entitlement');
+}
+$sharedDebtSource = $debtLimitedSource;
+$sharedDebtSource['projects'][0]['sharedDebtLimitedRemainingTimes'] = 5;
+$sharedDebtSource['projects'][] = [
+    'detailId' => 302, 'detailVersion' => 4, 'projectId' => 402,
+    'remainingTimes' => 10, 'debtLimitedRemainingTimes' => 5,
+    'sharedDebtLimitedRemainingTimes' => 5, 'remainingValueCents' => 0,
+    'totalTimes' => 10, 'totalValueCents' => 0,
+];
+$sharedRejected = false;
+try {
+    CashierV3CardOperationKernel::plan([
+        'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+        'idempotencyKey' => 'SHARED-DEBT-LIMIT', 'reason' => '共享池债务限制回归',
+        'projectLines' => [['sourceDetailId' => 301, 'quantity' => 3], ['sourceDetailId' => 302, 'quantity' => 3]],
+    ], $sharedDebtSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+} catch (CashierV3CommandException $error) {
+    $sharedRejected = strpos($error->getMessage(), '当前可用 5 次') !== false;
+}
+check_card_operation($sharedRejected, 'shared project aggregate cannot exceed card-level paid times');
+check_card_operation(
+    count($replacement['lines']) === 2
+    && ($replacement['lines'][1]['lineRole'] ?? '') === 'target_project'
+    && (int)($replacement['lines'][1]['quantityAfter'] ?? 0) === 3
+    && (int)($replacement['lines'][1]['quantityDelta'] ?? 0) === 3,
+    'replacement freezes independently selected target-right count'
+);
+$replacementRepeated = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-REPLACEMENT-0002', 'reason' => '项目调整',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 1], ['sourceDetailId' => 301, 'quantity' => 3]],
+], $source, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation(
+    count($replacementRepeated['stateMutation']['projectMutations'] ?? []) === 1
+    && (int)($replacementRepeated['stateMutation']['projectMutations'][0]['quantityAfter'] ?? -1) === 0,
+    'repeated source selection is aggregated before available rights validation'
+);
+$multipleSourceReplacement = $source;
+$multipleSourceReplacement['projects'][] = [
+    'detailId' => 302,
+    'detailVersion' => 4,
+    'projectId' => 402,
+    'remainingTimes' => 3,
+    'remainingValueCents' => 6000,
+];
+$replacementMultipleSources = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-REPLACEMENT-0004', 'reason' => '项目调整',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2], ['sourceDetailId' => 302, 'quantity' => 3]],
+], $multipleSourceReplacement, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation(
+    count($replacementMultipleSources['stateMutation']['projectMutations'] ?? []) === 2
+    && count($replacementMultipleSources['lines'] ?? []) === 3
+    && (int)($replacementMultipleSources['lines'][2]['quantityAfter'] ?? 0) === 5,
+    'multiple source projects create target rights equal to the selected total'
+);
+$projectUpgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-0001', 'reason' => '项目升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'targetEntitlementQuantity' => 3,
+], $source, ['catalogId' => 601, 'catalogName' => '升级目标项目', 'priceCents' => 20000], $context);
+check_card_operation(
+    $projectUpgrade['operationStatus'] === 'awaiting_checkout'
+    && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityAfter'] ?? -1) === 2
+    && (int)($projectUpgrade['stateMutation']['projectMutations'][0]['quantityDelta'] ?? 0) === -2
+    && (int)($projectUpgrade['stateMutation']['targetEntitlementQuantity'] ?? 0) === 3
+    && (int)($projectUpgrade['checkoutSettlement']['sourceRemainingValueCents'] ?? -1) === 4000,
+    'project upgrade freezes source quantity and independent target-right count until checkout settlement'
+);
+$projectUpgradeSourceExceedsTarget = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-0002', 'reason' => '原权益高于目标仍升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+], $source, ['catalogId' => 601, 'catalogName' => '低价升级目标', 'priceCents' => 3000], $context);
+check_card_operation(
+    $projectUpgradeSourceExceedsTarget['operationStatus'] === 'awaiting_checkout'
+    && (int)($projectUpgradeSourceExceedsTarget['checkoutSettlement']['sourceRemainingValueCents'] ?? -1) === 4000
+    && (int)($projectUpgradeSourceExceedsTarget['checkoutSettlement']['settlementDeltaCents'] ?? -1) === 0,
+    'project upgrade floors a negative source-to-target delta at zero'
+);
+$projectUpgradeSourceExceedsTargetSnapshot = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-UPGRADE-SNAPSHOT-02', 'reason' => '原权益高于目标快照升级',
+    'projectLines' => [['sourceDetailId' => 301, 'quantity' => 2]],
+    'snapshotSettlement' => [
+        'targetPriceCents' => 3000,
+        'sourceRemainingValueCents' => 4000,
+        'settlementDeltaCents' => 0,
+    ],
+], $source, ['catalogId' => 601, 'catalogName' => '低价升级目标', 'priceCents' => 3000], $context);
+check_card_operation(
+    (int)($projectUpgradeSourceExceedsTargetSnapshot['checkoutSettlement']['settlementDeltaCents'] ?? -1) === 0,
+    'checkout snapshot accepts a zero delta when source value exceeds target price'
+);
+$roundingSource = $source;
+$roundingSource['projects'] = [[
+    'detailId' => 302,
+    'detailVersion' => 4,
+    'projectId' => 402,
+    'remainingTimes' => 2,
+    'remainingValueCents' => 67,
+    'totalTimes' => 3,
+    'totalValueCents' => 100,
+]];
+$replacementRounding = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'PROJECT-REPLACEMENT-0003', 'reason' => '项目调整',
+    'projectLines' => [['sourceDetailId' => 302, 'quantity' => 1]],
+], $roundingSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation(
+    (int)($replacementRounding['lines'][0]['amountCents'] ?? -1) === 0,
+    'whole-yuan replacement keeps indivisible value for the final use'
+);
+
+// 整元尾差归末次，历史分角扣减必须可对账，且目标金额永远整元。
+$regular = CashierV3CardOperationKernel::replacementAllocation(100000, 3, 3, 1);
+$final = CashierV3CardOperationKernel::replacementAllocation(100000, 3, 1, 1);
+$historic = CashierV3CardOperationKernel::replacementAllocation(25660, 1, 1, 1, true);
+check_card_operation($regular['targetValueCents'] === 33300 && $final['targetValueCents'] === 33400
+    && $final['sourceValueAfterCents'] === 0, 'whole-yuan allocation assigns all remainder to final use');
+check_card_operation($historic['sourceDeductionCents'] === 25660
+    && $historic['targetValueCents'] === 25600 && $historic['roundingDeductionCents'] === 60
+    && $historic['sourceValueAfterCents'] === 0, 'historic final use clears source and audits fractional deduction');
+
+$historicalSource = $source;
+$historicalSource['projects'] = [[
+    'detailId' => 302, 'detailVersion' => 4, 'projectId' => 402,
+    'remainingTimes' => 1, 'remainingValueCents' => 25660,
+    'totalTimes' => 1, 'totalValueCents' => 25660, 'centCapable' => true,
+]];
+$historicalPlan = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'R36-HISTORICAL-FRACTION', 'reason' => '历史分角取整',
+    'projectLines' => [['sourceDetailId' => 302, 'quantity' => 1]],
+], $historicalSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation($historicalPlan['lines'][0]['amountCents'] === 25660
+    && $historicalPlan['lines'][1]['amountCents'] === 25600
+    && $historicalPlan['lines'][0]['replacementAmountAllocation']['roundingDeductionCents'] === 60,
+    'historical source debit and target credit preserve an explicit auditable difference');
+
+$upgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-UPGRADE-0001', 'reason' => '升级套餐',
+], $source, ['catalogId' => 601, 'catalogName' => '高级卡', 'priceCents' => 20000], $context);
+check_card_operation($upgrade['operationStatus'] === 'awaiting_checkout', 'positive upgrade waits for checkout');
+check_card_operation($upgrade['checkoutSettlement']['settlementDeltaCents'] === 8000, 'upgrade delta uses remaining value');
+$snapshotUpgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-UPGRADE-SNAPSHOT-01', 'reason' => '按结账快照升级',
+    'snapshotSettlement' => [
+        'targetPriceCents' => 168000,
+        'sourceRemainingValueCents' => 29800,
+        'settlementDeltaCents' => 138200,
+    ],
+], $source, ['catalogId' => 601, 'catalogName' => '高级卡', 'priceCents' => 20000], $context);
+check_card_operation(
+    $snapshotUpgrade['checkoutSettlement']['targetPriceCents'] === 168000
+        && $snapshotUpgrade['checkoutSettlement']['sourceRemainingValueCents'] === 29800
+        && $snapshotUpgrade['checkoutSettlement']['settlementDeltaCents'] === 138200,
+    'upgrade settlement uses checkout snapshot monetary values'
+);
+check_card_operation(
+    $upgrade['stateMutation']['cardStatus'] === 'enabled'
+    && $upgrade['stateMutation']['projectMutations'] === []
+    && $upgrade['settledAt'] === 0,
+    'pending upgrade changes no current right before formal checkout'
+);
+$zeroDeltaUpgrade = CashierV3CardOperationKernel::plan([
+    'operationType' => 'card_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'CARD-UPGRADE-0002', 'reason' => '等值升级套餐',
+], $source, ['catalogId' => 602, 'catalogName' => '等值升级卡', 'priceCents' => 12000], $context);
+check_card_operation(
+    $zeroDeltaUpgrade['operationStatus'] === 'awaiting_checkout'
+    && $zeroDeltaUpgrade['requiresCheckout'] === true
+    && $zeroDeltaUpgrade['settledAt'] === 0,
+    'zero-difference upgrade still requires formal settlement'
+);
+
+$conflicted = false;
+try {
+    CashierV3CardOperationKernel::plan([
+        'operationType' => 'card_transfer', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 6,
+        'idempotencyKey' => 'CARD-TRANSFER-0002', 'reason' => '过期请求',
+    ], $source, ['memberId' => 2], $context);
+} catch (\Throwable $exception) {
+    $conflicted = true;
+}
+check_card_operation($conflicted, 'old source version is rejected');
+
+$runtimeTables = [
+    'eb_cashier_v3_command_receipt',
+    'eb_cashier_v3_entitlement_resource_version',
+    'eb_cashier_v3_business_event',
+    'eb_cashier_v3_outbox',
+    'eb_cashier_v3_card_state',
+    'eb_cashier_v3_card_operation',
+    'eb_cashier_v3_card_operation_line',
+    'eb_cashier_v3_card_operation_settlement',
+];
+$readyGuard = new CashierV3CardOperationReadinessGuard();
+$readyGuard->setInspector(static function () use ($runtimeTables): array {
+    return $runtimeTables;
+});
+$ready = true;
+try {
+    $readyGuard->assertReady();
+} catch (Throwable $exception) {
+    $ready = false;
+}
+check_card_operation($ready, 'card operation readiness accepts the complete atomic dependency set');
+
+$missingGuard = new CashierV3CardOperationReadinessGuard();
+$missingGuard->setInspector(static function () use ($runtimeTables): array {
+    return array_values(array_diff($runtimeTables, ['eb_cashier_v3_outbox']));
+});
+$missingCode = '';
+$missingTables = [];
+try {
+    $missingGuard->assertReady();
+} catch (CashierV3CommandException $exception) {
+    $missingCode = $exception->getResultCode();
+    $missingTables = (array)($exception->getDetail()['missing_tables'] ?? []);
+}
+check_card_operation(
+    $missingCode === 'COMMAND_TABLE_NOT_READY' && $missingTables === ['eb_cashier_v3_outbox'],
+    'card operation readiness fails before a command when a gateway dependency is absent'
+);
+
+if ($failed > 0) {
+    exit(1);
+}
+echo "card-operation kernel: 16/0 PASS\n";

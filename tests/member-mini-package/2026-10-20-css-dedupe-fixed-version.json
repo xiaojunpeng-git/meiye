@@ -1,0 +1,91 @@
+{
+  "task": "M008-MEMBER-20261020-PACKAGE",
+  "status": "self-tested-awaiting-product-manager-fixed-version-acceptance",
+  "baseline": "2ddff36f9cbb93f8006d0e23cf9a66d8067d5456",
+  "patchSha256": "99f2bbbdbe56bccb066166b6dd79ec37ad3a6f2549d142f2e37cbfe974604e2f",
+  "files": [
+    {
+      "file": "前端代码/uniapp/manifest.json",
+      "sha256": "1f454419e60a88adae4b25b37e8992aef64495ee8822a570c18c42dbb113ec5a"
+    },
+    {
+      "file": "前端代码/uniapp/vue.config.js",
+      "sha256": "7a3eba9cd7a5a2f340649b0ad3f036ab236dbca4d601fc6f2f2be134451df559"
+    },
+    {
+      "file": "scripts/build/member-mini-css-dedupe.cjs",
+      "sha256": "8df7c1074b9460054a5556391b2f26259cf068152a52803b33f8bd8b46db5e0f"
+    },
+    {
+      "file": "tests/member-mini-package/css-dedupe-contract.cjs",
+      "sha256": "bf4321167a3d2a8a4bc0e2f8a27c8030ff41b0ddef87334155c419c9a9e2e02d"
+    }
+  ],
+  "target": {
+    "customer": "008",
+    "terminal": "Vue2 uniapp member mini-program",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com",
+    "version": "3.0.2",
+    "uploadOnly": true,
+    "review": false,
+    "production": false
+  },
+  "scope": [
+    "same-package exact-order WXSS factoring",
+    "exclude H5-only/copied build-input assets",
+    "retain required iconfont.woff2"
+  ],
+  "unchanged": [
+    "all application scripts",
+    "all WXML templates",
+    "all registered routes",
+    "all image/font bytes",
+    "App.vue",
+    "uni-icons component",
+    "lottery page",
+    "H5 build behavior",
+    "backend/database/other clients"
+  ],
+  "candidate": "/private/tmp/m008-r2-mini-20261020/008-css-candidate",
+  "candidateConfigSha256": "60130110f54a40b44d840a405b4f79fb47a8701308b0bbd1384913ddb3ae16d5",
+  "cssProofSha256": "b9926d2e7dc02ef891531dc683795edd5c6d9547887f66a8b2ebdef917890714",
+  "compiledFilesCompared": 1709,
+  "jsonKeyOrderOnly": 21,
+  "cssFilesFactored": 120,
+  "expandedCssAllByteIdentical": true,
+  "packageSourceBytes": {
+    "pages/users": 2046216,
+    "pages/admin": 2050967,
+    "pages/discover": 333776,
+    "pages/activity": 706271,
+    "pages/goods": 2087746,
+    "main": 2065713,
+    "pages/extension": 114710,
+    "pages/store": 570815,
+    "pages/behalf": 216631,
+    "pages/merchant": 251643,
+    "pages/columnGoods": 98885,
+    "pages/work": 17442,
+    "pages/annex": 1340834,
+    "pages/short_video": 302664
+  },
+  "wechatPreview": "PASS",
+  "wechatPreviewInfoSha256": "74068b6ae9079c8fd5bc5bb0fbdaa14e9c2296343d3d865e1d9361286df46d9d",
+  "tests": [
+    "CSS factoring/order/relative URL/package isolation/idempotency PASS",
+    "complete 1709-file equivalence PASS",
+    "008 API/AppID isolation PASS",
+    "navigation margins PASS",
+    "staff stacked cards PASS",
+    "store names/layout PASS",
+    "historical reservation add-project PASS"
+  ],
+  "comments": [
+    "manifest.json upload exclusion boundary",
+    "vue.config.js Weixin-only build scope",
+    "member-mini-css-dedupe.cjs extraction invariants",
+    "css-dedupe-contract.cjs equivalence checks"
+  ],
+  "authorizationBoundary": "Not committed or uploaded; current request authorizes only 008 member experience upload, not review/production/other customers. Fixed supplement acceptance still required."
+}

@@ -1,0 +1,43 @@
+{
+  "result": "PASS",
+  "scope": "008 standard dictionary plus stores127/129/130 province/city/area only",
+  "planSha256": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d",
+  "sourceCommit": "de4128786921fb26bfa7780458d91ea2e67f5666",
+  "executorCommit": "9e0888ed42d64d8003287403d618c7edfc119cec",
+  "production": {
+    "result": "PASS",
+    "instance": "008",
+    "commit": "de4128786921fb26bfa7780458d91ea2e67f5666",
+    "dictionaryRows": 44707,
+    "updatedStores": [
+      127,
+      129,
+      130
+    ],
+    "other127StoreRowsUnchanged": true,
+    "protectedApplicationFilesUnchanged": true,
+    "configurationAndDecorationUnchanged": true,
+    "upgradeLedgerUnchanged": true,
+    "backup": "/www/backups/008.cc3798.com/20261024-region-data-1760affd"
+  },
+  "API": "PASS",
+  "browser320and375": "PASS",
+  "pendingStores": 21,
+  "applicationDeployment": false,
+  "push": false,
+  "miniUpload": false,
+  "files": {
+    "production-before.json": "f246e49e1efe5289182aa0c891c48aa4d9142ce33df7d6f20615f5327bb13753",
+    "production-after.json": "9ccaa253dfa80789651ab8280f4b14b1c1eb17d68c937b3dc49faf2dd153a45c",
+    "production-preflight.json": "dc2e74cfc85fb8760fe0ca5b106c4bad41e90827da5f1cb5fdc569d734c75938",
+    "production-applied.json": "868f6104ed7e00c780294b2045fd3fb38f3bcbb55d44bee657ed7200a5cc6326",
+    "production-verified.json": "ec04fd16d96a470a7d9ab4985bb7abcc4605a3fefd58d564cb9fe80806dc2759",
+    "transfer.json": "d50aa75e81ec6cd09826d8362eb502337879275a3f6dc8967fb1e1d998cbfacd",
+    "api-verification.json": "834ad071bce06ac77a04cba71bec28575eb7437189265154615451336c2eae19",
+    "008-browser.json": "aedf5e7e83d7cace832a61d41c0c5305e375b5360fa802fb72271c7cbfe88445",
+    "008-online-320.png": "04f1ca87d27be7608313dbb0fa4bb83b1988b3c7281096f7d7eb1759418d4013",
+    "008-online-375.png": "db99377b5a067a9a808574ed3cd54583305888c6bb1622400a172ad4c6b56755",
+    "008-regions-320.png": "47723ab4dcc360882d7edf08cb31eed91ab2d092f302256c3a77875f0ad775ec",
+    "008-regions-375.png": "922d675989b6b8dc1d50a36d9a398f82b09d05de42ac85d9b501c9b9a4c25808"
+  }
+}

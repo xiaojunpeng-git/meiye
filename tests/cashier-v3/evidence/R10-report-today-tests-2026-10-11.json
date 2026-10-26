@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-10-11T11:51:30.068Z",
+  "tests": [
+    {
+      "test": "r10-report-today-defaults.mjs",
+      "exit": 0,
+      "stdout": "PASS 23 store reports: picker/query/export/route today, explicit ranges, Shanghai midnight, platform unchanged\n",
+      "stderr": ""
+    },
+    {
+      "test": "store-business-report-contract.mjs",
+      "exit": 0,
+      "stdout": "PASS data navigation targets the Cashier V3 report route\nPASS report functions are upper-page tabs\nPASS craftsman consumption keeps the audited fact-detail API but does not expose it as a navigation tab\nPASS craftsman consumption opens exact service records directly instead of the old modal\nPASS service-record drilldown can return to the original report filters\nPASS phase-two reports are dispatched by the unified report service\nPASS report tabs preserve the active runtime in stable deep links\nPASS all store-operation reports default to today without widening the actual query\nPASS new-customer reports explain guide attribution\nPASS browser uses the explicit store or platform report adapter, never a legacy store endpoint\nPASS V3 route exposes catalog, scope, query and export\nPASS controller resolves employee scope and narrows requested stores\nPASS self participant employee identity is server-derived and client spoofing is ignored\nPASS NONE report scope is rejected before query execution\nPASS participant provider covers salesperson guide manager and service participation\nPASS SELF organization picker is limited to stores with own participation\nPASS query export drilldown and manual annotations share participant scope\nPASS scope picker matches the platform twin-pane organization and store interaction\nPASS status metadata is not rendered while pending metrics remain visible\nPASS person filters use keyword-gated controlled selector modal\nPASS report columns and dynamic payment groups come from server metadata\nPASS wide report headers distinguish business sections without changing column metadata\nPASS every report can show current-column business explanations\nPASS dynamic partner share columns explain the frozen category-rate calculation\nPASS editable report rows use line-level stable keys\nPASS partner detail uses the manual input solution fields\nPASS manual input solution can persist an explicit empty value\nPASS shared report view keeps the annotation key and version contract\nPASS market detail accepts backend-issued guest subjects without inventing member identity\nPASS guest market edits have server-verified order subjects and feed the performance summary\nPASS guest market edits accept the real no-source dimension without relaxing store identity\nPASS platform report route bypasses the cashier session and workbench bootstrap\nPASS platform six-dimension deep links cannot fall back to the store report runtime and do not impose a date cutoff\nPASS platform adapter uses the administrator cookie and platform report endpoints only in platform mode\nPASS local Vue 3 platform report requests use the platform gateway without rerouting other admin calls\nPASS local starter injects the host platform gateway into the Vue 3 container\nPASS platform scope and personnel endpoints are server-clipped to the administrator range\nPASS platform reports reuse employee personal store and organization data scope\nPASS Vue 2 report pages only redirect to the Vue 3 platform route\nPASS platform manual input sends the source row store scope\nPASS salesperson report has only one daily performance column and no labor columns\nPASS beauty large-order report consumes frozen second-level category allocations without duplicating amounts\nPASS large-order report keeps salesperson and sales-manager rows independent\nPASS beauty large-order winner is one highest second-level category per salesperson-month\n\n44 passed, 0 failed\n",
+      "stderr": ""
+    },
+    {
+      "test": "store-report-period-picker-contract.mjs",
+      "exit": 0,
+      "stdout": "PASS store report period picker preserves query contract and responsive layout\n",
+      "stderr": ""
+    },
+    {
+      "test": "r10-report-today-local.php (local read-only MySQL)",
+      "exit": 0,
+      "stdout": "PASS partner_item_summary range=2026-10-11..2026-10-11 rows=0\nPASS partner_item_detail range=2026-10-11..2026-10-11 rows=0\nPASS member_consumption_detail range=2026-10-11..2026-10-11 rows=0\nPASS store_item_analysis range=2026-10-11..2026-10-11 rows=3\nPASS store_craftsman_consumption range=2026-10-11..2026-10-11 rows=0\nPASS store_craftsman_consumption_detail range=2026-10-11..2026-10-11 rows=0\nPASS store_salesperson_performance range=2026-10-11..2026-10-11 rows=0\nPASS market_performance range=2026-10-11..2026-10-11 rows=0\nPASS market_detail range=2026-10-11..2026-10-11 rows=0\nPASS member_visit_analysis range=2026-10-11..2026-10-11 rows=0\nPASS member_visit_annual_summary range=2026-10-11..2026-10-11 rows=12\nPASS field_acquisition_detail range=2026-10-11..2026-10-11 rows=0\nPASS field_acquisition_summary range=2026-10-11..2026-10-11 rows=0\nPASS cross_industry_customer_detail range=2026-10-11..2026-10-11 rows=0\nPASS cross_industry_customer_summary range=2026-10-11..2026-10-11 rows=2\nPASS new_customer_analysis range=2026-10-11..2026-10-11 rows=0\nPASS new_customer_analysis_summary range=2026-10-11..2026-10-11 rows=0\nPASS salesperson_large_order_statistics range=2026-10-11..2026-10-11 rows=0\nPASS store_refund_ledger range=2026-10-11..2026-10-11 rows=0\nPASS six_dimension_analysis range=2026-10-11..2026-10-11 rows=0\nPASS phase_six_other_multi_payment range=2026-10-11..2026-10-11 rows=0\nPASS phase_six_salary_summary range=2026-10-11..2026-10-11 rows=0\nPASS phase_six_salary_detail range=2026-10-11..2026-10-11 rows=0\nPASS historical exclusion month_rows=66 today_rows=0 excluded=66\nPASS 23 actual local report queries/exports; defaults, explicit dates, historical exclusion; no DB writes\n",
+      "stderr": ""
+    },
+    {
+      "test": "PHP 7.4 lint",
+      "exit": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/controller/cashier/v3/Report.php\n",
+      "stderr": ""
+    },
+    {
+      "test": "Vue SFC script/template compilation",
+      "exit": 0,
+      "errors": []
+    },
+    {
+      "test": "git diff --check",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

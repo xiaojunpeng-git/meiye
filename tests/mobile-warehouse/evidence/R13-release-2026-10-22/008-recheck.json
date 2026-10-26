@@ -1,0 +1,26 @@
+{
+  "php": "7.4.33",
+  "backend": {
+    "app/services/mobile/dashboard/MobileMerchantDashboardServices.php": "33bdc49c7a8028ea4fe51742b6a8442a95d28275ee326d59fc6041d262d74a7d",
+    "app/services/report/GroupManagementDashboardServices.php": "b10380ea477d3cf0d3fe106899d8cae105760f38f5b8e4814c363587b8399d6e",
+    "app/services/query/metric/RegisteredMetricReadServices.php": "80926ae917067920841b6bd7009acaeea9be9d7a90965c8e484a38b59c82e3c5",
+    "app/services/mobile/warehouse/MobileWarehouseServices.php": "4f7d858bdea6bb91bda535b075e08d0555ec926ab66ddaeff77341a32e6c4fb5",
+    "app/services/report/StoreDealPeopleQualificationServices.php": "2c80ec39ec7eaa412212a538be1541476d50c17d8677b430590c215ea01c4df2",
+    "app/services/report/StoreUnifiedReportPhaseTwoServices.php": "4c2564b7661f6251679c7e26294b9a301ccb5efa1e4ac69e30d14be484c652b4",
+    "app/services/report/StoreReportCurrentProductCategoryServices.php": "9e0f7a954868d814b56baf89642e6192f955c574b74d16becd13bcf65fd4c28c"
+  },
+  "front": [
+    {
+      "directory": "/www/wwwroot/008.cc3798.com/public/view_cashier_v3",
+      "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+      "assets": {
+        "assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+        "assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+      }
+    }
+  ],
+  "migration": {
+    "id": 51,
+    "upgrade_key": "20261021-047-sales-debt-balance-settlement"
+  }
+}

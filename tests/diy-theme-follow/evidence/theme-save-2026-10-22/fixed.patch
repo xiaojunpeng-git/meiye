@@ -1,0 +1,301 @@
+diff --git a/tests/diy-theme-follow/save-mysql.php b/tests/diy-theme-follow/save-mysql.php
+new file mode 100644
+index 00000000..78b6ccc9
+--- /dev/null
++++ b/tests/diy-theme-follow/save-mysql.php
+@@ -0,0 +1,128 @@
++<?php
++declare(strict_types=1);
++
++// Exercise the real service/controllers on a connection-local MySQL 5.7 table.
++// No production connection, shared DIY document or customer cache may be changed.
++require '/var/www/html/vendor/autoload.php';
++$app = new think\App('/var/www/html/');
++$app->env->load('/var/www/html/.env');
++$app->initialize();
++if (config('database.connections.mysql.hostname') !== 'mysql') {
++    throw new RuntimeException('Local MySQL container only');
++}
++$cache = config('cache');
++$prefix = 'theme-save-test-' . bin2hex(random_bytes(8)) . ':';
++$cache['stores']['redis']['prefix'] = $prefix;
++$cache['stores']['redis']['tag_prefix'] = $prefix . 'tag:';
++config($cache, 'cache');
++
++use app\dao\diy\DiyDao;
++use app\services\diy\DiyServices;
++use think\facade\Db;
++
++function ensure(bool $ok, string $message): void {
++    if (!$ok) throw new RuntimeException($message);
++}
++function fails(callable $fn, string $message): void {
++    try { $fn(); } catch (Throwable $error) { return; }
++    throw new RuntimeException($message);
++}
++function themeValueForTest(): string {
++    return (string)Db::name('diy')->where('template_name', 'color_change')->where('type', 3)->value('value');
++}
++
++// Inject a failure after the real SQL mutation: the service must roll it back,
++// not return a successful save or poison the previously committed cache.
++class FailingThemeDao extends DiyDao {
++    public function update($id, array $data, ?string $key = null) {
++        parent::update($id, $data, $key);
++        throw new RuntimeException('Injected update failure');
++    }
++    public function save(array $data) {
++        parent::save($data);
++        throw new RuntimeException('Injected insert failure');
++    }
++}
++class ThemeControllerProbe extends app\controller\admin\v1\diy\Diy {
++    public function __construct(DiyServices $services) { $this->services = $services; }
++}
++
++$table = config('database.connections.mysql.prefix') . 'diy';
++ensure((bool)preg_match('/^[a-zA-Z0-9_]+$/', $table), 'Unsafe table name');
++$lockName = 'diy_theme_' . substr(hash('sha256', (string)Db::query('SELECT DATABASE() AS db')[0]['db']), 0, 40);
++try {
++    $ddl = Db::query('SHOW CREATE TABLE `' . $table . '`')[0]['Create Table'];
++    Db::execute(str_replace('CREATE TABLE `' . $table . '`', 'CREATE TEMPORARY TABLE `' . $table . '`', $ddl));
++    Db::name('diy')->insert(['template_name' => 'default', 'type' => 1, 'value' => '{"sentinel":"page"}']);
++    Db::name('diy')->insert(['template_name' => 'category', 'type' => 3, 'value' => '2']);
++    $protected = Db::name('diy')->order('id')->select()->toArray();
++    $service = app()->make(DiyServices::class);
++    $controller = new ThemeControllerProbe($service);
++    $failing = new DiyServices(new FailingThemeDao());
++    fails(static function () use ($failing) { $failing->saveThemeColor(7); }, 'Failed insert reported success');
++    ensure(Db::name('diy')->count() === 2, 'Failed first save left a record');
++
++    $response = json_decode($controller->colorChange('7', 'color_change')->getContent(), true);
++    ensure($response['status'] === 200 && themeValueForTest() === '7', 'First wine save failed');
++    $id = Db::name('diy')->where('template_name', 'color_change')->value('id');
++    $controller->colorChange('7', 'color_change');
++    ensure(Db::name('diy')->where('template_name', 'color_change')->count() === 1, 'Repeat save duplicated setting');
++    ensure(Db::name('diy')->where('template_name', 'color_change')->value('id') === $id, 'Repeat save replaced identity');
++
++    // Both administrative refresh and public member theme reads use the saved row.
++    $admin = json_decode($controller->getColorChange('color_change')->getContent(), true);
++    $public = new app\controller\api\v2\PublicController(new think\facade\App());
++    $member = json_decode($public->colorChange($service, 'color_change')->getContent(), true);
++    ensure($admin['data']['status'] === 7 && $member['data']['status'] === 7, 'Admin/member read disagree');
++    foreach ([1, 2, 3, 4, 5, 6, 7] as $status) {
++        $controller->colorChange((string)$status, 'color_change');
++        ensure(themeValueForTest() === (string)$status, 'Existing theme update failed');
++    }
++    foreach ([0, 8, -1, '1.5', '7x', '', [], true, 7.0] as $status) {
++        fails(static function () use ($service, $status) { $service->saveThemeColor($status); }, 'Invalid palette accepted');
++        ensure(themeValueForTest() === '7', 'Invalid palette changed saved theme');
++    }
++    $service->cacheStrUpdate('color_change_color_change_3', '7');
++    fails(static function () use ($failing) { $failing->saveThemeColor(2); }, 'Failed update reported success');
++    ensure(themeValueForTest() === '7' && (int)$service->getColorChange('color_change') === 7, 'Rollback changed database/cache');
++    $service->cacheStrUpdate('color_change_color_change_3', '3');
++    $service->saveThemeColor(7);
++    ensure((int)$service->getColorChange('color_change') === 7, 'Successful save kept stale red cache');
++    ensure(Db::name('diy')->where('template_name', '<>', 'color_change')->order('id')->select()->toArray() === $protected,
++        'Theme save touched another document');
++
++    // A corrupt legacy duplicate must be rejected instead of arbitrarily choosing a row.
++    $duplicate = Db::name('diy')->insertGetId(['template_name' => 'color_change', 'type' => 3, 'value' => '1']);
++    fails(static function () use ($service) { $service->saveThemeColor(2); }, 'Duplicate setting silently overwritten');
++    Db::name('diy')->where('id', $duplicate)->delete();
++    ensure(themeValueForTest() === '7', 'Duplicate rejection changed authority');
++    ensure((int)Db::query('SELECT IS_FREE_LOCK(?) AS available', [$lockName])[0]['available'] === 1,
++        'A failure leaked its connection lock');
++    // A second connection owns the instance lock: the command must time out
++    // without writing; after release the ordinary retry must still succeed.
++    $connection = config('database.connections.mysql');
++    $competitor = new PDO('mysql:host=mysql;port=' . $connection['hostport'] . ';dbname=' . $connection['database'],
++        $connection['username'], $connection['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
++    $take = $competitor->prepare('SELECT GET_LOCK(?, 0)');
++    $take->execute([$lockName]);
++    ensure((int)$take->fetchColumn() === 1, 'Contention setup failed');
++    try {
++        fails(static function () use ($service) { $service->saveThemeColor(2); }, 'Concurrent writer bypassed lock');
++        ensure(themeValueForTest() === '7', 'Busy command changed theme');
++    } finally {
++        $competitor->prepare('SELECT RELEASE_LOCK(?)')->execute([$lockName]);
++    }
++    $service->saveThemeColor(7);
++    $category = json_decode($controller->colorChange('1', 'category')->getContent(), true);
++    ensure($category['status'] === 200 && (int)$service->getColorChange('category') === 1,
++        'Existing category command changed');
++    $unknown = json_decode($controller->colorChange('7', 'not-a-theme')->getContent(), true);
++    ensure($unknown['status'] !== 200 && Db::name('diy')->count() === 3, 'Unknown type created a document');
++    file_put_contents('/tmp/theme-save-member-response.json', json_encode($member));
++    echo "PASS theme first/repeat/save-refresh; all palettes; invalid values; SQL rollback; cache refresh; document isolation; duplicate rejection; lock cleanup/contention; category compatibility\n";
++} finally {
++    Db::execute('DROP TEMPORARY TABLE IF EXISTS `' . $table . '`');
++    $redis = think\facade\Cache::store('redis')->handler();
++    $keys = $redis->keys($prefix . '*');
++    if ($keys) $redis->del($keys);
++}
+diff --git a/tests/diy-theme-follow/saved-theme-browser.cjs b/tests/diy-theme-follow/saved-theme-browser.cjs
+new file mode 100644
+index 00000000..05696841
+--- /dev/null
++++ b/tests/diy-theme-follow/saved-theme-browser.cjs
+@@ -0,0 +1,80 @@
++// Consume the real local PHP controller response in the existing member build.
++// Theme color is never assigned to the page VM: App.vue must resolve the palette.
++const fs = require('node:fs');
++const path = require('node:path');
++const http = require('node:http');
++const assert = require('node:assert/strict');
++const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
++const root = path.resolve(process.env.MEMBER_H5_TEST_ROOT || '');
++const fixture = JSON.parse(fs.readFileSync(process.env.THEME_API_FIXTURE, 'utf8'));
++assert.equal(fixture.data.status, 7, 'Fixture must come from the successful local wine save');
++assert(fs.existsSync(path.join(root, 'index.html')), 'Explicit compiled member H5 input required');
++const evidence = path.join(__dirname, 'evidence/theme-save-2026-10-22');
++fs.mkdirSync(evidence, { recursive: true });
++const server = http.createServer((req, res) => {
++  const pathname = new URL(req.url, 'http://localhost').pathname;
++  const file = pathname.startsWith('/pages/') ? path.join(root, 'index.html') : path.join(root, pathname);
++  if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
++    res.writeHead(404).end(); return;
++  }
++  const types = {'.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html',
++    '.woff': 'font/woff', '.woff2': 'font/woff2', '.png': 'image/png'};
++  res.setHeader('Content-Type', types[path.extname(file)] || 'application/octet-stream');
++  fs.createReadStream(file).pipe(res);
++});
++(async () => {
++  let browser;
++  const requests = [], cases = [], warnings = [];
++  try {
++    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++    browser = await chromium.launch({headless: true, channel: 'chrome'});
++    const page = await browser.newPage({viewport: {width: 375, height: 812}});
++    page.on('pageerror', error => warnings.push(error.message));
++    await page.route('**/api/**', async route => {
++      const request = route.request(), url = new URL(request.url());
++      requests.push({path: url.pathname, method: request.method()});
++      assert.equal(request.method(), 'GET', 'Browser verification cannot write business data');
++      if (url.pathname === '/api/get_script') {
++        await route.fulfill({body: '', contentType: 'application/javascript'}); return;
++      }
++      let response = {status: 200, data: {}, msg: 'ok'};
++      if (url.pathname.includes('color_change')) response = fixture;
++      if (url.pathname === '/api/navigation') response.data = {
++        name: 'pageFoot', effectConfig: {tabVal: 1}, navConfig: {tabVal: 0}, navStyleConfig: {tabVal: 0}, toneConfig: {tabVal: 0},
++        topConfig: {val: 0}, bottomConfig: {val: 0}, prConfig: {val: 0}, mbConfig: {val: 0},
++        bgColor: {color: [{item: '#fff'}]}, bgColor2: {color: [{item: '#fff'}]},
++        menuList: [{name: '服务', icon: 'icon-ic_mall', link: '/pages/activity/therapist_list/index'}],
++      };
++      if (url.pathname.includes('reservation/staff/list')) response.data = {list: [
++        {id: 1, staff_name: '验证老师', position_label: '美容师', star_level: 4},
++      ]};
++      await route.fulfill({json: response});
++    });
++    for (const width of [375, 320]) {
++      await page.setViewportSize({width, height: 812});
++      await page.goto('http://127.0.0.1:' + server.address().port +
++        '/pages/activity/therapist_list/index?store_id=130&position_ids=69', {waitUntil: 'domcontentloaded'});
++      await page.locator('.btn-primary').waitFor({timeout: 20000});
++      await page.waitForFunction(() => getComputedStyle(document.querySelector('.btn-primary')).backgroundColor === 'rgb(123, 41, 65)');
++      const row = await page.locator('.btn-primary').evaluate(element => {
++        const style = getComputedStyle(element), rect = element.getBoundingClientRect();
++        return {theme: style.getPropertyValue('--view-theme').trim(), background: style.backgroundColor,
++          backgroundImage: style.backgroundImage, left: rect.left, right: rect.right};
++      });
++      assert.equal(row.theme.toLowerCase(), '#7b2941');
++      assert.equal(row.backgroundImage, 'none');
++      assert(row.left > 0 && row.right < width, 'Booking button overflow');
++      cases.push({width, ...row});
++      await page.screenshot({path: path.join(evidence, 'booking-wine-' + width + '.png')});
++    }
++    assert(requests.some(request => request.path.includes('color_change')));
++    assert.deepEqual(warnings, [], 'Fixture bootstrap errors must not hide a theme failure');
++    const result = {result: 'PASS', source: 'Local MySQL save -> actual public controller response -> compiled App.vue -> booking button',
++      productionConfigurationWrites: 0, cases, requests, warnings};
++    fs.writeFileSync(path.join(evidence, 'browser-result.json'), JSON.stringify(result, null, 2) + '\n');
++    console.log(JSON.stringify(result));
++  } finally {
++    if (browser) await browser.close();
++    await new Promise(resolve => server.close(resolve));
++  }
++})().catch(error => { console.error(error); process.exitCode = 1; });
+diff --git a/后端代码/app/controller/admin/v1/diy/Diy.php b/后端代码/app/controller/admin/v1/diy/Diy.php
+index e48da0a8..40ea8315 100644
+--- a/后端代码/app/controller/admin/v1/diy/Diy.php
++++ b/后端代码/app/controller/admin/v1/diy/Diy.php
+@@ -581,6 +581,12 @@ class Diy extends AuthController
+      */
+     public function colorChange($status, $type)
+     {
++        // Theme configuration may be absent on a new instance. Its dedicated
++        // command creates only that scalar setting; category templates stay unchanged.
++        if ((string)$type === 'color_change') {
++            $this->services->saveThemeColor($status);
++            return $this->success('设置成功');
++        }
+         if (!$status) return app('json')->fail('参数错误');
+         $info = $this->services->get(['template_name' => $type, 'type' => 3]);
+         if ($info) {
+diff --git a/后端代码/app/services/diy/DiyServices.php b/后端代码/app/services/diy/DiyServices.php
+index b0418bfa..73c28b82 100644
+--- a/后端代码/app/services/diy/DiyServices.php
++++ b/后端代码/app/services/diy/DiyServices.php
+@@ -463,6 +463,59 @@ class DiyServices extends BaseServices
+ 		});
+     }
+ 
++    /**
++     * Persist one supported system palette, including an instance's first save.
++     * The DIY scalar is authoritative; never synthesize or overwrite page JSON.
++     */
++    public function saveThemeColor($status): void
++    {
++        if ((!is_int($status) && !is_string($status)) || !preg_match('/^[1-7]$/D', (string)$status)) {
++            throw new AdminException('请选择有效的主题风格');
++        }
++        $connection = \think\facade\Db::connect();
++        $database = $connection->query('SELECT DATABASE() AS db')[0]['db'];
++        // No unique key exists for this legacy document table. A database-scoped
++        // connection lock serializes first creation and cache invalidation together.
++        $lockName = 'diy_theme_' . substr(hash('sha256', (string)$database), 0, 40);
++        $locked = $connection->query('SELECT GET_LOCK(?, 10) AS acquired', [$lockName]);
++        if ((int)($locked[0]['acquired'] ?? 0) !== 1) {
++            throw new AdminException('主题配置正在保存，请稍后重试');
++        }
++        try {
++            $this->transaction(function () use ($status) {
++                $where = ['template_name' => 'color_change', 'type' => 3];
++                if ($this->dao->getCount($where) > 1) {
++                    throw new AdminException('主题配置存在重复记录，请联系管理员处理');
++                }
++                $info = $this->dao->get($where);
++                $data = ['value' => (string)$status, 'update_time' => time()];
++                if ($info) {
++                    if (!$this->dao->update($info['id'], $data)) {
++                        throw new AdminException('主题保存失败');
++                    }
++                } elseif (!$this->dao->save($data + [
++                    'name' => '主题风格', 'title' => '主题换色',
++                    'template_name' => 'color_change', 'type' => 3, 'add_time' => time(),
++                ])) {
++                    throw new AdminException('主题保存失败');
++                }
++            });
++            // Invalidate only after commit. A retry reads the saved scalar rather
++            // than publishing an uncommitted value or an older writer's cache.
++            $this->dao->cacheStrDel('color_change_color_change_3');
++            event('diy.update');
++        } finally {
++            try {
++                $released = $connection->query('SELECT RELEASE_LOCK(?) AS released', [$lockName]);
++                if ((int)($released[0]['released'] ?? 0) !== 1) $connection->close();
++            } catch (\Throwable $error) {
++                // Discard a pooled connection if its advisory lock cannot be released.
++                $connection->close();
++                \think\facade\Log::error('Theme lock release failed: ' . $error->getMessage());
++            }
++        }
++    }
++
+     /**
+      * 取单个diy小程序预览二维码
+      * @param int $id

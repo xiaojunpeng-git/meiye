@@ -1,0 +1,1212 @@
+diff --git a/tests/diy-cube-slides/browser.cjs b/tests/diy-cube-slides/browser.cjs
+new file mode 100644
+index 00000000..998281ea
+--- /dev/null
++++ b/tests/diy-cube-slides/browser.cjs
+@@ -0,0 +1,90 @@
++// Render the full compiled member app. APIs are isolated synthetic fixtures; no production writes.
++const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
++const {root,loaded,withCubeSlides}=require('./contract.cjs');
++const appRoot=process.env.CUBE_H5_ROOT||'/private/tmp/m008-cube-slides-20261022/member/member-candidate';
++const evidence=path.join(__dirname,'evidence');fs.mkdirSync(evidence,{recursive:true});
++const counts=[2,2,3,3,3,3,3,4,5,4,1,2];
++function config(style){
++ const c=loaded.preview.options.data.call({num:style}).defaultConfig;c.timestamp=style;c.styleConfig.tabVal=style;
++ c.prConfig.val=12;c.imgConfig.val=6;c.filletImg.val=8;c.mbConfig.val=12;
++ c.picStyle.picList=Array.from({length:counts[style]},(_,i)=>withCubeSlides({},[
++  {image:'/cube-a.png',link:'/pages/users/user_coupon/index?cube='+style+'&frame='+i+'a',objectFit:'cover'},
++  {image:'/cube-b.png',link:'/pages/users/user_coupon/index?cube='+style+'&frame='+i+'b',objectFit:'contain'}
++ ]));
++ c.picStyle.docPicList=[{doc:{startX:0,startY:0,w:187.5,h:375}},{doc:{startX:187.5,startY:0,w:187.5,h:375}}];
++ return c;
++}
++const configs=Array.from({length:12},(_,i)=>config(i));
++const fixture={title:'魔方验证',is_show:1,is_bg_color:1,color_picker:'#fff',is_bg_pic:0,value:Object.fromEntries(configs.map((c,i)=>['cube'+String(i).padStart(2,'0'),c]))};
++fs.writeFileSync(path.join(evidence,'decoration-fixture.json'),JSON.stringify(fixture,null,2));
++function api(url){
++ let data={};
++ if(url.includes('/diy/get_diy/')){
++  data=process.env.CUBE_API_FIXTURE?JSON.parse(fs.readFileSync(process.env.CUBE_API_FIXTURE,'utf8')).data:JSON.parse(JSON.stringify(fixture));
++  if(process.env.CUBE_LEGACY)Object.values(data.value).forEach(c=>c.picStyle.picList.forEach(region=>delete region.slides));
++ }
++ else if(url.includes('diy_version'))data={version:'cube-local'};
++ else if(url.includes('color_change'))data={status:7,navigation:0};
++ else if(url.endsWith('/navigation'))data={name:'pageFoot',effectConfig:{tabVal:1},navConfig:{tabVal:0},navStyleConfig:{tabVal:0},toneConfig:{tabVal:0},topConfig:{val:0},bottomConfig:{val:0},prConfig:{val:0},mbConfig:{val:0},bgColor:{color:[{item:'#fff'}]},bgColor2:{color:[{item:'#fff'}]},menuList:[]};
++ else if(url.endsWith('/get_entry_store'))data={store_id:0,user_entry_rules:[],shop_operation_type:1};
++ else if(url.includes('nearby'))data={info:{id:0,name:'本地验证',is_alone:0}};
++ else if(url.includes('spread/'))data=[];
++ return {status:200,msg:'ok',data};
++}
++const server=http.createServer((req,res)=>{
++ const url=new URL(req.url,'http://localhost'),p=url.pathname;
++ if(p.startsWith('/api/')){if(p==='/api/get_script'){res.setHeader('Content-Type','application/javascript');res.end('');return;}res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(api(p)));}
++ if(p==='/cube-a.png'||p==='/cube-b.png'){res.setHeader('Content-Type','image/png');return res.end(fs.readFileSync(path.join(root,'前端代码/uniapp/static/design-system',p==='/cube-a.png'?'beauty-carousel-spa.png':'beauty-carousel-care.png')));}
++ if(p==='/favicon.ico'){res.writeHead(204);return res.end();}
++ const file=p.startsWith('/pages/')?path.join(appRoot,'index.html'):path.join(appRoot,p);
++ if(!file.startsWith(appRoot+'/')||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);return res.end();}
++ res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.png':'image/png','.woff':'font/woff','.ttf':'font/ttf'})[path.extname(file)]||'application/octet-stream');fs.createReadStream(file).pipe(res);
++});
++async function run(){
++ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
++ await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++ if(process.argv.includes('--serve')){console.log('CUBE_URL='+origin+'/pages/index/index');return;}
++ const browser=await chromium.launch({channel:'chrome',headless:true}),page=await browser.newPage();const errors=[],results=[];
++ page.on('pageerror',e=>errors.push(e.message));
++ await page.route('**/*',route=>{
++   const url=route.request().url();
++   if(new URL(url).pathname.startsWith('/api/')) {
++     assert.equal(route.request().method(),'GET','No business writes during rendering');
++     if(new URL(url).pathname==='/api/get_script')return route.fulfill({contentType:'application/javascript',body:''});
++     return route.fulfill({json:api(new URL(url).pathname)});
++   }
++   if(url==='https://res.wx.qq.com/open/js/jweixin-1.2.0.js')return route.fulfill({contentType:'application/javascript',body:'window.jWeixin={};'});
++   return url.startsWith(origin+'/')?route.continue():route.abort();
++ });
++ try{
++ for(const width of [375,320]){
++ await page.setViewportSize({width,height:844});await page.goto(origin+'/pages/index/index');await page.locator(process.env.CUBE_LEGACY?'.pictureCube .easy-loadimage':'.cube-region-swiper').first().waitFor({state:'attached',timeout:30000});
++ await page.waitForFunction(()=>document.querySelectorAll('.pictureCube').length===12);
++ const regions=page.locator(process.env.CUBE_LEGACY?'.pictureCube .easy-loadimage':'.cube-region-image');
++ // Scroll each real component into view so the existing lazy loader resolves its anchor.
++ for(let i=0;i<await regions.count();i++){await regions.nth(i).evaluate(el=>el.scrollIntoView());}
++ await page.waitForTimeout(1000);
++ const before=await regions.evaluateAll(nodes=>nodes.map(el=>{const r=el.getBoundingClientRect();return {width:r.width,height:r.height,left:r.left,right:r.right};}));
++ assert(before.every(r=>r.width>5&&r.height>5&&r.left>=0&&r.right<=width+1),'Zero-size/overflow region '+JSON.stringify(before));
++ await page.waitForTimeout(3300);
++ const after=await regions.evaluateAll(nodes=>nodes.map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})));
++ before.forEach((r,i)=>{assert(Math.abs(r.height-after[i].height)<1,'Slide resized region');assert(Math.abs(r.width-after[i].width)<1);});
++ results.push({width,regions:before.length,layoutStable:true,...(process.env.CUBE_LEGACY?{bounds:before}:{})});
++ await regions.nth(0).evaluate(el=>el.scrollIntoView());await page.screenshot({path:path.join(evidence,(process.env.CUBE_LEGACY||'member')+'-'+width+'.png')});
++ }
++ if(!process.env.CUBE_LEGACY){
++ await page.evaluate(()=>{window.__cubeNav=[];window.uni.navigateTo=options=>{window.__cubeNav.push(options.url);};});
++ const first=page.locator('.cube-region-swiper').first();
++ await first.evaluate(el=>el.scrollIntoView());
++ const active=await first.evaluate(el=>{const box=el.getBoundingClientRect(),x=box.left+box.width/2;const slide=[...el.querySelectorAll('uni-swiper-item')].find(item=>{const b=item.getBoundingClientRect();return b.left<=x&&b.right>x;});return slide&&slide.querySelector('img')&&slide.querySelector('img').getAttribute('src');});
++ assert(active,'Current slide must have a loaded image');
++ await first.click();const nav=await page.evaluate(()=>window.__cubeNav);
++ assert.equal(nav.length,1,'One tap must not also trigger the region first-frame link');
++ assert.equal(nav[0],'/pages/users/user_coupon/index?cube=0&frame=0'+(active.includes('cube-b.png')?'b':'a'));
++ results.push({currentFrameLink:nav[0],oneNavigationPerTap:true});
++ }
++ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(evidence,(process.env.CUBE_LEGACY||'browser')+'-result.json'),JSON.stringify({result:'PASS',results,errors,productionRequests:0},null,2));console.log(JSON.stringify(results.map(({bounds,...r})=>r)));
++ }catch(error){await page.screenshot({path:path.join(evidence,'failure.png')});console.error('PAGE_ERRORS',errors);console.error((await page.locator('body').innerText()).slice(0,1200));throw error;}finally{await browser.close();server.close();}
++}
++if(require.main===module)run().catch(e=>{console.error(e);server.close();process.exitCode=1;});
++module.exports={server,configs,fixture,api};
+diff --git a/tests/diy-cube-slides/build.cjs b/tests/diy-cube-slides/build.cjs
+new file mode 100644
+index 00000000..942433d0
+--- /dev/null
++++ b/tests/diy-cube-slides/build.cjs
+@@ -0,0 +1,47 @@
++// Build an immutable tree containing only the reviewed cube files, never unrelated dirty work.
++const fs = require('fs'), path = require('path'), cp = require('child_process'), vm = require('vm');
++const root = path.resolve(__dirname, '../..');
++const files = [
++  '前端代码/shared/diyCubeSlides.js',
++  '前端代码/admin/src/components/mobileConfig/c_picture_cube.vue',
++  '前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue',
++  '前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue',
++  '前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue',
++  '前端代码/admin/src/components/mobilePage/cubePreviewImage.vue',
++  '前端代码/admin/src/components/mobilePage/picture_cube.vue',
++  '前端代码/uniapp/pages/index/components/cubeRegionImage.vue',
++  '前端代码/uniapp/pages/index/components/pictureCube.vue'
++];
++const target = process.argv[2];
++if (!['admin', 'member', 'mini'].includes(target)) throw Error('Explicit build target required');
++process.chdir(root);
++const base = process.env.CUBE_BUILD_BASE || '/private/tmp/m008-cube-slides-20261022';
++if (!base.startsWith('/private/tmp/m008-cube-slides-20261022')) throw Error('Unsafe output root');
++fs.mkdirSync(base, {recursive: true});
++const git = (args, options = {}) => cp.execFileSync('git', args, {cwd: root, encoding: 'utf8', ...options}).trim();
++const head = git(['rev-parse', 'HEAD']);
++const env = {...process.env, GIT_INDEX_FILE: path.join(base, target + '.index')};
++git(['read-tree', head], {env});
++for (const file of files) git(['update-index', '--add', '--cacheinfo', '100644', git(['hash-object', '-w', file]), file], {env});
++const tree = git(['write-tree'], {env});
++fs.writeFileSync(path.join(base, target + '-source.json'), JSON.stringify({head, tree, files, remoteOperations: false}, null, 2));
++let script;
++if (target === 'mini') {
++  script = fs.readFileSync(path.join(root, 'scripts/build/member-008-round4-mini.cjs'), 'utf8')
++    .replace(/const commit=assetsCandidate\?[^;]+;/, 'const commit=' + JSON.stringify(tree) + ';')
++    .replace(/const base=assetsCandidate\?[^;]+;/, 'const base=' + JSON.stringify(base + '/mini') + ';')
++    .replace("git(['rev-parse','HEAD']).toString().trim()!==commit", "git(['rev-parse','HEAD']).toString().trim()!==" + JSON.stringify(head))
++    .replace(/if\(dirty\.split[^\n]+/, '// Only the explicit tree above is compiled.');
++  process.argv = [process.argv[0], 'cube-mini-build'];
++} else {
++  script = fs.readFileSync(path.join(root, 'scripts/member-commerce-release-build.cjs'), 'utf8')
++    .replace(/const commit=variant===.*?;/, 'const commit=' + JSON.stringify(tree) + ';')
++    .replace("const base='/private/tmp/m008-round3-release-20261020';", 'const base=' + JSON.stringify(base + '/' + target) + ';')
++    // The tracked admin baseline has no ESLint config. Template/parser contracts run separately.
++    .replace('config.cache(false);', "config.module.rules.delete('eslint');config.cache(false);");
++  // Uni's scan pass resolves before its optimizing emission; success requires actual HTML.
++  script = script.replace('process.exit(0);return value;', "if(fs.existsSync(path.join(output,'index.html')))process.exit(0);return value;")
++    .replace('const init=Service.prototype.init;', "process.once('exit', code => { const exists=fs.existsSync(path.join(output,terminal==='admin'?'system.html':'index.html'));fs.writeFileSync(output+'-complete.json',JSON.stringify({commit,terminal,result:code===0&&exists?'PASS':'FAIL',actualOutput:exists}));if(!exists)process.exitCode=1;});const init=Service.prototype.init;");
++  process.argv = [process.argv[0], 'cube-build', target, 'candidate'];
++}
++vm.runInThisContext('(function(require,__dirname,__filename){' + script + '\n})', {filename: __filename})(require, path.join(root, 'scripts/build'), __filename);
+diff --git a/tests/diy-cube-slides/contract.cjs b/tests/diy-cube-slides/contract.cjs
+new file mode 100644
+index 00000000..62b549bf
+--- /dev/null
++++ b/tests/diy-cube-slides/contract.cjs
+@@ -0,0 +1,70 @@
++// Execute canonical component methods and shared normalization, not copied business logic.
++const assert = require('assert/strict'), fs = require('fs'), path = require('path');
++const root = path.resolve(__dirname, '../..'), deps = path.join(root, '前端代码/admin/node_modules');
++const compiler = require(path.join(deps, 'vue-template-compiler'));
++const parser = require(path.join(deps, '@babel/parser'));
++const Vue = require(path.join(deps, 'vue'));
++const shared = fs.readFileSync(path.join(root, '前端代码/shared/diyCubeSlides.js'), 'utf8');
++const {cubeSlides, withCubeSlides} = new Function(shared.replace(/export function/g, 'function') + '\nreturn {cubeSlides,withCubeSlides};')();
++const bindings = {cubeSlides, withCubeSlides, cubeRegionImage: {}, cubePreviewImage: {}, draggable: {}, vuedraggable: {}, uploadPictures: {}, linkaddress: {}, swiper: {}, swiperSlide: {},
++  mapState: () => ({defaultArray() {return [];}}), uni: {getWindowInfo: () => ({windowWidth: 375}),getImageInfo: ({success}) => success({width: 750, height: 750})}};
++function load(file) {
++  const sfc = compiler.parseComponent(fs.readFileSync(path.join(root,file),'utf8'));
++  const result = compiler.compile(sfc.template.content);
++  assert.deepEqual(result.errors, [], file + ' template');
++  let source = sfc.script.content;
++  const edits = parser.parse(source, {sourceType:'module'}).program.body.filter(n => ['ImportDeclaration','ExportDefaultDeclaration'].includes(n.type));
++  for (const n of edits.reverse()) source = source.slice(0,n.start) + (n.type==='ImportDeclaration'?'':'return '+source.slice(n.declaration.start,n.end)) + source.slice(n.end);
++  const options = new Function(...Object.keys(bindings),source)(...Object.values(bindings));
++  return {sfc, options, source};
++}
++const paths = {
++  regionPicker:'前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue',
++  sharedMenu:'前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue',
++  editor:'前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue',
++  preview:'前端代码/admin/src/components/mobilePage/picture_cube.vue',
++  previewImage:'前端代码/admin/src/components/mobilePage/cubePreviewImage.vue',
++  member:'前端代码/uniapp/pages/index/components/pictureCube.vue',
++  memberImage:'前端代码/uniapp/pages/index/components/cubeRegionImage.vue'
++};
++const loaded = Object.fromEntries(Object.entries(paths).map(([k,v]) => [k,load(v)]));
++if (require.main === module) {
++  const legacy = {image:'/a.png',link:'/old',objectFit:'contain'};
++  assert.deepEqual(cubeSlides(legacy),[legacy]);
++  assert.deepEqual(cubeSlides(withCubeSlides(legacy,[])),[],'Deleted last image must not resurrect legacy content');
++  const next = withCubeSlides(legacy,[{image:'',link:'/empty'},{image:'/b.png',link:'/b',objectFit:'fill'}]);
++  assert.equal(next.image,'/b.png'); assert.equal(next.link,'/b');
++  assert.equal(legacy.image,'/a.png','Reading/editing must not mutate legacy source');
++  const cfg = Vue.observable({styleConfig:{tabVal:9},picStyle:{tabVal:0,picList:[legacy,{image:'/other.png',link:'/other'}],docPicList:[{doc:{w:100,h:100}}]}});
++  const editor = new Vue({...loaded.editor.options,propsData:{configObj:cfg}});
++  editor.addFrame(); editor.updateFrame(1,'image','/second.png');editor.updateFrame(1,'link','/second');
++  assert.equal(editor.frames.length,2);assert.equal(editor.frames[1].link,'/second');
++  editor.saveFrames(editor.frames.slice().reverse());
++  assert.equal(cfg.picStyle.picList[0].image,'/second.png');assert.equal(cfg.picStyle.docPicList[0].img,'/second.png');
++  editor.editingIndex=0;editor.editingRegion=editor.region;cfg.picStyle.tabVal=1;
++  editor.receiveImage({att_dir:'/must-not-leak.png'});assert.equal(editor.region.image,'/other.png');
++  cfg.picStyle.tabVal=0;editor.removeFrame(0);assert.equal(editor.frames.length,1);editor.removeFrame(0);assert.equal(editor.region.image,'');
++  assert.equal(cfg.picStyle.picList[1].link,'/other','Region edits leaked');
++  const saved=JSON.parse(JSON.stringify(cfg));assert.equal(JSON.stringify(saved.picStyle),JSON.stringify(cfg.picStyle),'JSON roundtrip');
++  const image = new Vue({...loaded.memberImage.options,propsData:{region:next}});
++  const events=[];image.$on('navigate',frame=>events.push(frame.link));image.navigate(image.slides[0]);assert.deepEqual(events,['/b']);
++  assert.equal(image.slideMode(image.slides[0]),'scaleToFill');
++  const config = loaded.preview.options.data.call({num:0}).defaultConfig;
++  config.picStyle.picList=[{image:'/a.png',link:'/a',slides:[{image:'/a.png',link:'/a'},{image:'/b.png',link:'/b'}]}];
++  config.picStyle.docPicList=[{doc:{startX:0,startY:0,w:375,h:375},img:'/stale.png'}];config.styleConfig.tabVal=11;
++  const member=new Vue({...loaded.member.options,propsData:{dataConfig:config}});
++  assert.equal(member.docPicList[0].slides[1].link,'/b');assert.equal(member.docPicList[0].doc.w,375);
++  const menu=loaded.sharedMenu.options;
++  const menuData={list:[{img:'old',info:[{value:'/old'}]}]};
++  const ctx={configData:menuData,activeIndex:0,indexLast:0,$nextTick:fn=>fn(),modalPic:true};
++  menu.methods.linkUrl.call(ctx,'/nav');menu.methods.getPic.call(ctx,{att_dir:'/nav.png'});
++  assert.equal(menuData.list[0].info[0].value,'/nav');assert.equal(menuData.list[0].img,'/nav.png');assert.equal(ctx.modalPic,false);
++  assert(!loaded.sharedMenu.sfc.script.content.includes('picStyle'),'Retired cube editor branch remains');
++  const picker=loaded.regionPicker.options;
++  const pickCtx={arrayObj:{image:'',link:''},configData:{picList:[]}};
++  picker.methods.picArrayConcat.call(pickCtx,2);
++  assert.notEqual(pickCtx.configData.picList[0],pickCtx.configData.picList[1],'Regions share their placeholder');
++  picker.methods.currentTab.call(pickCtx,11,{});assert.equal(pickCtx.configData.tabVal,11,'Custom region index 11 must not enter the old single-image branch');
++  console.log('PASS: legacy, add/edit/reorder/delete, no resurrection, independent regions, asynchronous picker guard, JSON roundtrip, current-frame links, custom-grid geometry, shared navigation editor regression, 7 SFC templates.');
++}
++module.exports={root,deps,loaded,paths,bindings,cubeSlides,withCubeSlides};
+diff --git a/tests/diy-cube-slides/editor-browser.cjs b/tests/diy-cube-slides/editor-browser.cjs
+new file mode 100644
+index 00000000..7a1bca90
+--- /dev/null
++++ b/tests/diy-cube-slides/editor-browser.cjs
+@@ -0,0 +1,40 @@
++// Actual editor and preview SFCs, with only the unchanged media/link dialogs replaced by fixtures.
++const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
++const {root,deps,loaded}=require('./contract.cjs'),{configs}=require('./browser.cjs');
++const less=require(path.join(deps,'less'));
++async function run(){
++ const css=[];for(const key of ['editor','preview','previewImage'])for(const style of loaded[key].sfc.styles){css.push(style.lang==='less'?(await less.render(style.content)).css:style.content);}
++ const modules=Object.fromEntries(['editor','preview','previewImage'].map(key=>[key,{script:loaded[key].source,template:loaded[key].sfc.template.content}]));
++ const html=`<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}body{font:14px Arial;margin:24px;color:#333}.layout{display:flex;gap:28px;align-items:flex-start}.preview{width:375px;flex-shrink:0}.editor{width:350px;flex-shrink:0}.grid-column-2{display:grid;grid-template-columns:repeat(2,1fr)}.grid-column-3{display:grid;grid-template-columns:repeat(3,1fr)}.flex-1{flex:1;min-width:0}.flex-between-center{display:flex;justify-content:space-between;align-items:center}.h-full{height:100%}.w-full{width:100%}button{cursor:pointer}${css.join('\n')}</style><link rel="stylesheet" href="/iview.css"><link rel="stylesheet" href="/swiper.css"><div id="app"><div class="layout"><div class="preview"><cube-preview :num="0" /></div><div class="editor"><div>区域 <button v-for="(item,i) in config.picStyle.picList" :id="'region-'+i" @click="config.picStyle.tabVal=i">{{i+1}}</button></div><cube-editor :config-obj="config" /></div></div></div><script src="/vue.js"></script><script src="/iview.js"></script><script src="/sortable.js"></script><script src="/draggable.js"></script><script src="/swiper.js"></script><script src="/awesome.js"></script><script>
++ const shared=${JSON.stringify(fs.readFileSync(path.join(root,'前端代码/shared/diyCubeSlides.js'),'utf8'))};
++ const {cubeSlides,withCubeSlides}=new Function(shared.replace(/export function/g,'function')+';return {cubeSlides,withCubeSlides}')();
++ const modules=${JSON.stringify(modules)};
++ const config=${JSON.stringify(configs[9])};
++ const store=Vue.observable({state:{admin:{mobildConfig:{defaultArray:[config]}}}});Vue.prototype.$store=store;
++ const bindings={cubeSlides,withCubeSlides,cubePreviewImage:{},draggable:window.vuedraggable,uploadPictures:{render(h){return h('button',{on:{click:()=>this.$emit('getPic',{att_dir:'/cube-b.png'})}},'选择验证图片');}},linkaddress:{data:()=>({modals:false}),template:'<span></span>'},swiper:VueAwesomeSwiper.swiper,swiperSlide:VueAwesomeSwiper.swiperSlide,mapState:()=>({defaultArray(){return this.$store.state.admin.mobildConfig.defaultArray}})};
++ for(const [key,name] of [['previewImage','cubePreviewImage'],['preview','cube-preview'],['editor','cube-editor']]){const m=modules[key];const options=new Function(...Object.keys(bindings),m.script)(...Object.values(bindings));if(key==='preview')options.components.cubePreviewImage=Vue.component('cubePreviewImage');Vue.component(name,Object.assign(options,Vue.compile(m.template)));}
++ window.fixture=new Vue({el:'#app',data:{config}});
++ </script>`;
++ const resources={'/vue.js':'vue/dist/vue.js','/iview.js':'view-design/dist/iview.js','/iview.css':'view-design/dist/styles/iview.css','/sortable.js':'sortablejs/Sortable.js','/draggable.js':'vuedraggable/dist/vuedraggable.umd.js','/swiper.js':'swiper/dist/js/swiper.js','/swiper.css':'swiper/dist/css/swiper.css','/awesome.js':'vue-awesome-swiper/dist/vue-awesome-swiper.js'};
++ const server=http.createServer((req,res)=>{const p=new URL(req.url,'http://localhost').pathname;if(p==='/'){res.setHeader('Content-Type','text/html;charset=utf-8');return res.end(html);}if(resources[p]){res.setHeader('Content-Type',p.endsWith('.css')?'text/css':'application/javascript');return res.end(fs.readFileSync(path.join(deps,resources[p])));}if(p.startsWith('/cube-')){res.setHeader('Content-Type','image/png');return res.end(fs.readFileSync(path.join(root,'前端代码/uniapp/static/design-system',p==='/cube-a.png'?'beauty-carousel-spa.png':'beauty-carousel-care.png')));}res.writeHead(204);res.end();});
++ await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++ const {chromium}=require('/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');const browser=await chromium.launch({channel:'chrome',headless:true}),page=await browser.newPage({viewport:{width:900,height:900}}),errors=[];
++ page.on('pageerror',e=>errors.push(e.message));
++ try{
++ await page.goto(origin);await page.locator('.cube-frame').nth(1).waitFor();assert.equal(await page.locator('.cube-frame').count(),2);
++ const image=await page.locator('.preview .swiper-slide-active img').first().evaluate(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height,top:el.getBoundingClientRect().top,rootTop:el.closest('.cube-preview-image').getBoundingClientRect().top,naturalWidth:el.naturalWidth}));
++ assert(image.naturalWidth>0&&image.width>0&&Math.abs(image.top-image.rootTop)<1,'Preview image must stay inside its region');
++ await page.locator('.cube-frame input.ivu-input').nth(1).fill('/pages/users/user_coupon/index?edited=1');
++ await page.getByText('添加图片',{exact:true}).click();assert.equal(await page.locator('.cube-frame').count(),3);
++ await page.locator('.cube-picture').nth(2).click();await page.getByRole('button',{name:'选择验证图片'}).click();
++ await page.locator('.ivu-modal-wrap').waitFor({state:'hidden'});
++ await page.locator('#region-1').click();assert.equal(await page.locator('.cube-frame').count(),2);
++ await page.locator('#region-0').click();assert.equal(await page.locator('.cube-frame').count(),3);
++ assert.equal(await page.locator('.cube-frame input.ivu-input').nth(1).inputValue(),'/pages/users/user_coupon/index?edited=1');
++ await page.locator('.cube-frame button[title="删除图片"]').nth(2).click();assert.equal(await page.locator('.cube-frame').count(),2);
++ const size=await page.locator('.preview .mobile-page').boundingBox();assert(size.width===375&&size.height>50);
++ await page.screenshot({path:path.join(__dirname,'evidence/editor.png')});assert.deepEqual(errors,[]);
++ fs.writeFileSync(path.join(__dirname,'evidence/editor-result.json'),JSON.stringify({result:'PASS',realComponents:true,checks:['selected-region','add-image','picker-callback','edit-link','switch-preserves-content','delete','preview'],errors},null,2));console.log('PASS: real editor controls and preview.');
++ }catch(error){console.error('EDITOR_ERRORS',errors);console.error((await page.locator('body').innerText()).slice(0,900));await page.screenshot({path:path.join(__dirname,'evidence/editor-failure.png')});throw error;}finally{await browser.close();server.close();}
++}
++run().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/diy-cube-slides/mini-motion.cjs b/tests/diy-cube-slides/mini-motion.cjs
+new file mode 100644
+index 00000000..daf6a7e3
+--- /dev/null
++++ b/tests/diy-cube-slides/mini-motion.cjs
+@@ -0,0 +1,17 @@
++// Bound the sampling count and compare image pixels only, excluding status-bar clock changes.
++const fs=require('fs'),path=require('path'),cp=require('child_process');
++const sharp=require(process.env.SHARP_MODULE||'/tmp/node_modules/sharp');
++const dir=path.join(__dirname,'evidence'),project='/private/tmp/m008-cube-slides-20261022/mini/008-member';
++(async()=>{
++ let previous,changed=0,captures=0;
++ for(let i=0;i<4;i++){
++  const file=path.join(dir,'mini-motion-'+i+'.png');
++  cp.execFileSync('/Applications/wechatwebdevtools.app/Contents/MacOS/wechatide',['-c','Codex','simulator_screenshot','--project',project,'--path',file,'--optimize','false','--wait','1'],{encoding:'utf8',timeout:30000});
++  const next=await sharp(file).extract({left:40,top:75,width:500,height:70}).raw().toBuffer();
++  if(previous)for(let j=0;j<next.length;j++)if(Math.abs(next[j]-previous[j])>10)changed++;
++  previous=next;captures++;if(changed>500)break;
++ }
++ if(changed<500)throw Error('No image movement in four bounded captures');
++ fs.writeFileSync(path.join(dir,'mini-motion.json'),JSON.stringify({result:'PASS',changedColorChannels:changed,captures,nativeAutoplay:true,imageCropExcludesClock:true},null,2));
++ console.log('PASS: native image pixels changed, not just the clock.');
++})().catch(error=>{console.error(error);process.exitCode=1;});
+diff --git a/tests/diy-cube-slides/mini.cjs b/tests/diy-cube-slides/mini.cjs
+new file mode 100644
+index 00000000..d5f4b204
+--- /dev/null
++++ b/tests/diy-cube-slides/mini.cjs
+@@ -0,0 +1,35 @@
++// Run the actual compiled mini-program, with a temporary request mock and bundled test photos.
++const fs=require('fs'),path=require('path'),cp=require('child_process'),assert=require('assert/strict');
++const project='/private/tmp/m008-cube-slides-20261022/mini/008-member';
++const cli='/Applications/wechatwebdevtools.app/Contents/MacOS/wechatide';
++const evidence=path.join(__dirname,'evidence');
++function tool(name,args=[]){const out=cp.execFileSync(cli,['-c','Codex',name,'--project',project,...args],{encoding:'utf8',timeout:60000});const result=JSON.parse(out.slice(out.indexOf('{')));assert(result.ok,JSON.stringify(result));return result.result;}
++function evaluate(fn,args){const list=['--fn-source',fn.toString()];if(args){const f='/private/tmp/m008-cube-slides-20261022/evaluate-args.json';fs.writeFileSync(f,JSON.stringify(args));list.push('--args-file',f);}const r=tool('automation_evaluate',list);return r.result.result;}
++const fixture=JSON.parse(fs.readFileSync(path.join(evidence,'public-response.json'),'utf8').replaceAll('/cube-a.png','/static/cube-proof-a.png').replaceAll('/cube-b.png','/static/cube-proof-b.png'));
++for(const [from,to]of [['beauty-carousel-spa.png','cube-proof-a.png'],['beauty-carousel-care.png','cube-proof-b.png']]){
++ const bytes=fs.readFileSync(path.join(__dirname,'../../前端代码/uniapp/static/design-system',from)),dest=project+'/static/'+to;
++ if(!fs.existsSync(dest)||!bytes.equals(fs.readFileSync(dest)))fs.writeFileSync(dest,bytes);
++}
++evaluate(function(fixture){const app=getApp();if(!app.__cubeOriginalRequest)app.__cubeOriginalRequest=wx.request;wx.request=function(o){
++ if(o.method&&o.method.toUpperCase()!=='GET'){if(o.fail)o.fail({errMsg:'No writes in cube test'});return {abort(){}};}
++ let data={};if(o.url.includes('/diy/get_diy/'))data=fixture.data;
++ else if(o.url.includes('diy_version'))data={version:'cube-native-proof'};
++ else if(o.url.includes('color_change'))data={status:7,navigation:0};
++ else if(o.url.includes('get_entry_store'))data={store_id:0,user_entry_rules:[],shop_operation_type:1};
++ else if(o.url.includes('nearby'))data={info:{id:0,name:'本地验证',is_alone:0}};
++ else if(o.url.includes('/navigation'))data={name:'pageFoot',effectConfig:{tabVal:1},navConfig:{tabVal:0},navStyleConfig:{tabVal:0},toneConfig:{tabVal:0},topConfig:{val:0},bottomConfig:{val:0},prConfig:{val:0},mbConfig:{val:0},bgColor:{color:[{item:'#fff'}]},bgColor2:{color:[{item:'#fff'}]},menuList:[]};
++ const r={statusCode:200,data:{status:200,msg:'ok',data}};if(o.success)o.success(r);if(o.complete)o.complete(r);return {abort(){}};
++ };wx.removeStorageSync('diyData');wx.removeStorageSync('diyVersion');wx.reLaunch({url:'/pages/index/index'});return {mocked:true};},[fixture]);
++const measure=async function(){const all=[];function walk(vm){if(vm.$options.name==='cubeRegionImage')all.push(vm);(vm.$children||[]).forEach(walk);}walk(getCurrentPages().slice(-1)[0].$vm);
++ return await Promise.all(all.map(vm=>new Promise(resolve=>{wx.createSelectorQuery().in(vm.$scope).select('.cube-region-image').boundingClientRect(r=>resolve({width:r&&r.width,height:r&&r.height,left:r&&r.left,right:r&&r.right,slides:vm.slides.length})).exec();})));};
++// Tool waits give native layout/rendering time, without changing component state.
++tool('simulator_screenshot',['--path',path.join(evidence,'mini-a.png'),'--optimize','false','--wait','2']);
++const before=evaluate(measure);assert.equal(before.length,35);assert(before.every(r=>r.width>5&&r.height>5&&r.left>=0&&r.right<=390));
++tool('simulator_screenshot',['--path',path.join(evidence,'mini-b.png'),'--optimize','false','--wait','3']);
++const after=evaluate(measure);before.forEach((r,i)=>{assert(Math.abs(r.width-after[i].width)<1);assert(Math.abs(r.height-after[i].height)<1);});
++fs.writeFileSync(path.join(evidence,'mini-result.json'),JSON.stringify({result:'PASS',project,source:'actual native mini-program with isolated local fixtures',layouts:12,regions:35,before,after,upload:false},null,2));
++// Leave the selected four-region layout visible for PM inspection, without a production save.
++evaluate(function(doc){const app=getApp();app.__cubeProofDoc=doc;wx.request=function(o){const data=o.url.includes('/diy/get_diy/')?doc.data:o.url.includes('diy_version')?{version:'cube-selected'}:o.url.includes('get_entry_store')?{store_id:0,user_entry_rules:[],shop_operation_type:1}:o.url.includes('nearby')?{info:{id:0,name:'本地验证',is_alone:0}}:o.url.includes('color_change')?{status:7,navigation:0}:{};if(o.success)o.success({statusCode:200,data:{status:200,msg:'ok',data}});return {abort(){}};};wx.removeStorageSync('diyData');wx.removeStorageSync('diyVersion');wx.reLaunch({url:'/pages/index/index'});return true;},[{...fixture,data:{...fixture.data,value:{cube:fixture.data.value.cube09}}}]);
++tool('simulator_screenshot',['--path',path.join(evidence,'mini-selected.png'),'--optimize','false','--wait','2']);
++cp.execFileSync(process.execPath,[path.join(__dirname,'mini-motion.cjs')],{stdio:'inherit'});
++console.log('PASS: actual mini-program, 12 layouts/35 regions, nonzero bounds and stable dimensions; selected cube visible. No upload.');
+diff --git a/tests/diy-cube-slides/save-mysql.php b/tests/diy-cube-slides/save-mysql.php
+new file mode 100644
+index 00000000..21baf8fe
+--- /dev/null
++++ b/tests/diy-cube-slides/save-mysql.php
+@@ -0,0 +1,32 @@
++<?php
++// Real decoration service persistence on a connection-local temporary table only.
++require '/var/www/html/vendor/autoload.php';
++$app=new think\App('/var/www/html/');$app->env->load('/var/www/html/.env');$app->initialize();
++if(config('database.connections.mysql.hostname')!=='mysql')throw new RuntimeException('Local container only');
++$cache=config('cache');$prefix='cube-test-'.bin2hex(random_bytes(8)).':';
++$cache['stores']['redis']['prefix']=$prefix;$cache['stores']['redis']['tag_prefix']=$prefix.'tag:';config($cache,'cache');
++use think\facade\Db;
++function cubeEnsure($ok,$why){if(!$ok)throw new RuntimeException($why);}
++$table=config('database.connections.mysql.prefix').'diy';
++cubeEnsure((bool)preg_match('/^[a-zA-Z0-9_]+$/',$table),'Unsafe table');
++try{
++ $ddl=Db::query('SHOW CREATE TABLE `'.$table.'`')[0]['Create Table'];
++ Db::execute(str_replace('CREATE TABLE `'.$table.'`','CREATE TEMPORARY TABLE `'.$table.'`',$ddl));
++ $fixture=json_decode(file_get_contents('/tmp/cube-decoration-fixture.json'),true);
++ cubeEnsure(is_array($fixture['value']??null),'Explicit synthetic fixture required');
++ $data=['template_name'=>'cube-local-only','name'=>'cube-local-only','title'=>'Cube test','type'=>1,'status'=>1,'is_show'=>1,'version'=>'cube-v1','value'=>json_encode($fixture['value'])];
++ $service=app()->make(app\services\diy\DiyServices::class);
++ $id=$service->saveData(0,$data);
++ $public=$service->getDiyInfo($id);
++ cubeEnsure($public['value']===$fixture['value'],'Public read lost slides or layout');
++ $stored=Db::name('diy')->where('id',$id)->value('value');
++ cubeEnsure(json_decode($stored,true)===$fixture['value'],'Database roundtrip changed decoration');
++ $changed=$data;$changed['version']='cube-v2';$value=$fixture['value'];
++ $key=array_key_first($value);$value[$key]['picStyle']['picList'][0]['slides']=[];
++ $value[$key]['picStyle']['picList'][0]['image']='';$value[$key]['picStyle']['picList'][0]['link']='';
++ $changed['value']=json_encode($value);$service->saveData($id,$changed);
++ cubeEnsure($service->getDiyInfo($id)['value']===$value,'Update left stale slides in cache');
++ cubeEnsure(Db::name('diy')->count()===1,'Repeat save duplicated document');
++ file_put_contents('/tmp/cube-public-response.json',json_encode(['status'=>200,'msg'=>'ok','data'=>$public]));
++ echo "PASS: real MySQL decoration save -> public read, 12 layouts with slides/links, existing-row update, removed slides and cache refresh; temporary table only.\n";
++}finally{Db::execute('DROP TEMPORARY TABLE IF EXISTS `'.$table.'`');}
+diff --git a/前端代码/admin/src/components/mobileConfig/c_picture_cube.vue b/前端代码/admin/src/components/mobileConfig/c_picture_cube.vue
+index cb168b92..6dba3559 100644
+--- a/前端代码/admin/src/components/mobileConfig/c_picture_cube.vue
++++ b/前端代码/admin/src/components/mobileConfig/c_picture_cube.vue
+@@ -10,6 +10,7 @@
+ <script>
+ import toolCom from '@/components/mobileConfigRight/index.js';
+ import rightBtn from '@/components/rightBtn/index.vue';
++import cubeSlidesEditor from '@/components/mobileConfigRight/c_cube_slides.vue';
+ export default {
+   name: 'c_picture_cube',
+   componentsName: 'picture_cube',
+@@ -27,6 +28,7 @@ export default {
+   },
+   components: {
+     ...toolCom,
++    c_cube_slides: cubeSlidesEditor,
+     rightBtn
+   },
+   data() {
+@@ -79,7 +81,7 @@ export default {
+               configNme: 'titleContent'
+             },
+             {
+-							    components: toolCom.c_menu_list,
++							    components: cubeSlidesEditor,
+ 							    configNme: 'menuConfig'
+             }
+ 			            ];
+diff --git a/前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue b/前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue
+new file mode 100644
+index 00000000..88e52001
+--- /dev/null
++++ b/前端代码/admin/src/components/mobileConfigRight/c_cube_slides.vue
+@@ -0,0 +1,94 @@
++<template>
++  <div class="cube-slides-editor" v-if="region">
++    <draggable :value="frames" handle=".cube-move" @input="saveFrames">
++      <div class="cube-frame" v-for="(frame, index) in frames" :key="index">
++        <Icon class="cube-move" type="md-reorder" title="拖动排序" />
++        <button class="cube-picture" type="button" @click="chooseImage(index)" :title="'选择图片 ' + (index + 1)">
++          <img v-if="frame.image" :src="frame.image" alt="" />
++          <Icon v-else type="ios-add" size="28" />
++        </button>
++        <div class="cube-fields">
++          <Input :value="frame.link" placeholder="请输入链接" icon="ios-link"
++            @input="updateFrame(index, 'link', $event)" @on-click="chooseLink(index)" />
++          <Select :value="frame.objectFit" @on-change="updateFrame(index, 'objectFit', $event)">
++            <Option value="cover">填充裁剪</Option><Option value="contain">完整显示</Option><Option value="fill">拉伸填充</Option>
++          </Select>
++        </div>
++        <Button type="text" icon="ios-trash-outline" title="删除图片" @click="removeFrame(index)" />
++      </div>
++    </draggable>
++    <Button long icon="md-add" @click="addFrame">添加图片</Button>
++    <Modal v-model="modalPic" title="选择图片" width="960px" footer-hide :mask-closable="false">
++      <uploadPictures v-if="modalPic" isChoice="单选" :gridBtn="gridBtn" :gridPic="gridPic" @getPic="receiveImage" />
++    </Modal>
++    <linkaddress ref="links" @linkUrl="receiveLink" />
++  </div>
++</template>
++
++<script>
++import draggable from 'vuedraggable';
++import uploadPictures from '@/components/uploadPictures';
++import linkaddress from '@/components/linkaddress';
++import { cubeSlides, withCubeSlides } from '../../../../shared/diyCubeSlides';
++export default {
++  name: 'c_cube_slides',
++  components: { draggable, uploadPictures, linkaddress },
++  props: { configObj: { type: Object, required: true } },
++  data() {
++    return { modalPic: false, editingIndex: 0, editingRegion: null,
++      gridBtn: { xl: 4, lg: 8, md: 8, sm: 8, xs: 8 }, gridPic: { xl: 6, lg: 8, md: 12, sm: 12, xs: 12 } };
++  },
++  computed: {
++    regionIndex() { return this.configObj.picStyle ? this.configObj.picStyle.tabVal : 0; },
++    region() { return this.configObj.picStyle && this.configObj.picStyle.picList[this.regionIndex]; },
++    frames() { return cubeSlides(this.region, true); }
++  },
++  watch: {
++    // An asynchronous image/link picker must never write into a newly selected region.
++    regionIndex() { this.closePickers(); },
++    'configObj.styleConfig.tabVal'() { this.closePickers(); }
++  },
++  methods: {
++    closePickers() {
++      this.modalPic = false;
++      this.editingRegion = null;
++      if (this.$refs.links) this.$refs.links.modals = false;
++    },
++    saveFrames(frames) {
++      if (!this.region) return;
++      const next = withCubeSlides(this.region, frames);
++      this.$set(this.configObj.picStyle.picList, this.regionIndex, next);
++      // Custom-grid geometry remains unchanged; keep its legacy thumbnail projection current.
++      const doc = (this.configObj.picStyle.docPicList || [])[this.regionIndex];
++      if (doc) { this.$set(doc, 'img', next.image); this.$set(doc, 'link', next.link); }
++    },
++    updateFrame(index, field, value) {
++      const frames = this.frames;
++      if (!frames[index]) return;
++      frames[index][field] = value;
++      this.saveFrames(frames);
++    },
++    addFrame() { this.saveFrames(this.frames.concat({ image: '', link: '', objectFit: 'cover' })); },
++    removeFrame(index) { const frames = this.frames; frames.splice(index, 1); this.saveFrames(frames); },
++    chooseImage(index) { this.editingIndex = index; this.editingRegion = this.region; this.modalPic = true; },
++    receiveImage(image) {
++      if (this.editingRegion === this.region) this.updateFrame(this.editingIndex, 'image', image.att_dir);
++      this.modalPic = false;
++    },
++    chooseLink(index) { this.editingIndex = index; this.editingRegion = this.region; this.$refs.links.modals = true; },
++    receiveLink(link) {
++      if (this.editingRegion === this.region) this.updateFrame(this.editingIndex, 'link', link);
++    }
++  }
++};
++</script>
++
++<style scoped>
++.cube-slides-editor { margin: 0 15px 20px; }
++.cube-frame { display: flex; align-items: center; gap: 8px; padding: 12px 4px; border-bottom: 1px solid #eee; min-width: 0; }
++.cube-move { cursor: move; flex-shrink: 0; }
++.cube-picture { width: 56px; height: 56px; padding: 0; flex-shrink: 0; border: 1px solid #ddd; background: #fff; cursor: pointer; }
++.cube-picture img { width: 100%; height: 100%; object-fit: cover; }
++.cube-fields { flex: 1; min-width: 0; display: grid; gap: 6px; }
++.cube-slides-editor > button { margin-top: 12px; }
++</style>
+diff --git a/前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue b/前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue
+index 5e203286..4b412c95 100644
+--- a/前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue
++++ b/前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue
+@@ -14,7 +14,6 @@
+           <div
+             class="delect-btn"
+             @click.stop="bindDelete(item, index)"
+-            v-if="!configData.isCube"
+           >
+             <span class="iconfont-diy icondel_1"></span>
+           </div>
+@@ -31,15 +30,6 @@
+             <div class="info-item" v-for="(infos, key) in item.info" :key="key">
+               <span class="span">{{ infos.title }}</span>
+               <div class="input-box">
+-                <Input
+-                  :icon="key == item.info.length - 1 ? 'ios-link' : ''"
+-                  v-model="infos.value"
+-                  :placeholder="infos.tips"
+-                  :maxlength="infos.max"
+-                  v-if="configData.isCube"
+-                  @on-blur="onBlur"
+-				  @on-click="getLink(index, key, item.info)"
+-                />
+                 <Input
+                   :icon="key == item.info.length - 1 ? 'ios-link' : ''"
+                   v-model="infos.value"
+@@ -47,7 +37,6 @@
+                   :maxlength="infos.max"
+                   show-word-limit
+ 				  @on-click="getLink(index, key, item.info)"
+-                  v-else
+                 />
+               </div>
+             </div>
+@@ -160,11 +149,9 @@ export default {
+     }
+   },
+   methods: {
++    // This shared editor serves navigation/hot-zone items; cube frames have one region-owned editor.
+     linkUrl(e) {
+       this.configData.list[this.activeIndex].info[this.indexLast].value = e;
+-      if (this.defaults.name == 'pictureCube') {
+-        this.defaults.picStyle.picList[this.defaults.picStyle.tabVal].link = e;
+-      }
+     },
+     getLink(index, key, item) {
+       this.indexLast = item.length - 1;
+@@ -229,25 +216,9 @@ export default {
+     getPic(pc) {
+       this.$nextTick(() => {
+         this.configData.list[this.activeIndex].img = pc.att_dir;
+-        const data = this.defaults.menuConfig;
+-        if (data && data.isCube) {
+-          this.defaults.picStyle.picList.splice(
+-            this.defaults.picStyle.tabVal,
+-            1,
+-            {
+-              image: pc.att_dir,
+-              link: data.list[0].info[0].value
+-            }
+-          );
+-        }
+         this.modalPic = false;
+       });
+     },
+-    onBlur() {
+-      const data = this.defaults.menuConfig;
+-      this.defaults.picStyle.picList[this.defaults.picStyle.tabVal].link =
+-        data.list[0].info[0].value;
+-    },
+     // 删除
+     bindDelete(item, index) {
+       if (this.configData.list.length == 1) {
+diff --git a/前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue b/前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue
+index 57b7b911..259a7b64 100644
+--- a/前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue
++++ b/前端代码/admin/src/components/mobileConfigRight/c_pictrue.vue
+@@ -446,15 +446,14 @@ export default {
+     },
+     'configObj.styleConfig.tabVal': {
+       handler() {
++        // Initial selection may precede mounted; region data still belongs to this widget.
++        if (!this.configObj.styleConfig || !this.configObj.picStyle) return;
++        this.defaults = this.configObj;
++        this.configData = this.configObj[this.configNme];
+         this.count = this.defaults.styleConfig.count;
+         this.picArrayConcat(this.count);
+         this.configData.picList.splice(this.count);
+         this.currentIndex = 0;
+-        const list = this.defaults.menuConfig.list[0];
+-        if (this.configData.picList[0]) {
+-          list.img = this.configData.picList[0].image;
+-          list.info[0].value = this.configData.picList[0].link;
+-        }
+         this.lis = document.getElementsByClassName('lay-item');
+       },
+       deep: true,
+@@ -462,7 +461,7 @@ export default {
+     },
+     'configObj.picStyle.docPicList': {
+       handler() {
+-        if (this.configObj.styleConfig.tabVal == 11) {
++        if (this.configObj.styleConfig && this.configObj.styleConfig.tabVal == 11) {
+           this.configObj.picStyle.docPicList.map((e, i) => {
+             this.configObj.picStyle.docPicList[i].img =
+               this.configObj.picStyle.picList[i].image;
+@@ -480,33 +479,12 @@ export default {
+       this.selPicBox = e;
+       this.currentIndex = e;
+       this.configData.tabVal = e;
+-      if (this.defaults.menuConfig.isCube) {
+-        if (this.configData.tabVal !== 11) {
+-          const list = this.defaults.menuConfig.list[0];
+-          if (data.picList[e] && data.picList[e].image) {
+-            list.img = data.picList[e].image;
+-            list.info[0].value = data.picList[e].link;
+-          } else {
+-            list.img = '';
+-            list.info[0].value = '';
+-          }
+-        } else {
+-          this.selPicBox = e;
+-          const list = this.defaults.docPicList;
+-          if (data.menuConfig.picStyle.picList[e].image) {
+-            list[e].img = data.menuConfig.picStyle.picList[e].image;
+-            list[e].info[0].value =
+-              data.menuConfig.picStyle.docPicList[e].value;
+-          } else {
+-            list[0].img = '';
+-            list[0].info[0].value = '';
+-          }
+-        }
+-      }
++      // The region editor reads picList directly; no second menuConfig copy is maintained.
+     },
+     picArrayConcat(count) {
+       for (let i = this.configData.picList.length; i < count; i++) {
+-        this.configData.picList.push(this.arrayObj);
++        // Each region must own its content; sharing the placeholder object couples edits.
++        this.configData.picList.push({ ...this.arrayObj });
+       }
+     },
+     // 删除指定热区
+diff --git a/前端代码/admin/src/components/mobilePage/cubePreviewImage.vue b/前端代码/admin/src/components/mobilePage/cubePreviewImage.vue
+new file mode 100644
+index 00000000..c45033d6
+--- /dev/null
++++ b/前端代码/admin/src/components/mobilePage/cubePreviewImage.vue
+@@ -0,0 +1,36 @@
++<template>
++  <img v-if="slides.length < 2" :src="firstImage" />
++  <div v-else class="cube-preview-image">
++    <img class="cube-preview-anchor" :src="firstImage" />
++    <swiper class="cube-preview-swiper" :options="options" :key="signature">
++      <swiper-slide v-for="(slide, index) in slides" :key="index">
++        <img :src="slide.image" :style="{ objectFit: slide.objectFit }" />
++      </swiper-slide>
++    </swiper>
++  </div>
++</template>
++
++<script>
++import { swiper, swiperSlide } from 'vue-awesome-swiper';
++import 'swiper/dist/css/swiper.css';
++import { cubeSlides } from '../../../../shared/diyCubeSlides';
++export default {
++  name: 'cubePreviewImage',
++  components: { swiper, swiperSlide },
++  props: { region: { type: Object, default: () => ({}) } },
++  data() { return { options: { loop: true, autoplay: { delay: 3000, disableOnInteraction: false } } }; },
++  computed: {
++    slides() { return cubeSlides(this.region); },
++    firstImage() { return this.slides.length ? this.slides[0].image : ''; },
++    // Restart only this region when its images change, not another region's preview.
++    signature() { return this.slides.map(frame => frame.image).join('|'); }
++  }
++};
++</script>
++
++<style scoped>
++.cube-preview-image { position: relative; min-width: 0; max-width: 100%; overflow: hidden; }
++.cube-preview-anchor { width: 100%; height: 100%; visibility: hidden; object-fit: inherit; }
++.cube-preview-image > .cube-preview-swiper { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
++.cube-preview-swiper img { display: block; width: 100%; height: 100%; }
++</style>
+diff --git a/前端代码/admin/src/components/mobilePage/picture_cube.vue b/前端代码/admin/src/components/mobilePage/picture_cube.vue
+index 14e77b52..4a6530fd 100644
+--- a/前端代码/admin/src/components/mobilePage/picture_cube.vue
++++ b/前端代码/admin/src/components/mobilePage/picture_cube.vue
+@@ -14,7 +14,7 @@
+       <div class="advert-item-1 flex-1" :style="[grdiGap]" v-if="style === 0">
+         <div v-for="(item, index) in picList" :key="index"
+         >
+-          <img class="img" :src="item.image" v-if="item.image" :style="[imgBorderRadius]"/>
++          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgBorderRadius]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -22,7 +22,7 @@
+       </div>
+       <div class="flex-1 grid-column-2" :style="[colGap]" v-if="style === 1">
+         <div v-for="(item, index) in picList" :key="index">
+-          <img class="img" :src="item.image" v-if="item.image"  :style="[imgStyle,{'object-fit':item.objectFit}]" />
++          <cube-preview-image class="img" :region="item" v-if="item.image"  :style="[imgStyle,{'object-fit':item.objectFit}]"  />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -30,7 +30,7 @@
+       </div>
+       <div class="flex-1 grid-column-3" :style="[colGap]" v-if="style === 2">
+         <div v-for="(item, index) in picList" :key="index">
+-          <img class="img" :src="item.image" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]"/>
++          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -38,19 +38,19 @@
+       </div>
+       <div class="advert-item-4 flex-1" :style="[grdiGap]" v-if="style === 3">
+         <div class="pic1">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3">
+-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius]"/>
++          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius]" />
+           <div class="empty-box" v-else >
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -58,19 +58,19 @@
+       </div>
+       <div class="advert-item-5 flex-1" :style="[grdiGap]" v-if="style === 4">
+         <div class="pic1">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius]" />
+           <div class="empty-box" v-else >
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2" :style="[{'height': imageH/2 + imgConfig + 'px'}]">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3" :style="[{'height': imageH/2 + imgConfig + 'px'}]">
+-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgStyle,{'object-fit':picList[2].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgStyle,{'object-fit':picList[2].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -78,21 +78,21 @@
+       </div>
+       <div class="advert-item-6 flex-1" :style="[grdiGap]" v-if="style === 5">
+         <div class="pic1">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig + 'px'}]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig + 'px'}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2 h-full">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image"
+-            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image"
++            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3 h-full">
+-          <img class="img" :src="picList[2].image" v-if="picList[2].image"
+-            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image"
++            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -100,20 +100,20 @@
+       </div>
+       <div class="advert-item-7 flex-1" :style="[grdiGap]" v-if="style === 6">
+         <div class="pic1 h-full">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2 h-full">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3">
+-          <img class="img" :src="picList[2].image" v-if="picList[2].image"
+-            :style="[imgBorderRadius,{'height': imageH + imgConfig + 'px','object-fit':picList[2].objectFit}]" />
++          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image"
++            :style="[imgBorderRadius,{'height': imageH + imgConfig + 'px','object-fit':picList[2].objectFit}]"  />
+           <div class="empty-box" v-else >
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -121,7 +121,7 @@
+       </div>
+       <div class="grid-column-2 flex-1" :style="[grdiGap]" v-if="style === 7">
+         <div class="w-full" v-for="(item, index) in picList" :key="index">
+-          <img class="img" :src="item.image" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]"/>
++          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -129,31 +129,31 @@
+       </div>
+       <div class="advert-item-9 flex-1" :style="[grdiGap]" v-if="style === 8">
+         <div class="pic1">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle,{'object-fit':picList[0].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle,{'object-fit':picList[0].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3">
+-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[2].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[2].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic4">
+-          <img class="img" :src="picList[3].image" v-if="picList[3].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[3].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[3]" v-if="picList[3].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[3].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic5">
+-          <img class="img" :src="picList[4].image" v-if="picList[4].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[4].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[4]" v-if="picList[4].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[4].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -161,26 +161,26 @@
+       </div>
+       <div class="advert-item-6 flex-1" :style="[grdiGap]" v-if="style === 9">
+         <div class="pic1">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig * 2 + 'px'}]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig * 2 + 'px'}]" />
+           <div class="empty-box" v-else >
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic2">
+-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]"/>
++          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+         </div>
+         <div class="pic3 flex-between-center">
+           <div class="flex-1 h-full">
+-            <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]"/>
++            <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]" />
+             <div class="empty-box" v-else >
+               <img src="../../assets/images/shan.png" />
+             </div>
+           </div>
+           <div class="flex-1 h-full" :style="{'margin-left': imgConfig + 'px'}">
+-            <img class="img" :src="picList[3].image" v-if="picList[3].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[3].objectFit}]"/>
++            <cube-preview-image class="img" :region="picList[3]" v-if="picList[3].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[3].objectFit}]" />
+             <div class="empty-box" v-else>
+               <img src="../../assets/images/shan.png" />
+             </div>
+@@ -189,7 +189,7 @@
+       </div>
+       <template v-if="style === 10">
+         <div class="w-full">
+-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius]"/>
++          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius]" />
+           <div class="empty-box" v-else>
+             <img src="../../assets/images/shan.png" />
+           </div>
+@@ -208,12 +208,12 @@
+ 	        top: (item.doc.startY/375)*100 + '%',
+ 	      }"
+ 	    >
+-	      <img
++	      <cube-preview-image
+ 	        class="img"
+-	        :src="item.img"
++	        :region="item"
+ 	        v-if="item.img"
+ 	        :style="{ borderRadius: imgRadius }"
+-	      />
++	       />
+ 	      <div class="empty-box" v-else :style="{ borderRadius: imgRadius }">
+ 	        <img src="../../assets/images/shan.png" />
+ 	      </div>
+@@ -225,8 +225,10 @@
+ 
+ <script>
+ import { mapState } from 'vuex';
++import cubePreviewImage from './cubePreviewImage.vue';
+ export default {
+   name: 'picture_cube',
++  components: { cubePreviewImage },
+   cname: '图片魔方',
+   configName: 'c_picture_cube',
+   icon: '#iconzujian-tupianmofang',
+@@ -443,11 +445,8 @@ export default {
+             this.picList = data.picStyle.picList;
+           }
+         } else {
+-          data.picStyle.docPicList.map((e, i) => {
+-            data.picStyle.docPicList[i].img = data.picStyle.picList[i].image;
+-            data.picStyle.docPicList[i].link = data.picStyle.picList[i].link;
+-          });
+-          this.$set(this, 'docPicList', data.picStyle.docPicList);
++          // Join images without mutating saved geometry or duplicating slide ownership.
++          this.$set(this, 'docPicList', data.picStyle.docPicList.map((doc, index) => Object.assign({}, doc, data.picStyle.picList[index])));
+         }
+         this.computedHeight();
+       }
+@@ -518,6 +517,10 @@ export default {
+ }
+ .advert {
+   display: flex;
++  // Swiper's internal track must not set the min-content width of a grid region.
++  > div, .pic1, .pic2, .pic3, .pic4, .pic5 {
++    min-width: 0;
++  }
+   // background-color: #fff;
+ }
+ .advert-item-1{
+diff --git a/前端代码/shared/diyCubeSlides.js b/前端代码/shared/diyCubeSlides.js
+new file mode 100644
+index 00000000..66d95431
+--- /dev/null
++++ b/前端代码/shared/diyCubeSlides.js
+@@ -0,0 +1,19 @@
++// The legacy image/link remain a first-frame projection; slides own multi-image content.
++// Reading old decoration JSON never mutates it or invents a second save source.
++export function cubeSlides(region, includeEmpty = false) {
++  const value = region || {};
++  const source = Array.isArray(value.slides) ? value.slides : [{
++    image: value.image || value.img || '', link: value.link || '', objectFit: value.objectFit || 'cover'
++  }];
++  return source.filter(item => item && (includeEmpty || item.image)).map(item => ({
++    image: typeof item.image === 'string' ? item.image : '',
++    link: typeof item.link === 'string' ? item.link : '',
++    objectFit: ['cover', 'contain', 'fill'].includes(item.objectFit) ? item.objectFit : 'cover'
++  }));
++}
++
++export function withCubeSlides(region, slides) {
++  const frames = cubeSlides({ slides }, true);
++  const first = frames.find(frame => frame.image) || frames[0] || { image: '', link: '', objectFit: 'cover' };
++  return Object.assign({}, region, first, { slides: frames });
++}
+diff --git a/前端代码/uniapp/pages/index/components/cubeRegionImage.vue b/前端代码/uniapp/pages/index/components/cubeRegionImage.vue
+new file mode 100644
+index 00000000..683527e1
+--- /dev/null
++++ b/前端代码/uniapp/pages/index/components/cubeRegionImage.vue
+@@ -0,0 +1,39 @@
++<template>
++  <view class="cube-region-image" :style="{ borderRadius }">
++    <easy-loadimage :mode="mode" :width="width" :height="height" :image-src="firstImage"
++      :borderRadius="borderRadius" :style="{ visibility: slides.length > 1 ? 'hidden' : 'visible' }" />
++    <swiper v-if="slides.length > 1" class="cube-region-swiper" :autoplay="true" :circular="true" :interval="3000" :duration="350">
++      <swiper-item v-for="(slide, index) in slides" :key="index" @click.stop="navigate(slide)">
++        <easy-loadimage class="cube-region-frame" :image-src="slide.image" :mode="slideMode(slide)"
++          width="100%" height="100%" :borderRadius="borderRadius" />
++      </swiper-item>
++    </swiper>
++  </view>
++</template>
++
++<script>
++import { cubeSlides } from '../../../../shared/diyCubeSlides';
++export default {
++  name: 'cubeRegionImage',
++  props: {
++    region: { type: Object, default: () => ({}) }, mode: { type: String, default: 'aspectFill' },
++    width: { type: String, default: '100%' }, height: { type: String, default: 'auto' },
++    borderRadius: { type: String, default: '0' }
++  },
++  computed: {
++    slides() { return cubeSlides(this.region); },
++    firstImage() { return this.slides.length ? this.slides[0].image : ''; }
++  },
++  methods: {
++    // The first image anchors the existing layout. Later frames only fill that box.
++    slideMode(slide) { return { cover: 'aspectFill', contain: 'aspectFit', fill: 'scaleToFill' }[slide.objectFit]; },
++    navigate(slide) { this.$emit('navigate', slide); }
++  }
++};
++</script>
++
++<style scoped>
++.cube-region-image { position: relative; width: 100%; height: 100%; min-width: 0; overflow: hidden; }
++.cube-region-swiper { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
++.cube-region-frame { display: block; width: 100%; height: 100%; }
++</style>
+diff --git a/前端代码/uniapp/pages/index/components/pictureCube.vue b/前端代码/uniapp/pages/index/components/pictureCube.vue
+index 02b6804f..e4bbd454 100644
+--- a/前端代码/uniapp/pages/index/components/pictureCube.vue
++++ b/前端代码/uniapp/pages/index/components/pictureCube.vue
+@@ -3,116 +3,116 @@
+ 	<view class="pictureCube" :style="[boxStyle]" v-if="picList.length && !dataConfig.isHide">
+ 		<view class="advert-item-1 flex-1" :style="[grdiGap]" v-if="style==0">
+ 			<view v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
+-				<easy-loadimage mode="widthFix" width="100%" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="widthFix" width="100%" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="flex-1 grid-column-2" :style="[colGap]" v-else-if="style==1">
+ 			<view class="item w-full" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
+-				<easy-loadimage :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="flex-1 grid-column-3"  :style="[colGap]" v-else-if="style==2">
+ 			<view class="item" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
+-				<easy-loadimage :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-4 flex-1" :style="[grdiGap]" v-else-if="style==3">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2" @click="goDetail(picList[1])">
+-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3" @click="goDetail(picList[2])">
+-				<easy-loadimage mode="widthFix" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="widthFix" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-5 flex-1" :style="[grdiGap]" v-else-if="style==4">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage mode="widthFix" width="100%" height="100%" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="widthFix" width="100%" height="100%" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2" @click="goDetail(picList[1])">
+-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3" @click="goDetail(picList[2])">
+-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-6 flex-1" :style="[grdiGap]" v-else-if="style==5">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2 h-full" @click="goDetail(picList[1])">
+-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3 h-full" @click="goDetail(picList[2])">
+-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-7 flex-1" :style="[grdiGap]" v-else-if="style==6">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2" @click="goDetail(picList[1])">
+-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3" @click="goDetail(picList[2])">
+-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="grid-column-2 flex-1" :style="[grdiGap]" v-else-if="style==7">
+ 			<view class="w-full" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
+-				<easy-loadimage  :mode="filterMode(item.objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image  :mode="filterMode(item.objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-9 flex-1" :style="[grdiGap]" v-else-if="style==8">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage width="100%" height="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2 " @click="goDetail(picList[1])">
+-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3" @click="goDetail(picList[2])">
+-				<easy-loadimage width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image width="100%" :height="templateH + 'rpx'" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic4" @click="goDetail(picList[3])">
+-				<easy-loadimage :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[3].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" :height="templateH + 'rpx'" :region="picList[3]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic5" @click="goDetail(picList[4])">
+-				<easy-loadimage :mode="filterMode(picList[4].objectFit || 'cover')" width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[4].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[4].objectFit || 'cover')" width="100%" :height="templateH + 'rpx'" :region="picList[4]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert-item-6 flex-1"  :style="[grdiGap]" v-else-if="style==9">
+ 			<view class="pic1" @click="goDetail(picList[0])">
+-				<easy-loadimage width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic2" @click="goDetail(picList[1])">
+-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%"  :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%"  :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 			<view class="pic3 h-full flex-between-center" >
+ 				<view class="flex-1 h-full" @click="goDetail(picList[2])">
+-					<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++					<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 				</view>
+ 				<view class="flex-1 h-full" :style="{'margin-left': dataConfig.imgConfig.val*2 + 'rpx'}" @click="goDetail(picList[3])">
+-					<easy-loadimage :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[3].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++					<cube-region-image :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :region="picList[3]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 				</view>
+ 			</view>
+ 		</view>
+ 		<view class="flex-1" v-else-if="style==10">
+ 			<view class="h-full" @click="goDetail(picList[0])">
+-				<easy-loadimage mode="widthFix" width="100%" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
++				<cube-region-image mode="widthFix" width="100%" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
+ 			</view>
+ 		</view>
+ 		<view class="advert12" :style="[autoHeight]" v-else-if="style==11">
+ 			<template v-if="dataConfig.picStyle.docPicList.length">
+-				<view v-for="(item,index) in dataConfig.picStyle.docPicList" :key="index" :style="{
++				<view v-for="(item,index) in docPicList" :key="index" :style="{
+ 					top: `${(item.doc.startY/375)*100}%`,
+ 					left: `${(item.doc.startX/375)*100}%`,
+ 					width: `${(item.doc.w/375)*100}%`,
+ 					height: `${(item.doc.h/375)*100}%`,
+ 					borderWidth: `${dataConfig.imgConfig.val*2}rpx`,
+ 				}" class="item" @click="goDetail(item)">
+-					<easy-loadimage mode="aspectFill" width="100%" height="100%" :imageSrc="item.img" class="image" :borderRadius="imgBorderRadius"></easy-loadimage>
++					<cube-region-image mode="aspectFill" width="100%" height="100%" :region="item" @navigate="goDetail" class="image" :borderRadius="imgBorderRadius"></cube-region-image>
+ 				</view>
+ 			</template>
+ 		</view>
+@@ -120,8 +120,10 @@
+ </template>
+ 
+ <script>
++	import cubeRegionImage from './cubeRegionImage.vue';
+ 	export default {
+ 		name: 'pictureCube',
++		components: { cubeRegionImage },
+ 		props: {
+ 			dataConfig: {
+ 				type: Object,
+@@ -137,6 +139,10 @@
+ 			};
+ 		},
+ 		computed: {
++			// Geometry stays in docPicList; picList remains the sole per-region image source.
++			docPicList() {
++				return this.dataConfig.picStyle.docPicList.map((doc, index) => Object.assign({}, doc, this.picList[index]));
++			},
+ 			boxStyle(){
+ 				return {
+ 					padding: `${this.dataConfig.topConfig.val*2}rpx ${this.dataConfig.prConfig.val*2}rpx ${this.dataConfig.bottomConfig.val*2}rpx ${this.dataConfig.prConfig.val*2}rpx`,
+@@ -191,6 +197,7 @@
+ 				else return url.replace('http://', 'https://');
+ 			},
+ 			goDetail(url) {
++				if (!url || !url.link) return;
+ 				let urls = url.link;
+ 				this.$util.JumpPath(urls);
+ 			},
+@@ -385,4 +392,4 @@
+ 			}
+ 		}
+ 	}
+-</style>
+\ No newline at end of file
++</style>

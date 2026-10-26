@@ -1,0 +1,87 @@
+{
+  "round": "R91",
+  "started_head": "83a40179c56bdff8e216ab868b121db339bd8b8e",
+  "fixed_head": "6f90d08dfa5c1e2f6e21125b5e9def6ac3786620",
+  "head_change_in_scope": "",
+  "patch_sha256": "afec3fff5b4539ad77831b7fcd79783b442db8574ee371a07aec1ba2542b0e91",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+      "baseline_sha256": "a92f3d0ccef2e1a6878310b9203f75bbf5c84ad38553504bf932eb00282d1294",
+      "sha256": "e82c2b19b95f33e7bb87bea98846da04aa148388d3f1942ee04238cfb67fb41d",
+      "status": "modified"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "baseline_sha256": "2721a1e95d3c47ef75cafad41d953000edb1c1c28d2180699f12cef162a058ae",
+      "sha256": "b446be4cd0dcf8d66927d4402674f476dc7706f67d893fe234ade212a33afdc3",
+      "status": "modified"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "baseline_sha256": "c00d45b9bf69ca65414848862c4e7caf20e26d042837d18b20502ab1f03a9919",
+      "sha256": "503d162e24a763127b8e5852698db6529c451ef29c4e3d64a0fe9b6404e876f8",
+      "status": "modified"
+    },
+    {
+      "path": "tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs",
+      "baseline_sha256": "830007f28b8cdb471e6a8cda42fce551c243f55c11238aae60c17adf1203cd95",
+      "sha256": "82957db938256a73194cce135e6b30910e329b95101d6c12521510bb8bc2ba53",
+      "status": "modified"
+    },
+    {
+      "path": "tests/report-group-dashboard/php/r89-secondary-categories.php",
+      "baseline_sha256": "34aca417fee4e1626f8fe78d2d92924fdb01e275426cef20473b9266155c40c2",
+      "sha256": null,
+      "status": "deleted"
+    },
+    {
+      "path": "tests/report-group-dashboard/php/r91-category-sale-types.php",
+      "baseline_sha256": null,
+      "sha256": "f358fd626b70a940491a8f2db5f439f2471c013093d98f9150cf7a54764fd844",
+      "status": "added"
+    },
+    {
+      "path": "scripts/r91-local-verification.mjs",
+      "baseline_sha256": null,
+      "sha256": "8c6ca175e8af9c8a2e70aa9277c5954a87d07f395a289617ab442769a599a712",
+      "status": "added"
+    }
+  ],
+  "build_scope": "Local workspace validation only; unrelated dirty source is not authorized for release.",
+  "grouping": {
+    "frontend": [
+      "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+    ],
+    "backend": [
+      "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "后端代码/app/services/report/GroupManagementDashboardServices.php"
+    ],
+    "tests": [
+      "tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs",
+      "tests/report-group-dashboard/php/r89-secondary-categories.php",
+      "tests/report-group-dashboard/php/r91-category-sale-types.php"
+    ],
+    "scripts": [
+      "scripts/r91-local-verification.mjs"
+    ],
+    "database": [],
+    "evidence_directory": "tests/report-group-dashboard/evidence/r91-2026-10-18/"
+  },
+  "business_test_sha256": "534c47d515cf25dcf79c17eff9c5c6a99ca0f481dab44c0b8559ef240109f5bc",
+  "scope_sha256": "1354023f5d831e9bb2c4161806b0730ef789e8468693d7692a47256ac4808364",
+  "screenshots": [
+    {
+      "path": "desktop.png",
+      "sha256": "ea15eb1c1db90e1435399368a87b5cea5ce2884e49ee7679d292900e2e0ec6d3"
+    },
+    {
+      "path": "narrow.png",
+      "sha256": "1ca928c30cc1adb92fd2f8d8fdb6d3e67f7b05a56e12a1327156853c8021ab40"
+    },
+    {
+      "path": "drilldown.png",
+      "sha256": "955ec350a97d15ec371555db04266680a4605ff4cbeadce3f2cafe62331eb4d7"
+    }
+  ]
+}

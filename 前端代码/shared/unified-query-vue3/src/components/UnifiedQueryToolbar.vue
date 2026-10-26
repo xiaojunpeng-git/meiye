@@ -1,0 +1,1127 @@
+<script setup>
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import Download from '@lucide/vue/dist/esm/icons/download.mjs'
+import UnifiedQueryDateRange from './UnifiedQueryDateRange.vue'
+import UnifiedQueryNumericRangePresets from './UnifiedQueryNumericRangePresets.vue'
+import { numericRangePresetFilters, numericRangePresetMode } from '../contracts/numericRangePresets.js'
+import UnifiedQueryCustomFieldDrawer from './UnifiedQueryCustomFieldDrawer.vue'
+import UnifiedQueryExportDrawer from './UnifiedQueryExportDrawer.vue'
+import UnifiedQueryFieldRenameDrawer from './UnifiedQueryFieldRenameDrawer.vue'
+import UnifiedQuerySettingsDrawer from './UnifiedQuerySettingsDrawer.vue'
+import { readQueryPreferences, writeQueryPreferences } from '../contracts/localQueryPreferences.js'
+import {
+  cloneUnifiedQuerySnapshot,
+  normalizeUnifiedQuerySettings,
+  unifiedQueryActionSucceeded
+} from '../contracts/unifiedQueryContract.js'
+
+const props = defineProps({
+  // 只控制展示文案，normal/all 查询值和刷新路径保持不变。
+  compactScopeLabels: { type: Boolean, default: false },
+  localSettingsKey: { type: String, default: '' },
+  searchPlaceholder: {
+    type: String,
+    default: '请输入查询内容'
+  },
+  settingsButtonLabel: {
+    type: String,
+    default: '设置'
+  },
+  showSettingsButton: {
+    type: Boolean,
+    default: true
+  },
+  // 订单中心的导出属于查询结果操作，放在“设置”之后；其他已接入页面保持原位置，
+  // 避免一次调整影响无关页面。
+  exportButtonAfterSettings: {
+    type: Boolean,
+    default: false
+  },
+  // 订单中心只需要导出当前查询结果，不展示范围、字段或文件名配置表单。
+  // 仍复用同一异步任务和下载结果面板，保证权限、查询快照和 Excel 生成口径不分叉。
+  directQueryExport: {
+    type: Boolean,
+    default: false
+  },
+  showKeywordSearch: {
+    type: Boolean,
+    default: true
+  },
+  compactKeywordSearch: {
+    type: Boolean,
+    default: false
+  },
+  // 有固定业务范围的页面不应让操作员切换到另一套数据范围；仍在查询
+  // 契约中发送 normal，确保后端权限与其他页面保持同一表达方式。
+  showDataScope: {
+    type: Boolean,
+    default: true
+  },
+  // Some dense operational pages need their status shortcuts and their
+  // configured quick fields beside the primary query controls. Keep the
+  // default two-row presentation for all existing pages.
+  inlineQuickControls: {
+    type: Boolean,
+    default: false
+  },
+  // 按页面显式启用：查询/重置跟随第二行字段，其他接入页仍使用原来的首行位置。
+  queryActionsAfterQuickFields: {
+    type: Boolean,
+    default: false
+  },
+  // 仅无首行附加控件的页面启用：固定显示筛选行，将导出并入操作组并移除收起行。
+  singleRowQuickQuery: {
+    type: Boolean,
+    default: false
+  },
+  quickFilters: {
+    type: Array,
+    default: () => []
+  },
+  statusOptions: {
+    type: Array,
+    default: () => []
+  },
+  fields: {
+    type: Array,
+    default: () => []
+  },
+  defaultSortField: {
+    type: String,
+    default: '业务时间'
+  },
+  maxQuickFields: {
+    type: Number,
+    default: 8
+  },
+  onSaveSettings: {
+    type: Function,
+    default: null
+  },
+  onSelectEntity: {
+    type: Function,
+    default: null
+  },
+  lockStoreSelector: {
+    type: Boolean,
+    default: false
+  },
+  currentStore: {
+    type: Object,
+    default: () => ({})
+  },
+  settings: {
+    type: Object,
+    default: () => ({})
+  },
+  pageCode: {
+    type: String,
+    default: ''
+  },
+  pageName: {
+    type: String,
+    default: '当前查询页面'
+  },
+  resultCount: {
+    type: Number,
+    default: 0
+  },
+  pageSize: {
+    type: Number,
+    default: 20
+  },
+  currentPageCount: {
+    type: Number,
+    default: -1
+  },
+  currentPage: {
+    type: Number,
+    default: 1
+  },
+  dataAsOf: {
+    type: String,
+    default: ''
+  },
+  // 只有页面在服务端成功返回 projection 后才会传入已执行快照；输入控件本身不是快照。
+  executedQuery: {
+    type: Object,
+    default: null
+  },
+  // 页面可以为某个快捷日期字段提供初始范围；未提供时保持现有“今天”默认。
+  // 该值只影响首次初始化/清空后的显示，不替代服务端查询口径。
+  defaultQuickDateRanges: {
+    type: Object,
+    default: () => ({})
+  },
+  isQueryLoading: {
+    type: Boolean,
+    default: false
+  },
+  // 页面显式启用等待反馈；默认不改变其他已验收查询栏的按钮行为。
+  showQueryLoading: {
+    type: Boolean,
+    default: false
+  },
+  stateContextKey: {
+    type: [String, Number],
+    default: ''
+  },
+  queryCapability: {
+    type: Object,
+    default: () => ({})
+  },
+  onSaveFieldAliases: {
+    type: Function,
+    default: null
+  },
+  onSaveCustomField: {
+    type: Function,
+    default: null
+  },
+  onChangeCustomFieldStatus: {
+    type: Function,
+    default: null
+  },
+  onArchiveCustomField: {
+    type: Function,
+    default: null
+  },
+  onUpgradeSavedQueryFieldReference: {
+    type: Function,
+    default: null
+  },
+  onCreateExport: {
+    type: Function,
+    default: null
+  },
+  onQueryExportTask: {
+    type: Function,
+    default: null
+  },
+  onDownloadExport: {
+    type: Function,
+    default: null
+  }
+})
+
+const emit = defineEmits(['query', 'quick-filter', 'save-settings', 'settings-applied', 'field-aliases-saved', 'custom-field-saved'])
+
+const keyword = ref('')
+const dataScope = ref('normal')
+const businessStatus = ref('')
+const isSettingsOpen = ref(false)
+const quickRangeError = ref('')
+const customFiltersExpanded = ref(true)
+
+function openSettings() {
+  isSettingsOpen.value = true
+}
+
+// 外层页面在能力加载完成后读取与可见控件一致的查询快照，确保默认周期首查生效。
+defineExpose({ openSettings, querySnapshot: buildQueryPayload })
+const isCustomFieldOpen = ref(false)
+const isFieldRenameOpen = ref(false)
+const isExportOpen = ref(false)
+const exportTaskReference = ref(null)
+const isDirectExporting = ref(false)
+const exportError = ref('')
+const quickFieldValues = reactive({})
+const quickFieldRanges = reactive({})
+// 空值在下拉框中使用专用哨兵；空字符串仍表示“全部”，不能混成同一查询条件。
+const QUICK_EMPTY_VALUE = '__MOHE_QUERY_EMPTY__'
+
+function normalizeSettings(settings = {}) {
+  const normalized = normalizeUnifiedQuerySettings(settings)
+  return {
+    ...normalized,
+    hasQuickFields: Boolean(
+      Array.isArray(settings?.quickFields)
+      || Array.isArray(settings?.quick_fields)
+      || Array.isArray(settings?.settings?.quickFields)
+      || Array.isArray(settings?.settings?.quick_fields)
+    ),
+    schemaVersion: normalized.schemaVersion || 1
+  }
+}
+
+const activeSettings = ref(normalizeSettings(props.settings))
+const fieldMap = computed(() => new Map(props.fields.filter((field) => !field.hidden && field.key !== 'id').map((field) => [field.key, field])))
+const quickFieldMap = computed(() => new Map([...fieldMap.value].filter(([, field]) => (
+  field.quickFilterHidden !== true
+  && (!capabilityMatchesPage.value || field.capabilities?.quickFilter === true)
+))))
+const defaultQuickFieldKeys = computed(() => props.fields
+  .filter((field) => !field.hidden
+    && field.key !== 'id'
+    && field.defaultQuick
+    && (!capabilityMatchesPage.value || field.capabilities?.quickFilter === true))
+  .map((field) => field.key)
+  .slice(0, props.maxQuickFields))
+const activeQuickFieldKeys = computed(() => {
+  const configured = activeSettings.value.quickFields.filter((key) => quickFieldMap.value.has(key)).slice(0, props.maxQuickFields)
+  // 固定日期等默认字段不因用户只勾选销售人而消失；自定义字段只补充筛选。
+  return [...new Set([...defaultQuickFieldKeys.value, ...(activeSettings.value.hasQuickFields ? configured : [])])]
+})
+const activeQuickFields = computed(() => activeQuickFieldKeys.value.map((key) => quickFieldMap.value.get(key)).filter(Boolean))
+const primaryQuickFields = computed(() => inlineFields(true))
+const beforeKeywordQuickFields = computed(() => primaryQuickFields.value.filter((field) => field.quickPlacement !== 'afterKeyword'))
+const afterKeywordQuickFields = computed(() => primaryQuickFields.value.filter((field) => field.quickPlacement === 'afterKeyword'))
+const secondaryQuickFields = computed(() => inlineFields(false))
+// 单行页面不能继承旧的“收起”偏好而隐藏全部控件；没有字段时仍回退原首行。
+const singleRowQueryActive = computed(() => props.singleRowQuickQuery
+  && props.queryActionsAfterQuickFields && secondaryQuickFields.value.length > 0)
+// 普通页面收起或没有第二行字段时回到首行，避免查询/重置不可用。
+const queryActionsInSecondary = computed(() => props.queryActionsAfterQuickFields
+  && (customFiltersExpanded.value || singleRowQueryActive.value) && secondaryQuickFields.value.length > 0)
+// 收起后仍提示正在使用的自定义条件，避免把隐藏误认为清空。
+const customFilterCount = computed(() => new Set(exportTopFilters()
+  .filter((filter) => secondaryQuickFields.value.some((field) => field.key === filter.field))
+  .map((filter) => filter.field)).size + (activeSettings.value.filters?.length || 0))
+function inlineFields(primary) {
+  return activeQuickFields.value.filter((field) => (props.inlineQuickControls && defaultQuickFieldKeys.value.includes(field.key)) === primary)
+}
+const capabilityMatchesPage = computed(() => Boolean(
+  props.pageCode
+  && props.queryCapability?.enabled === true
+  && props.queryCapability?.pageCode === props.pageCode
+))
+const hasCommandContext = computed(() => Boolean(props.queryCapability?.commandContext?.kind && props.queryCapability?.commandContext?.id))
+const canManageCustomFields = computed(() => capabilityMatchesPage.value
+  && hasCommandContext.value)
+const canRenameFields = computed(() => capabilityMatchesPage.value
+  && hasCommandContext.value
+  && Number(props.queryCapability?.fieldAliasVersion) > 0)
+const exportFields = computed(() => props.fields.filter((field) => (
+  !field.hidden
+  && field.key !== 'id'
+  && field.capabilities?.export === true
+)))
+const hasExecutedQuerySnapshot = computed(() => Boolean(
+  props.executedQuery
+  && typeof props.executedQuery === 'object'
+  && !Array.isArray(props.executedQuery)
+  && Object.keys(props.executedQuery).length
+))
+const canExport = computed(() => capabilityMatchesPage.value
+  && hasCommandContext.value
+  && hasExecutedQuerySnapshot.value
+  && props.isQueryLoading !== true
+  && props.queryCapability?.exportCapability?.enabled === true
+  && (props.queryCapability?.exportCapability?.allowCurrentQuery === true || props.queryCapability?.exportCapability?.allowCurrentPage === true)
+  && exportFields.value.length > 0)
+const originalFields = computed(() => props.fields.map((field) => ({
+  ...field,
+  label: field.originalLabel || field.label
+})))
+const fixedCurrentStore = computed(() => {
+  const source = props.currentStore && typeof props.currentStore === 'object' ? props.currentStore : {}
+  return {
+    id: source.id || source.storeId || null,
+    label: source.name || source.storeName || '当前门店'
+  }
+})
+
+const normalizedStatusOptions = computed(() => props.statusOptions.map((option) => {
+  if (typeof option === 'string') {
+    return { value: option, label: option, normal: true }
+  }
+  return {
+    value: option.value ?? option.label,
+    label: option.label ?? option.value,
+    normal: option.normal !== false && option.isNormal !== false
+  }
+}))
+
+const availableStatusOptions = computed(() => (dataScope.value === 'all'
+  ? normalizedStatusOptions.value
+  : normalizedStatusOptions.value.filter((option) => option.normal)))
+
+watch(dataScope, () => {
+  if (dataScope.value === 'normal') {
+    businessStatus.value = ''
+    return
+  }
+  if (!availableStatusOptions.value.some((option) => option.value === businessStatus.value)) {
+    businessStatus.value = ''
+  }
+})
+
+watch(
+  () => props.settings,
+  (settings) => {
+    activeSettings.value = normalizeSettings(readQueryPreferences(props.localSettingsKey)?.settings || settings)
+  },
+  { deep: true }
+)
+
+watch(() => props.localSettingsKey, (key) => {
+  const saved = readQueryPreferences(key)
+  activeSettings.value = normalizeSettings(saved?.settings || props.settings)
+  customFiltersExpanded.value = saved?.expanded !== false
+}, { immediate: true })
+
+function toggleCustomFilters() {
+  customFiltersExpanded.value = !customFiltersExpanded.value
+  if (!props.localSettingsKey) return
+  try {
+    writeQueryPreferences(props.localSettingsKey, { settings: activeSettings.value, expanded: customFiltersExpanded.value })
+  } catch (error) { quickRangeError.value = error.message }
+}
+
+// 重置只清查询值，不删除用户选择的字段和排序；周期恢复页面配置的默认范围。
+function resetQuery() {
+  keyword.value = ''
+  dataScope.value = 'normal'
+  businessStatus.value = ''
+  Object.keys(quickFieldValues).forEach((key) => { delete quickFieldValues[key] })
+  Object.keys(quickFieldRanges).forEach((key) => { delete quickFieldRanges[key] })
+  activeSettings.value = { ...activeSettings.value, filters: [] }
+  activeQuickFields.value.forEach((field) => {
+    if (isQuickDateRange(field)) quickFieldRanges[field.key] = defaultQuickDateRange(field)
+    else if (field.defaultQuick && topFieldType(field) === 'date') quickFieldValues[field.key] = localToday()
+  })
+  if (props.localSettingsKey) {
+    try { writeQueryPreferences(props.localSettingsKey, { settings: activeSettings.value, expanded: customFiltersExpanded.value }) }
+    catch (error) { quickRangeError.value = error.message; return }
+  }
+  emit('settings-applied', { ...activeSettings.value })
+  submitQuery()
+}
+
+watch(
+  () => props.stateContextKey,
+  () => {
+    // 导出任务属于账号／门店上下文，切换后不得继续轮询、展示或下载旧上下文的任务。
+    isExportOpen.value = false
+    exportTaskReference.value = null
+  }
+)
+
+function topFieldType(field) {
+  const type = String(field.type || '').toLowerCase()
+  if (['number', 'amount', 'money', 'currency', 'count', 'times', 'integer', 'decimal'].includes(type)) return 'number'
+  if (['date', 'datetime', 'date_time'].includes(type)) return type === 'date' ? 'date' : 'datetime-local'
+  return 'text'
+}
+
+function topFieldPlaceholder(field) {
+  const inputType = topFieldType(field)
+  if (inputType === 'number') return `输入${field.label}`
+  if (inputType === 'date' || inputType === 'datetime-local') return `选择${field.label}`
+  return `请输入${field.label}`
+}
+
+function topFieldOperator(field) {
+  if (fieldSelector(field)) return 'eq'
+  const type = String(field.type || 'text').toLowerCase()
+  return type === 'text' ? 'contains' : 'eq'
+}
+
+const LEGACY_ENTITY_LABELS = Object.freeze({
+  person: '选择人员',
+  store: '选择门店',
+  organization: '选择组织'
+})
+
+function fieldSelector(field) {
+  if (!field || typeof field !== 'object') return null
+  const source = field.selector && typeof field.selector === 'object' ? field.selector : {}
+  const kind = String(source.kind || '').trim().toLowerCase()
+  if (/^[a-z][a-z0-9_]{1,63}$/.test(kind)) {
+    return {
+      ...source,
+      kind,
+      label: String(source.label || '').trim() || `选择${field.label}`
+    }
+  }
+  const legacyKind = String(field.type || '').trim().toLowerCase()
+  return LEGACY_ENTITY_LABELS[legacyKind]
+    ? { kind: legacyKind, label: LEGACY_ENTITY_LABELS[legacyKind] }
+    : null
+}
+
+function isEntityField(field) {
+  return Boolean(fieldSelector(field))
+}
+
+function isFixedStoreField(field) {
+  return Boolean(props.lockStoreSelector && fieldSelector(field)?.kind === 'store' && fixedCurrentStore.value.id)
+}
+
+function entityFieldLabel(field) {
+  return fieldSelector(field)?.label || `选择${field?.label || '记录'}`
+}
+
+function entityValueId(field, value) {
+  if (!value || typeof value !== 'object') return value
+  const idKey = String(fieldSelector(field)?.idKey || '').trim()
+  return (idKey ? value[idKey] : null) ?? value.id
+}
+
+function entityValueLabel(field, value) {
+  if (!value || typeof value !== 'object') return ''
+  const labelKey = String(fieldSelector(field)?.labelKey || '').trim()
+  return (labelKey ? value[labelKey] : '') || value.label || value.name || value.displayValue || ''
+}
+
+function displayTopFieldValue(field) {
+  if (isFixedStoreField(field)) return fixedCurrentStore.value.label
+  const value = quickFieldValues[field.key]
+  if (!value) return entityFieldLabel(field)
+  return entityValueLabel(field, value) || entityValueId(field, value) || entityFieldLabel(field)
+}
+
+function quickRangeValue(field, bound) {
+  return quickFieldRanges[field.key]?.[bound] ?? ''
+}
+
+// 仅显式声明快捷模式的数量字段使用此状态，普通数值/日期区间不受影响。
+function quickRangePreset(field) {
+  return numericRangePresetMode(quickFieldValues[field.key])
+}
+
+function selectQuickRangePreset(field, mode) {
+  quickFieldValues[field.key] = numericRangePresetMode(mode)
+  quickRangeError.value = ''
+  // 自定义先允许完整录入上下界，再由查询按钮或回车提交；其余模式直接查询。
+  if (mode !== 'custom') submitQuery()
+}
+
+function isQuickDateRange(field) {
+  return field?.quickDateRange === true && topFieldType(field) === 'date'
+}
+
+function localToday() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+function defaultQuickDateRange(field) {
+  const configured = props.defaultQuickDateRanges?.[field?.key]
+  const min = String(configured?.min ?? '').trim()
+  const max = String(configured?.max ?? '').trim()
+  const isDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if (isDate(min) && isDate(max) && min <= max) return { min, max }
+  const today = localToday()
+  return { min: today, max: today }
+}
+
+function ensureQuickDateRangeDefaults() {
+  activeQuickFields.value.forEach((field) => {
+    if (!isQuickDateRange(field)) return
+    if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
+    const defaults = defaultQuickDateRange(field)
+    if (!quickFieldRanges[field.key].min) quickFieldRanges[field.key].min = defaults.min
+    if (!quickFieldRanges[field.key].max) quickFieldRanges[field.key].max = defaults.max
+  })
+}
+
+function ensureQuickFieldDefaults() {
+  activeQuickFields.value.forEach((field) => {
+    // 未设置的枚举对应“全部”；只补空值，不覆盖已选业务类型或恢复的查询条件。
+    if (field.type === 'enum' && field.options?.length && quickFieldValues[field.key] == null) {
+      quickFieldValues[field.key] = ''
+    }
+    if (field.quickDefaultToday !== true || topFieldType(field) !== 'date') return
+    if (!quickFieldValues[field.key]) quickFieldValues[field.key] = localToday()
+  })
+}
+
+function setQuickRangeValue(field, bound, value) {
+  if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
+  quickFieldRanges[field.key][bound] = value
+  quickRangeError.value = ''
+}
+
+// 周期控件一次提交完整日期范围，沿用同一查询按钮路径，避免选起点时就发送半个周期。
+function applyDateRange(field, range) {
+  setQuickRangeValue(field, 'min', range.min)
+  setQuickRangeValue(field, 'max', range.max)
+  submitQuery()
+}
+
+function validateQuickRanges() {
+  for (const field of activeQuickFields.value) {
+    if (field.quickRange !== true && !isQuickDateRange(field)) continue
+    if (field.quickRangePresets === true && quickRangePreset(field) !== 'custom') continue
+    const range = quickFieldRanges[field.key] || {}
+    if (range.min === '' || range.min === undefined || range.min === null
+      || range.max === '' || range.max === undefined || range.max === null) continue
+    if ((isQuickDateRange(field) && String(range.min) > String(range.max))
+      || (field.quickRange === true && Number(range.min) > Number(range.max))) {
+      quickRangeError.value = isQuickDateRange(field)
+        ? `${field.label}的开始日期不能晚于结束日期。`
+        : `${field.label}的最小值不能大于最大值。`
+      return false
+    }
+  }
+  quickRangeError.value = ''
+  return true
+}
+
+function exportTopFilters() {
+  return activeQuickFields.value
+    .flatMap((field) => {
+      // 下拉框的空来源使用 null 操作符，和普通来源名称保持同一后端查询／导出快照。
+      if (field.quickAllowEmpty === true && quickFieldValues[field.key] === QUICK_EMPTY_VALUE) {
+        return [{ field: field.key, operator: 'is_null', value: null }]
+      }
+      if (field.quickRangePresets === true) {
+        return numericRangePresetFilters(field.key, quickRangePreset(field), quickFieldRanges[field.key])
+      }
+      if (field.quickRange === true || isQuickDateRange(field)) {
+        const range = quickFieldRanges[field.key] || {}
+        return [
+          range.min === undefined || range.min === null || range.min === '' ? null : {
+            field: field.key,
+            operator: 'gte',
+            value: range.min
+          },
+          range.max === undefined || range.max === null || range.max === '' ? null : {
+            field: field.key,
+            operator: 'lte',
+            value: range.max
+          }
+        ].filter(Boolean)
+      }
+      const value = isFixedStoreField(field) ? fixedCurrentStore.value : quickFieldValues[field.key]
+      if (value === undefined || value === null || value === '') return []
+      const normalizedValue = entityValueId(field, value)
+      if (normalizedValue === undefined || normalizedValue === null || normalizedValue === '') return []
+      return [{
+        field: field.key,
+        operator: topFieldOperator(field),
+        value: normalizedValue
+      }]
+    })
+}
+
+function currentFieldVersions() {
+  const liveVersions = Object.fromEntries(props.fields
+    .filter((field) => field.custom === true && Number(field.version) > 0)
+    .map((field) => [field.key, Number(field.version)]))
+  return {
+    ...liveVersions,
+    ...(activeSettings.value.customFieldVersions || {})
+  }
+}
+
+function buildQueryPayload() {
+  return {
+    ...(props.pageCode ? { pageCode: props.pageCode } : {}),
+    page: Math.max(1, Number(props.currentPage) || 1),
+    limit: Math.max(1, Number(props.pageSize) || 20),
+    ...(capabilityMatchesPage.value && props.queryCapability?.queryCutoffDate
+      ? { queryCutoffDate: props.queryCapability.queryCutoffDate }
+      : {}),
+    keyword: keyword.value,
+    dataScope: dataScope.value,
+    businessStatus: businessStatus.value,
+    topFilters: exportTopFilters(),
+    sorts: activeSettings.value.sorts,
+    filters: activeSettings.value.filters,
+    filterRelation: activeSettings.value.filterRelation,
+    groupBy: activeSettings.value.groupBy,
+    summaries: activeSettings.value.summaries,
+    visibleFields: activeSettings.value.visibleFields,
+    fieldVersions: currentFieldVersions()
+  }
+}
+
+function submitQuickDateOnChange(field) {
+  // 单日看板类页面选完日期即可刷新；日期区间保留给用户完整填写后点击“查询”，
+  // 避免刚改开始日期就提交一个尚未完成的范围。
+  if (topFieldType(field) === 'date' && field?.quickSubmitOnChange === true) submitQuery()
+}
+
+function submitQuery() {
+  if (!validateQuickRanges()) return
+  emit('query', { ...buildQueryPayload(), page: 1 })
+}
+
+function selectQuickFilter(filter) {
+  emit('quick-filter', {
+    ...filter,
+    query: buildQueryPayload()
+  })
+}
+
+function selectScope(scope) {
+  dataScope.value = scope
+  if (scope === 'normal') {
+    businessStatus.value = ''
+  } else if (!availableStatusOptions.value.some((option) => option.value === businessStatus.value)) {
+    businessStatus.value = ''
+  }
+  // 范围和业务状态已经由统一查询合同中的 dataScope / businessStatus
+  // 完整表达。不能再附带旧列表使用的 status 字段，否则后端的严格
+  // 查询形状校验会把这次范围切换判为非法。
+  emit('query', buildQueryPayload())
+}
+
+async function persistSettings(settings, options = {}) {
+  if (props.localSettingsKey) {
+    try {
+      writeQueryPreferences(props.localSettingsKey, { settings, expanded: true })
+      return { result: { status: 'success' } }
+    } catch (error) { return { result: { status: 'failed', message: error.message } } }
+  }
+  if (!props.onSaveSettings) {
+    emit('save-settings', settings)
+    return { success: true }
+  }
+  return props.onSaveSettings(settings, options)
+}
+
+async function selectEntity(payload) {
+  if (props.onSelectEntity) return props.onSelectEntity(payload)
+  return null
+}
+
+async function selectTopEntity(field) {
+  if (isFixedStoreField(field)) return
+  const currentValue = quickFieldValues[field.key]
+  const result = await selectEntity({
+    scope: 'top_filter',
+    field,
+    selectorKind: fieldSelector(field)?.kind || '',
+    currentValue: entityValueId(field, currentValue)
+  })
+  const selected = result?.selected || result?.data?.selected
+  if (selected) quickFieldValues[field.key] = selected
+}
+
+function clearTopField(field) {
+  if (isFixedStoreField(field)) return
+  if (field.quickRange === true || isQuickDateRange(field)) {
+    quickFieldRanges[field.key] = isQuickDateRange(field)
+      ? defaultQuickDateRange(field)
+      : { min: '', max: '' }
+    quickRangeError.value = ''
+    return
+  }
+  quickFieldValues[field.key] = ''
+}
+
+function applySettings(settings) {
+  activeSettings.value = normalizeSettings(settings)
+  customFiltersExpanded.value = true
+  // 删除配置时也删除旧输入，防止重新勾选后恢复不可见的旧筛选。
+  const keys = new Set(activeQuickFieldKeys.value)
+  Object.keys(quickFieldValues).forEach((key) => { if (!keys.has(key)) delete quickFieldValues[key] })
+  Object.keys(quickFieldRanges).forEach((key) => { if (!keys.has(key)) delete quickFieldRanges[key] })
+  activeQuickFields.value.forEach((field) => {
+    if ((field.quickRange === true || isQuickDateRange(field)) && !(field.key in quickFieldRanges)) {
+      quickFieldRanges[field.key] = { min: '', max: '' }
+    }
+    if (!(field.key in quickFieldValues)) quickFieldValues[field.key] = ''
+  })
+  ensureQuickDateRangeDefaults()
+  ensureQuickFieldDefaults()
+  emit('settings-applied', { ...activeSettings.value })
+  submitQuery()
+}
+
+watch(activeQuickFields, () => {
+  ensureQuickDateRangeDefaults()
+  ensureQuickFieldDefaults()
+}, { immediate: true })
+
+async function saveAliases(aliases, options = {}) {
+  if (!canRenameFields.value || !props.onSaveFieldAliases) {
+    return { result: { status: 'failed', code: 'FIELD_RENAME_DISABLED', message: '当前账号不能修改字段显示名称。' } }
+  }
+  const activeKeys = new Set(props.fields.map((field) => field.key))
+  const dormantCustomKeys = new Set((props.queryCapability?.customFields || [])
+    .filter((field) => field?.key && !activeKeys.has(field.key) && field.status !== 'archived')
+    .map((field) => field.key))
+  const preservedDormantAliases = Object.fromEntries(Object.entries(props.queryCapability?.fieldAliases || {})
+    .filter(([fieldKey]) => dormantCustomKeys.has(fieldKey)))
+  const result = await props.onSaveFieldAliases({
+    ...preservedDormantAliases,
+    ...aliases
+  }, options)
+  if (unifiedQueryActionSucceeded(result)) emit('field-aliases-saved', aliases)
+  return result
+}
+
+async function saveCustomField(field) {
+  if (!canManageCustomFields.value || !props.onSaveCustomField) {
+    return { result: { status: 'failed', code: 'CUSTOM_FIELD_DISABLED', message: '当前账号不能保存自定义字段。' } }
+  }
+  const result = await props.onSaveCustomField(field)
+  if (unifiedQueryActionSucceeded(result)) emit('custom-field-saved', field)
+  return result
+}
+
+function changeCustomFieldStatus(payload) {
+  if (!canManageCustomFields.value || !props.onChangeCustomFieldStatus) {
+    return { result: { status: 'failed', code: 'CUSTOM_FIELD_STATUS_DISABLED', message: '当前账号不能更改字段状态。' } }
+  }
+  return props.onChangeCustomFieldStatus(payload)
+}
+
+function archiveCustomField(payload) {
+  if (!canManageCustomFields.value || !props.onArchiveCustomField) {
+    return { result: { status: 'failed', code: 'CUSTOM_FIELD_ARCHIVE_DISABLED', message: '当前账号不能删除此字段。' } }
+  }
+  return props.onArchiveCustomField(payload)
+}
+
+async function upgradeSavedQueryFieldReference(payload) {
+  if (!hasCommandContext.value || !props.onUpgradeSavedQueryFieldReference) {
+    return { result: { status: 'failed', code: 'REFERENCE_UPGRADE_DISABLED', message: '当前页面不能升级字段版本，请刷新后重试。' } }
+  }
+  const result = await props.onUpgradeSavedQueryFieldReference(payload)
+  if (unifiedQueryActionSucceeded(result)) {
+    // composable 的成功路径已刷新 capability；用同一份服务端偏好重建查询，确保
+    // 当前列表、分页、合计和下一次导出都切换到刚刚确认的新字段版本。
+    await nextTick()
+    const refreshed = props.queryCapability?.querySettings
+    if (refreshed && typeof refreshed === 'object') activeSettings.value = normalizeSettings(refreshed)
+    applySettings(activeSettings.value)
+  }
+  return result
+}
+
+function createExport(configuration) {
+  if (!canExport.value || !props.onCreateExport || !hasExecutedQuerySnapshot.value) {
+    return { result: { status: 'failed', code: 'EXPORT_SNAPSHOT_REQUIRED', message: '请先完成一次成功查询，再创建导出任务。' } }
+  }
+  return props.onCreateExport({
+    // 导出冻结“最近一次成功执行”的深拷贝，用户尚未点击查询的输入变化绝不能带入任务。
+    query: cloneUnifiedQuerySnapshot(props.executedQuery),
+    configuration
+  })
+}
+
+const directExportFieldKeys = computed(() => {
+  const exportable = new Set(exportFields.value.map((field) => field.key))
+  const configured = Array.isArray(activeSettings.value.visibleFields)
+    ? activeSettings.value.visibleFields.filter((key) => exportable.has(key))
+    : []
+  return configured.length ? configured : exportFields.value.map((field) => field.key)
+})
+
+function directExportFileName() {
+  const now = new Date()
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('')
+  return `${props.pageName}_${date}.xlsx`
+}
+
+async function startDirectQueryExport() {
+  if (isDirectExporting.value || !canExport.value) return
+  isDirectExporting.value = true
+  exportError.value = ''
+  try {
+    const result = await createExport({
+      scope: 'query',
+      fields: directExportFieldKeys.value,
+      includeSummary: false,
+      fileName: directExportFileName()
+    })
+    if (result?.status === 'result_unknown' && result?.idempotencyKey) {
+      // 创建请求超时不能重复创建第二个文件任务。沿用已有抽屉的幂等回查逻辑，
+      // 以原请求键恢复同一个任务。
+      exportTaskReference.value = {
+        id: null,
+        status: 'result_unknown',
+        fileName: directExportFileName(),
+        rowCount: props.resultCount,
+        originalIdempotencyKey: result.idempotencyKey
+      }
+      isExportOpen.value = true
+      return
+    }
+    const succeeded = result?.status === 'success' || unifiedQueryActionSucceeded(result?.raw || result)
+    if (!succeeded || !result?.task?.id) {
+      exportError.value = result?.message || '导出任务创建失败，请重试。'
+      return
+    }
+    exportTaskReference.value = result.task
+    isExportOpen.value = true
+  } catch (error) {
+    exportError.value = error?.message || '导出任务创建失败，请重试。'
+  } finally {
+    isDirectExporting.value = false
+  }
+}
+</script>
+
+<template>
+  <section
+    class="unified-query-toolbar"
+    :class="{
+      'unified-query-toolbar--quick-controls-inline': inlineQuickControls,
+      'unified-query-toolbar--actions-after-fields': queryActionsAfterQuickFields,
+      'unified-query-toolbar--compact-keyword-search': compactKeywordSearch
+    }"
+    aria-label="查询条件"
+  >
+    <div v-if="!singleRowQueryActive" class="unified-query-toolbar__topline">
+      <div class="unified-query-toolbar__primary">
+        <slot name="leading-controls" />
+        <div v-if="inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
+          <button
+            v-for="filter in quickFilters"
+            :key="filter.key"
+            type="button"
+            class="unified-query-quick-filter"
+            :aria-pressed="filter.active === true"
+            :class="{ 'unified-query-quick-filter--active': filter.active }"
+            @click="selectQuickFilter(filter)"
+          >
+            {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
+          </button>
+        </div>
+        <div v-if="beforeKeywordQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
+          <label v-for="field in beforeKeywordQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+            <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
+            <div class="unified-query-top-field__control">
+              <UnifiedQueryDateRange v-if="isQuickDateRange(field)" :model-value="{ min: quickRangeValue(field, 'min'), max: quickRangeValue(field, 'max') }" :label="`${field.label}周期`" @change="applyDateRange(field, $event)" />
+              <UnifiedQueryNumericRangePresets v-else-if="field.quickRangePresets === true" :label="field.label" :mode="quickRangePreset(field)" :min="quickRangeValue(field, 'min')" :max="quickRangeValue(field, 'max')" @mode="selectQuickRangePreset(field, $event)" @bound="(bound, value) => setQuickRangeValue(field, bound, value)" @query="submitQuery" />
+              <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
+                <input
+                  :value="quickRangeValue(field, 'min')"
+                  type="number"
+                  placeholder="最小值"
+                  aria-label="最小值"
+                  @input="setQuickRangeValue(field, 'min', $event.target.value)"
+                  @keyup.enter="submitQuery"
+                >
+                <span>至</span>
+                <input
+                  :value="quickRangeValue(field, 'max')"
+                  type="number"
+                  placeholder="最大值"
+                  aria-label="最大值"
+                  @input="setQuickRangeValue(field, 'max', $event.target.value)"
+                  @keyup.enter="submitQuery"
+                >
+              </div>
+              <button
+                v-else-if="isEntityField(field)"
+                type="button"
+                class="unified-query-top-field__entity"
+                :class="{ 'unified-query-top-field__entity--fixed': isFixedStoreField(field) }"
+                :disabled="isFixedStoreField(field)"
+                :title="isFixedStoreField(field) ? '门店端默认使用当前门店，无需选择' : ''"
+                @click="selectTopEntity(field)"
+              >
+                {{ displayTopFieldValue(field) }}
+              </button>
+              <select v-else-if="field.type === 'enum' && field.options?.length" v-model="quickFieldValues[field.key]" @change="submitQuery">
+                <option value="">全部</option>
+                <option v-for="option in field.options" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
+              </select>
+              <input
+                v-else
+                v-model="quickFieldValues[field.key]"
+                :type="topFieldType(field)"
+                :placeholder="topFieldPlaceholder(field)"
+                @change="submitQuickDateOnChange(field)"
+                @keyup.enter="submitQuery"
+              >
+              <button v-if="field.quickRangePresets !== true && field.quickClearable !== false && !isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+            </div>
+          </label>
+        </div>
+        <label v-if="showKeywordSearch" class="search-field">
+          <span class="sr-only">综合查询</span>
+          <input v-model="keyword" type="search" :placeholder="searchPlaceholder" autocomplete="off" @keyup.enter="submitQuery">
+        </label>
+        <div v-if="afterKeywordQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="综合查询右侧筛选字段">
+          <div v-for="field in afterKeywordQuickFields" :key="field.key" class="unified-query-top-field unified-query-top-field--after-keyword">
+            <label :for="`after-keyword-${field.key}`">{{ field.quickLabel || field.label }}</label>
+            <div class="unified-query-top-field__control">
+              <select :id="`after-keyword-${field.key}`" v-model="quickFieldValues[field.key]" @change="submitQuery">
+                <option value="">{{ field.quickAllLabel || '全部' }}</option>
+                <option v-if="field.quickAllowEmpty === true" :value="QUICK_EMPTY_VALUE">{{ field.quickEmptyLabel || '空值' }}</option>
+                <option v-for="option in field.options || []" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <button v-if="!queryActionsInSecondary" type="button" class="button button--primary" :disabled="showQueryLoading && isQueryLoading" :aria-busy="showQueryLoading && isQueryLoading" @click="submitQuery">{{ showQueryLoading && isQueryLoading ? '查询中…' : '查询' }}</button>
+        <div v-if="showDataScope" class="unified-query-scope" role="group" aria-label="数据范围">
+          <span class="unified-query-scope__thumb" :class="{ 'unified-query-scope__thumb--all': dataScope === 'all' }" aria-hidden="true" />
+          <button type="button" :aria-pressed="dataScope === 'normal'" :class="{ 'unified-query-scope__active': dataScope === 'normal' }" @click="selectScope('normal')">{{ compactScopeLabels ? '正常' : '正常数据' }}</button>
+          <button type="button" :aria-pressed="dataScope === 'all'" :class="{ 'unified-query-scope__active': dataScope === 'all' }" @click="selectScope('all')">{{ compactScopeLabels ? '全部' : '全部数据' }}</button>
+        </div>
+        <select v-if="normalizedStatusOptions.length && dataScope === 'all'" v-model="businessStatus" class="unified-query-status" aria-label="其他状态" @change="submitQuery">
+          <option value="">其他状态</option>
+          <option v-for="option in availableStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+        <button v-if="canExport && !exportButtonAfterSettings" type="button" class="button button--secondary unified-query-export-button" @click="isExportOpen = true"><Download :size="16" />导出</button>
+        <button v-if="showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
+        <button v-if="!queryActionsInSecondary" type="button" class="button button--secondary" @click="resetQuery">重置</button>
+        <button
+          v-if="canExport && exportButtonAfterSettings"
+          type="button"
+          class="button button--secondary unified-query-export-button"
+          :disabled="isDirectExporting"
+          @click="directQueryExport ? startDirectQueryExport() : (isExportOpen = true)"
+        ><Download :size="16" />{{ isDirectExporting ? '正在创建…' : '导出' }}</button>
+        <slot name="primary-actions" />
+      </div>
+      <button v-if="secondaryQuickFields.length" type="button" class="button unified-query-toolbar__toggle" :aria-expanded="customFiltersExpanded" @click="toggleCustomFilters">{{ customFiltersExpanded ? '收起' : '展开' }}<span v-if="customFilterCount">（{{ customFilterCount }}）</span></button>
+      <div v-if="$slots['context-actions']" class="unified-query-toolbar__context-actions">
+        <slot name="context-actions" />
+      </div>
+    </div>
+
+    <div v-if="(customFiltersExpanded || singleRowQueryActive) && (secondaryQuickFields.length || (!inlineQuickControls && quickFilters.length))" class="unified-query-toolbar__secondary">
+      <!-- A single-row query must keep the host's permission-scoped context controls visible. -->
+      <div v-if="singleRowQueryActive && $slots['context-actions']" class="unified-query-toolbar__context-actions">
+        <slot name="context-actions" />
+      </div>
+      <div v-if="!inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
+        <button
+          v-for="filter in quickFilters"
+          :key="filter.key"
+          type="button"
+          class="unified-query-quick-filter"
+          :aria-pressed="filter.active === true"
+          :class="{ 'unified-query-quick-filter--active': filter.active }"
+          @click="selectQuickFilter(filter)"
+        >
+          {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
+        </button>
+      </div>
+
+      <div v-if="secondaryQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="自定义查询字段">
+        <label v-for="field in secondaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+          <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
+          <div class="unified-query-top-field__control">
+            <UnifiedQueryDateRange v-if="isQuickDateRange(field)" :model-value="{ min: quickRangeValue(field, 'min'), max: quickRangeValue(field, 'max') }" :label="`${field.label}周期`" @change="applyDateRange(field, $event)" />
+            <UnifiedQueryNumericRangePresets v-else-if="field.quickRangePresets === true" :label="field.label" :mode="quickRangePreset(field)" :min="quickRangeValue(field, 'min')" :max="quickRangeValue(field, 'max')" @mode="selectQuickRangePreset(field, $event)" @bound="(bound, value) => setQuickRangeValue(field, bound, value)" @query="submitQuery" />
+            <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
+              <input
+                :value="quickRangeValue(field, 'min')"
+                type="number"
+                placeholder="最小值"
+                aria-label="最小值"
+                @input="setQuickRangeValue(field, 'min', $event.target.value)"
+                @keyup.enter="submitQuery"
+              >
+              <span>至</span>
+              <input
+                :value="quickRangeValue(field, 'max')"
+                type="number"
+                placeholder="最大值"
+                aria-label="最大值"
+                @input="setQuickRangeValue(field, 'max', $event.target.value)"
+                @keyup.enter="submitQuery"
+              >
+            </div>
+            <button
+              v-else-if="isEntityField(field)"
+              type="button"
+              class="unified-query-top-field__entity"
+              :class="{ 'unified-query-top-field__entity--fixed': isFixedStoreField(field) }"
+              :disabled="isFixedStoreField(field)"
+              :title="isFixedStoreField(field) ? '门店端默认使用当前门店，无需选择' : ''"
+              @click="selectTopEntity(field)"
+            >
+              {{ displayTopFieldValue(field) }}
+            </button>
+            <select v-else-if="field.type === 'enum' && field.options?.length" v-model="quickFieldValues[field.key]" @change="submitQuery">
+              <option value="">全部</option>
+              <option v-for="option in field.options" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
+            </select>
+              <input
+                v-else
+                v-model="quickFieldValues[field.key]"
+                :type="topFieldType(field)"
+                :placeholder="topFieldPlaceholder(field)"
+                @change="submitQuickDateOnChange(field)"
+                @keyup.enter="submitQuery"
+              >
+            <button v-if="field.quickRangePresets !== true && field.quickClearable !== false && !isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+          </div>
+        </label>
+        <!-- 复用原操作入口与查询快照，不另建页面级查询或重置实现。 -->
+        <div v-if="queryActionsInSecondary" class="unified-query-toolbar__field-actions">
+          <button type="button" class="button button--primary" :disabled="showQueryLoading && isQueryLoading" :aria-busy="showQueryLoading && isQueryLoading" @click="submitQuery">{{ showQueryLoading && isQueryLoading ? '查询中…' : '查询' }}</button>
+          <button type="button" class="button button--secondary" @click="resetQuery">重置</button>
+          <button v-if="singleRowQueryActive && showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
+          <!-- 单行布局只移动入口，权限、导出抽屉与直接导出的执行契约均保持原样。 -->
+          <button v-if="singleRowQueryActive && canExport" type="button" class="button button--secondary unified-query-export-button" :disabled="exportButtonAfterSettings && isDirectExporting" @click="exportButtonAfterSettings && directQueryExport ? startDirectQueryExport() : (isExportOpen = true)"><Download :size="16" />{{ exportButtonAfterSettings && isDirectExporting ? '正在创建…' : '导出' }}</button>
+        </div>
+      </div>
+    </div>
+    <p v-if="quickRangeError" class="unified-query-toolbar__error" role="alert">{{ quickRangeError }}</p>
+    <p v-if="exportError" class="unified-query-toolbar__error" role="alert">{{ exportError }}</p>
+
+    <UnifiedQuerySettingsDrawer
+      v-if="isSettingsOpen"
+      :fields="fields"
+      :default-sort-field="defaultSortField"
+      :max-quick-fields="maxQuickFields"
+      :on-save="persistSettings"
+      :on-select-entity="selectEntity"
+      :lock-store-selector="lockStoreSelector"
+      :current-store="currentStore"
+      :initial-settings="activeSettings"
+      :invalid-references="activeSettings.invalidReferences"
+      :on-upgrade-reference="upgradeSavedQueryFieldReference"
+      :schema-version="capabilityMatchesPage ? queryCapability.schemaVersion : activeSettings.schemaVersion"
+      :enforce-field-capabilities="capabilityMatchesPage"
+      :show-custom-fields="canManageCustomFields"
+      :show-field-rename="canRenameFields"
+      @close="isSettingsOpen = false"
+      @applied="applySettings"
+      @custom-fields="isCustomFieldOpen = true"
+      @field-rename="isFieldRenameOpen = true"
+    />
+
+    <UnifiedQueryCustomFieldDrawer
+      v-if="isCustomFieldOpen && canManageCustomFields"
+      :fields="fields"
+      :custom-fields="queryCapability.customFields || []"
+      :page-name="pageName"
+      :permissions="queryCapability.permissions || {}"
+      :on-save="saveCustomField"
+      :on-status-change="changeCustomFieldStatus"
+      :on-archive="archiveCustomField"
+      @close="isCustomFieldOpen = false"
+    />
+
+    <UnifiedQueryFieldRenameDrawer
+      v-if="isFieldRenameOpen && canRenameFields"
+      :fields="originalFields"
+      :aliases="queryCapability.fieldAliases || {}"
+      :page-name="pageName"
+      :on-save="saveAliases"
+      @close="isFieldRenameOpen = false"
+    />
+
+    <UnifiedQueryExportDrawer
+      v-if="isExportOpen && canExport"
+      :key="stateContextKey"
+      :fields="exportFields"
+      :visible-field-keys="activeSettings.visibleFields"
+      :page-name="pageName"
+      :result-count="resultCount"
+      :page-size="pageSize"
+      :current-page-count="currentPageCount"
+      :data-as-of="dataAsOf || queryCapability.dataAsOf"
+      :export-capability="queryCapability.exportCapability"
+      :on-create="createExport"
+      :on-query-task="onQueryExportTask"
+      :on-download="onDownloadExport"
+      :initial-task="exportTaskReference"
+      @close="isExportOpen = false"
+      @task-change="exportTaskReference = $event"
+    />
+  </section>
+</template>
+
+<style scoped>
+.unified-query-export-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+</style>

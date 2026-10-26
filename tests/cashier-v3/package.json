@@ -1,0 +1,10 @@
+{
+  "name": "cashier-v3-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@babel/parser": "^7.24.0",
+    "@vue/compiler-sfc": "^3.4.38",
+    "esbuild": "^0.20.2"
+  }
+}

@@ -1,0 +1,861 @@
+{
+  "scope": "canonical editor/member component fixture; local only",
+  "cases": [
+    {
+      "pass": true,
+      "theme": "#42CA4D",
+      "mode": 0,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(66, 202, 77)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(66, 202, 77)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(66, 202, 77)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(66, 202, 77)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#1DB0FC",
+      "mode": 0,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 375,
+      "background": "#ffffff",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 375,
+      "background": "#2468ac",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#42CA4D",
+      "mode": 1,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 1,
+      "width": 375,
+      "background": "#2468ac",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(36, 104, 172) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 1,
+      "width": 320,
+      "background": "#ffffff",
+      "rows": [
+        {
+          "style": 0,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#42CA4D",
+      "mode": 1,
+      "width": 375,
+      "background": "#ffffff",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgb(255, 255, 255) 100%)",
+          "active": "rgb(233, 51, 35)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#1DB0FC",
+      "mode": 0,
+      "width": 320,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#1DB0FC",
+      "mode": 0,
+      "width": 320,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(29, 176, 252)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 320,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 320,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "theme": "#7B2941",
+      "mode": 0,
+      "width": 375,
+      "background": "transparent",
+      "rows": [
+        {
+          "style": 0,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 1,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 2,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        },
+        {
+          "style": 3,
+          "width": 375,
+          "overflow": false,
+          "memberOpacity": "1",
+          "editorOpacity": "1",
+          "moduleBackground": "rgba(0, 0, 0, 0)",
+          "gradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "editorGradient": "linear-gradient(rgba(245, 245, 245, 0) 0%, rgba(245, 245, 245, 0) 50%, rgba(0, 0, 0, 0) 100%)",
+          "active": "rgb(123, 41, 65)",
+          "searchColor": "rgb(92, 61, 69)",
+          "image": "/asset.png"
+        }
+      ]
+    }
+  ],
+  "navigation": "/test-link-1",
+  "errors": []
+}

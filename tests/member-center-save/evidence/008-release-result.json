@@ -1,0 +1,102 @@
+{
+  "task": "M008-R8-001",
+  "acceptance": "PM confirmed 9928360a and 008-only deployment/recovery",
+  "businessCommit": "a10369ce907423b640c16021bff97784dc742553",
+  "releaseCommit": "d208975258544751cd39d549157e61b8015a527c",
+  "backup": "/www/backups/008.cc3798.com/20261021-member-center-d2089752",
+  "build": {
+    "tree": "f3f79032b70898dcb1261456af3a7911aeea3c62",
+    "variant": "candidate",
+    "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+    "input": "/private/tmp/m008-round8-release-20261021/candidate-readonly/前端代码/admin",
+    "output": "/private/tmp/m008-round8-release-20261021/candidate-dist",
+    "node": "v16.20.2",
+    "inputFiles": 1475,
+    "htmlSha256": "d1cc760960ab56ce7e7da53cddc07f5c0c3654a94352f5a385525216b10dc323",
+    "result": "PASS"
+  },
+  "pack": {
+    "commit": "d208975258544751cd39d549157e61b8015a527c",
+    "files": 11,
+    "baselineAdminFiles": 1184,
+    "styleChange": {
+      "before": "view_admin/css/chunk-d066818c.3bd71775.css",
+      "after": "view_admin/css/chunk-1b0e45a2.2805bba3.css",
+      "rules": "identical except scope selectors"
+    },
+    "r95ChunkIdentical": true,
+    "changes": [
+      "system.html",
+      "view_admin/css/chunk-1b0e45a2.2805bba3.css",
+      "view_admin/css/chunk-1b0e45a2.2805bba3.css.gz",
+      "view_admin/js/app.6d572966.js",
+      "view_admin/js/app.6d572966.js.gz",
+      "view_admin/js/chunk-1b0e45a2.11c40cb6.js",
+      "view_admin/js/chunk-1b0e45a2.11c40cb6.js.gz",
+      "view_admin/js/chunk-25c399d5.56054cd1.js",
+      "view_admin/js/chunk-25c399d5.56054cd1.js.gz"
+    ],
+    "entry": "d1cc760960ab56ce7e7da53cddc07f5c0c3654a94352f5a385525216b10dc323",
+    "archiveSha256": "d9626daf8cdb56c982bb4f9436897120bb8dccbe58ba06d9902261ab334c11e4",
+    "configurationRebaseline": {
+      "before": "41c3212e19acefbb548ce7358b749d3ff04811d70d3410aac29f04b2119117a9",
+      "latest": "fe324a5817940a73d9ce41d53d41d3993e5a609cc4bd295117e6db410f8a2dd1",
+      "reason": "Concurrent non-menu configuration edit; preserve latest settings, replace only menu.list; code/entries unchanged"
+    }
+  },
+  "installed": {
+    "result": "PASS",
+    "instance": "008",
+    "commit": "d208975258544751cd39d549157e61b8015a527c",
+    "businessCommit": "a10369ce907423b640c16021bff97784dc742553",
+    "files": 11,
+    "restoredMenuCount": 14,
+    "rowSha256": "854fb084684daabab6b2af2af1ec5f630839caeeede93e5f686c09f6e059096b",
+    "protectedUnchanged": true
+  },
+  "public": {
+    "instance": "008",
+    "files": {
+      "public/system.html": "d1cc760960ab56ce7e7da53cddc07f5c0c3654a94352f5a385525216b10dc323",
+      "public/view_admin/css/chunk-1b0e45a2.2805bba3.css": "8a9366e5b32d61e47f00f00594c682706502a80f48236511fdd7aff3a355d55e",
+      "public/view_admin/css/chunk-1b0e45a2.2805bba3.css.gz": "f695c69b291f833b8ba43eadcb5d9749764ad180f6e12456c62ae4fc89de6b79",
+      "public/view_admin/js/app.6d572966.js": "a0f6d35a4a5f4a9536f2972350591051b4d68eed0ce14cecad52a670ca729007",
+      "public/view_admin/js/app.6d572966.js.gz": "c90feca304aaf14cc285997b74dab78b5cb5765a5bef888b9c44842463478239",
+      "public/view_admin/js/chunk-1b0e45a2.11c40cb6.js": "760bcb538b54d272e4897c268a027ddd1892a7a446bcab270ca580bcebb1d0c2",
+      "public/view_admin/js/chunk-1b0e45a2.11c40cb6.js.gz": "843b3cafec5acfe875c4439d2acd721f61caa905b87d3a80e850a25926919715",
+      "public/view_admin/js/chunk-25c399d5.56054cd1.js": "33ba58a29ee702ce80372b37977fd58e1f17b7dec4d06c7239a61219ed0b235f",
+      "public/view_admin/js/chunk-25c399d5.56054cd1.js.gz": "97cb50b79d910ba1bfbb015c7bf206caefc4dd61eaf91b90abba22ea5bbc44ef"
+    },
+    "memberEntryPreserved": true,
+    "cashierEntryPreserved": true,
+    "anonymousMenuCount": 12,
+    "result": "PASS"
+  },
+  "projects": {
+    "success": true,
+    "result": {
+      "result": {
+        "route": "pages/users/user_card_list/index",
+        "cards": 15,
+        "valid": 14,
+        "hasDisplayContent": true
+      }
+    }
+  },
+  "ui": {
+    "adminLoad": true,
+    "adminSaveEnabledAfterLoad": true,
+    "h5AuthenticatedServices": 11,
+    "miniActualOnlineServices": 11,
+    "unpaidVisible": 0,
+    "cardMenuNavigation": true,
+    "onlineSaveClicked": false,
+    "physicalDeviceChecked": false
+  },
+  "boundaries": {
+    "pushed": false,
+    "miniUploaded": false,
+    "otherClientsModified": false,
+    "memberRightsModified": false
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "rh": {
+    "appid": "wx29d9b63c92555701",
+    "api_origin": "https://rh.cc3798.com",
+    "version": "0.16.7",
+    "source_commit": "878a597a8d519fa5a6b8fd25de5aa1f064b34309",
+    "package": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r13-mini-release-1cbx8kjd/rh/前端代码/mobile-vue3/unpackage/dist/dev/mp-weixin",
+    "files": {
+      "project.config.json": "1acf4310b616d149fbcce387ab283d649f44eb4323563258501a8f9e694ea0d5",
+      "src/merchant/pages/home/index.js": "a0b2bc2e33eb9738bd9b1a20e6d76450b8bbad0c5670a2a7df73fe17c9267422",
+      "src/merchant/pages/category-ranking/index.wxml": "bf56077530875745687f44ff28bd328c98baa295af4c9ccb0abab144c2203b2b",
+      "src/shared/platform/mobile-runtime-config.js": "f087fcd32752fc6e5b1a6fbb7594e567f64b1536f024d97354e861bca5e9b5d8"
+    },
+    "no_source_maps": true,
+    "no_other_customer_domain": true
+  },
+  "008": {
+    "appid": "wx14666197911d052b",
+    "api_origin": "https://008.cc3798.com",
+    "version": "0.15.23",
+    "source_commit": "878a597a8d519fa5a6b8fd25de5aa1f064b34309",
+    "package": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r13-mini-release-1cbx8kjd/008/前端代码/mobile-vue3/unpackage/dist/dev/mp-weixin",
+    "files": {
+      "project.config.json": "abd5e6d7921fcc8007ead1255759b7bad3d6b40d8715ec955ca50fa6132ccc03",
+      "src/merchant/pages/home/index.js": "a0b2bc2e33eb9738bd9b1a20e6d76450b8bbad0c5670a2a7df73fe17c9267422",
+      "src/merchant/pages/category-ranking/index.wxml": "bf56077530875745687f44ff28bd328c98baa295af4c9ccb0abab144c2203b2b",
+      "src/shared/platform/mobile-runtime-config.js": "ca52a18b7b550ee4f2292b91aa8f6bca55bd69c1f5fb959c2c3f2e78bcfb408b"
+    },
+    "no_source_maps": true,
+    "no_other_customer_domain": true
+  }
+}

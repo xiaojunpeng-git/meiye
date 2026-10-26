@@ -1,0 +1,119 @@
+<template>
+	<MoheAiEntry />
+	<view class="merchant-primary-tab-bar" role="tablist">
+		<view
+			v-for="tab in visibleTabs"
+			:key="tab.key"
+			class="merchant-primary-tab-bar__tab"
+			:class="{ 'merchant-primary-tab-bar__tab--active': props.activeKey === tab.key }"
+			role="tab"
+			:aria-selected="props.activeKey === tab.key"
+			@tap="openTab(tab.key)"
+		>
+			<view class="merchant-primary-tab-bar__icon" :class="'merchant-primary-tab-bar__icon--' + tab.key" aria-hidden="true"></view>
+			<text class="merchant-primary-tab-bar__label">{{ tab.label }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import MoheAiEntry from './mohe-ai-entry.uvue'
+	import { currentMerchantRoot } from '../platform/mobile-merchant-session.uts'
+	import { switchMerchantPrimaryTab } from '../platform/mobile-navigation.uts'
+	import { merchantTabIsAllowed } from '../platform/merchant-tab-permissions.uts'
+
+	const props = defineProps<{ activeKey : string }>()
+	const tabs = [
+		{ key: 'home', label: '经营', actions: ['MERCHANT_HOME_VIEW', 'mobile.merchant.home', '401009'] },
+		{ key: 'warehouse', label: '数据', actions: ['MERCHANT_WAREHOUSE_VIEW', 'mobile.merchant.warehouse', '401007'] },
+		{ key: 'customers', label: '客户', actions: ['CUSTOMER_VIEW', 'mobile.merchant.customers', '401004'] },
+		{ key: 'workbench', label: '工作台', actions: ['RESERVATION_VIEW', 'mobile.merchant.workbench', '401001'] },
+		// 账号与退出入口不属于四个业务 Tab 的权限控制范围。
+		{ key: 'profile', label: '我的', actions: [] }
+	]
+	// Fail closed while the merchant root is being read; never briefly render
+	// business entries before their server-authorized actions are known.
+	const visibleTabs = ref<Array<any>>([])
+
+	onMounted(() => refreshTabs())
+
+	function refreshTabs() : void {
+		let root = currentMerchantRoot()
+		let granted = grantedCapabilities(root)
+		// A session without entrance actions is not authorized for any tab. Do not
+		// fall back to rendering all entries: the server enforces the same action
+		// contract and the route guard will send the user back through bootstrap.
+		if (granted.length === 0) {
+			visibleTabs.value = root != null ? [tabs[4]] : []
+			return
+		}
+		let next : Array<any> = []
+		for (let index = 0; index < 4; index++) {
+			let tab = tabs[index]
+			if (Array.isArray(root.availableActions)) {
+				if (merchantTabIsAllowed(String(tab.key), root)) next.push(tab)
+			} else {
+				let actions : Array<any> = tab.actions
+				for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+					if (granted.indexOf(String(actions[actionIndex])) >= 0) {
+						next.push(tab)
+						break
+					}
+				}
+			}
+		}
+		if (root != null) next.push(tabs[4])
+		visibleTabs.value = next
+	}
+
+	function grantedCapabilities(root : any) : Array<string> {
+		if (root == null || typeof root != 'object') return []
+		let source : any = Array.isArray(root.availableActions) ? root.availableActions : root.capabilities
+		if (!Array.isArray(source)) return []
+		let result : Array<string> = []
+		for (let index = 0; index < source.length; index++) {
+			let value = source[index]
+			if (value != null && typeof value == 'object') {
+				let code = String(value.action || value.code || value.feature_code || value.featureCode || value.id || '')
+				if (code.length > 0) result.push(code)
+			} else {
+				let code = String(value || '')
+				if (code.length > 0) result.push(code)
+			}
+		}
+		return result
+	}
+
+	function openTab(key : string) : void {
+		switchMerchantPrimaryTab(key)
+	}
+</script>
+
+<style>
+	/* The primary merchant navigation belongs to the viewport, not the page
+	 * scroll flow. Keeping it fixed also makes H5 behave like the mini program
+	 * shell and prevents a long page from pushing the navigation away. */
+	.merchant-primary-tab-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100; display: flex; box-sizing: border-box; min-height: 72px; flex-direction: row; align-items: stretch; padding-top: 6px; padding-bottom: env(safe-area-inset-bottom); border-top-width: 1px; border-top-style: solid; border-top-color: #dde4ed; background-color: rgba(255, 255, 255, 0.98); box-shadow: 0 -6px 18px rgba(35, 70, 110, 0.08); }
+	.merchant-primary-tab-bar__tab { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; border-top-width: 0; background-color: transparent; font-size: 11px; font-weight: 600; line-height: 15px; color: #728198; }
+	.merchant-primary-tab-bar__tab--active { background-color: transparent; color: #1677cc; }
+	.merchant-primary-tab-bar__icon { position: relative; display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; color: #728198; }
+	.merchant-primary-tab-bar__icon::before, .merchant-primary-tab-bar__icon::after { position: absolute; display: block; box-sizing: border-box; border-color: currentColor; content: ''; }
+	.merchant-primary-tab-bar__tab--active .merchant-primary-tab-bar__icon { color: #1677cc; }
+	/* 经营：简洁的房屋/经营入口线稿。 */
+	.merchant-primary-tab-bar__icon--home::before { width: 15px; height: 13px; margin-top: 4px; border-width: 2px; border-style: solid; border-radius: 2px; }
+	.merchant-primary-tab-bar__icon--home::after { width: 13px; height: 13px; margin-top: -5px; border-top-width: 2px; border-top-style: solid; border-left-width: 2px; border-left-style: solid; transform: rotate(45deg); }
+	/* 数据：带分隔线的数仓/报表线稿。 */
+	.merchant-primary-tab-bar__icon--warehouse::before { width: 17px; height: 15px; border-width: 2px; border-style: solid; border-radius: 3px; }
+	.merchant-primary-tab-bar__icon--warehouse::after { width: 9px; height: 2px; background-color: currentColor; box-shadow: 0 -4px 0 currentColor, 0 4px 0 currentColor; }
+	/* 客户：头像与肩部轮廓线稿。 */
+	.merchant-primary-tab-bar__icon--customers::before { width: 9px; height: 9px; margin-top: -7px; border-width: 2px; border-style: solid; border-radius: 50%; }
+	.merchant-primary-tab-bar__icon--customers::after { width: 18px; height: 9px; margin-top: 9px; border-width: 2px; border-style: solid; border-bottom: 0; border-radius: 10px 10px 0 0; }
+	/* 工作台：四格功能入口线稿。 */
+	.merchant-primary-tab-bar__icon--workbench::before { width: 17px; height: 17px; border-width: 2px; border-style: solid; border-radius: 3px; }
+	.merchant-primary-tab-bar__icon--workbench::after { width: 2px; height: 17px; background-color: currentColor; box-shadow: 6px 0 0 currentColor, -6px 0 0 currentColor; }
+	/* 我的：个人头像线稿。 */
+	.merchant-primary-tab-bar__icon--profile::before { width: 9px; height: 9px; margin-top: -7px; border-width: 2px; border-style: solid; border-radius: 50%; }
+	.merchant-primary-tab-bar__icon--profile::after { width: 17px; height: 9px; margin-top: 9px; border-width: 2px; border-style: solid; border-bottom: 0; border-radius: 10px 10px 0 0; }
+	.merchant-primary-tab-bar__label { margin-top: 3px; line-height: 15px; text-align: center; }
+	.merchant-primary-tab-bar__tab--active .merchant-primary-tab-bar__label { font-weight: 700; }
+</style>

@@ -1,0 +1,100 @@
+<?php
+namespace app\controller\ai;
+
+use app\services\ai\AiGatewayServices;
+use app\services\mobile\protocol\MobileApiResponse;
+use app\services\mobile\protocol\MobileApiException;
+
+/** Explicit action list; never route user-controlled operation names to the gateway. */
+trait AiHttpActions
+{
+    public function aiBootstrap() { return $this->callAi('bootstrap'); }
+    public function aiCreate() { return $this->callAi('create'); }
+    public function aiExecute(string $runId) { return $this->callAi('execute',$runId); }
+    public function aiStatus(string $runId) { return $this->callAi('status',$runId); }
+    public function aiFeedbackSave(string $runId) { return $this->callAi('feedback_save',$runId); }
+    public function aiFeedbackList() { return $this->callAi('feedback_list'); }
+    public function aiFeedbackDetail(string $id) { return $this->callAi('feedback_detail',$id); }
+    public function aiDelivery(string $runId) { return $this->callAi('delivery',$runId); }
+    public function aiClarify(string $runId) { return $this->callAi('clarify',$runId); }
+    public function aiCancel(string $runId) { return $this->callAi('cancel',$runId); }
+    public function aiExport(string $runId) { return $this->callAi('export',$runId); }
+    public function aiExportCreate(string $runId) { return $this->callAi('export_create',$runId); }
+    public function aiExportStatus(string $runId) { return $this->callAi('export_status',$runId); }
+    public function aiConfigGet() { return $this->callAi('config_get'); }
+    public function aiConfigSave() { return $this->callAi('config_save'); }
+    public function aiConfigCheck() { return $this->callAi('config_check'); }
+    public function aiManagementGet() { return $this->callAi('management_get'); }
+    public function aiManagementSave() { return $this->callAi('management_save'); }
+    public function aiManagementValidate() { return $this->callAi('management_validate'); }
+    public function aiManagementPublish() { return $this->callAi('management_publish'); }
+    public function aiManagementRollback() { return $this->callAi('management_rollback'); }
+    public function aiManagementPreview() { return $this->callAi('management_preview'); }
+    public function aiManagementRebase() { return $this->callAi('management_rebase'); }
+    public function aiMetricRegistryGet() { return $this->callAi('metric_registry_get'); }
+
+    private function callAi(string $operation,string $runId='')
+    {
+        try {
+            if (strtoupper((string)$this->request->method())==='GET') {
+                $query=$this->request->get();
+                foreach (['client_session_id','run_delivery_token','generation','window_token','question','history','context_ref'] as $key) {
+                    if (array_key_exists($key,(array)$query)) { throw new \RuntimeException('AI_SENSITIVE_QUERY_FORBIDDEN'); }
+                }
+                $input=[];
+                if ($operation==='feedback_detail') $input['id']=$runId;
+                foreach (['X-Mohe-Ai-Client-Session-Id'=>'client_session_id','X-Mohe-Ai-Run-Delivery-Token'=>'run_delivery_token','X-Mohe-Ai-Generation'=>'generation','X-Mohe-Ai-Window-Token'=>'window_token'] as $header=>$key) {
+                    $value=$this->request->header($header,''); if ($value!=='') { $input[$key]=$value; }
+                }
+            } else {
+                // Parse the same JSON representation for POST and PUT; never depend on post() for PUT.
+                $raw=$this->request->getContent();
+                if (strlen($raw)>262144 || substr(ltrim($raw),0,1)!=='{') { throw new \RuntimeException('AI_INPUT_INVALID'); }
+                $input=json_decode($raw,true,32);
+                if (json_last_error()!==JSON_ERROR_NONE) { throw new \RuntimeException('AI_INPUT_INVALID'); }
+            }
+            if (!is_array($input)) { throw new \RuntimeException('AI_INPUT_INVALID'); }
+            $context=$this->buildAiContext();
+            $context['_refresh']=function () { return $this->refreshAiContext(); };
+            $result=$this->aiGateway()->handle($operation,$context,$input,$runId);
+            if ($result instanceof \think\Response) { return $result->header(['Cache-Control'=>'no-store']); }
+            if (!is_array($result)) { throw new \RuntimeException('AI_RESPONSE_INVALID'); }
+            $response=$this->isMobileAi()
+                ? MobileApiResponse::success($result,MobileApiResponse::MERCHANT_CONTRACT)
+                : app('json')->success('ok',$result);
+            return $response->header(['Cache-Control'=>'no-store']);
+        } catch (\Throwable $exception) {
+            // Preserve the shared mobile login/protocol contract. Only typed,
+            // public contract failures bypass AI redaction, never raw errors.
+            if ($this->isMobileAi() && $exception instanceof MobileApiException) {
+                return MobileApiResponse::failure($exception,$this->request)->header(['Cache-Control'=>'no-store']);
+            }
+            // Never return/log SQL, request content, tokens, prompts or provider errors here.
+            $message=[
+                'AI_PERMISSION_DENIED'=>'当前账号没有此项操作权限。',
+                'AI_MANAGEMENT_REVISION_CONFLICT'=>'配置已更新，请刷新后重新操作，未覆盖其他修改。',
+                'AI_MANAGEMENT_DOCUMENT_INVALID'=>'配置内容不符合已登记能力，请检查填写项。',
+                'AI_MANAGEMENT_BUDGET_INVALID'=>'执行预算不合法，不能超过已登记上限或小于节点预算合计。',
+                'AI_MANAGEMENT_SOURCE_CHANGED'=>'底层能力版本已变化，请联系维护人员核对配置。',
+                'AI_MANAGEMENT_REBASE_INVALID'=>'旧版管理配置无法安全迁移，请恢复源码默认配置后重新设置。',
+                'AI_MANAGEMENT_NOT_READY'=>'管理配置尚未安装完成，请联系维护人员。',
+                'AI_MANAGEMENT_VERSION_NOT_FOUND'=>'所选配置版本不存在或不属于当前实例。',
+                'AI_CLIENT_UPGRADE_REQUIRED'=>'魔核 AI 已更新，请刷新页面后重新打开。',
+                'AI_CLARIFICATION_STALE'=>'这一步已更新，请使用当前显示的选项确认。',
+                'AI_CLARIFICATION_IN_PROGRESS'=>'当前选择已接纳，正在继续查询。',
+                'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',
+                'AI_CONTEXT_REQUIRED'=>'前文条件已失效或无法核验，请在新问题中明确条件。',
+                'AI_FEEDBACK_UNAVAILABLE'=>'这条回答已过期或暂不可评价。',
+                'AI_FEEDBACK_INVALID'=>'评价未保存，请刷新这条回答后重试。',
+                'AI_FEEDBACK_NOT_FOUND'=>'这条采集记录不存在或已不可查看。',
+            ][$exception->getMessage()]??'魔核 AI 请求未完成，请重试或联系管理员。';
+            $reason=$exception->getMessage();
+            $safeReason=preg_match('/^AI_[A-Z0-9_]{1,62}$/D',$reason)===1?$reason:'AI_REQUEST_FAILED';
+            return ($this->isMobileAi()
+                ? json(['contractVersion'=>MobileApiResponse::MERCHANT_CONTRACT,'errorCode'=>$safeReason,'message'=>$message],400)
+                : app('json')->fail($message,['error_code'=>$safeReason]))->header(['Cache-Control'=>'no-store']);
+        }
+    }
+
+    protected function aiGateway() { return new AiGatewayServices(); }
+}

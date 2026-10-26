@@ -1,0 +1,56 @@
+{
+  "before": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "d37edb7ba2b2bee1f4da4d65c4e1ccc873dda9f0b202bd822b952b73664a9b66",
+      "count": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "836017a3d41f8a06b11aa298646ea205db981e0b1b2ce4b874894f0d0dc3145e",
+      "count": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    },
+    "/api/store/list?is_select=1&page=2&limit=20": {
+      "status": 200,
+      "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "count": 0
+    },
+    "/api/store/list?is_select=1&keywords=M008_REGION_UNMATCHED_20261024": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    }
+  },
+  "after": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "d37edb7ba2b2bee1f4da4d65c4e1ccc873dda9f0b202bd822b952b73664a9b66",
+      "count": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "7a6dc122e7b6e8c613d5d32319c9238669d5634ee975de626339c1e98cd9e5b3",
+      "count": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    },
+    "/api/store/list?is_select=1&page=2&limit=20": {
+      "status": 200,
+      "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "count": 0
+    },
+    "/api/store/list?is_select=1&keywords=M008_REGION_UNMATCHED_20261024": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    }
+  }
+}

@@ -1,0 +1,370 @@
+<?php
+declare(strict_types=1);
+
+namespace app\services\cashier\v3\settlement;
+
+use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
+use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
+use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\fact\CashierV3CheckoutFactIdFactory;
+use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
+use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
+use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
+use app\services\cashier\v3\registry\CashierV3ContextPolicy;
+use app\services\user\UserBalanceAtomicServices;
+use think\facade\Db;
+
+/**
+ * The repayment authority for debts created by submit-recharge.
+ *
+ * This intentionally does not call StoreDebtServices: recharge debts use the
+ * order_id=0 compatibility sentinel and must never be resolved as sales orders.
+ */
+final class CashierV3RechargeDebtRepaymentServices
+{
+    public const ACTION = 'submit-recharge-debt-repayment';
+    // 充值欠款补交复用记账收款白名单，避免补交路径与充值完成路径产生口径漂移。
+    // Recharge debt is cleared only by an actual receipt, never a non-cash offset.
+    private const PAYMENT_METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection'];
+
+    public function submitInTx(array $scope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('rechargeDebtRepayment.submitInTx');
+        $operator = $scope['operator_scope'] ?? null;
+        $dataScope = $scope['data_scope'] ?? null;
+        $recorder = $scope['event_recorder'] ?? null;
+        $execution = $scope['event_execution'] ?? null;
+        if (!$operator instanceof CashierV3OperatorScope || !$dataScope instanceof CashierV3DataScopeContext
+            || !$recorder instanceof CashierV3BusinessEventRecorder || !$execution instanceof CashierV3BusinessEventExecution) {
+            throw self::failure('recharge_repayment_scope_incomplete');
+        }
+        $input = $this->input((array)($scope['payload'] ?? []));
+        if (!$dataScope->allowsStore($operator->storeId())) {
+            throw self::failure('recharge_repayment_scope_denied');
+        }
+
+        $debt = (array)Db::name('store_debt')->where('id', $input['debtId'])->lock(true)->find();
+        $map = (array)Db::name('cashier_v3_recharge_debt_authority')->where('debt_id', $input['debtId'])->lock(true)->find();
+        if (!$debt || !$map || (int)($debt['order_id'] ?? -1) !== 0
+            || (int)($debt['uid'] ?? 0) !== $input['memberId']
+            || (int)($debt['store_id'] ?? 0) !== $operator->storeId()
+            || (int)($map['member_id'] ?? 0) !== $input['memberId']
+            || (int)($map['store_id'] ?? 0) !== $operator->storeId()
+            || (string)($map['tenant_id'] ?? '') !== $dataScope->tenantId()) {
+            throw self::failure('recharge_repayment_source_mismatch');
+        }
+        $rechargeId = (int)($map['recharge_id'] ?? 0);
+        $recharge = (array)Db::name('user_recharge')->where('id', $rechargeId)->lock(true)->find();
+        if (!$recharge || (int)($recharge['uid'] ?? 0) !== $input['memberId']
+            || (int)($recharge['store_id'] ?? 0) !== $operator->storeId()) {
+            throw self::failure('recharge_repayment_recharge_missing');
+        }
+        // 原充值单来源是欠款弹窗的默认选项；本次明确选择的来源归属于补交，
+        // 不反写原充值单，也不读取收银工具栏来源。
+        $originalSource = [
+            'business_source_primary_id' => (int)($recharge['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => trim((string)($recharge['business_source_primary_name_snapshot'] ?? '')),
+            'business_source_secondary_id' => (int)($recharge['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => trim((string)($recharge['business_source_secondary_name_snapshot'] ?? '')),
+            'business_source_label_snapshot' => trim((string)($recharge['business_source_label_snapshot'] ?? '')),
+        ];
+        $total = self::cents((string)($debt['total_debt'] ?? ''));
+        $repaidBefore = self::cents((string)($debt['repaid_debt'] ?? ''));
+        $pending = $total - $repaidBefore;
+        if ((int)($debt['status'] ?? -1) !== 0 || $pending <= 0 || $input['amountCents'] > $pending) {
+            throw self::failure('recharge_repayment_amount_outdated');
+        }
+        if (self::cents((string)($recharge['debt_amount'] ?? '')) !== $total
+            || self::cents((string)($recharge['repaid_debt_amount'] ?? '0.00')) !== $repaidBefore) {
+            throw self::failure('recharge_repayment_projection_mismatch');
+        }
+        $this->assertPayments($input['paymentLines'], $input['amountCents']);
+        $input['salespeople'] = $this->resolveSalespeople($input['salespersonAllocations'], $input['amountCents'], $operator);
+        $now = time();
+        $businessDate = self::businessDate($input['businessDate'] ?? null, $now);
+        $commandKey = (string)($scope['idempotency_key'] ?? '');
+        if ($commandKey === '') {
+            throw self::failure('recharge_repayment_idempotency_missing');
+        }
+        $repaymentId = 'RRP-' . substr(hash_hmac('sha256', $dataScope->tenantId() . "\0" . $input['debtId'] . "\0" . $commandKey, $this->secret()), 0, 40);
+        $repaymentNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+            $dataScope->tenantId(),
+            CashierV3BusinessDocumentNumberServices::DEBT_REPAYMENT,
+            'recharge_debt_repayment',
+            $repaymentId,
+            $businessDate,
+            $now
+        );
+        $repaidAfter = $repaidBefore + $input['amountCents'];
+        $debtStatus = $repaidAfter === $total ? 1 : 0;
+        // 零奖励沿用升级前的命令指纹，历史重放不能仅因新增缺省字段而冲突。
+        $fingerprintInput = $input;
+        if ($input['rewardAmountCents'] === 0) unset($fingerprintInput['rewardAmountCents']);
+        $fingerprint = hash('sha256', json_encode([$fingerprintInput, $dataScope->tenantId(), $operator->storeId(), $rechargeId, $repaidBefore], JSON_UNESCAPED_SLASHES));
+        $existing = Db::name('cashier_v3_recharge_debt_repayment')->where('tenant_id', $dataScope->tenantId())->where('command_idempotency_key', $commandKey)->lock(true)->find();
+        if ($existing) {
+            if ((string)($existing['immutable_fingerprint'] ?? '') !== $fingerprint) {
+                throw self::failure('recharge_repayment_idempotency_conflict');
+            }
+            return $this->replayedResult((array)$existing);
+        }
+        // 历史已完成补交保持原幂等回放结果。新补交必须有明确来源；
+        // 与原单一致时保留历史快照，重选则在事务内从当前有效目录解析名称。
+        if ($originalSource['business_source_primary_id'] <= 0
+            || $originalSource['business_source_primary_name_snapshot'] === ''
+            || $originalSource['business_source_label_snapshot'] === ''
+            || ($originalSource['business_source_secondary_id'] > 0 && $originalSource['business_source_secondary_name_snapshot'] === '')) {
+            $originalSource = self::sourceSnapshotColumns([]);
+        }
+        if ($input['businessSource']['business_source_primary_id'] <= 0) {
+            throw self::failure('recharge_repayment_business_source_required');
+        }
+        if ($input['businessSource'] === $originalSource) {
+            $input['businessSource'] = $originalSource;
+        } else {
+            $selected = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
+                $input['businessSource']['business_source_primary_id'],
+                $input['businessSource']['business_source_secondary_id'], true
+            );
+            $input['businessSource'] = self::sourceSnapshotColumns($selected);
+        }
+        // 充值补交奖励与本金分开保存；资格只依据服务端核定来源，余额仍只补入本金。
+        $rewardAmountCents = CashierV3RepaymentReward::forSource($input['rewardAmountCents'], $input['businessSource']['business_source_primary_name_snapshot']);
+        $recordId = (int)Db::name('cashier_v3_recharge_debt_repayment')->insertGetId([
+            'repayment_id' => $repaymentId, 'repayment_no' => $repaymentNo,
+            'tenant_id' => $dataScope->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $input['memberId'], 'operator_id' => $operator->operatorId(),
+            'debt_id' => $input['debtId'], 'recharge_id' => $rechargeId, 'command_idempotency_key' => $commandKey, 'immutable_fingerprint' => $fingerprint,
+            // 补交主记录及同事务收款事实共用本次已确认来源。
+            'business_source_primary_id' => $input['businessSource']['business_source_primary_id'],
+            'business_source_primary_name_snapshot' => $input['businessSource']['business_source_primary_name_snapshot'],
+            'business_source_secondary_id' => $input['businessSource']['business_source_secondary_id'],
+            'business_source_secondary_name_snapshot' => $input['businessSource']['business_source_secondary_name_snapshot'],
+            'business_source_label_snapshot' => $input['businessSource']['business_source_label_snapshot'],
+            'salespeople_snapshot_json' => json_encode($input['salespeople'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'reward_amount_cents' => $rewardAmountCents,
+            'amount_cents' => $input['amountCents'], 'debt_repaid_before_cents' => $repaidBefore, 'debt_repaid_after_cents' => $repaidAfter, 'debt_status_after' => $debtStatus,
+            'balance_ledger_id' => 0, 'business_date' => $businessDate, 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'status' => 'processing', 'version' => 1, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        if ($recordId <= 0) throw self::failure('recharge_repayment_insert_failed');
+
+        $balanceProvider = new CashierV3MemberBalanceProvider();
+        $beforeBalance = $balanceProvider->lockSnapshotInTx($input['memberId'], $operator, $dataScope);
+        if ((int)$beforeBalance['accountVersion'] !== $input['balanceVersion']) throw self::failure('recharge_repayment_balance_version_conflict');
+        try {
+            $atomic = app()->make(UserBalanceAtomicServices::class)->creditBenGive(
+                $input['memberId'], self::money($input['amountCents']), '0.00', 'recharge_debt_repayment', $recordId,
+                '收银V3充值欠款补交', 'cv3-recharge-debt-repayment-' . hash('sha256', $dataScope->tenantId() . '|' . $commandKey)
+            );
+        } catch (\Throwable $exception) {
+            throw self::failure('recharge_repayment_balance_credit_failed', ['cause' => get_class($exception)]);
+        }
+        $afterBalance = $balanceProvider->lockSnapshotInTx($input['memberId'], $operator, $dataScope);
+        $ledgerId = (int)($atomic['money_id'] ?? 0);
+        if ($ledgerId <= 0 || (int)$afterBalance['principalCents'] !== (int)$beforeBalance['principalCents'] + $input['amountCents']) {
+            throw self::failure('recharge_repayment_balance_result_invalid');
+        }
+        $payments = [];
+        foreach ($input['paymentLines'] as $index => $line) {
+            $payments[] = [
+                'repayment_id' => $repaymentId, 'payment_line_no' => $index + 1, 'payment_method' => $line['paymentMethod'], 'amount_cents' => $line['amountCents'],
+                'collection_reference_snapshot' => $line['collectionReference'], 'remark_snapshot' => $line['remark'],
+                'immutable_fingerprint' => hash('sha256', json_encode($line, JSON_UNESCAPED_SLASHES)),
+                'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+            ];
+        }
+        if ((int)Db::name('cashier_v3_recharge_debt_repayment_payment')->insertAll($payments) !== count($payments)) throw self::failure('recharge_repayment_payment_insert_failed');
+        if ((int)Db::name('store_debt')->where('id', $input['debtId'])->update(['repaid_debt' => self::money($repaidAfter), 'status' => $debtStatus, 'update_time' => $now]) !== 1
+            || (int)Db::name('store_debt_item')->where('debt_id', $input['debtId'])->update(['repaid_debt' => self::money($repaidAfter), 'update_time' => $now]) < 1
+            || (int)Db::name('user_recharge')->where('id', $rechargeId)->update(['repaid_debt_amount' => self::money($repaidAfter)]) !== 1
+            || (int)Db::name('cashier_v3_recharge_debt_repayment')->where('id', $recordId)->update(['balance_ledger_id' => $ledgerId, 'status' => 'succeeded', 'updated_at' => $now]) !== 1) {
+            throw self::failure('recharge_repayment_projection_write_failed');
+        }
+        $event = $recorder->recordInTx($execution, (array)($scope['event_contract'] ?? []), [
+            'event_type' => 'debt.repaid', 'aggregate_type' => 'recharge_debt_repayment', 'aggregate_id' => $repaymentId, 'aggregate_version' => 1, 'event_version' => 1,
+            'source_type' => self::ACTION, 'source_id' => $repaymentId, 'member_id' => $input['memberId'], 'business_date' => $businessDate,
+            'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'aggregate_name_snapshot' => $repaymentNo,
+            'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'),
+            'payload' => ['contractVersion' => 'cashier-v3-recharge-debt-repayment-v1','rechargeId' => $rechargeId,'debtId' => $input['debtId'],'amountCents' => $input['amountCents'],'balanceLedgerId' => $ledgerId,'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($input['salespeople'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
+        ]);
+        $this->persistFactsInTx($input, $operator, $dataScope, $rechargeId, $repaymentId, $repaymentNo, $now, $businessDate, $event, $ledgerId, $afterBalance, $commandKey);
+        (new CashierV3SupplementAttributionServices())->persistInitialInTx(
+            $repaymentId, $repaymentNo, $input['memberId'], $businessDate, $input['amountCents'],
+            $input['guideSelections'], $input['salesManagerSelections'], $commandKey,
+            (string)$event['event_no'], $operator, $dataScope
+        );
+        return ['data' => ['repayment' => ['repaymentId' => $repaymentId,'repaymentNo' => $repaymentNo,'amount' => self::money($input['amountCents']),'balanceVersion' => (int)$afterBalance['accountVersion'],'businessEventNo' => (string)$event['event_no']]], 'business_no' => $repaymentNo, 'touched' => ['member_balance'], 'message' => '充值欠款补交成功，已补足会员储值本金。'];
+    }
+
+    private function persistFactsInTx(array $input, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $rechargeId, string $repaymentId, string $repaymentNo, int $now, string $businessDate, array $event, int $ledgerId, array $balance, string $commandKey): void
+    {
+        $ids = new CashierV3CheckoutFactIdFactory($this->secret());
+        $member = (array)Db::name('user')->where('uid', $input['memberId'])->field('real_name,nickname')->find();
+        $store = (string)Db::name('system_store')->where('id', $operator->storeId())->value('name');
+        $operatorName = (string)Db::name('system_store_staff')->where('id', $operator->operatorId())->value('staff_name');
+        $paymentFacts = [];
+        foreach ($input['paymentLines'] as $index => $line) {
+            $lineId = $repaymentId . ':payment:' . ($index + 1);
+            $paymentFacts[] = ['factId' => $ids->paymentFactId($operator->tenantId(), $repaymentId, $lineId), 'naturalKey' => $ids->paymentNaturalKey($operator->tenantId(), $repaymentId, $lineId), 'factVersion' => 1, 'reversalOf' => '', 'status' => 'effective', 'sourceLineId' => $lineId, 'paymentMethod' => $line['paymentMethod'], 'paymentAuthorityKey' => $repaymentId . ':' . ($index + 1), 'collectionReference' => $line['collectionReference'], 'amountCents' => $line['amountCents']];
+        }
+        $performanceLine = $repaymentId . ':performance'; $external = 0; $performanceFacts = [];
+        foreach ($input['salespeople'] as $person) {
+            $amount = (int)$person['amountCents'];
+            if (in_array((string)$person['employeeTypeCodeSnapshot'], ['partner', 'outsourced'], true)) $external += $amount;
+            $performanceFacts[] = ['factId' => $ids->salesPerformanceFactId($operator->tenantId(), $repaymentId, $performanceLine, (string)$person['employeeId'], (string)$person['sequence']), 'naturalKey' => $ids->salesPerformanceNaturalKey($operator->tenantId(), $repaymentId, $performanceLine, (string)$person['employeeId'], (string)$person['sequence']), 'factVersion' => 1, 'reversalOf' => '', 'status' => 'effective', 'sourceLineId' => $performanceLine, 'performanceType' => 'sales_performance_allocated', 'employeeId' => (int)$person['employeeId'], 'employeeNameSnapshot' => (string)$person['name'], 'employeeTypeSnapshot' => (string)$person['employeeTypeCodeSnapshot'], 'employeeTypeAuthorityVersion' => (int)$person['employeeTypeAuthorityVersion'], 'roleSnapshot' => 'salesperson', 'allocationWeightNumerator' => (int)$person['allocationWeight'], 'allocationWeightDenominator' => 100, 'allocationBaseAmountCents' => $input['amountCents'], 'amountCents' => $amount, 'ruleCodeSnapshot' => 'recharge_debt_repayment_salesperson_allocation', 'ruleNameSnapshot' => '充值欠款补交销售人分配', 'ruleVersionSnapshot' => 'v1'];
+        }
+        $performanceFacts[] = ['factId' => $ids->actualPerformanceFactId($operator->tenantId(), $repaymentId, $performanceLine), 'naturalKey' => $ids->actualPerformanceNaturalKey($operator->tenantId(), $repaymentId, $performanceLine), 'factVersion' => 1, 'reversalOf' => '', 'status' => 'effective', 'sourceLineId' => $performanceLine, 'performanceType' => 'actual_performance_recorded', 'employeeId' => 0, 'employeeNameSnapshot' => '', 'employeeTypeSnapshot' => '', 'employeeTypeAuthorityVersion' => 0, 'roleSnapshot' => '', 'allocationWeightNumerator' => 0, 'allocationWeightDenominator' => 1, 'allocationBaseAmountCents' => $input['amountCents'], 'amountCents' => $input['amountCents'] - $external, 'ruleCodeSnapshot' => 'recharge_debt_repayment_cash_performance', 'ruleNameSnapshot' => '充值欠款补交现金业绩', 'ruleVersionSnapshot' => 'v1'];
+        $source = $input['businessSource'];
+        $plan = CashierV3CheckoutFactPlanV1::fromInternalAuthority(['contractVersion' => CashierV3CheckoutFactPlanV1::CONTRACT_VERSION, 'commandIdempotencyKey' => $commandKey, 'context' => ['tenantId' => $operator->tenantId(), 'tenantNameSnapshot' => '', 'organizationId' => $operator->organizationId(), 'organizationNameSnapshot' => '', 'organizationPathSnapshot' => $operator->organizationId(), 'storeId' => $operator->storeId(), 'storeNameSnapshot' => $store, 'memberId' => $input['memberId'], 'memberNameSnapshot' => trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? '')), 'operatorId' => $operator->operatorId(), 'operatorNameSnapshot' => $operatorName, 'businessDate' => $businessDate, 'businessTimezone' => 'Asia/Shanghai', 'occurredAt' => $now, 'settledAt' => $now, 'recordedAt' => $now, 'checkoutRequestId' => $repaymentId, 'orderId' => $repaymentId, 'orderNoSnapshot' => $repaymentNo, 'sourceDocumentType' => 'recharge_debt_repayment', 'businessEventNo' => (string)$event['event_no'], 'businessSourcePrimaryId' => $source['business_source_primary_id'], 'businessSourcePrimaryNameSnapshot' => $source['business_source_primary_name_snapshot'], 'businessSourceSecondaryId' => $source['business_source_secondary_id'], 'businessSourceSecondaryNameSnapshot' => $source['business_source_secondary_name_snapshot'], 'businessSourceLabelSnapshot' => $source['business_source_label_snapshot']], 'saleFacts' => [], 'paymentFacts' => $paymentFacts, 'balanceFacts' => [['factId' => $ids->balanceFactId($operator->tenantId(), $repaymentId, (string)$ledgerId), 'naturalKey' => $ids->balanceNaturalKey($operator->tenantId(), $repaymentId, (string)$ledgerId), 'factVersion' => 1, 'reversalOf' => '', 'status' => 'effective', 'sourceLineId' => $repaymentId . ':balance', 'balanceChangeType' => 'recharge_debt_repayment_credit', 'balanceAccountId' => (string)$balance['accountId'], 'accountVersion' => (int)$balance['accountVersion'], 'principalDeltaCents' => $input['amountCents'], 'bonusDeltaCents' => 0, 'principalAfterCents' => (int)$balance['principalCents'], 'bonusAfterCents' => (int)$balance['giftCents']]], 'performanceFacts' => $performanceFacts]);
+        try { (new ThinkPhpCashierV3CheckoutFactRepository())->persistInTx($plan, $operator, $scope); } catch (\Throwable $e) { throw self::failure('recharge_repayment_fact_write_failed', ['cause' => get_class($e)]); }
+    }
+
+    private function input(array $payload): array
+    {
+        $memberId=(int)($payload['memberId']??0); $debtId=(int)($payload['debtId']??$payload['debtRecordId']??0); $amount=self::inputCents($payload['amount']??null); $version=(int)($payload['balanceVersion']??0);
+        $lines=is_array($payload['paymentLines']??null)?array_values($payload['paymentLines']):[]; $salespeople=is_array($payload['salespersonAllocations']??null)?array_values($payload['salespersonAllocations']):[];
+        if($memberId<=0||$debtId<=0||$amount<=0||$version<=0||!$lines) throw self::failure('recharge_repayment_payload_invalid');
+        $out=[]; foreach($lines as $line){$method=trim((string)($line['paymentMethod']??''));$cents=self::inputCents(is_array($line)?($line['amount']??null):null);$reference=trim((string)($line['collectionReference']??''));$remark=trim((string)($line['remark']??''));if(!in_array($method,self::PAYMENT_METHODS,true)||$cents<=0||strlen($reference)>128||strlen($remark)>255)throw self::failure('recharge_repayment_payment_invalid');$out[]=['paymentMethod'=>$method,'amountCents'=>$cents,'collectionReference'=>$reference,'remark'=>$remark];}
+        // 浏览器提交本次选中的 ID；名称仍由事务内原单快照或有效目录确定。
+        $source = is_array($payload['businessSource'] ?? null) ? $payload['businessSource'] : [];
+        return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,
+            'guideSelections'=>is_array($payload['guideSelections'] ?? null) ? array_values($payload['guideSelections']) : [],
+            'salesManagerSelections'=>is_array($payload['salesManagerSelections'] ?? null) ? array_values($payload['salesManagerSelections']) : [],
+            'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source),'rewardAmountCents'=>CashierV3RepaymentReward::cents($source['rewardAmountCents'] ?? 0)];
+    }
+    /** 将来源快照映射为补交记录与收款事实共用的可查询字段。 */
+    private static function sourceSnapshotColumns(array $source): array
+    {
+        return [
+            'business_source_primary_id' => (int)($source['primarySourceId'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($source['primarySourceNameSnapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($source['secondarySourceId'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($source['secondarySourceNameSnapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($source['displayNameSnapshot'] ?? ''),
+        ];
+    }
+    private function assertPayments(array $lines,int $amount):void { $sum=0; foreach($lines as $line)$sum+=(int)$line['amountCents']; if($sum!==$amount)throw self::failure('recharge_repayment_payment_total_invalid'); }
+    private function resolveSalespeople(array $allocations, int $amount, CashierV3OperatorScope $operator): array
+    {
+        if (!$allocations) return [];
+        if ($amount <= 0 || $amount % 100 !== 0 || count($allocations) > 20) {
+            throw self::failure('recharge_repayment_salespeople_invalid');
+        }
+        $requested = []; $otherStaffIds = [];
+        foreach ($allocations as $index => $row) {
+            if (!is_array($row)) throw self::failure('recharge_repayment_salespeople_invalid');
+            $staffId = (int)($row['staffId'] ?? 0);
+            $weight = (int)($row['allocationWeight'] ?? 0);
+            if ($staffId <= 0 || $weight <= 0 || $weight > 100 || isset($requested[$staffId])) {
+                throw self::failure('recharge_repayment_salespeople_invalid');
+            }
+            // 充值补交与销售补交使用同一选择器，虚拟工号必须在落账事务中按集团任职复核。
+            $source = trim((string)($row['personnelSource'] ?? 'store'));
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                if ($source !== 'other') throw self::failure('recharge_repayment_salesperson_source_invalid');
+                $otherStaffIds[] = $staffId;
+            } elseif ($source !== 'store') throw self::failure('recharge_repayment_salesperson_source_invalid');
+            [$performanceAmountManual, $performanceAmountCents] = self::manualPerformanceAmount($row);
+            $requested[$staffId] = [
+                'allocationWeight' => $weight,
+                'isPreSale' => !empty($row['isPreSale']) || !empty($row['marked']),
+                'performanceAmountManual' => $performanceAmountManual,
+                'performanceAmountCents' => $performanceAmountCents,
+                'sequence' => $index + 1,
+            ];
+        }
+        $ids = array_values(array_diff(array_keys($requested), $otherStaffIds));
+        sort($ids, SORT_NUMERIC);
+        $rows = $ids === [] ? [] : Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
+            ->whereIn('ss.id', $ids)->where('ss.store_id', $operator->storeId())->where('ss.status', 1)->where('ss.is_del', 0)
+            ->where('ss.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+            ->field('ss.id,ss.staff_name,ss.employee_id,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
+            ->lock(true)->select()->toArray();
+        if (count($rows) !== count($ids)) throw self::failure('recharge_repayment_salesperson_ineligible');
+        $otherAuthority = new CashierV3QueryEntitySelectorServices();
+        foreach ($otherStaffIds as $staffId) {
+            $other = $otherAuthority->lockOrganizationSalesperson($staffId, $operator);
+            if ($other === []) throw self::failure('recharge_repayment_salesperson_ineligible');
+            $rows[] = $other;
+        }
+        $by = []; $seenEmployeeIds = [];
+        foreach ($rows as $row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if ($employeeId <= 0 || isset($seenEmployeeIds[$employeeId])) throw self::failure('recharge_repayment_salesperson_duplicate');
+            $seenEmployeeIds[$employeeId] = true;
+            $by[(int)$row['id']] = $row;
+        }
+        if (count($by) !== count($requested)) throw self::failure('recharge_repayment_salesperson_ineligible');
+        $result = []; $groups = []; $amountYuan = intdiv($amount, 100);
+        foreach ($requested as $staffId => $selection) {
+            $row = $by[$staffId] ?? null;
+            if (!$row) throw self::failure('recharge_repayment_salesperson_ineligible');
+            $type = (string)($row['employment_type_code'] ?? '');
+            $version = (int)($row['employment_type_version'] ?? 0);
+            $name = trim((string)($row['name'] ?? '')) ?: trim((string)($row['staff_name'] ?? ''));
+            if ($name === '' || !in_array($type, ['internal', 'partner', 'outsourced'], true) || $version <= 0) {
+                throw self::failure('recharge_repayment_salesperson_type_invalid');
+            }
+            $positionId = (int)($row['position_id'] ?? 0);
+            // 独立核算只能由当前职位配置决定，客户端不能伪造独立分组。
+            $independent = (int)($row['performance_independent'] ?? 0) === 1;
+            $groupKey = $independent ? 'independent:' . ($positionId > 0 ? $positionId : $staffId) : 'normal';
+            $result[] = [
+                'staffId' => (int)$staffId, 'employeeId' => (int)$row['employee_id'], 'name' => $name,
+                'employeeTypeCodeSnapshot' => $type, 'employeeTypeAuthorityVersion' => $version,
+                'allocationWeight' => (int)$selection['allocationWeight'], 'amountCents' => 0,
+                'performanceAmountManual' => (bool)$selection['performanceAmountManual'],
+                'performanceAmountCents' => (int)$selection['performanceAmountCents'],
+                'isPreSale' => (bool)$selection['isPreSale'], 'sequence' => (int)$selection['sequence'],
+                'positionId' => $positionId, 'positionName' => (string)($row['position_name'] ?? ''),
+                'performanceIndependent' => $independent, 'allocationGroupKey' => $groupKey,
+            ];
+            $groups[$groupKey][] = count($result) - 1;
+        }
+        foreach ($groups as $groupKey => $indexes) {
+            $weightTotal = 0; foreach ($indexes as $index) $weightTotal += (int)$result[$index]['allocationWeight'];
+            if ($weightTotal !== 100) throw self::failure('recharge_repayment_salespeople_group_weight_invalid', ['allocationGroupKey' => $groupKey]);
+            $manualIndexes = array_values(array_filter($indexes, static fn(int $index): bool => !empty($result[$index]['performanceAmountManual'])));
+            if ($manualIndexes) {
+                $autoIndexes = array_values(array_filter($indexes, static fn(int $index): bool => empty($result[$index]['performanceAmountManual'])));
+                $autoWeight = 0; foreach ($autoIndexes as $index) $autoWeight += (int)$result[$index]['allocationWeight'];
+                $autoBase = intdiv($amountYuan * $autoWeight, 100) * 100;
+                $allocated = 0; $lastAuto = $autoIndexes[count($autoIndexes) - 1] ?? null;
+                foreach ($autoIndexes as $index) {
+                    $share = $index === $lastAuto ? $autoBase - $allocated : intdiv($amountYuan * (int)$result[$index]['allocationWeight'], 100) * 100;
+                    if ($share <= 0 || $share % 100 !== 0) throw self::failure('recharge_repayment_salespeople_amount_invalid');
+                    $allocated += $share; $result[$index]['amountCents'] = $share;
+                }
+                foreach ($manualIndexes as $index) $result[$index]['amountCents'] = (int)$result[$index]['performanceAmountCents'];
+                continue;
+            }
+            $allocated = 0; $last = $indexes[count($indexes) - 1];
+            foreach ($indexes as $index) {
+                $share = $index === $last ? $amount - $allocated : intdiv($amountYuan * (int)$result[$index]['allocationWeight'], 100) * 100;
+                if ($share <= 0 || $share % 100 !== 0) throw self::failure('recharge_repayment_salespeople_amount_invalid');
+                $allocated += $share; $result[$index]['amountCents'] = $share;
+            }
+            if ($allocated !== $amount) throw self::failure('recharge_repayment_salespeople_amount_invalid');
+        }
+        return $result;
+    }
+    private function replayedResult(array $row):array { if((string)($row['status']??'')!=='succeeded')throw self::failure('recharge_repayment_prior_result_unknown'); return ['data'=>['repayment'=>['repaymentId'=>(string)$row['repayment_id'],'repaymentNo'=>(string)$row['repayment_no'],'amount'=>self::money((int)$row['amount_cents'])]],'business_no'=>(string)$row['repayment_no'],'touched'=>['member_balance'],'message'=>'充值欠款补交已完成。']; }
+    private function secret():string { $secret=trim((string)config('cashier_v3.checkout_namespace_secret')); if(strlen($secret)<32)throw self::failure('recharge_repayment_secret_missing'); return $secret; }
+    private static function inputCents($value):int { if(!is_int($value)&&!is_string($value))return -1;$raw=trim((string)$value);if(preg_match('/^(?:0|[1-9][0-9]*)$/D',$raw)!==1)return -1;return (int)$raw*100; }
+    private static function manualPerformanceAmount(array $row): array { $manual=!empty($row['performanceAmountManual'])||!empty($row['performance_amount_manual']); if(!$manual)return [false,0]; $raw=$row['performanceAmountCents']??$row['performance_amount_cents']??null; if((!is_int($raw)&&!is_string($raw))||preg_match('/^(?:0|[1-9][0-9]*)$/D',trim((string)$raw))!==1)throw self::failure('recharge_repayment_salespeople_manual_amount_invalid'); $cents=(int)$raw; if($cents<0||$cents%100!==0)throw self::failure('recharge_repayment_salespeople_manual_amount_invalid'); return [true,$cents]; }
+    private static function cents(string $money):int { if(preg_match('/^(?:0|[1-9][0-9]*)(?:\.00)?$/D',$money)!==1)throw self::failure('recharge_repayment_money_invalid');$yuan=explode('.',$money,2)[0];return (int)$yuan*100; }
+    private static function money(int $cents):string { if($cents<0||$cents%100!==0)throw self::failure('recharge_repayment_whole_yuan_required');return (string)intdiv($cents,100); }
+    private static function businessDate($value, int $now): string { $date=trim((string)$value); if(preg_match('/^\d{4}-\d{2}-\d{2}$/D',$date)!==1)throw self::failure('recharge_repayment_business_date_invalid'); $parsed=\DateTimeImmutable::createFromFormat('!Y-m-d',$date,new \DateTimeZone('Asia/Shanghai')); $errors=\DateTimeImmutable::getLastErrors(); if(!$parsed||($errors!==false&&($errors['warning_count']>0||$errors['error_count']>0))||$parsed->format('Y-m-d')!==$date)throw self::failure('recharge_repayment_business_date_invalid'); $today=(new \DateTimeImmutable('@'.$now))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d'); if($date>$today)throw self::failure('recharge_repayment_business_date_future'); return $date; }
+    private static function failure(string $reason,array $detail=[]):CashierV3CommandException { return new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,'充值欠款补交资料不完整，请刷新后重试。',CashierV3ResultCode::STATUS_FAILED,array_merge(['reason'=>$reason],$detail)); }
+}

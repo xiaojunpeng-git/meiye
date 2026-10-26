@@ -1,0 +1,908 @@
+{
+  "commit": "a3cce3d4ae5b1c3940458d9838d124b318dbb830",
+  "integration": "0153faa75258b2bf5796c2580d55c25fd299d520",
+  "checked_at": "2026-10-10T14:55:32.197Z",
+  "assets": [
+    {
+      "path": "public/system.html",
+      "status": 200,
+      "sha256": "b45f5707b7f32ecd5cc5ba7a38eddb9bbb0dd4d8bc212913173ed419a2634bfc"
+    },
+    {
+      "path": "public/view_admin/css/app.b6208b14.css",
+      "status": 200,
+      "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd"
+    },
+    {
+      "path": "public/view_admin/css/app.b6208b14.css.gz",
+      "status": 200,
+      "sha256": "95ef1f354c26aa9d5b1407b1f6e449c23e20d3df7acb37a03f244b4f701e62f8"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css",
+      "status": 200,
+      "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css.gz",
+      "status": 200,
+      "sha256": "cefbcb6bcd91ba321e7fb53e61bb082ae7ba9d60e47af798af8848d133135185"
+    },
+    {
+      "path": "public/view_admin/js/app.8a545f46.js",
+      "status": 200,
+      "sha256": "cd459fcbed87b5d24dd55ea07341d91175c3ee9a135f48febd71af383130c5aa"
+    },
+    {
+      "path": "public/view_admin/js/app.8a545f46.js.gz",
+      "status": 200,
+      "sha256": "47ec5f55d8f055a3266da5d4fcd47110b65189932ef02ec5678c7c5f6d102e67"
+    },
+    {
+      "path": "public/view_admin/js/chunk-03e140b0.5923f8bc.js",
+      "status": 200,
+      "sha256": "f53a2d45db5cf6a626b53ad12ad27c9f34aa65843d4ab557dea7936349cd9f73"
+    },
+    {
+      "path": "public/view_admin/js/chunk-06bfc80c.0f113a08.js",
+      "status": 200,
+      "sha256": "745001ec5d020da6e714ee17ada1fdc6b011f972c3a14f1a466bf903ba7afa99"
+    },
+    {
+      "path": "public/view_admin/js/chunk-06cb077e.6c33ecad.js",
+      "status": 200,
+      "sha256": "3b660cf5daee763b17a8bc05390e15e205931f491f868ada4110759a4df53d5c"
+    },
+    {
+      "path": "public/view_admin/js/chunk-10698699.ff6c366c.js",
+      "status": 200,
+      "sha256": "ee2351922b9491b52d454bd8885f88213d2dd04a0c0c4305d94035bcf7cc8030"
+    },
+    {
+      "path": "public/view_admin/js/chunk-157640dc.9e8f7a13.js",
+      "status": 200,
+      "sha256": "8171aae48aa315da4e9870f05452fa386aff2c18ad23fa7f28d5eeff42cc92c2"
+    },
+    {
+      "path": "public/view_admin/js/chunk-1c2bb3b5.f636c697.js",
+      "status": 200,
+      "sha256": "280700796b298ade190019faa1d4bf76219751fd96c179311879fe871190181a"
+    },
+    {
+      "path": "public/view_admin/js/chunk-279d30a1.bb8899fb.js",
+      "status": 200,
+      "sha256": "a39a6c562a05308770b15979f641871f04803b8850aac294512ac380f470cf04"
+    },
+    {
+      "path": "public/view_admin/js/chunk-2b5700fe.a6644c70.js",
+      "status": 200,
+      "sha256": "cb1095e3ca0e3d962145c658269e2d188744adec651a76afd767d6d8d2f896e6"
+    },
+    {
+      "path": "public/view_admin/js/chunk-2c07b020.215d4625.js",
+      "status": 200,
+      "sha256": "17778636b0c65475dba2b9ecade77320cc220833488821cbd2287492e0dabc49"
+    },
+    {
+      "path": "public/view_admin/js/chunk-339dabee.8bbee418.js",
+      "status": 200,
+      "sha256": "2c35f409da8ee263ad30a75825691e6bc9358bd1b27936bee1c1635ef7d2ad81"
+    },
+    {
+      "path": "public/view_admin/js/chunk-3763d98a.daada7cc.js",
+      "status": 200,
+      "sha256": "c7a00672fdd3c58f595bd02bbc8da9ab08133db0f29ac992f6a25362fbea9d17"
+    },
+    {
+      "path": "public/view_admin/js/chunk-39cb59d8.862f1e81.js",
+      "status": 200,
+      "sha256": "002e01ba90eb745d09d2e77dd67faaa1469c0fe59e1d349fe62a7795d46171da"
+    },
+    {
+      "path": "public/view_admin/js/chunk-413788c9.6556df9b.js",
+      "status": 200,
+      "sha256": "12112a413843aa965f9d2e5b81bf994c6425d815fe394f9e74fa25ba756be0c6"
+    },
+    {
+      "path": "public/view_admin/js/chunk-4576b5d7.75f5cd4f.js",
+      "status": 200,
+      "sha256": "b4050153b6a5acf456a75b8afbe18a3e0f3421eb0d32159049c6212b4274f5ff"
+    },
+    {
+      "path": "public/view_admin/js/chunk-49973ade.6bb7c581.js",
+      "status": 200,
+      "sha256": "0bdd5df242600bcf9ff53266156df922cf615d01d0b5195fda629559e6784fd0"
+    },
+    {
+      "path": "public/view_admin/js/chunk-4ae79160.05c06fc7.js",
+      "status": 200,
+      "sha256": "9920046aeb654a610184e2356b8e357e6c537663ed3a572883bb02652fb31787"
+    },
+    {
+      "path": "public/view_admin/js/chunk-4e9d0e8a.3eefcb4e.js",
+      "status": 200,
+      "sha256": "bd9ef74bc1f95076cf1741c588fb1b02032ec60d58bd2204b3b86234c7cab077"
+    },
+    {
+      "path": "public/view_admin/js/chunk-5d908a60.16ac301c.js",
+      "status": 200,
+      "sha256": "ca1ac5303624cdabaa281c025eb308370d4a906cd2db60f0d55fae9bddfa7c24"
+    },
+    {
+      "path": "public/view_admin/js/chunk-696689d6.2f7525d1.js",
+      "status": 200,
+      "sha256": "605ac39cd64b0f3fed5437196970606de58990badfc4ffa878c6e5d4ab4425df"
+    },
+    {
+      "path": "public/view_admin/js/chunk-697efd4c.5d1cd804.js",
+      "status": 200,
+      "sha256": "bb4ab10011a93b9cb6f049506877ed44d0644c37022dcb1751b655fa06bdb3e1"
+    },
+    {
+      "path": "public/view_admin/js/chunk-6a3a07e4.a2ec1dd2.js",
+      "status": 200,
+      "sha256": "54f8f83afaf09df56826815976e266d243fa23b9f3879753ad5570abb0eac370"
+    },
+    {
+      "path": "public/view_admin/js/chunk-6b1d633c.b493cbaf.js",
+      "status": 200,
+      "sha256": "9b5573149304840b63398c417e5e3aa323673d62dc0c1fd5f0e56ed5b69c5080"
+    },
+    {
+      "path": "public/view_admin/js/chunk-6c9d64fd.d676950c.js",
+      "status": 200,
+      "sha256": "88f281867755de76335034365f03e9332dbc09c1535bf738fcbb14bf956494e1"
+    },
+    {
+      "path": "public/view_admin/js/chunk-6d48cee3.5dcee46c.js",
+      "status": 200,
+      "sha256": "c84d7d9802e01ef3510591e6217dbb05db4f019cb336020f053cb3612f4e40d3"
+    },
+    {
+      "path": "public/view_admin/js/chunk-729c0bcc.cd13c4ab.js",
+      "status": 200,
+      "sha256": "b2e66738bbed24c10a699551da3ae4a7ef6e6db467e0ad9990115b2db261d059"
+    },
+    {
+      "path": "public/view_admin/js/chunk-732b26ea.7cd180c6.js",
+      "status": 200,
+      "sha256": "ad3ba5d6564c6b9d7812da868b1642df7843cc069d226027bbeb24bab5d07b0d"
+    },
+    {
+      "path": "public/view_admin/js/chunk-783dc458.ae4751ef.js",
+      "status": 200,
+      "sha256": "3b2a8d032a2be8495d004cf2e801db3e464bf5d8cc04c492a0cc3eb883721500"
+    },
+    {
+      "path": "public/view_admin/js/chunk-8116efbc.a3fd0d11.js",
+      "status": 200,
+      "sha256": "a85cfde9bea25eb32ca3ede8efe04ae25d414609017c7e682c5bf1c0e1152228"
+    },
+    {
+      "path": "public/view_admin/js/chunk-833b1f3e.22da09d7.js",
+      "status": 200,
+      "sha256": "5464ea0cabdd313a247a3c24c30e8f8d7ee1107956aa5394b2c38e03c3927155"
+    },
+    {
+      "path": "public/view_admin/js/chunk-957bd164.74706d74.js",
+      "status": 200,
+      "sha256": "73f484c1279cd32120c8bb1e81d6b2f2044bf0b29ad92aee4504b14d1fb5ed75"
+    },
+    {
+      "path": "public/view_admin/js/chunk-b576fdfc.3044e68a.js",
+      "status": 200,
+      "sha256": "f7d8c9f118feeba8b893ebb51575a95ef883b2134f9ab85082e257dfe00f7e46"
+    },
+    {
+      "path": "public/view_admin/js/chunk-c855a876.0ecf39a0.js",
+      "status": 200,
+      "sha256": "2762aa51323d0f44100eefd28a00f6f62db9f35174d68c32d0c3442d9889e83d"
+    },
+    {
+      "path": "public/view_admin/js/chunk-faafc4a4.fe8974db.js",
+      "status": 200,
+      "sha256": "97b3999d6ac7be1de9d937c98cd515f95c491dca67a06cd9b005e59829fdab1b"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.5ad8ce84.js",
+      "status": 200,
+      "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.5ad8ce84.js.gz",
+      "status": 200,
+      "sha256": "eb3eadde4f569b6a64d5fb248dac3b149663b5cdb0b0158e66683975eb0ef295"
+    }
+  ],
+  "live_file_count": 1169,
+  "read_only_probe": {
+    "staff_id": 523,
+    "source_name": "张高锦",
+    "store_id": 1,
+    "store_name": "合肥世纪中心店",
+    "member_count": 100,
+    "preview_count": 100,
+    "columns": [
+      "nickname",
+      "real_name",
+      "phone",
+      "bound_at"
+    ],
+    "elapsed_ms": 22,
+    "recipient_count": 7,
+    "same_store_all": true,
+    "query_plan": [
+      {
+        "id": 1,
+        "select_type": "PRIMARY",
+        "table": "<derived2>",
+        "partitions": null,
+        "type": "ALL",
+        "possible_keys": null,
+        "key": null,
+        "key_len": null,
+        "ref": null,
+        "rows": 40,
+        "filtered": 100,
+        "Extra": "Using temporary; Using filesort"
+      },
+      {
+        "id": 1,
+        "select_type": "PRIMARY",
+        "table": "u",
+        "partitions": null,
+        "type": "eq_ref",
+        "possible_keys": "PRIMARY,status",
+        "key": "PRIMARY",
+        "key_len": "4",
+        "ref": "b.member_id",
+        "rows": 1,
+        "filtered": 5,
+        "Extra": "Using where"
+      },
+      {
+        "id": 6,
+        "select_type": "DEPENDENT SUBQUERY",
+        "table": "su",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "store_id,uid",
+        "key": "uid",
+        "key_len": "4",
+        "ref": "ruihao.u.uid",
+        "rows": 1,
+        "filtered": 4.6493401527404785,
+        "Extra": "Using index condition; Using where"
+      },
+      {
+        "id": 2,
+        "select_type": "DERIVED",
+        "table": "s",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "idx_store_staff",
+        "key": "idx_store_staff",
+        "key_len": "8",
+        "ref": "const,const",
+        "rows": 102,
+        "filtered": 10,
+        "Extra": "Using where"
+      },
+      {
+        "id": 3,
+        "select_type": "DEPENDENT SUBQUERY",
+        "table": "c",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "idx_member_time",
+        "key": "idx_member_time",
+        "key_len": "4",
+        "ref": "ruihao.s.member_id",
+        "rows": 1,
+        "filtered": 100,
+        "Extra": "Using where"
+      },
+      {
+        "id": 4,
+        "select_type": "UNION",
+        "table": "l",
+        "partitions": null,
+        "type": "index_merge",
+        "possible_keys": "idx_staff_status,idx_store_status",
+        "key": "idx_staff_status,idx_store_status",
+        "key_len": "5,5",
+        "ref": null,
+        "rows": 30,
+        "filtered": 100,
+        "Extra": "Using intersect(idx_staff_status,idx_store_status); Using where"
+      },
+      {
+        "id": 5,
+        "select_type": "DEPENDENT SUBQUERY",
+        "table": "a",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "uk_member_staff,idx_member_active",
+        "key": "idx_member_active",
+        "key_len": "5",
+        "ref": "ruihao.l.member_id,const",
+        "rows": 1,
+        "filtered": 100,
+        "Extra": "Using index"
+      }
+    ],
+    "archive_reads_same_relation": true
+  },
+  "database_before": {
+    "database": "ruihao",
+    "mysql_version": "5.7.44-log",
+    "tables": {
+      "member_exclusive_service_selection": 363,
+      "member_exclusive_service_selection_change": 301,
+      "member_exclusive_service": 323,
+      "member_exclusive_service_change": 329,
+      "organization_write_idempotency": 1514,
+      "cashier_v3_entitlement_resource_version": 64892,
+      "system_store_staff": 1233,
+      "employee": 1426,
+      "store_user": 169032
+    },
+    "indexes": {
+      "member_exclusive_service_selection": [
+        "PRIMARY",
+        "uk_member_staff",
+        "idx_member_active",
+        "idx_store_staff"
+      ],
+      "member_exclusive_service_selection_change": [
+        "PRIMARY",
+        "uk_change_key",
+        "idx_member_time"
+      ],
+      "member_exclusive_service": [
+        "PRIMARY",
+        "uk_member_id",
+        "idx_staff_status",
+        "idx_employee_status",
+        "idx_store_status",
+        "idx_bound_at"
+      ],
+      "member_exclusive_service_change": [
+        "PRIMARY",
+        "uk_change_key",
+        "idx_member_time",
+        "idx_previous_staff_time",
+        "idx_current_staff_time",
+        "idx_source_business"
+      ],
+      "organization_write_idempotency": [
+        "PRIMARY",
+        "uk_request_token",
+        "idx_scope_action",
+        "idx_operator_time"
+      ],
+      "cashier_v3_entitlement_resource_version": [
+        "PRIMARY",
+        "uk_resource",
+        "idx_member_kind",
+        "idx_update_time"
+      ],
+      "system_store_staff": [
+        "PRIMARY",
+        "uk_staff_active_employee_store",
+        "idx_uid_status_isdel_verifystatus",
+        "idx_staff_employee_store",
+        "idx_staff_store_employee",
+        "idx_staff_phone_store"
+      ],
+      "employee": [
+        "PRIMARY",
+        "uk_employee_phone",
+        "uk_employee_uid",
+        "idx_employee_status_del"
+      ],
+      "store_user": [
+        "PRIMARY",
+        "store_id",
+        "uid"
+      ]
+    },
+    "columns": {
+      "member_exclusive_service_selection": [
+        "id",
+        "member_id",
+        "staff_id",
+        "employee_id",
+        "store_id",
+        "staff_name",
+        "sort_order",
+        "status",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "member_exclusive_service_selection_change": [
+        "id",
+        "change_key",
+        "member_id",
+        "previous_json",
+        "current_json",
+        "operator_id",
+        "occurred_at"
+      ],
+      "member_exclusive_service": [
+        "id",
+        "member_id",
+        "staff_id",
+        "employee_id",
+        "store_id",
+        "staff_name",
+        "store_name",
+        "source_type",
+        "source_business_type",
+        "source_business_id",
+        "reason",
+        "status",
+        "version",
+        "bound_at",
+        "operator_id",
+        "operator_name",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "member_exclusive_service_change": [
+        "id",
+        "change_key",
+        "member_id",
+        "previous_staff_id",
+        "previous_employee_id",
+        "previous_store_id",
+        "previous_staff_name",
+        "previous_store_name",
+        "current_staff_id",
+        "current_employee_id",
+        "current_store_id",
+        "current_staff_name",
+        "current_store_name",
+        "source_type",
+        "source_business_type",
+        "source_business_id",
+        "reason",
+        "operator_id",
+        "operator_name",
+        "idempotency_key",
+        "occurred_at",
+        "recorded_at",
+        "created_at"
+      ],
+      "organization_write_idempotency": [
+        "id",
+        "request_token",
+        "operator_id",
+        "action",
+        "scope_key",
+        "request_hash",
+        "response_json",
+        "add_time"
+      ],
+      "cashier_v3_entitlement_resource_version": [
+        "id",
+        "resource_kind",
+        "resource_id",
+        "member_id",
+        "source_fingerprint",
+        "current_version",
+        "last_action",
+        "add_time",
+        "update_time"
+      ],
+      "system_store_staff": [
+        "id",
+        "employee_id",
+        "active_employee_id",
+        "store_id",
+        "uid",
+        "account",
+        "pwd",
+        "avatar",
+        "staff_name",
+        "phone",
+        "roles",
+        "last_ip",
+        "last_time",
+        "login_count",
+        "level",
+        "verify_status",
+        "order_status",
+        "is_admin",
+        "is_store",
+        "is_manager",
+        "is_cashier",
+        "is_customer",
+        "customer_phone",
+        "customer_url",
+        "work_member_id",
+        "work_member_code",
+        "status",
+        "notify",
+        "is_way",
+        "is_del",
+        "add_time",
+        "position",
+        "position_level",
+        "department",
+        "employee_number",
+        "join_date",
+        "id_card",
+        "birthday_date",
+        "birthday_type",
+        "age",
+        "join_area",
+        "birthday_area",
+        "now_area",
+        "contract_begin",
+        "contract_end",
+        "can_choose",
+        "cashier_salesperson_enabled",
+        "cashier_craftsman_enabled",
+        "craftsman_performance_type",
+        "is_reservable",
+        "is_butler",
+        "is_fencheng",
+        "salary_status",
+        "is_hezuofang",
+        "off_work_time",
+        "staff_intro",
+        "mentor_employee_id"
+      ],
+      "employee": [
+        "id",
+        "name",
+        "phone",
+        "avatar",
+        "avatar_type",
+        "uid",
+        "status",
+        "status_version",
+        "employment_type_code",
+        "employment_type_version",
+        "auth_version",
+        "is_del",
+        "add_time",
+        "update_time",
+        "mentor_employee_id",
+        "education",
+        "education_version"
+      ],
+      "store_user": [
+        "id",
+        "store_id",
+        "uid",
+        "label_id",
+        "status",
+        "add_time"
+      ]
+    },
+    "latest_upgrade": {
+      "id": "216",
+      "upgrade_key": "20261010-r52-outbound-header",
+      "executed_at": "2026-10-10 16:51:44"
+    },
+    "relationship_sha256": {
+      "member_exclusive_service_selection": "fb8c2e2ef02beac0262eb35602d47b1614cfa6b47bdc5947f80ffde2bb8dc1ea",
+      "member_exclusive_service_selection_change": "b0c19e676d2ff2e629ca6faccd4534bc703c0d16eb76e54d293008af02c31262",
+      "member_exclusive_service": "0482ec86cc66ecea1222d207bfecb8f12451684b94790dc4de671ba6ae2e6395",
+      "member_exclusive_service_change": "2f76e3843d95e817bbd809eac5c740763fc3f45f19ac8d23d0be27c98aac4710"
+    }
+  },
+  "database_after": {
+    "database": "ruihao",
+    "mysql_version": "5.7.44-log",
+    "tables": {
+      "member_exclusive_service_selection": 363,
+      "member_exclusive_service_selection_change": 301,
+      "member_exclusive_service": 323,
+      "member_exclusive_service_change": 329,
+      "organization_write_idempotency": 1514,
+      "cashier_v3_entitlement_resource_version": 64892,
+      "system_store_staff": 1233,
+      "employee": 1426,
+      "store_user": 169032
+    },
+    "indexes": {
+      "member_exclusive_service_selection": [
+        "PRIMARY",
+        "uk_member_staff",
+        "idx_member_active",
+        "idx_store_staff"
+      ],
+      "member_exclusive_service_selection_change": [
+        "PRIMARY",
+        "uk_change_key",
+        "idx_member_time"
+      ],
+      "member_exclusive_service": [
+        "PRIMARY",
+        "uk_member_id",
+        "idx_staff_status",
+        "idx_employee_status",
+        "idx_store_status",
+        "idx_bound_at"
+      ],
+      "member_exclusive_service_change": [
+        "PRIMARY",
+        "uk_change_key",
+        "idx_member_time",
+        "idx_previous_staff_time",
+        "idx_current_staff_time",
+        "idx_source_business"
+      ],
+      "organization_write_idempotency": [
+        "PRIMARY",
+        "uk_request_token",
+        "idx_scope_action",
+        "idx_operator_time"
+      ],
+      "cashier_v3_entitlement_resource_version": [
+        "PRIMARY",
+        "uk_resource",
+        "idx_member_kind",
+        "idx_update_time"
+      ],
+      "system_store_staff": [
+        "PRIMARY",
+        "uk_staff_active_employee_store",
+        "idx_uid_status_isdel_verifystatus",
+        "idx_staff_employee_store",
+        "idx_staff_store_employee",
+        "idx_staff_phone_store"
+      ],
+      "employee": [
+        "PRIMARY",
+        "uk_employee_phone",
+        "uk_employee_uid",
+        "idx_employee_status_del"
+      ],
+      "store_user": [
+        "PRIMARY",
+        "store_id",
+        "uid"
+      ]
+    },
+    "columns": {
+      "member_exclusive_service_selection": [
+        "id",
+        "member_id",
+        "staff_id",
+        "employee_id",
+        "store_id",
+        "staff_name",
+        "sort_order",
+        "status",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "member_exclusive_service_selection_change": [
+        "id",
+        "change_key",
+        "member_id",
+        "previous_json",
+        "current_json",
+        "operator_id",
+        "occurred_at"
+      ],
+      "member_exclusive_service": [
+        "id",
+        "member_id",
+        "staff_id",
+        "employee_id",
+        "store_id",
+        "staff_name",
+        "store_name",
+        "source_type",
+        "source_business_type",
+        "source_business_id",
+        "reason",
+        "status",
+        "version",
+        "bound_at",
+        "operator_id",
+        "operator_name",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "member_exclusive_service_change": [
+        "id",
+        "change_key",
+        "member_id",
+        "previous_staff_id",
+        "previous_employee_id",
+        "previous_store_id",
+        "previous_staff_name",
+        "previous_store_name",
+        "current_staff_id",
+        "current_employee_id",
+        "current_store_id",
+        "current_staff_name",
+        "current_store_name",
+        "source_type",
+        "source_business_type",
+        "source_business_id",
+        "reason",
+        "operator_id",
+        "operator_name",
+        "idempotency_key",
+        "occurred_at",
+        "recorded_at",
+        "created_at"
+      ],
+      "organization_write_idempotency": [
+        "id",
+        "request_token",
+        "operator_id",
+        "action",
+        "scope_key",
+        "request_hash",
+        "response_json",
+        "add_time"
+      ],
+      "cashier_v3_entitlement_resource_version": [
+        "id",
+        "resource_kind",
+        "resource_id",
+        "member_id",
+        "source_fingerprint",
+        "current_version",
+        "last_action",
+        "add_time",
+        "update_time"
+      ],
+      "system_store_staff": [
+        "id",
+        "employee_id",
+        "active_employee_id",
+        "store_id",
+        "uid",
+        "account",
+        "pwd",
+        "avatar",
+        "staff_name",
+        "phone",
+        "roles",
+        "last_ip",
+        "last_time",
+        "login_count",
+        "level",
+        "verify_status",
+        "order_status",
+        "is_admin",
+        "is_store",
+        "is_manager",
+        "is_cashier",
+        "is_customer",
+        "customer_phone",
+        "customer_url",
+        "work_member_id",
+        "work_member_code",
+        "status",
+        "notify",
+        "is_way",
+        "is_del",
+        "add_time",
+        "position",
+        "position_level",
+        "department",
+        "employee_number",
+        "join_date",
+        "id_card",
+        "birthday_date",
+        "birthday_type",
+        "age",
+        "join_area",
+        "birthday_area",
+        "now_area",
+        "contract_begin",
+        "contract_end",
+        "can_choose",
+        "cashier_salesperson_enabled",
+        "cashier_craftsman_enabled",
+        "craftsman_performance_type",
+        "is_reservable",
+        "is_butler",
+        "is_fencheng",
+        "salary_status",
+        "is_hezuofang",
+        "off_work_time",
+        "staff_intro",
+        "mentor_employee_id"
+      ],
+      "employee": [
+        "id",
+        "name",
+        "phone",
+        "avatar",
+        "avatar_type",
+        "uid",
+        "status",
+        "status_version",
+        "employment_type_code",
+        "employment_type_version",
+        "auth_version",
+        "is_del",
+        "add_time",
+        "update_time",
+        "mentor_employee_id",
+        "education",
+        "education_version"
+      ],
+      "store_user": [
+        "id",
+        "store_id",
+        "uid",
+        "label_id",
+        "status",
+        "add_time"
+      ]
+    },
+    "latest_upgrade": {
+      "id": "216",
+      "upgrade_key": "20261010-r52-outbound-header",
+      "executed_at": "2026-10-10 16:51:44"
+    },
+    "relationship_sha256": {
+      "member_exclusive_service_selection": "fb8c2e2ef02beac0262eb35602d47b1614cfa6b47bdc5947f80ffde2bb8dc1ea",
+      "member_exclusive_service_selection_change": "b0c19e676d2ff2e629ca6faccd4534bc703c0d16eb76e54d293008af02c31262",
+      "member_exclusive_service": "0482ec86cc66ecea1222d207bfecb8f12451684b94790dc4de671ba6ae2e6395",
+      "member_exclusive_service_change": "2f76e3843d95e817bbd809eac5c740763fc3f45f19ac8d23d0be27c98aac4710"
+    }
+  },
+  "relationship_and_audit_fingerprints_unchanged": true,
+  "browser": {
+    "existing_session": true,
+    "production_transfer_executed": false,
+    "staff_list_count": 1298,
+    "member_columns": [
+      "客户昵称",
+      "客户姓名",
+      "手机号",
+      "绑定时间"
+    ],
+    "member_count": 100,
+    "source_staff_id": 523,
+    "same_store_candidate_count": 7,
+    "multi_selected_count": 2,
+    "confirm_disabled_before_selection": true,
+    "confirm_enabled_after_selection": true,
+    "cancel_success": true,
+    "temporary_tab_closed": true,
+    "user_three_tabs_preserved": true,
+    "viewport_unchanged": true
+  },
+  "screenshots": [
+    {
+      "path": "R7-exclusive-member-rh-list-2026-10-10.png",
+      "sha256": "8353099874f7628e8f8c2c929a0280c8fc6fc0f997ed02a6f506548c58210706"
+    },
+    {
+      "path": "R7-exclusive-member-rh-transfer-2026-10-10.png",
+      "sha256": "5b16f8932d0217f82430bfc7f6409aaaeb18b6ab43957a3b0b92f17e33850114"
+    }
+  ],
+  "runtime": {
+    "manager_count": 1,
+    "manager_pid": 20651,
+    "listen_port": 20800,
+    "restarted": true
+  },
+  "backup": {
+    "directory": "/www/backups/rh.cc3798.com/20261010-r7-exclusive-a3cce3d4",
+    "code_sha256": "34e3c4fc9b4eef4aceaa6205671297127b98c22b28569c09daed9044d67d446c",
+    "database_sha256": "b7dd52445c5df47f9e26c3559bd686d397eb4ea9940ab46ba1b9eaefba0feff8",
+    "gzip_integrity": true,
+    "directory_mode": "700",
+    "file_mode": "600"
+  }
+}

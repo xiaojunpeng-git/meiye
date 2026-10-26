@@ -1,0 +1,27 @@
+{
+  "recorded_at": "2026-10-11T13:58:18.616970+00:00",
+  "runtime": "PHP 7.4.33, isolated Docker network none, source and root read-only",
+  "source_sha256": {
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "tests/mohe-ai/opt3-worker-recovery.php": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826"
+  },
+  "results": [
+    {
+      "suite": "opt3-worker-recovery",
+      "exit_code": 0,
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS OPT3 worker recovery 46 assertions\n"
+    },
+    {
+      "suite": "async-execution-state-contract",
+      "exit_code": 0,
+      "output": "PASS async execution acceptance/replay contract\n"
+    }
+  ],
+  "limitations": [
+    "Different host or missing dedicated process identity never proves a reused PID stopped. Such slots remain fenced.",
+    "No expired aggregate quarantine counter is reset."
+  ],
+  "business_database_writes": false
+}

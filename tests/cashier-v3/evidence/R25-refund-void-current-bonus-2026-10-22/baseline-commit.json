@@ -1,0 +1,11 @@
+{
+  "parent": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "commit": "261617ebdb7e94d1406d395be1c118d381fcaf2e",
+  "sources": {
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+    "后端代码/app/services/cashier/v3/order/CashierV3UnifiedRefundServices.php": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterVoidServices.php": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "后端代码/app/services/cashier/v3/settlement/CashierV3SalesDebtBalanceServices.php": "45090ffed0bcc5d25a60e4076860bc87bf473afd"
+  },
+  "scope": "仅将四个已提交且已上线的精确文件归档为独立依赖基线；不是本轮新增优化"
+}

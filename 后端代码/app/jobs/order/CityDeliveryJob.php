@@ -1,0 +1,52 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app\jobs\order;
+
+
+use app\services\order\StoreDeliveryOrderServices;
+use mohe\basic\BaseJobs;
+use mohe\traits\QueueTrait;
+use think\facade\Log;
+
+/**
+ * 同城配送
+ * Class CityDeliveryJob
+ * @package app\jobs
+ */
+class CityDeliveryJob extends BaseJobs
+{
+    use QueueTrait;
+
+	/**
+ 	* 同步创建、更新达达门店信息
+	* @param $id
+	* @param $is_new
+	* @return bool
+	 */
+	public function syncCityShop($id, $is_new)
+	{
+		try {
+			$status = sys_config('dada_delivery_status') && sys_config('dada_app_key') && sys_config('dada_app_sercret');
+			if (!$status) {
+				return true;
+			}
+			/** @var StoreDeliveryOrderServices $deliveryOrderServices */
+			$deliveryOrderServices = app()->make(StoreDeliveryOrderServices::class);
+			$deliveryOrderServices->syncCityShop((int)$id);
+		} catch (\Throwable $e) {
+			Log::error('同步创建同城配送达达门店失败，原因：'. $e->getMessage());
+		}
+		return true;
+	}
+
+
+}

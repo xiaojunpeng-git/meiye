@@ -1,0 +1,62 @@
+{
+  "task": "R50 pure entitlement experience snapshot persistence",
+  "date": "2026-10-09",
+  "status": "selftested_waiting_product_manager_acceptance",
+  "baselineHead": "cdb8fbdf3862381e5540781b5936dea4fa7b4b16",
+  "trackedPatchSha256": "e4dce59e7e4ba22b51fdb17085d7296cbfc9778a0e0b5a053729765f60ce7875",
+  "preservedStagedDiffSha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "files": [
+    {
+      "group": "frontend_source",
+      "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+      "sha256": "df14067ab3aadfed6c0ceaeaa27b9b99cdaceb4e0e4749315c377ff32e37e900"
+    },
+    {
+      "group": "automated_test",
+      "path": "tests/cashier-v3/js/entitlement-experience-checkout-snapshot.mjs",
+      "sha256": "f23f7b1f0cc7c4ea47f5eefe14d1765789736aba0cc3d2f28b178b909b8624f6"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/cashier-v3/evidence/R50-entitlement-experience-selftest-2026-10-09.md",
+      "sha256": "4a182b7e906c7215cdcb6a50d6d143831ac9c19b4eea27d4f12960f9ab1f2df3"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/cashier-v3/evidence/R50-entitlement-experience-list-2026-10-09.png",
+      "sha256": "d91cbb3e4376202b91365bf0ab30af15713f3aad0413ad1d1601ca8f9e9d4c7c"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/cashier-v3/evidence/R50-entitlement-experience-detail-2026-10-09.png",
+      "sha256": "a91cb218f9ec6845466b0b2d4ec0525c2be56f7539a118b8368ddacdfa971b17"
+    }
+  ],
+  "businessTest": {
+    "environment": "local_only_18091",
+    "serviceRecordNo": "FW100900005",
+    "serviceFactId": 15685,
+    "checkoutRequestId": "CKR-b4941214d84ad7d537a334e39c6dd328255126f2",
+    "draftExperience": 1,
+    "serviceExperience": 1,
+    "writeoffExperience": 1,
+    "quantity": 1,
+    "remainingBefore": 19,
+    "remainingAfter": 18,
+    "saleFacts": 0,
+    "paymentFacts": 0,
+    "listAfterReload": "experience_visible",
+    "detailAfterReload": "experience_visible"
+  },
+  "dynamicRegressionChecks": 46,
+  "build": "cashier-v3 npm run build passed; no 8080 package or deployment",
+  "knownBaselineFailures": [
+    "cart-line-service-settings-deferred-contract: clear recovery static assertion, reproduced with HEAD source",
+    "checkout-personnel-closure-contract: preview assignment text regex, reproduced with HEAD source"
+  ],
+  "historicalRowsChanged": false,
+  "productionDataChanged": false,
+  "committed": false,
+  "deployed": false,
+  "pushed": false
+}

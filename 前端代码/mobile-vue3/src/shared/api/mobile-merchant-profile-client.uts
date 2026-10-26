@@ -1,0 +1,31 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+const profileTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		account: { method: 'GET', path: '/mobile/merchant/profile/account', requestMetadataProfile: 'MERCHANT_SESSION' },
+		scope: { method: 'GET', path: '/mobile/merchant/profile/scope', requestMetadataProfile: 'MERCHANT_SESSION' },
+		credentials: { method: 'POST', path: '/mobile/merchant/profile/credentials', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: { 'X-Mobile-Contract-Version': 'contractVersion', 'X-Mobile-Client-Session-Id': 'clientSessionId', 'X-Mobile-Platform': 'platform', 'X-Mobile-Request-Id': 'requestId', Authorization: 'Bearer <merchantToken>', 'X-Mobile-Active-Context-Id': 'activeContextId', 'X-Mobile-State-Context-Id': 'stateContextId' },
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+export function queryMobileMerchantAccount(done : (value : any) => void) : void { requestProfile('account', {}, done) }
+export function queryMobileMerchantScope(done : (value : any) => void) : void { requestProfile('scope', {}, done) }
+export function changeMobileMerchantCredentials(payload : any, done : (value : any) => void) : void { requestProfile('credentials', payload, done) }
+
+function requestProfile(endpoint : string, payload : any, done : (value : any) => void) : void {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	let plan = buildMobileRequestPlan(profileTransportContract, endpoint, session)
+	if (!mobileRequestPlanMatchesContract(profileTransportContract, endpoint, session, plan)) { done({ ok: false, message: '账号请求上下文无效，请重新进入商家端。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}

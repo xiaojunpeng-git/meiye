@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
+
+const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
+const workbench = readFileSync(resolve(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'), 'utf8')
+const catalog = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php'), 'utf8')
+const catalogAuthority = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php'), 'utf8')
+
+assert.match(catalog, /'cardPreview' => self::publicCardPreview\(\$item\)/)
+assert.match(catalog, /'cardPurchaseSnapshot' => in_array\(\$item\['kindCode'\]/)
+assert.match(catalog, /function catalog\([\s\S]*?normalizeAuthorityRow\(\$row, true\)/)
+assert.match(catalogAuthority, /\$isSharedLegacyComponent = \$productOwnerType === 0 && \$productOwnerId === 0/)
+assert.match(catalogAuthority, /\$item\['product_relation_id'\] = \$storeId/)
+assert.match(catalog, /in_array\(\$productType, \[5, 6\], true\) && \$skuProductType === 0/)
+assert.match(catalog, /private static function publicCardPreview\(array \$item\): \?array/)
+assert.match(catalog, /'writeoffAmountCents' => \(int\)\(\$component\['writeoffAmountCents'\] \?\? 0\)/)
+assert.doesNotMatch(catalog, /'resourceSources' => self::publicCardPreview/)
+assert.match(catalog, /\$catalogItem = \$normalized/)
+
+assert.match(workbench, /const pendingCardPurchase = ref\(null\)/)
+assert.match(workbench, /if \(isRuleCardPurchase\(item\)\) \{\s*pendingCardPurchase\.value = clonePlain\(item\)\s*return/s)
+assert.match(workbench, /async function confirmPendingCardPurchase\(\)/)
+assert.match(workbench, /async function appendCatalogItemToDraft\(item\)/)
+assert.match(workbench, /let catalogItemAppendQueue = Promise\.resolve\(\)/)
+assert.match(workbench, /catalogItemAppendQueue\.then\(\(\) =>/)
+assert.match(workbench, /catalogItemAppendQueue = queued\.catch\(\(\) => null\)/)
+assert.match(workbench, /appendLocalCashierDraftOperation\(\{ action: 'choose-catalog-item', localLineId, itemId, catalogKind \}/)
+assert.match(workbench, /cardPurchaseSnapshot: clonePlain\(item\.cardPurchaseSnapshot \|\| \{\}\)/)
+assert.match(workbench, /function checkoutCardPurchaseSnapshot\([\s\S]*?catalog\.value\.items[\s\S]*?currentItem\?\.cardPurchaseSnapshot/)
+assert.match(workbench, /next\.cardPurchaseSnapshot = checkoutCardPurchaseSnapshot\(line\)/)
+assert.doesNotMatch(workbench, /requestAction\('choose-catalog-item'/)
+assert.match(workbench, /await appendCatalogItemToDraft\(item\)/)
+assert.match(workbench, /action: 'add-checkout-entitlement-lines'/)
+assert.match(workbench, /return localDraftResult\('卡内项目已加入本次购物车。'\)/)
+assert.match(workbench, /aria-label="确认卡项内容"/)
+assert.match(workbench, /cardPreviewRuleDescription\(pendingCardPurchase\.cardPreview\)/)
+assert.match(workbench, /pendingCardPurchase\.cardPreview\.ruleType === 'time'/)
+assert.match(workbench, /writeValid\) === 1\) return '长期有效'/)
+assert.match(workbench, /确认加入购物车/)
+
+console.log('PASS card purchase preview only exposes display-safe rule fields')
+console.log('PASS all four rule cards require explicit confirmation before draft mutation')
+console.log('PASS catalog mutations stay in the browser draft until final snapshot submission')
+console.log('PASS time card preview includes configured per-writeoff amount')

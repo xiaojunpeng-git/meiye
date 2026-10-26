@@ -1,0 +1,836 @@
+{
+  "task": "R12-00012 double signature spacing",
+  "source_commit": "1f022a626b88b2c616fa440d0de92ea57ba8f196",
+  "release_commit": "b19e3d4ab32381c1f7e971e505f79bbdb45af8ea",
+  "remote_baseline": "2eb6302be2424f3efa0aac9a6d8cd9542c2918d6",
+  "hot_update_source": "18091 mohe-cashier-v3-src /app = canonical 前端代码/cashier-v3; inventory/shared same source; accepted files only; unrelated dirty files excluded",
+  "source_trees": {
+    "前端代码/cashier-v3": "06d4a8606bf204973c8702e364fec9cb582c474e",
+    "前端代码/inventory-vue3": "4d9c336ca7ec3137aca5e0e663461b2162598943",
+    "前端代码/shared": "30a91137bf7a16f7da01fcdc324bfd64b067602d"
+  },
+  "build": "npm ci inventory-vue3/cashier-v3; npm run build; Vite 4.5.14, 1999 modules, exit 0, existing large-chunk warning",
+  "node": "v16.20.2",
+  "dependencies": {
+    "vue": "3.5.40",
+    "vite": "4.5.14",
+    "@vitejs/plugin-vue": "4.6.2",
+    "@lucide/vue": "1.27.0",
+    "vue-router": "4.6.4",
+    "esbuild": "0.18.20",
+    "rollup": "3.30.0",
+    "@vue/compiler-sfc": "3.5.40"
+  },
+  "package_sha256": "392b8d08b06815ecac544497c0163c1f856cf3f9f7739dba15ddf0933a2d3fe0",
+  "files": [
+    {
+      "path": "assets/exceljs.min-a0d233a6.js",
+      "bytes": 939632,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "assets/index-1d8f15eb.css",
+      "bytes": 661541,
+      "sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f"
+    },
+    {
+      "path": "assets/index-6d347f40.js",
+      "bytes": 2071215,
+      "sha256": "24f24df5754589ebb6e2956a18207e85248b40b8035683021cf33a37c3c6fa04"
+    },
+    {
+      "path": "assets/login-beauty-quiet-826510a5.png",
+      "bytes": 1159059,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "index.html",
+      "bytes": 484,
+      "sha256": "dfb9b43e059536e801e27db5a11694abdbbea585bd8012354c4891aedd81880e"
+    }
+  ],
+  "sources": [
+    {
+      "path": "前端代码/cashier-v3/.gitignore",
+      "sha256": "f99ead27b34cbc6756d707e7e7ee7340eb9a71e02dfec2b40d5fb848dd3f4d4f"
+    },
+    {
+      "path": "前端代码/cashier-v3/README.md",
+      "sha256": "dda78ad3fcc0c98b4252439c0bb5ab632f8fe168172fefaa251c31a75c71f49c"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-bottom-fixed-2048x1011.png",
+      "sha256": "e2393493646f32f6255893ec71acb6b3c526c0b18966bd59d1ac0956d212f3ec"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-member-cart-final.png",
+      "sha256": "6b029d75999f7e26b4035e7c7838ff3f1dc6b9b2d83f33ed1c44cf894296974e"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-member-cart-v2.png",
+      "sha256": "6c34213149d03bc96ff2ad8866ce45ea7545a9817f6924e6b10611feea538015"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-organic-background.png",
+      "sha256": "27031e1dd350fb5dd2e3c3288bb824bfd4f9ad68d78ecc406a2ae9c18b99fe0a"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-organic-no-horizontal-scroll.png",
+      "sha256": "cd8814b041d37d4c17557c6a5c3a5957bf1fbb4db1fa8e2180c0ed60a6b5f951"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-selected-badges-final.png",
+      "sha256": "0110fc480d654e33f6dd9211791f8aa2c6fbacfa307ee90d8010a542145756ac"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-soft-pink-catalog.png",
+      "sha256": "2006fe6a8c8ed56a1a7bca03f4ef43d1a4170295b14bf948f1a119e364b4a81b"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/cashier-virtual-long-names.png",
+      "sha256": "4302f0927feafa2cf8bd91ecfb2d1ba0cfaee615162c7d1b7b1baf4b814cc588"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-cashier-1366x768-final.png",
+      "sha256": "e2a8fe59ecc18491fd01143c8339a5f826c704a48cd03a9126ac761f5f963942"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-cashier-1366x768.png",
+      "sha256": "e2a8fe59ecc18491fd01143c8339a5f826c704a48cd03a9126ac761f5f963942"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-comparison-1366x768-final.png",
+      "sha256": "78ab8ec78fdc1aabf54872579f37cf2d6cc596f5d3a0bcdfe6f67aea731cff80"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-comparison-1366x768.png",
+      "sha256": "78ab8ec78fdc1aabf54872579f37cf2d6cc596f5d3a0bcdfe6f67aea731cff80"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-reservation-1366x768.png",
+      "sha256": "ba32736ee209f71a1cfa593f5bfeb68e8cbb9edb44c538c40a583b1d91eb7628"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-reservation-960x540-final.png",
+      "sha256": "bec8ea0209abd18844efd6ed5fd4a48c78f567c73880a90f1406fa77b105b302"
+    },
+    {
+      "path": "前端代码/cashier-v3/_design_qa/shell-reservation-960x540.png",
+      "sha256": "8655e42baf0cc7b7378e2d966423e99117c92789dc0f7f68f216ea7288aba415"
+    },
+    {
+      "path": "前端代码/cashier-v3/custom-fields-preview.html",
+      "sha256": "bd9cb0142d064946152993fdd9456b0cf60cfdb20e0d157499720240af6800aa"
+    },
+    {
+      "path": "前端代码/cashier-v3/design-qa.md",
+      "sha256": "8613ab70752b245651e1d3ea3f6c6dc65223569929e9ec76f7e8315636657775"
+    },
+    {
+      "path": "前端代码/cashier-v3/index.html",
+      "sha256": "18a979f4087de24ee8fea546828319c3a283d218a02adb1d27f1159cc64b7252"
+    },
+    {
+      "path": "前端代码/cashier-v3/package-lock.json",
+      "sha256": "b24a42d99a17192c3f23fc0d4154016a9ba2e5cf8699183cf0e49703d86e5297"
+    },
+    {
+      "path": "前端代码/cashier-v3/package.json",
+      "sha256": "07076721c85eb25ff3eba293d2c6858e3f4e58e49f7eb7d929c5069ee6e35906"
+    },
+    {
+      "path": "前端代码/cashier-v3/pd-v3.html",
+      "sha256": "319e3e5f17c37d1685272822b51515e506b0852d9fa79b01b6a58a1608aa1649"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/App.vue",
+      "sha256": "0b8a4870148802a2a9b3037b443fb2cd1019b3b8855fc17cb656ae9ab8ac3838"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/assets/login-beauty-quiet.png",
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/assets/mohe-ai-entry-orbits.gif",
+      "sha256": "04fc0ac982885d41b3f4242b0c0463305136845ffee9150ac3c95e927163d97b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/MoheAiEntry.vue",
+      "sha256": "9db0440563cfae8de7d3c5a0b310209f11ff7baf3d76e06b92b78e8b0a93ac77"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/OrganizationStoreScopePicker.vue",
+      "sha256": "5ba479630ea993051a7b8fef1b03e4afe7473ec1283ddd1e55457576e20a2ebc"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/StaffPhoneTransferDialog.vue",
+      "sha256": "2f63e40a854657648b0d1ca6a5b3849b2889ac8eba69227849baedd960512f9c"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/care/CareCommandDrawer.vue",
+      "sha256": "1d2a7a89a06e9279d5aefcb131c704b6b958ad993680bdfe5c712ff394c91a01"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/care/CareMetricDetailDrawer.vue",
+      "sha256": "228ef6e1fa09f220159bfaee89f089b5972ec6f0a7031892fa2452030def90d6"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/care/CareRecordDetailDrawer.vue",
+      "sha256": "76cf91caa00558cb313602994f817ac921ce86b5643c84dbbdca52cf23ccf154"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/care/CareTaskDetailDrawer.vue",
+      "sha256": "ec883cbb085bacdf3f7be1b7501cfee4d7707389a3001b61683e9176659865bb"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CartLineRightControls.vue",
+      "sha256": "a115863ae12bebcd607b0007109fc56627ff52a1261a4a7a334a2e8b807a4364"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue",
+      "sha256": "1cc8fb86d10c8f00ee465a1ace7b0ded34d57421bcc9cb76f607c76b6aa47a00"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue",
+      "sha256": "7e2e7ae124571f4b8ea785b046eae8c005225fd459ae7712d901651689805c96"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CashierGuidedBusinessPanel.vue",
+      "sha256": "9d126c3f839b7b195326643f99e1d09a6d86c7c1bcf6376fbe8d9f5a19bb2086"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue",
+      "sha256": "43045512bf106a0811bb9ad4a3b25ded90b02a5b267f806670c8fa449c976795"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue",
+      "sha256": "30d0186d7f69264448cbe6e09bf8041efd7acca4de83059a0f94019f75c571ef"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/HangOrderOverlay.vue",
+      "sha256": "4a44e445de55e300e1495261e410b4867f364d3fe46afa29d287ebc8241dd422"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue",
+      "sha256": "7b14ba7dc349a6bab3d58da45c4f0ca8afb6d6d2e715789e5480bab41814d74d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/SalespersonAllocationOverlay.vue",
+      "sha256": "bd3d102955def538a2142385ba6625d2f963a3e8472683d9fc310efb39dc16a0"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/common/MemberSelectorOverlay.vue",
+      "sha256": "4691c387fa61317e2740ea9d626bc1972973322c162e2dc113e9135c59ae5987"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue",
+      "sha256": "ed9d77dbff460178106cec655c3eb8770f143790b3c681528f12603942df386f"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/common/TablePagination.vue",
+      "sha256": "1723a8dfee3dabd58dc0446bd8abb1ce13976fc640d80ab0eab3abb1b5dce665"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/inventory/InventoryIframeBridge.vue",
+      "sha256": "bad462bf14fef3131bdf29099bc63e159a312fe5937e63ac9399b7f29ac4a8f2"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/DirectGiftOverlay.vue",
+      "sha256": "120bf2bd2641327b98ff12e1168976f998dc08d67270be40b5810c14609b6bdc"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/MemberCreatorPanel.vue",
+      "sha256": "a830828d86bd4775c872795fb69ff539c4845a3d648a065dbd9226c76bbc72c8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue",
+      "sha256": "a83546b54290219aa575981f1f07f6eebe1b669d735e77e3583277e09d849d87"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/MemberDebtReminderOverlay.vue",
+      "sha256": "4038f29473f91f5aaa5eb6aa0abe9a961a428410b72fc6106d858a947002ea83"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue",
+      "sha256": "270accb487d768adb360f5594bb648b5d0bf677ed070211a53f580ab30bc4f37"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/RechargeOverlay.vue",
+      "sha256": "b08d97882e5dc4aaf6984aad9f6797f5911f55ff431c576110144a05dc2346d1"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/member/directGiftProducts.js",
+      "sha256": "0b1f6178a06001d161dd0954dac982478c32a83cfbfe57c768ef215fc8d549a8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/order/BusinessRecordDetailOverlay.vue",
+      "sha256": "b4f87e1a71bc7d58a56129b2bbbe7c39eb0d2c088b2f4edef62b01aed911f847"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/order/ReceiptPrinterSetupOverlay.vue",
+      "sha256": "7663577e8e2ed1fffc10d63a9ab9142460f1a2131c929511a6b9d8213e66cccd"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue",
+      "sha256": "0d8c293b66bb16ad11942e56d607c2028f1daa8bb22fc6c5f430571967309310"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/order/SalesOrderReceiptPrintButton.vue",
+      "sha256": "57266627f4d2094e8f921ec6a70d2bc7c7c76af73d3092045fe2a3aae99d76bf"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/QueryEntitySelectorOverlay.vue",
+      "sha256": "edabc306ae8c50f4f1faf4d64eb1769ffafe6325db1e999db6a8b0199b54d68d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/UnifiedQueryCustomFieldDrawer.vue",
+      "sha256": "bce9f2acc5e4d0cf09aa3d99f908507a8067305482892af133a57a281d8f2060"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/UnifiedQueryExportDrawer.vue",
+      "sha256": "795af74e35d3cefb0f533480089cededde58b42cb8e2884d44f0a7332326a147"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/UnifiedQueryFieldRenameDrawer.vue",
+      "sha256": "2793b236d8ce240755ecc5798f71ee047d625bd70d76d07b7c82abbbd14eff53"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/UnifiedQuerySettingsDrawer.vue",
+      "sha256": "73eb0547b21a3ea26f6ad7975cbb1f6dcff3b40e5f5d8f844d430c5dbe68a786"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/query/UnifiedQueryToolbar.vue",
+      "sha256": "5d547cf89d7d16b4d63fb3ef2549ab46be52d2e09a71e3d21ccdcb3368d00e77"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/reservation/ReservationDetailOverlay.vue",
+      "sha256": "dbd38b796d62e662b771ade338a8856e8869dbf9902a96a88fa0d196d6637bcc"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/reservation/ReservationEditorOverlay.vue",
+      "sha256": "6d8eb2af3f6447197ddf44420c6b797bf27cbca41785dabcdf4f07884eb72833"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/room/RoomAssignmentOverlay.vue",
+      "sha256": "b96e77f797d0d461586c49339918f19dca83a2af2fe78b158cbc89aa01520ff5"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/room/RoomDetailOverlay.vue",
+      "sha256": "15fd2d805f7d79d271f9b6cf912f0ee402f92478499f2ca1cce80442b4ce120e"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/room/UnassignedRoomListOverlay.vue",
+      "sha256": "6866ccfcc654dbb531498cc8b64e0bac6f89a20b3e2506c9a677e02c49aeb0a6"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/service/ServiceCompletionOverlay.vue",
+      "sha256": "846f01f21f763a55ce21018f52ef9b9737f7fbc86b0b6c4ed4b6b32239cb3ea9"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/service/ServiceLineCompletionEditorOverlay.vue",
+      "sha256": "36a56ae05401d3611836168553570b0bacce02c9f709c2002a8968e3f9d88516"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/service/ServiceLineCraftsmenOverlay.vue",
+      "sha256": "16518f5ffb5162f555fd7380a2d11c65f35e0f30615c9986e54e14f5f3d9fbf9"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/writeoff/EntitlementProjectSelector.vue",
+      "sha256": "f665eb9c2a15730b7fd88ace2ed9676b9ed71bf4d91ed9818807d2aae593710b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/writeoff/WriteoffConfirmationOverlay.vue",
+      "sha256": "9886c79c0cd544edfd716da8d6fd7602ca66f971d16e4696008d8d6cdd342744"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/composables/useModalFocusTrap.js",
+      "sha256": "4a28511c51ea357ecffafe9ea26007b6d45a9e9c016fa7039f2d9cabaf4a122f"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/composables/useRechargeCheckout.js",
+      "sha256": "2181692a430b1065dd8acae421d96129b174f07bd741aa2441b5731eb9af8943"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/composables/useUnifiedQueryPage.js",
+      "sha256": "998921ca2b5fedfa50422130421bfcc0df84c0089c2a092c07bcec51b0d898c1"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/constants/phaseFourReports.js",
+      "sha256": "10de82c103400679944242677b930fcbfe05d7c32772a0931a220fbfadd44ab9"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/constants/phaseSixReports.js",
+      "sha256": "40f84da7737aa85b4b7e921032fedc9a1b97683d867bbb9ba639006eb1150787"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/UnifiedQueryCustomFieldPreview.vue",
+      "sha256": "9b9bb5f824caedf0d2a80db6c71b95fa9c1b7c2a4b48767b744fc0319a9812c8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/customFieldPreviewMain.js",
+      "sha256": "fe682e52d9ec2eede6d8aa895d137f49075b61265049b90a5dd31e02629b53b8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/customerAnalyticsPreviewData.js",
+      "sha256": "bbb16c04a9c7fdd0fd5bcd96fd14aaaf13afb7ff25e2deaa34a859108aae980a"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/customerCarePreviewData.js",
+      "sha256": "7c33196e594e0055015610b63f46b0c675f7d1d516c6fedd267f41dc04ec975e"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/pdV3FixtureMain.js",
+      "sha256": "05cfb4174f2e4a9b35b3f2975e139a4ae336dbf620d7ae7423db8c2ee712984c"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/layouts/CashierShell.vue",
+      "sha256": "877be7d81f0836fb8523366404aba826583baf65265f6e4542897adffe0e82dd"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/main.js",
+      "sha256": "c33e0442f1baf9cdf14ffbd3840bb3dece131d645dd1a28e2661d1c6c382776e"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/router/index.js",
+      "sha256": "777733b7b13fa787b2390532e36ef9128cb6d386481cf338f77e8b56b37f6818"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierBusinessConfigApi.js",
+      "sha256": "0846b29caf039638e51535ec5498d761604c35fac093589afe5370668b90d648"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3ActionManifest.js",
+      "sha256": "122308daf4bd04d41ef63308f4ddaaeeecd9c46b027acc583632e07b9668f3cf"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+      "sha256": "dc56409a6e52fd1a7a7b341b312936394b77b5ab984b575d63fa98f8be68d992"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3CheckoutBalancePreview.js",
+      "sha256": "314de2a60ae8086a1ece25d4d873fae26d5b8e50e84e14fbd7c1e9ac8bc31ce6"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3CheckoutResultContract.js",
+      "sha256": "d7bdd91866ebb20f16c56bac367f9ec36bd037c2910efc97dc6b423bdfd40e6d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3ContextSwitchCallSites.js",
+      "sha256": "3ec87453ace5f206c28dce853138844fef5bb49355a39d7677d4f98bd243a388"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3DraftCommandRecovery.js",
+      "sha256": "d7e363152f1245868ad085fc4cec7f77c8577c405826b8819fde4e7d95c04d19"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3EntitlementDraftContract.js",
+      "sha256": "4d74c982a289f0f436f2f4de32bcd006be7f39bfabc8236f7ba3758c22bcaba1"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3HangOrderResultContract.js",
+      "sha256": "978e03fb0326226bed227ac45cab20766a8add591ebc14214d0466f55680cd1d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3HttpAdapter.js",
+      "sha256": "5deeaa6f775054b30673cf131dc9b8a3c1a64d46762a42bfad154ec5d7fa5a7c"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js",
+      "sha256": "9f782355dba1995b2894dc44223842a5d7592b77bd5125732a903323b3ebe80d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3RoomOpenIntent.js",
+      "sha256": "3350b611610fdbbff34d5746f1c311f0e7ad569f7726e0e19a23a6d794088b71"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/cashierV3SessionLifecycle.js",
+      "sha256": "8558bf70e8ed533c1ecd29475f965fccb19d37081cd4e98404f1c21975a39167"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/customerAnalyticsApi.js",
+      "sha256": "1a00b29ea128447b986d918cf74ad38f02c140b9981adf3a0b34b59a04fd28a3"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/customerCareApi.js",
+      "sha256": "7ce66e5d357bf0efe151989cadb44c9dd6086fd07881d4e15656a73c4776b762"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/employeeDashboardApi.js",
+      "sha256": "f98833be1371aa8d526ce081a3ecc4f26d951da278d24dd905413de3dd0ea232"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/engineeringLedgerApi.js",
+      "sha256": "74a8a1e9164c25743a4e1d7cf94513d512db8a0d0d83a738a20081576757577f"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/groupManagementDashboardApi.js",
+      "sha256": "028137784e1301e6288c06b941545684a32cc12a3f780a08481ed8375bc93c7c"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/hangDraftApi.js",
+      "sha256": "1f042cfa1350d58a4b5d4d9107292ab72b0ac204225ec7acc3751f0026f69f77"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/memberDashboardApi.js",
+      "sha256": "2380f8bb745e985802b54e74272e69b2de749fd9035b842014be2132b4f650cd"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js",
+      "sha256": "8a3f9c9a16cf507c35d3f6166abb1c5b813aed74bcd20d4bd86941e523924f46"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/orderVoidReceiptRecovery.js",
+      "sha256": "1636ce24f8d555db9562f69a3d6315ab3294d91b31b2017af3c4814c40140e30"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/personnelDefaultAllocation.js",
+      "sha256": "38ecd814af92a98311e74e83eab85ecc95ac260391e736f2ebf215e3aa803b4b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/platformOrderCenterApi.js",
+      "sha256": "f683add5849479dc1a9d5cb25fe0ac90520c695e2dfd1eac8fb174698b4e0450"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/presaleClaimApi.js",
+      "sha256": "73d6b85c0f6de4a3db373c3cf08dc8031501d317a401c96b194b9da71f61334f"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/productDashboardApi.js",
+      "sha256": "af2329378f854c7cc66c1c38d5f9dc2029a4f895912874d5b67deca82392262b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/refundWholeYuanInput.js",
+      "sha256": "9ce7486c33121a23c2c956a6942be5ed1e871abb84230d2161233c4443768ad5"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/roomManagementApi.js",
+      "sha256": "ca14f517c1b3c306272c17ad24f6c089540192362003992de615c6172b9b1416"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js",
+      "sha256": "8b81035f47ee68c62fbcc0c5f540d79d7e31cbc97b89744cb7de5e903756e0d6"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/sixDimensionReportConfigApi.js",
+      "sha256": "9d76796d75d81f1b797c402427c9c60823a813206515d5b49204ee49b75c933b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/staffManagementApi.js",
+      "sha256": "d34b810de841c9c86bb8c4bb1aba6d71b18220bd738c9eecfde889d53c6f4bbf"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/storeBusinessReportApi.js",
+      "sha256": "7d6eab3c3da631263d8c0595c9c591b670a183a12add03ad3e70c49b34cacc96"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/storeV3LoginApi.js",
+      "sha256": "fd806adab506b0f13ea649cfa3d09833df0c465dfd8e36845f517ef80d3c6648"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/storeV3SessionToken.js",
+      "sha256": "aa579eea02c13c945d2cd89b37e183edcfe897028186f185850a0c8b95db7571"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/unifiedQueryContract.js",
+      "sha256": "876b5d218c6d95428d08a73a961ccda6d12d0a239371d799b89ccc57b3373159"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/styles/base.css",
+      "sha256": "238707c1dec4a7167d562c012d32f7d6aa3f7bb7e17dad7542346eb2d5148174"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/BusinessDashboardView.vue",
+      "sha256": "fcd40580174a7af94c0aac1760671af26acc647a4ed426b6a07440bc0a3b47c8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+      "sha256": "56bca288451745ac6c37906cac57307d159ed2c24aa2e13d095f63c62466978b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/ConsumptionTierConfigView.vue",
+      "sha256": "ae7d71c406a7bab398a1eae39e29a7a281fa8e5b50e0bdf9143e6018b3232b02"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue",
+      "sha256": "0ab868659b9b69e60d2190f28a1051fd837b2ce2338e53d106dd2f058c84ace8"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/EmployeeDashboardView.vue",
+      "sha256": "81d12d5e1156b71ed83269e820e83205d477f2d52914456eb5d0791d951c3bb0"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/EngineeringManagementView.vue",
+      "sha256": "cc78c95b24c3d37b8dd0ab55a9de806e183041083b4d0b5a98301a89b42d6acf"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/FundManagementView.vue",
+      "sha256": "e50f56087660be67f71212e69f265c8c30a1f7ed2e2776b511bfd8884a2d873e"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+      "sha256": "e29b8f578bdfb003f5f6cb3c99b970c367aa5a61bfc6c75a82c8ef1ee37b66b9"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/HangOrderListView.vue",
+      "sha256": "80c6403c8851205684b9fe94f17590d5760bdfc82ab992845f0a90f5de91f01b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/ManagementCenterView.vue",
+      "sha256": "e2f464489fd9b138c0b6156decd8e678487ab022892d199ed710844fba2ec472"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/MemberDashboardView.vue",
+      "sha256": "33a0b7c2befad72461e0b7a66990b812d191bd7deaa52d2d05121f3e4dee93f3"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/MemberListView.vue",
+      "sha256": "9009e4c94d15eec3203ea282b2a2ff50096f06608d3989aaf32c8840793341bc"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+      "sha256": "a0e17923c047edaf1882825bca6a8540d45fac0ffbdc92245b1712df621a2021"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/PresaleClaimView.vue",
+      "sha256": "4099d9dd1fded59adb626aaf3729740c76c0b0868268ca2b0cbb3c98457cc230"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/ProductDashboardView.vue",
+      "sha256": "8c50c9a9e424ba4684f989ba9761cadd7262b9f0abcb76d06dc54a6c84745a05"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/ProjectReplacementView.vue",
+      "sha256": "82d4e7530a3246f8931677c402d26ac1d0c9bcb047be4e11e4b32a12d2cd4a3d"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/ReservationListView.vue",
+      "sha256": "d365631d82a48301eb24fe87d5058f52c6ebb1443d41757bda0e11503b6e3a26"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/RoomSettingsView.vue",
+      "sha256": "d1f1f2250a5e06168af7c4987a8fa3d18f88c27fe08dc75ca231dd4e3f900556"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/RoomStatusView.vue",
+      "sha256": "dc7cc38b1bfb85a0b9df70bbd6ab516fa93232efba44fbc297060585cfed3577"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/RoutePlaceholderView.vue",
+      "sha256": "890a91a3180785422ec93040533c8aedac456443ef9b3422c0d16fb621b856d1"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StaffListView.vue",
+      "sha256": "2c2935c73c72136f2bc233adc897b8147a8f6a0d494421523c173065f5474b74"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "sha256": "737b7e4d98cbe706d5fbf25c94aacecd1c715c9eeca9ee8371262d911f829d54"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreLoginView.vue",
+      "sha256": "017e6cbe68d56ee4cd1d2d08a66ba646ac1b57d252fa09210d8187a8193b4af0"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreTargetDashboardView.vue",
+      "sha256": "658d55b90e62ca3740a285ac17a9eac8599c6802019b42be462c57e33890a976"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/WriteoffWorkbenchView.vue",
+      "sha256": "154a3ffcbf34215af639acf2b33c3e6cee83a877602194ff0228e00d38970595"
+    },
+    {
+      "path": "前端代码/cashier-v3/vite.config.js",
+      "sha256": "d2be4f1d0fe7f9ade2da1963c23090a38ee80e8c347413ad2951da9ad00e7567"
+    },
+    {
+      "path": "前端代码/inventory-vue3/.gitignore",
+      "sha256": "790e3169bc19b046fe55ba1da6d13b976c28363c8c00462a2195fe5faf260910"
+    },
+    {
+      "path": "前端代码/inventory-vue3/index.html",
+      "sha256": "46b75eb9d1f379ae7fb36eba9f0d479e6c7d8848482c552d040701e6516027d2"
+    },
+    {
+      "path": "前端代码/inventory-vue3/package-lock.json",
+      "sha256": "0950690424f8f89569f32cff6ff6c4815e89ff56c7ae81aa6ffdf71ffd27ab0e"
+    },
+    {
+      "path": "前端代码/inventory-vue3/package.json",
+      "sha256": "cc878898007ea173253ba39dc12b6236d7423aa4fac14565ab018138e4e02a53"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "52e688892b6b8131f94219f9dfa02349a3a802e92165c1353ceff7325e50b33a"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/batchNumberDisplay.js",
+      "sha256": "4b398cb4096eca28131683cc90f1294b154817ba78d795fde3ee7c3854fc3423"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "sha256": "223a0aae5cc0379c0b3601409cf715b13da449c466b8fd8c7f6623cdd3bbffbd"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue",
+      "sha256": "7dc157f5969c6cc6e6dd57a10b4b837a64e446bd1f9a690063d93c4598fa6564"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue",
+      "sha256": "0dd142dad7ad72dccb920a827e790b67b5ea5a0a4fd341dd528f1c73957f0aa3"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryProductSelector.vue",
+      "sha256": "fb0f3616d69686642a27afe9292421956bec68c1dba4333538d5d8c0e5eeb393"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryRecipeModal.vue",
+      "sha256": "4a50b87b5a72a0d53190ca39c91748c19279a704e9be27d1938e818af856be9a"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryRecipeProductSelector.vue",
+      "sha256": "5cc7663896083b897f30927e6033335ba9d5b409f66194b8f2105d736ef24cc7"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryStoreSelector.vue",
+      "sha256": "5f019eeed49ab229c488ac3c37df379fba0765e00ca265d3ca907ce21f85368f"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/countWorksheet.js",
+      "sha256": "9619ad0ff4b40728a056caa0f815acdaf3c1eb73f787589c42ba70e0e0dc1941"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/documentDetailReader.js",
+      "sha256": "2536c5580f535b9521158f4cefd7a93d4e04d639a770a158cbd2878f5e58fc5c"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/groupedDocumentRows.js",
+      "sha256": "001d2d52fbc3bfcde9b30a9e90971afe027bb539a8d2bf602634de22514fb371"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/inboundDateValidation.js",
+      "sha256": "43816b8eead751f6547c38874258d1522554417d4fde7584dc5ac26e2d677d42"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/index.js",
+      "sha256": "d734ba4f0cb9a4f14bca7ef12ef7b3afef06d92e41e14cf92f155b9eadcb5c71"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/inventoryDatePickerOnly.js",
+      "sha256": "1beab3eba641e5ecf4497eb59d8518aa3f14423eb59e42e2c191314fcc785d23"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/main.js",
+      "sha256": "1ede3f58a5eb720f1ea6fe52863d84d38437989229d97b56f0ea627a21eb7fd1"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/quantityFormat.js",
+      "sha256": "a57cae67c71697ee234ba18f0ffc58b3e69b3362ddb2bf1375ae2fefbd7d0091"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/services/inventoryApi.js",
+      "sha256": "a1cb4bc376a667a004d09529a5d8fcfb69f81df5dde0ad451e9c2b69ccefeeb3"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/statusLabels.js",
+      "sha256": "d54290cd85c4271f5a1153a22e8b15119b1ab201e2e43837ea26cc3a5b883a26"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/styles.css",
+      "sha256": "08a41cb6db7a9ff63f28ddb422165a267374852e17d12a6ec1184bdcd6674587"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/utils/countSubmission.js",
+      "sha256": "de5365605df6a0cbebb651d6153303525dca609a4fe268ff83ad084673b0645a"
+    },
+    {
+      "path": "前端代码/inventory-vue3/vite.config.js",
+      "sha256": "e1e51de505b293738aa2a6b5bdcd5edeab0754251556c01d122fe4b364bc0599"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/browser-entry.mjs",
+      "sha256": "02a5bfd14d97b10420d2a592cda96446d607a2d3f26f7b0708cce7712c27b98b"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/browser-transport.mjs",
+      "sha256": "4edc491c29d4167f024f847f0e345eb02d6daa93c513ec3de74130606d13044d"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/clarification-state.mjs",
+      "sha256": "2f003d1ef8c616597ba6c2e851cff15e5d2d5e7813d331dadc77981d8a1ccbd2"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/device-session.mjs",
+      "sha256": "a1a69e01fadd08c2128fdf98cac37fd620daabefb4ac54d9cdc738272f86f66a"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/management-route-access.mjs",
+      "sha256": "1924248a8e08e16fda72d711075110322baba3f29a56aebf5eefb7f45fe71717"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/package.json",
+      "sha256": "ac0e964569027924634983341f13e99d55f22f0b912fbe00ed9a9dde0afa7aa6"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/QueryEntitySelectorOverlay.vue",
+      "sha256": "7528a81db92135eff63d1e0a63e525815f66e1c90af4caa20e38ae48fd67c370"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryCustomFieldDrawer.vue",
+      "sha256": "10e29040624c6b94b616d1a0cd098486a6739f9f76139bbfb3e8f77d32c0fe1f"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryDateRange.vue",
+      "sha256": "2f62f4572c905c858311622fac8498452bd27e530b138758926a20a31c8c55c8"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryExportDrawer.vue",
+      "sha256": "edceaca4566969b87a2e9ad672ca55a48a641f7f0ecb8f682a7e1699b536bb5a"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryFieldRenameDrawer.vue",
+      "sha256": "50d5d70a3c27dbc17d25697e035fd7ee582d40c02e64e63e76e0e97e8b77b2b0"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryNumericRangePresets.vue",
+      "sha256": "339a8d51e12afd04784aaa14c8121ddb53d5cc84b4de92140de39e8af4ae520e"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQuerySettingsDrawer.vue",
+      "sha256": "84c6fda57e0ca3e333918c694ea34add96c16dc9a5f0a3e2d81f28f827d2f057"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue",
+      "sha256": "b564fac423b280376a4d564cfce4863629a703b2b3dda2495c8824fcb152459d"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/composables/useUnifiedQueryPage.js",
+      "sha256": "526c24d0555f52fc5420a9cd4f911018873596778ac2e3ecfbbaf7d3429baadf"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/contracts/dateRange.js",
+      "sha256": "06ff429810108f91d1cef990b77f8ddbb43195a868768cc81e6e57e09659e90e"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/contracts/localQueryPreferences.js",
+      "sha256": "33a2a39c07b67f3a34a277ed64ec347f2ca2f3800dfcd60fbee98ac9fb3c3898"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/contracts/numericRangePresets.js",
+      "sha256": "ab1d2d2095b1e2ccc8f146a47a189db052830360f118a56dda2e5d3e95bde840"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/contracts/unifiedQueryContract.js",
+      "sha256": "10d9639e37120df147a96c6a7a9d88e7180fb6c3867094487e6c87c992931547"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/index.js",
+      "sha256": "382e1dcc4998058e7294fc3a525d923e44334b6f75458b8114d99162ae5b9ffb"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/styles/unified-query.css",
+      "sha256": "28e48b7b66ae308f3169077f572d97f34cee6c213e49e6b6accad2f19a98a50e"
+    }
+  ],
+  "database_migrations": [],
+  "bundle_comparison": "Byte-for-byte same as previous production main JS after reverting only the two 20mm CSS values and corresponding source comments; other assets unchanged"
+}

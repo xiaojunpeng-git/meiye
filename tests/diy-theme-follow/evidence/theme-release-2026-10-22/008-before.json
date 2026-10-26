@@ -1,0 +1,49 @@
+{
+  "root": "/www/wwwroot/008.cc3798.com",
+  "files": {
+    "app/controller/admin/v1/diy/Diy.php": "0f6d4d8971c9a4cd6277992b85f934f44bcd5c5d65d13e68528a530b74720c28",
+    "app/services/diy/DiyServices.php": "4323c84c20264e8029a687ce48686a7d6b41e98544eb7c1137fcea4912467d4b"
+  },
+  "environment": "281edaa546251318c0c44c99c571de478507edf66d5d9582ce3f0a8b3ab833d0",
+  "database": {
+    "name": "mohe_008",
+    "port": 3307,
+    "version": "5.7.44"
+  },
+  "themeRows": [],
+  "latestUpgrade": {
+    "upgrade_key": "20261021-047-sales-debt-balance-settlement",
+    "code_version": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "executed_at": "2026-10-21 18:15:08"
+  },
+  "front": {
+    "member": {
+      "path": "/www/wwwroot/008.cc3798.com/public/index.html",
+      "index": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+      "assets": {
+        "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+        "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+        "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+      }
+    },
+    "admin": {
+      "path": "/www/wwwroot/008.cc3798.com/public/system.html",
+      "index": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+      "assets": {
+        "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+        "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+        "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+        "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+      }
+    },
+    "cashier": {
+      "path": "/www/wwwroot/008.cc3798.com/public/view_cashier_v3/index.html",
+      "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+      "assets": {
+        "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+        "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+      }
+    }
+  },
+  "otherDiyDigest": "8b7b0ecaf5b996ebb74aa1352bc87a2460da2ab72751486bcabcb32f2121e98e"
+}

@@ -1,0 +1,5 @@
+240f82cfcce0fa3c8edc31fea5d3571b6ab86efa063d449ebb83fee5cfee7bf4  00-升级清单.md
+3e81f7454d50dc46b6f3b19ad185f7eb5ea776c7d9dbae40392e00a3d6ad5fb3  01-升级前检查.sql
+67d76eb5736c9fddd1c09b7b2f88f77cacb912dad6c626b8aea71b9bb0be4a12  02-正式升级.sql
+a934f6a842aa6f1592cc8231c6dcf2834dfb1556fa5fdcca4e82ae2eb6fb1e40  03-升级后验证.sql
+f5f74f1fd0ab87008b68d2cb8b9b34a2e6728f97ccb5056571d6948c74cf5d90  04-回滚或应急说明.md

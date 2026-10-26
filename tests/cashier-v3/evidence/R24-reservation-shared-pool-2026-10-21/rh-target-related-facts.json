@@ -1,0 +1,32 @@
+{
+  "service": [
+    {
+      "id": "43675",
+      "service_fact_id": "ESF-d5eaa0099546c45fb71e434dd11143840ea8ab06",
+      "source_line_id": "reservation:11702:4175",
+      "labor_amount_cents": "0",
+      "service_status": "completed",
+      "primary_craftsman_staff_id": "884"
+    }
+  ],
+  "performance": [
+    {
+      "fact_id": "RPF-563f6b8785e82113be12863314906468347d42f0",
+      "performance_type": "consumption_performance_recorded",
+      "amount_cents": "2300",
+      "allocation_base_amount_cents": "2300",
+      "rule_code_snapshot": "reservation_consumption_actual_entitlement_amount",
+      "rule_version_snapshot": "reservation-rule:1",
+      "status": "effective"
+    },
+    {
+      "fact_id": "SAA-471FA7B0A0A07BCEBD1E139460CCDA81D1E75E87",
+      "performance_type": "labor_performance_allocated",
+      "amount_cents": "0",
+      "allocation_base_amount_cents": "2300",
+      "rule_code_snapshot": "SERVICE-RECORD-CRAFTSMAN-ADJUST-V1",
+      "rule_version_snapshot": "v1",
+      "status": "effective"
+    }
+  ]
+}

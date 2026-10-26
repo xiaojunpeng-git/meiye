@@ -1,0 +1,139 @@
+{
+  "task": "R49-00001",
+  "round": 4,
+  "version": "V3",
+  "createdAt": "2026-10-09T13:52:55.479Z",
+  "status": "development_and_focused_selftests_complete_pending_product_manager_acceptance",
+  "originalBaselineHead": "b9547566d0a35db9fdff83e8c84fa77eefbc3fa5",
+  "baselineHead": "6165b9c10edc4918663852265b816d94fe9a11b3",
+  "baselineNote": "共享工作区其他任务推进 HEAD；本闭环按以下文件 SHA256 固定，未提交。",
+  "scope": [
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "2aab7cc378dc48b14e30050ba7643a0f5ff8b7992a3ef51edb01f75699318d99"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue",
+      "sha256": "39bcb342bc1674daa7ca05b23da1148709cc744977714e9d68a40936c9d41688"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/styles/unified-query.css",
+      "sha256": "28e48b7b66ae308f3169077f572d97f34cee6c213e49e6b6accad2f19a98a50e"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryNumericRangePresets.vue",
+      "sha256": "339a8d51e12afd04784aaa14c8121ddb53d5cc84b4de92140de39e8af4ae520e"
+    },
+    {
+      "path": "前端代码/shared/unified-query-vue3/src/contracts/numericRangePresets.js",
+      "sha256": "ab1d2d2095b1e2ccc8f146a47a189db052830360f118a56dda2e5d3e95bde840"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryBatchStockUnifiedQueryProvider.php",
+      "sha256": "7a7af6027acbe867b1d753d4a2fb2048b844e4743dfc97989c9308737dc5ce83"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryProductStockSummaryServices.php",
+      "sha256": "a0170227d050f9194d8853272fbae5983817450ec49a68f5ca530752b8d3eaf1"
+    },
+    {
+      "path": "tests/inventory/js/store-menu-contract.mjs",
+      "sha256": "c36015f16442f44e405efa405486ca904b30c345903b502e5725d2eea6d9efb7"
+    },
+    {
+      "path": "tests/inventory/js/stock-settings-entry-contract.mjs",
+      "sha256": "0b24c67663886f355d673b5c72719d4976ada2f127389815c07766ed74f3a8a9"
+    },
+    {
+      "path": "tests/unified-query/js/query-actions-after-fields-contract.mjs",
+      "sha256": "9c75646ddcdb5a54f3bf41c62cac33c2f00146540fbcd21eacc066efeddb0f51"
+    },
+    {
+      "path": "tests/inventory/js/stock-quantity-presets-contract.mjs",
+      "sha256": "69d3eb39a365797d59fce7db51b95346bc8877a0e0960d75e27a6b523a301c18"
+    },
+    {
+      "path": "tests/inventory/php/product-summary-quantity-range-contract.php",
+      "sha256": "7c4e4fe3ea4eb5199d59be290b1bba57fe6997793b153d947bb4128f6de4cd52"
+    },
+    {
+      "path": "tests/inventory/php/stock-quantity-presets-contract.php",
+      "sha256": "2b1e6865197f73ceacf801dbf6b04e6c118a9b7cac00a9f55d2b415ef3914759"
+    }
+  ],
+  "trackedDiffSha256": "e935550f4ecda687056514a854c3ef67d789250658f22a4fe107beed5d2881f1",
+  "fingerprintNote": "trackedDiff 不含未跟踪新文件；所有范围文件均由 scope SHA256 覆盖。",
+  "build": {
+    "source": "前端代码/inventory-vue3",
+    "hotEntry": "http://127.0.0.1:18091/view_cashier_v3/#/fund",
+    "command": "npm run build",
+    "modules": 1824,
+    "status": "passed_with_existing_chunk_warning",
+    "integrated8080": false,
+    "artifacts": [
+      {
+        "path": "前端代码/inventory-vue3/dist/index.html",
+        "sha256": "6a70cf00f70692f17c149d642c0f74f57177b6ba046979a51a42b916b731f12c"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-ad7960dc.css",
+        "sha256": "ad7960dcf4fcd39472f40745bae10824546ee8490b41e0463b9b2094b8a303f6"
+      },
+      {
+        "path": "前端代码/inventory-vue3/dist/assets/index-26b67e6a.js",
+        "sha256": "a516826ac55fd6cbaead549dcc47f44adb098a7bdbb6af177794e92b64647ed8"
+      }
+    ]
+  },
+  "tests": {
+    "quantityJs": 19,
+    "quantityPhp": 10,
+    "productSummaryPhp": 7,
+    "settingsJs": 13,
+    "actionsJs": 17,
+    "registrationPhp": 14,
+    "stockSummaryTotalPhp": 8,
+    "customFilterLayout": "passed",
+    "dateRange": "passed",
+    "diffCheck": "passed",
+    "browser": "custom_zero_all_positive_invalid_reset_desktop_narrow_passed",
+    "limitations": "详见 selftest 的广域旧测试、分页、平台及导出边界"
+  },
+  "evidence": [
+    {
+      "path": "tests/inventory/evidence/R49-stock-quantity-presets-selftest-2026-10-09.md",
+      "sha256": "5775556c97346eb6ccad603c8053d81b0ad849543011fb71d8474698e8661cca"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-quantity-presets-browser-2026-10-09.json",
+      "sha256": "4208948ca9cc5d823c554bb1cdc1482b82e8c10c390633142dad2d7ca8fb2de5"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-quantity-presets-default-2026-10-09.png",
+      "sha256": "8ec16c97396b22fb6ada9186e3a6a9b729328ec4ac8f82b0283549bcb0e58d0e"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-quantity-presets-custom-2026-10-09.png",
+      "sha256": "5046f725a704fe887ee586411d5edd4ffc4e910b7678bb20db7d126d760920ab"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-quantity-presets-detail-2026-10-09.png",
+      "sha256": "dac357599bc9325b3d50d6787f2d86cf445b7fe1850c81c0d0ffe363f06c2a5b"
+    }
+  ],
+  "commentsUpdated": [
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue",
+    "前端代码/shared/unified-query-vue3/src/styles/unified-query.css",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryNumericRangePresets.vue",
+    "前端代码/shared/unified-query-vue3/src/contracts/numericRangePresets.js",
+    "后端代码/app/services/product/inventory/query/InventoryBatchStockUnifiedQueryProvider.php",
+    "后端代码/app/services/product/inventory/query/InventoryProductStockSummaryServices.php"
+  ],
+  "databaseMigrations": [],
+  "engineeringScripts": [],
+  "productManagerAccepted": false,
+  "committed": false,
+  "deployed": false,
+  "pushed": false
+}

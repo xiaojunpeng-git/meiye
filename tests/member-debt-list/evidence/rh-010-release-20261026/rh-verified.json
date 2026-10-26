@@ -1,0 +1,37 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+  "controllerSha256": "d8e46605b440a1a049d9d10f621f14d89e0b2169ba012ae30a2a64cd5a2b9226",
+  "serviceUnchanged": true,
+  "frontendUnchanged": true,
+  "debtDataUnchanged": true,
+  "configurationUnchanged": true,
+  "behavior": [
+    {
+      "subject": "existing-member",
+      "authorizedCount": 1,
+      "currentPageRows": 1,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    },
+    {
+      "subject": "existing-member",
+      "authorizedCount": 1,
+      "currentPageRows": 1,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    },
+    {
+      "subject": "nonexistent-member",
+      "authorizedCount": 0,
+      "currentPageRows": 0,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    }
+  ],
+  "action": "INSTALLED"
+}

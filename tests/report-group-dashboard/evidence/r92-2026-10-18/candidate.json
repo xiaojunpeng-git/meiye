@@ -1,0 +1,92 @@
+{
+  "round": 92,
+  "status": "开发与自测完成，待产品经理确认验收；未提交、未部署、未push",
+  "baselineHead": "5ea310add04611f0135804d35cacfbf148f1d6c5",
+  "currentHead": "c5df15aa0247f5d9725d488f2b5076d7dc742819",
+  "patchSha256": "069bbe99313807d82b1333ace4e64f12a74a8afb327813eb3449b446151dd7db",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+      "sha256": "3d3e9e1181c7a6c64bdcf7b77bc89012a116bf1911e829e4b3187fe17a6a9b4f"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "sha256": "8ea3115828e912ca40a9e878ac6e292f740a4f2b51b8dbf927095cfaa672ecd5"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "a2306e68d829cf1e7bf23b2dee98d8f65cb7124766bf50f0082ec09a6b150218"
+    },
+    {
+      "path": "tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs",
+      "sha256": "2db5a376dc4c2ed02d2a0998127f91e2fd69f1554f068fcd19a4c5ede59b2888"
+    },
+    {
+      "path": "tests/report-group-dashboard/php/category-sale-types.php",
+      "sha256": "2d1ff539c69b45f2d2dbeda04d9657e669b5b15557e538131ec2549b416b1dd2"
+    },
+    {
+      "path": "scripts/group-dashboard-sale-types-local-verification.mjs",
+      "sha256": "5515a5b466a722040554c5e5cd94b5e9f7c63f0efb43d852e83b58486a04cb14"
+    }
+  ],
+  "deleted": [
+    "tests/report-group-dashboard/php/r91-category-sale-types.php",
+    "scripts/r91-local-verification.mjs"
+  ],
+  "scope": {
+    "new": [
+      "上方去掉体验卡，三等列展示疗程卡、单项、产品",
+      "每个一级分类下由体验卡改为单项，仍为名称/销售量/现金业绩",
+      "更新列名取值来源说明"
+    ],
+    "preserved": [
+      "原四类型底层数据保持独立，体验卡不并入其他类型",
+      "一级实际业绩、合计、排行、下钻和权限规则",
+      "平台嵌入和独立看板共用服务与组件"
+    ],
+    "otherTasks": "本轮过程中16f5c187和c5df15aa由其他任务提交，保留其改动；候选补丁仅包含本轮文件及段落。整包仅本地验证，未授权发布。"
+  },
+  "groups": {
+    "frontend": [
+      "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+    ],
+    "backend": [
+      "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "后端代码/app/services/report/GroupManagementDashboardServices.php"
+    ],
+    "tests": [
+      "tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs",
+      "tests/report-group-dashboard/php/category-sale-types.php"
+    ],
+    "scripts": [
+      "scripts/group-dashboard-sale-types-local-verification.mjs"
+    ],
+    "migrations": [],
+    "generated": [
+      "/tmp/r92-build (local mohe-cashier-v3-src container)"
+    ],
+    "evidence": [
+      "tests/report-group-dashboard/evidence/r92-2026-10-18"
+    ]
+  },
+  "tests": {
+    "readonly": 96,
+    "php74Lint": "PASS",
+    "saleTypeClassifier": "PASS",
+    "actualPerformanceContract": "8 PASS",
+    "stabilityContract": "PASS",
+    "frontendContract": "PASS",
+    "prebuild": "70 PASS",
+    "page": "两个本地入口已显示三项；单项11=六维2+生美9，现金业绩3999；原实际业绩93235不变",
+    "responsive": "本轮卡片桌面/窄屏无溢出；窄屏原有顶部六个经营指标卡仍存在截断，本轮未扩展修改",
+    "databaseWrites": 0,
+    "build": "PASS (Vite 4.5.14)"
+  },
+  "commentsUpdated": [
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "后端代码/app/services/report/GroupManagementDashboardServices.php"
+  ],
+  "remote": "不适用"
+}

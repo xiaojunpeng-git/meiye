@@ -1,0 +1,14 @@
+<script setup lang="uts">
+	import { openMiniProgramMerchantBootstrapOnLaunch } from './src/shared/platform/mobile-navigation.uts'
+
+	onLaunch(() => {
+		openMiniProgramMerchantBootstrapOnLaunch()
+	})
+</script>
+
+<style>
+	page {
+		background-color: #f4f7f5;
+		color: #1f2d26;
+	}
+</style>

@@ -1,0 +1,6 @@
+{
+	"contractVersion": "mobile-merchant-v1",
+	"error": {
+		"code": "ACTIVE_CONTEXT_MISMATCH"
+	}
+}

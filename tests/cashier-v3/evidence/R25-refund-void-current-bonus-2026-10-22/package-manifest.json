@@ -1,0 +1,10 @@
+{
+  "commit": "c7440b6b804a5b857dc84d372eb5a6ca49d323cb",
+  "files": {
+    "app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "e19267c7e4fa681c5bc489c864d8160ec74e59b8e907f15cce562dee6993ba61",
+    "app/services/user/UserBalanceAtomicServices.php": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a"
+  },
+  "scope": "R25 only; no frontend or database change",
+  "payload_sha256": "334ae1649f2c01c75180c8b69c3f5aa7ba66b19f3ff16996db42650515240fd8",
+  "package_path": "/private/tmp/mohe-r25-refund-void-c7440b6b/payload.tar"
+}

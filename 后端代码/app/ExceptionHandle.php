@@ -1,0 +1,132 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app;
+
+use app\services\product\inventory\InventoryErrorMessage;
+use app\services\mobile\protocol\MobileApiException;
+use app\services\mobile\protocol\MobileApiResponse;
+use app\services\query\UnifiedQueryException;
+use mohe\exceptions\AdminException;
+use mohe\exceptions\ApiException;
+use mohe\exceptions\AuthException;
+use mohe\exceptions\PayException;
+use mohe\exceptions\TemplateException;
+use mohe\exceptions\UploadException;
+use mohe\exceptions\WechatReplyException;
+use mohe\services\wechat\WechatException;
+use think\db\exception\DataNotFoundException;
+use think\db\exception\ModelNotFoundException;
+use think\exception\Handle;
+use think\exception\HttpException;
+use think\exception\HttpResponseException;
+use think\exception\ValidateException;
+use think\facade\Env;
+use think\Response;
+use Throwable;
+
+/**
+ * 应用异常处理类
+ */
+class ExceptionHandle extends Handle
+{
+    /**
+     * 不需要记录信息（日志）的异常类列表
+     * @var array
+     */
+    protected $ignoreReport = [
+        HttpException::class,
+        HttpResponseException::class,
+        ModelNotFoundException::class,
+        DataNotFoundException::class,
+        ValidateException::class,
+        AdminException::class,
+        UploadException::class,
+        PayException::class,
+        ApiException::class,
+        TemplateException::class,
+        AuthException::class
+    ];
+
+    /**
+ 	* 记录异常信息（包括日志或者其它方式记录）
+	* @param Throwable $exception
+	* @return void
+	 */
+    public function report(Throwable $exception): void
+    {
+        // 使用内置的方式记录异常日志
+        parent::report($exception);
+    }
+
+    /**
+     * Render an exception into an HTTP response.
+     *
+     * @access public
+     * @param \think\Request $request
+     * @param Throwable $e
+     * @return Response
+     */
+    public function render($request, Throwable $e): Response
+    {
+        $inventoryFailure = InventoryErrorMessage::from($e);
+        if ($inventoryFailure !== null) {
+            return json([
+                'data' => ['code' => $inventoryFailure['code']],
+                'msg' => $inventoryFailure['message'],
+                'status' => 400,
+            ]);
+        }
+        if ($this->isMobileApiRequest($request)) {
+            if ($e instanceof MobileApiException) {
+                return MobileApiResponse::failure($e, $request);
+            }
+            if ($e instanceof ValidateException) {
+                return MobileApiResponse::validationFailure($e, $request);
+            }
+            // 统一查询已接入手机端时，不能退回旧 status/msg/data 封装；
+            // 保持移动协议并避免调试信息进入客户端。
+            if ($e instanceof UnifiedQueryException) {
+                return MobileApiResponse::validationFailure($e, $request);
+            }
+        }
+        // 添加自定义异常处理机制
+        $massageData = Env::get('app_debug', false) ? [
+            'file'     => $e->getFile(),
+            'line'     => $e->getLine(),
+            'trace'    => $e->getTrace(),
+            'previous' => $e->getPrevious(),
+        ] : [];
+        // 添加自定义异常处理机制
+        if ($e instanceof DbException) {
+            return app('json')->fail('数据获取失败', $massageData);
+        } elseif ($e instanceof AuthException ||
+            $e instanceof ValidateException ||
+            $e instanceof ApiException ||
+            $e instanceof PayException ||
+            $e instanceof TemplateException ||
+            $e instanceof UploadException ||
+            $e instanceof WechatReplyException ||
+            $e instanceof AdminException ||
+            $e instanceof WechatException
+        ) {
+            return app('json')->make($e->getCode() ?: 400, $e->getMessage(), $massageData);
+        } else {
+            return app('json')->code(500)->make(400, $e->getMessage(), $massageData);
+        }
+
+    }
+
+    private function isMobileApiRequest($request): bool
+    {
+        return strpos(ltrim((string)$request->pathinfo(), '/'), 'api/mobile/') === 0;
+    }
+}

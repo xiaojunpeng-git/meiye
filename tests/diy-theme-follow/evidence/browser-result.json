@@ -1,0 +1,11 @@
+{
+  "pass": true,
+  "scope": "canonical component fixture, not full production deployment or mini-program runtime",
+  "cases": 8,
+  "indicatorsPerCase": 4,
+  "widths": [
+    375,
+    320
+  ],
+  "browserErrors": []
+}

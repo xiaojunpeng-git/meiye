@@ -1,0 +1,73 @@
+{
+  "title": "OPT3 冻结业务源码：上下文衔接、按需澄清与查询稳定性",
+  "frozen_at": "2026-10-11T14:31:59.849835+00:00",
+  "original_task_baseline": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "execution_baseline_head": "be821109147b046734c27fcf69472af44289e1b1",
+  "source_sha256": {
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+    "后端代码/app/services/ai/AiGatewayServices.php": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+    "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+    "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac"
+  },
+  "dependency_sha256": {
+    "后端代码/app/services/metric/MetricDictionaryServices.php": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7",
+    "后端代码/app/services/query/metric/MetricDefinitionRegistry.php": "b107d93ad729bf6b8a5eeadddafc9e409c7e58c43c7e1aa68a6f4fe0ae967c59",
+    "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php": "f400d1424c15595b57f5c811d7337becc8b14b430bf5b84b2b2602792138e4e5"
+  },
+  "owned_patch_fingerprint_sha256": "aca7e90b45b3f8586ac9062378a02ff464e224abb4388831b660f05f58b97230",
+  "fingerprint_method": "SHA256 of ordered UTF-8 path, NUL, git diff HEAD for owned source or exact recorded owned patch for RegisteredMetricReadServices, NUL",
+  "partial_ownership": {
+    "file": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "policy": "Only the two owned constructor/cache and serviceCustomerMetrics hunks; never stage the whole file diff. Existing refund hunks excluded.",
+    "ownership_evidence": "tests/mohe-ai/evidence/OPT3-service-customer-registered-ownership.json",
+    "owned_patch": "tests/mohe-ai/evidence/OPT3-service-customer-registered-owned.patch",
+    "owned_patch_sha256": "8bcc702832af180ce6948fb41fc828d1fb62794131211b89dc80f0189684194a",
+    "expected_worktree_after_sha256": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "current_matches_expected": true,
+    "reverse_apply_check_exit_code": 0,
+    "reverse_apply_check_output": ""
+  },
+  "scope": "local source and local business verification only",
+  "business_data_migrations": [],
+  "production_changed": false,
+  "product_manager_accepted": false,
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "validation_status": "Independent PHP7.4 ordinal guidance 91/91 passed; local 5x10 authorized after verified worker reload and zero active/held Run preflight.",
+  "prior_freeze_revisions": [
+    {
+      "frozen_at": "2026-10-11T14:30:54.761204+00:00",
+      "source_sha256": {
+        "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+        "后端代码/app/services/ai/AiGatewayServices.php": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+        "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+        "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+        "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+        "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+        "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+        "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+        "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+        "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+        "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+        "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+        "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+        "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+        "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac"
+      },
+      "owned_patch_fingerprint_sha256": "496a1b31d15d2f74e7970c3565535c9f62e38ef1b986513c7e9bb5ef320b184c",
+      "reason": "Pre-live final review corrected full-board ordinal out-of-range guidance; no 50-question batch started on this version."
+    }
+  ]
+}

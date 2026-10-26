@@ -1,0 +1,326 @@
+<template>
+	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }">
+		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-home-page__content">
+			<view class="merchant-home-page__content-inner">
+				<view class="merchant-home-page__context"><view class="merchant-home-page__org-filter" @tap="openWarehouse"><text>{{ scopeLabel }}›</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
+				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
+
+				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营业绩</text><text class="merchant-home-page__section-note">按当前筛选范围</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
+				<view class="merchant-home-page__metric-grid">
+					<view v-for="metric in overviewMetrics" :key="metric.key" class="merchant-home-page__metric-card" :class="'merchant-home-page__metric-card--' + metric.tone">
+						<view class="merchant-home-page__metric-head">
+							<view class="merchant-home-page__metric-icon"><text>{{ metric.icon }}</text></view>
+							<text class="merchant-home-page__metric-label">{{ metric.label }}</text>
+						</view>
+						<text class="merchant-home-page__metric-value">{{ metric.value }}</text>
+						<text class="merchant-home-page__metric-source">{{ metric.source }}</text>
+					</view>
+				</view>
+
+				<!-- 销售类型取后台共用投影，数量和现金业绩分别展示，不能与实际业绩混算。 -->
+				<view class="merchant-home-page__sale-grid">
+					<view v-for="card in saleTypeCards" :key="card.code" class="merchant-home-page__sale-card">
+						<text class="merchant-home-page__card-title">{{ card.title }}</text>
+						<text class="merchant-home-page__card-note">销售数量</text><text class="merchant-home-page__sale-quantity">{{ card.sales_quantity }}</text>
+						<text class="merchant-home-page__card-note">现金业绩</text><text class="merchant-home-page__sale-money">{{ formatDashboardMoney(card.cash_performance_cents) }}</text>
+					</view>
+				</view>
+
+				<view class="merchant-home-page__trend-card"><view class="merchant-home-page__card-head"><view><text class="merchant-home-page__card-title">经营趋势</text><text class="merchant-home-page__card-note">实际业绩与消耗业绩</text></view><text class="merchant-home-page__card-badge">{{ selectedPeriodLabel }}</text></view><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载趋势数据</text></view><view v-else-if="trendPoints().length > 0" class="merchant-home-page__trend-ready"><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="merchant-home-page__trend-canvas"></image><canvas v-else canvas-id="merchant-home-trend" id="merchant-home-trend" width="720" height="228" class="merchant-home-page__trend-canvas"></canvas><view class="merchant-home-page__trend-legend"><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--actual"></text><text>实际业绩</text></view><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--consume"></text><text>消耗业绩</text></view></view></view><view v-else class="merchant-home-page__trend-empty"><view class="merchant-home-page__trend-grid"><view v-for="line in 4" :key="line" class="merchant-home-page__trend-line"></view></view><text>暂无趋势数据</text><text>当前日期范围没有已完成事实</text></view></view>
+
+				<view class="merchant-home-page__section-head"><text class="merchant-home-page__section-title">分类业绩</text><text class="merchant-home-page__section-note">点击分类查看项目／产品排行</text></view>
+				<view v-if="loading && categoryCards.length === 0" class="merchant-home-page__inline-state"><text>正在加载分类业绩</text></view>
+				<view v-for="category in categoryCards" :key="category.category_id" class="merchant-home-page__category-card" @tap="openCategory(category.category_id)">
+					<view class="merchant-home-page__card-head"><text class="merchant-home-page__card-title">{{ category.name }}</text><text class="merchant-home-page__section-link">查看排行 ›</text></view>
+					<view class="merchant-home-page__category-total"><view><text class="merchant-home-page__sale-money">{{ formatDashboardMoney(category.amount_cents) }}</text><text class="merchant-home-page__card-note">分类实际业绩</text></view><text class="merchant-home-page__card-badge">{{ category.share == null ? '—' : category.share + '%' }}</text></view>
+					<view class="merchant-home-page__category-types"><view v-for="type in category.sale_types" :key="type.code"><text class="merchant-home-page__summary-label">{{ type.title }}</text><text class="merchant-home-page__card-note">销售量 {{ type.sales_quantity }}</text><text class="merchant-home-page__sale-money merchant-home-page__sale-money--small">{{ formatDashboardMoney(type.cash_performance_cents) }}</text></view></view>
+				</view>
+				<view v-if="!loading && categoryCards.length === 0" class="merchant-home-page__ranking-empty"><text>{{ message.length > 0 ? '分类业绩暂时无法加载' : '当前范围暂无分类业绩' }}</text></view>
+
+				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">{{ selectedPeriod === 'today' ? '今日客情' : '客情概况' }}</text><text class="merchant-home-page__section-note">按启用来源展示 · {{ selectedPeriodLabel }}</text></view><text class="merchant-home-page__section-link" @tap="showSourceExplanation">取值来源</text></view>
+				<view class="merchant-home-page__source-grid">
+					<view v-for="source in sourceCards" :key="source.source_id" class="merchant-home-page__source-card">
+						<text class="merchant-home-page__card-title">{{ source.name }}</text>
+						<view class="merchant-home-page__source-row"><text>进店数</text><text>{{ source.visit_count }}</text></view>
+						<view v-if="source.source_code === 'A'" class="merchant-home-page__source-row"><text>活客数</text><text>{{ source.active_customer_count }}</text></view>
+						<view class="merchant-home-page__source-row"><text>成交人数</text><text>{{ source.deal_count }}</text></view>
+						<view class="merchant-home-page__source-row merchant-home-page__source-row--money"><text>实际业绩</text><text>{{ formatDashboardMoney(source.deal_amount_cents) }}</text></view>
+					</view>
+				</view>
+				<view v-if="!loading && sourceCards.length === 0" class="merchant-home-page__ranking-empty"><text>{{ message.length > 0 ? '客情暂时无法加载' : sourceState === 'unavailable' ? '当前账号没有客户查看权限' : '当前没有启用的业务来源' }}</text></view>
+
+
+				<view class="merchant-home-page__section-head merchant-home-page__section-head--compact"><view><text class="merchant-home-page__section-title">{{ rankingName }}</text><text class="merchant-home-page__section-note">{{ rankingNote }}</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看全部 ›</text></view>
+				<view class="merchant-home-page__ranking-card"><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载排行数据</text></view><view v-else-if="rankingRows.length > 0" class="merchant-home-page__ranking-list"><view v-for="(row, index) in rankingRows" :key="row.entityType + '-' + row.entityId" class="merchant-home-page__ranking-row"><view class="merchant-home-page__ranking-rank" :class="'merchant-home-page__ranking-rank--' + index.toString()"><text>{{ index + 1 }}</text></view><view class="merchant-home-page__ranking-copy"><text class="merchant-home-page__ranking-name">{{ row.entityName || row.name }}</text><text class="merchant-home-page__ranking-meta">{{ row.entityType === 'branch' ? '分公司' : row.entityType === 'manager' ? '经理' : '门店' }}</text></view><text class="merchant-home-page__ranking-value">¥{{ row.displayValue || row.rankingValue || 0 }}</text></view></view><view v-else class="merchant-home-page__ranking-empty"><text class="merchant-home-page__ranking-empty-title">暂无排行数据</text><text class="merchant-home-page__ranking-empty-copy">当前权限范围没有可展示的排行</text></view></view>
+
+				<view class="merchant-home-page__freshness"><text>数据更新时间：{{ freshness }}</text><text>口径版本：{{ metricVersion }}</text></view>
+			</view>
+		</scroll-view>
+
+		<MerchantPrimaryTabBar active-key="home" />
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
+	import { currentMobilePlatform, drawMobileTrendCanvas } from '../../../shared/platform/mobile-platform.uts'
+	import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'
+	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
+
+	const periods = [{ key: 'today', label: '今天' }, { key: 'yesterday', label: '昨天' }, { key: 'last_month', label: '上月' }, { key: 'month', label: '本月' }, { key: 'custom', label: '自定义' }]
+	// 经营首页初次进入默认看当天经营事实，与数据页的初始时间保持一致。
+	const selectedPeriod = ref('today')
+	const loading = ref(false)
+	const refreshing = ref(false)
+	const message = ref('')
+	const scopeLabel = ref('授权组织范围')
+	const freshness = ref('—')
+	const metricVersion = ref('—')
+	const rankingName = ref('组织排行')
+	const rankingNote = ref('按现金业绩排序')
+	const trend = ref<any>({ points: [] })
+	const rankingRows = ref<Array<any>>([])
+	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+	const nativeTrendImage = ref('')
+	const canvasHost : any = getCurrentInstance().proxy
+	const overviewMetrics = ref<Array<any>>([])
+	const saleTypeCards = ref<Array<any>>([])
+	const categoryCards = ref<Array<any>>([])
+	const sourceCards = ref<Array<any>>([])
+	const sourceState = ref('empty')
+	const sourceExplanation = ref('')
+	const currentPeriod = ref<any>({})
+	let requestSequence = 0
+
+	const selectedPeriodLabel = computed(() => {
+		for (let index = 0; index < periods.length; index++) if (periods[index].key === selectedPeriod.value) return periods[index].label
+		return '今天'
+	})
+
+	// 首页含经营数据，分享卡片始终只指向公开登录入口，不携带当前页面或权限数据。
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() : any => ({ title: '商家端登录', path: '/src/app/pages/bootstrap/index' }))
+	onShareTimeline(() : any => ({ title: '商家端登录', query: '' }))
+	// #endif
+
+	onShow(() => {
+		if (merchantRequestSession(currentMerchantRoot()) == null) { openMerchantBootstrap(); return }
+		reload()
+	})
+
+	function reload() : void {
+		loading.value = true
+		message.value = ''
+		const sequence = ++requestSequence
+		queryMobileMerchantHome({ projectionVersion: 'sections-v2', periodMode: selectedPeriod.value }, (response : any) => {
+			// 快速切换期间时，旧请求不能覆盖新的筛选结果。
+			if (sequence !== requestSequence) return
+			loading.value = false
+			if (response == null || response.ok !== true || response.body == null) {
+				clearHomeData()
+				if (response != null && response.body != null && String(response.body.errorCode || response.body.protocolCode || '') === 'MERCHANT_SESSION_EXPIRED') {
+					clearMerchantRoot()
+					openMerchantBootstrap()
+					return
+				}
+				message.value = String(response == null ? '经营首页暂时不可用。' : (response.message || '经营首页暂时不可用。'))
+				return
+			}
+			applyHomePayload(response.body)
+		})
+	}
+	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 900) }
+
+	function selectPeriod(value : string) : void {
+		if (value === 'custom') { openWarehouse(); return }
+		selectedPeriod.value = value
+		clearHomeData()
+		reload()
+	}
+
+	// 条件变化或服务端拒绝后清掉旧期间/旧权限数值，不能把历史结果当成新查询结果。
+	function clearHomeData() : void {
+		saleTypeCards.value = []
+		categoryCards.value = []
+		sourceCards.value = []
+		trend.value = { points: [] }
+		nativeTrendImage.value = ''
+		rankingRows.value = []
+		currentPeriod.value = {}
+		overviewMetrics.value = []
+	}
+
+	function openWarehouse() : void { uni.redirectTo({ url: '/src/merchant/pages/warehouse/index' }) }
+	function openCategory(categoryId : number) : void {
+		// 传稳定分类 ID 和后端解析后的日期；详情重新经同一接口校验当前权限。
+		const period = currentPeriod.value
+		if (!period.startDate || !period.endDate) return
+		uni.navigateTo({ url: '/src/merchant/pages/category-ranking/index?categoryId=' + categoryId.toString() + '&startDate=' + period.startDate + '&endDate=' + period.endDate })
+	}
+	function showSourceExplanation() : void {
+		uni.showModal({ title: '客情取值来源', content: sourceExplanation.value, showCancel: false })
+	}
+
+	function applyHomePayload(payload : any) : void {
+		scopeLabel.value = String((payload.scope || {}).label || '授权组织范围')
+		metricVersion.value = String(payload.metric_version || '—')
+		freshness.value = formatDataTime(Number(payload.data_as_of || 0))
+		let trendPayload = payload.trend || {}
+		trend.value = trendPayload.data || trendPayload || { points: [] }
+		rankingRows.value = Array.isArray((payload.ranking || {}).rows) ? (payload.ranking || {}).rows : []
+		rankingName.value = String((payload.ranking || {}).name || '组织排行')
+		const rankingCode = String((payload.ranking || {}).code || '')
+		rankingNote.value = rankingCode === 'branch_cash_performance' ? '按分公司现金业绩排序' : rankingCode === 'manager_cash_performance' ? '按经理现金业绩排序' : '按门店现金业绩排序'
+		// 指标名、解释与数值均消费平台同一六项契约，手机只映射视觉样式和金额格式。
+		const cards = (payload.overview || {}).cards
+		overviewMetrics.value = (Array.isArray(cards) ? cards : []).map((metric : any) : any => {
+			const code = String(metric.metric_code || '')
+			const tone = code === 'actual_performance' ? 'actual' : code === 'refund_performance' ? 'refund' : code === 'consumption_performance' ? 'consume' : code === 'consumption_count' ? 'service' : code === 'consumption_unit_price' ? 'unit' : 'cash'
+			const icons : any = { cash: '¥', refund: '退', actual: '实', consume: '耗', service: '次', unit: '均' }
+			return { key: code, label: String(metric.name || ''), source: String(metric.source_explanation || ''), tone: tone, icon: icons[tone], value: metric.value_type === 'money' ? formatDashboardMoney(metric.value_cents) : metric.value == null ? '—' : String(metric.value) }
+		})
+		currentPeriod.value = payload.period || {}
+		saleTypeCards.value = Array.isArray(payload.sale_type_cards) ? payload.sale_type_cards : []
+		// 分类次序与显隐均由后台决定；手机端不按金额重新排序。
+		categoryCards.value = (Array.isArray(payload.categories) ? payload.categories : []).filter((category : any) : boolean => category.visible === true)
+		const sources = payload.sources || {}
+		sourceCards.value = Array.isArray(sources.records) ? sources.records : []
+		sourceState.value = String(sources.state || 'empty')
+		sourceExplanation.value = String(sources.source_explanation || '')
+		queueTrendDraw()
+	}
+
+	function trendPoints() : Array<any> {
+		let points = (trend.value || {}).points
+		return Array.isArray(points) ? points : []
+	}
+
+	function queueTrendDraw() : void {
+		setTimeout(() => { drawHomeTrend() }, 80)
+		setTimeout(() => { drawHomeTrend() }, 260)
+		setTimeout(() => { drawHomeTrend() }, 720)
+	}
+
+	function drawHomeTrend() : void {
+		let points = trendPoints()
+		if (points.length === 0) return
+		drawMobileTrendCanvas('merchant-home-trend', points, canvasHost, (filePath : string) => { nativeTrendImage.value = filePath })
+	}
+
+
+	function formatDataTime(timestamp : number) : string {
+		if (timestamp <= 0) return '—'
+		const date = new Date(timestamp * 1000)
+		return date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0')
+	}
+</script>
+
+<style>
+	.merchant-home-page { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #25364a; }
+	/* Keep a consistent top inset across the merchant pages. The WeChat
+	 * mini-program target adds its larger status-bar/capsule reservation below. */
+	.merchant-home-page__header { flex: none; padding: 18px 18px 14px 18px; background-color: #ffffff; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #e4ebf2; }
+	.merchant-home-page__eyebrow { display: block; font-size: 12px; font-weight: 700; line-height: 17px; color: #5b7893; }
+	.merchant-home-page__title-row { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 3px; }
+	.merchant-home-page__title { display: block; font-size: 25px; font-weight: 800; line-height: 32px; color: #1e3349; }
+	.merchant-home-page__subtitle { display: block; margin-top: 4px; font-size: 12px; line-height: 18px; color: #8291a0; }
+	.merchant-home-page__refresh { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 7px 10px; border-radius: 8px; background-color: #eef6ff; color: #1d73b8; font-size: 11px; }
+	.merchant-home-page__refresh text:first-child { font-size: 17px; line-height: 16px; }
+	.merchant-home-page__content { min-height: 0; height: 0; flex: 1; }
+	.merchant-home-page__content-inner { padding: 20px 14px 88px 14px; }
+	.merchant-home-page__context { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; padding: 8px 0 12px 0; border-radius: 0; background-color: transparent; }
+	.merchant-home-page__org-filter { display: flex; box-sizing: border-box; width: 100px; min-width: 100px; height: 36px; align-items: center; justify-content: center; padding: 0 10px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.merchant-home-page__org-filter text { overflow: hidden; width: 100%; font-size: 13px; font-weight: 700; line-height: 34px; color: #71839a; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__periods { display: flex; flex-shrink: 0; flex-direction: row; margin-left: 8px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 18px; background-color: rgba(255, 255, 255, 0.88); padding: 3px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
+	.merchant-home-page__period { min-width: 44px; height: 34px; padding: 0 6px; border-radius: 14px; text-align: center; white-space: nowrap; font-size: 12px; line-height: 34px; color: #7890a4; }
+	.merchant-home-page__period--active { background-color: #2779bd; color: #ffffff; font-weight: 700; }
+	.merchant-home-page__section-head { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; margin-top: 17px; margin-bottom: 9px; }
+	.merchant-home-page__section-head--compact { margin-top: 18px; }
+	.merchant-home-page__section-title { display: block; font-size: 16px; font-weight: 800; line-height: 21px; color: #29425a; }
+	.merchant-home-page__section-note { display: block; margin-top: 2px; font-size: 10px; line-height: 14px; color: #95a1ae; }
+	.merchant-home-page__section-link { padding: 3px 0; font-size: 11px; line-height: 16px; color: #2879ba; }
+	.merchant-home-page__section-link--muted { color: #9aa7b3; }
+	.merchant-home-page__metric-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+	.merchant-home-page__metric-card { position: relative; display: flex; box-sizing: border-box; width: calc(50% - 4px); min-height: 112px; flex-direction: column; padding: 12px; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); border-top-width: 3px; border-top-style: solid; border-top-color: #4f8fc5; }
+	.merchant-home-page__metric-card--actual { border-top-color: #4c9a8b; }
+	.merchant-home-page__metric-card--consume { border-top-color: #c28a34; }
+	.merchant-home-page__metric-card--refund, .merchant-home-page__metric-card--service { border-top-color: #4c9a8b; }
+	/* 六项经营指标共用同一标题结构，保证图标和指标名在窄屏卡片内始终成组对齐。 */
+	.merchant-home-page__metric-head { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+	.merchant-home-page__metric-icon { display: flex; width: 25px; height: 25px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf4fd; font-size: 11px; font-weight: 800; color: #2778ba; }
+	.merchant-home-page__metric-card--actual .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #3d887b; }
+	.merchant-home-page__metric-card--consume .merchant-home-page__metric-icon { background-color: #fff5df; color: #ae751d; }
+	.merchant-home-page__metric-card--refund .merchant-home-page__metric-icon, .merchant-home-page__metric-card--service .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #357a72; }
+	.merchant-home-page__metric-label { min-width: 0; margin-left: 8px; font-size: 11px; line-height: 15px; color: #718397; white-space: nowrap; }
+	.merchant-home-page__metric-value { margin-top: 8px; font-size: 21px; font-weight: 800; line-height: 26px; color: #1f5f8b; }
+	.merchant-home-page__metric-card--actual .merchant-home-page__metric-value { color: #357a72; }
+	.merchant-home-page__metric-card--consume .merchant-home-page__metric-value { color: #a66d13; }
+	.merchant-home-page__metric-card--refund .merchant-home-page__metric-value, .merchant-home-page__metric-card--service .merchant-home-page__metric-value { color: #357a72; }
+	.merchant-home-page__metric-card--unit .merchant-home-page__metric-value { color: #3b78a5; }
+	.merchant-home-page__metric-source { margin-top: auto; overflow: hidden; font-size: 9px; line-height: 13px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__trend-card, .merchant-home-page__ranking-card { overflow: hidden; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); }
+	.merchant-home-page__trend-card { margin-top: 10px; padding: 13px; }
+	.merchant-home-page__card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+	.merchant-home-page__card-title { display: block; font-size: 14px; font-weight: 800; line-height: 19px; color: #304961; }
+	.merchant-home-page__card-note { display: block; margin-top: 2px; font-size: 10px; line-height: 14px; color: #93a0ad; }
+	.merchant-home-page__card-badge { padding: 4px 7px; border-radius: 7px; background-color: #eef6ff; font-size: 10px; line-height: 14px; color: #2876b3; }
+	.merchant-home-page__trend-empty { position: relative; display: flex; height: 126px; align-items: center; justify-content: center; flex-direction: column; margin-top: 8px; border-radius: 10px; background-color: #f8fbfd; color: #8193a4; }
+	.merchant-home-page__trend-ready { margin-top: 8px; padding: 5px 8px 7px 8px; border-radius: 10px; background-color: #f8fbfd; }
+	.merchant-home-page__trend-canvas { display: block; width: 100%; height: 112px; }
+	.merchant-home-page__trend-legend { display: flex; flex-direction: row; justify-content: center; gap: 16px; font-size: 10px; line-height: 14px; color: #8293a3; }
+	.merchant-home-page__trend-legend > view { display: flex; flex-direction: row; align-items: center; }
+	.merchant-home-page__trend-dot { display: block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; }
+	.merchant-home-page__trend-dot--actual { background-color: #1976d2; }
+	.merchant-home-page__trend-dot--consume { background-color: #c28a34; }
+	.merchant-home-page__trend-grid { position: absolute; left: 12px; right: 12px; top: 17px; bottom: 17px; display: flex; flex-direction: column; justify-content: space-between; }
+	.merchant-home-page__trend-line { width: 100%; border-top-width: 1px; border-top-style: dashed; border-top-color: #dbe7ef; }
+	.merchant-home-page__trend-empty > text:first-of-type { z-index: 1; font-size: 12px; font-weight: 700; line-height: 17px; }
+	.merchant-home-page__trend-empty > text:last-of-type { z-index: 1; margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0acb7; }
+	.merchant-home-page__inline-state { display: flex; min-height: 105px; align-items: center; justify-content: center; font-size: 12px; color: #8493a1; }
+	/* 销售类型固定三项；动态分类单列，来源卡可换行，长名称不撑破视口。 */
+	.merchant-home-page__sale-grid { display: flex; flex-direction: row; gap: 7px; margin-top: 10px; }
+	.merchant-home-page__sale-card { flex: 1; min-width: 0; padding: 11px 8px; border-radius: 12px; background-color: #ffffff; border-top: 2px solid #4f8fc5; }
+	.merchant-home-page__sale-card .merchant-home-page__card-title { font-size: 12px; }
+	.merchant-home-page__sale-quantity { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; color: #357a72; }
+	.merchant-home-page__sale-money { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; color: #1f5f8b; overflow-wrap: anywhere; }
+	.merchant-home-page__sale-money--small { font-size: 12px; }
+	.merchant-home-page__sale-card .merchant-home-page__sale-money { font-size: 14px; }
+	.merchant-home-page__category-card { margin-bottom: 10px; padding: 12px; border-radius: 13px; background-color: #ffffff; border-top: 2px solid #4c9a8b; }
+	.merchant-home-page__category-total { display: flex; flex-direction: row; justify-content: space-between; align-items: center; margin-top: 5px; }
+	.merchant-home-page__category-types { display: flex; flex-direction: row; margin-top: 10px; padding-top: 9px; border-top: 1px solid #eef2f5; }
+	.merchant-home-page__category-types > view { flex: 1; min-width: 0; padding-right: 5px; }
+	.merchant-home-page__summary-label { display: block; font-size: 11px; color: #718397; }
+	.merchant-home-page__source-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+	.merchant-home-page__source-card { box-sizing: border-box; width: calc(50% - 4px); padding: 12px; border-radius: 12px; background-color: #ffffff; border-top: 2px solid #4f8fc5; }
+	.merchant-home-page__source-card .merchant-home-page__card-title { margin-bottom: 9px; font-size: 12px; overflow-wrap: anywhere; }
+	.merchant-home-page__source-row { display: flex; flex-direction: row; justify-content: space-between; gap: 6px; margin-top: 5px; font-size: 11px; color: #718397; }
+	.merchant-home-page__source-row text:last-child { color: #2b4358; font-weight: 700; }
+	.merchant-home-page__source-row--money text:last-child { color: #1f5f8b; }
+
+	.merchant-home-page__error { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background-color: #fff2f0; color: #b94b43; font-size: 11px; }
+	.merchant-home-page__error-retry { padding: 5px 8px; border-radius: 6px; background-color: #c6534c; color: #ffffff; }
+	.merchant-home-page__ranking-card { min-height: 116px; }
+	.merchant-home-page__ranking-list { padding: 2px 12px; }
+	.merchant-home-page__ranking-row { display: flex; min-height: 48px; flex-direction: row; align-items: center; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #eef2f5; }
+	.merchant-home-page__ranking-row:last-child { border-bottom-width: 0; }
+	.merchant-home-page__ranking-rank { display: flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 50%; background-color: #edf2f7; font-size: 10px; font-weight: 800; color: #60758b; }
+	.merchant-home-page__ranking-rank--0 { background-color: #f2c75c; color: #6e4c00; }
+	.merchant-home-page__ranking-rank--1 { background-color: #d7a078; color: #704123; }
+	.merchant-home-page__ranking-rank--2 { background-color: #f5e19c; color: #755f00; }
+	.merchant-home-page__ranking-copy { min-width: 0; flex: 1; margin-left: 9px; }
+	.merchant-home-page__ranking-name { display: block; overflow: hidden; font-size: 12px; line-height: 17px; color: #304961; text-overflow: ellipsis; white-space: nowrap; }
+	.merchant-home-page__ranking-meta { display: block; margin-top: 1px; font-size: 9px; line-height: 13px; color: #9aa7b3; }
+	.merchant-home-page__ranking-value { margin-left: 8px; font-size: 13px; font-weight: 800; line-height: 18px; color: #1f5f8b; }
+	.merchant-home-page__ranking-empty { display: flex; min-height: 116px; align-items: center; justify-content: center; flex-direction: column; }
+	.merchant-home-page__ranking-empty-title { font-size: 12px; font-weight: 700; line-height: 17px; color: #6f8192; }
+	.merchant-home-page__ranking-empty-copy { margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0aab3; }
+	.merchant-home-page__freshness { display: flex; flex-direction: row; justify-content: space-between; gap: 9px; margin-top: 11px; padding: 0 2px 5px 2px; font-size: 9px; line-height: 13px; color: #9ba6b0; }
+	/* Keep the selector below the status bar and capsule, without reserving a
+	 * second empty header area on the home page. */
+	.merchant-home-page--native-mini .merchant-home-page__content-inner { padding-top: 84px; }
+	@media all and (min-width: 700px) {
+		.merchant-home-page__content-inner { max-width: 720px; margin-left: auto; margin-right: auto; padding-left: 22px; padding-right: 22px; }
+	}
+</style>

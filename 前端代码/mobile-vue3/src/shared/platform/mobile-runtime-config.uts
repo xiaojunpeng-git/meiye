@@ -1,0 +1,60 @@
+const API_ORIGIN_KEY = 'mobile.runtime.apiOrigin'
+// Each customer mini program receives its own API origin at build time.
+// Missing provisioning must fail closed instead of reaching another customer.
+const MP_WEIXIN_PRODUCTION_ORIGIN = import.meta.env.VITE_MOBILE_API_ORIGIN
+
+function normalizedOrigin(value : any) : string {
+	if (typeof value != 'string') return ''
+	let origin = value.trim().replace(/\/$/, '')
+	// HBuilderX's embedded Web preview currently strips ':' while entering a URL.
+	// These two aliases are intentionally local-development conveniences only;
+	// customer installations still store a complete provisioned origin.
+	if (origin == 'localhost' || origin == '127.0.0.1') origin = 'http://' + origin + ':8080'
+	return /^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/.test(origin) ? origin : ''
+}
+
+function localWebDevelopmentOrigin() : string {
+	let origin = ''
+	// #ifdef WEB
+	let host = String(location.hostname || '')
+	if (host == 'localhost' || host == '127.0.0.1' || /^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) {
+		// The H5 preview has no API proxy. Call the canonical local backend
+		// gateway directly so requests cannot fall through to the Vite page.
+		origin = 'http://' + host + ':18093'
+	}
+	// #endif
+	return normalizedOrigin(origin)
+}
+
+// The instance address is provisioned per customer installation, never compiled
+// as a customer-specific source branch. H5 local development inherits the
+// current private-network host so a network change cannot strand the preview.
+export function mobileApiOrigin() : string {
+	// #ifdef MP-WEIXIN
+	// Never reuse a simulator/local address saved in storage when the released
+	// mini program is running. Its service endpoint is fixed per build.
+	return normalizedOrigin(MP_WEIXIN_PRODUCTION_ORIGIN)
+	// #endif
+	// The source preview must never be silently overridden by an old saved 8080
+	// address. Customer installations and other local previews keep their
+	// provisioned address unchanged. H5 18104 may be pointed at a customer
+	// instance from the login form, so honor that stored value before falling
+	// back to the local development gateway.
+	// #ifdef WEB
+	if (String(location.port || '') == '18100') return localWebDevelopmentOrigin()
+	if (String(location.port || '') == '18104') {
+		let configuredH5 = normalizedOrigin(uni.getStorageSync(API_ORIGIN_KEY))
+		if (configuredH5.length > 0) return configuredH5
+		return normalizedOrigin('http://' + String(location.hostname || '127.0.0.1') + ':18093')
+	}
+	// #endif
+	let configured = normalizedOrigin(uni.getStorageSync(API_ORIGIN_KEY))
+	return configured.length > 0 ? configured : localWebDevelopmentOrigin()
+}
+
+export function setMobileApiOrigin(value : string) : boolean {
+	let origin = normalizedOrigin(value)
+	if (origin.length == 0) return false
+	uni.setStorageSync(API_ORIGIN_KEY, origin)
+	return true
+}

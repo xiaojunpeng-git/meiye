@@ -1,0 +1,51 @@
+{
+  "version": "R49-zero-stock-detail-v1-2026-10-09",
+  "baselineHead": "44dd39f9426e6bdfedbdc229fdc123d9af5067d9",
+  "status": "selftest_passed_pending_product_manager_acceptance",
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "productionDatabaseWrites": false,
+  "trackedSourcePatchSha256": "223a892886c19a215c3c2993e37baabc8c43d5ee5944926950884e702caddbb6",
+  "trackedSourcePatchCommand": "git diff --binary -- 后端代码/app/services/product/inventory/InventoryStoreReadModelServices.php",
+  "unchangedStagedDiffSha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "files": [
+    {
+      "group": "backend_source",
+      "path": "后端代码/app/services/product/inventory/InventoryStoreReadModelServices.php",
+      "sha256": "b03cd00c916130840311c173be4abb617239c34742089872c87c7576ac1024be"
+    },
+    {
+      "group": "automated_test",
+      "path": "tests/inventory/php/zero-stock-product-detail-integration.php",
+      "sha256": "4eb4f8179414a0bb999e06d5af8eac2f53de04b14c9d4d772bf46eeb6d6a7353"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/inventory/evidence/R49-zero-stock-detail-selftest-2026-10-09.md",
+      "sha256": "66262fc49e403e1a2fc082bce25057b8e38888d820ccfbf443c7cfde2212d3fb"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/inventory/evidence/R49-zero-stock-detail-local-2026-10-09.png",
+      "sha256": "c86bbc0bda0147095f7b37aaf945d42f9a3d1e2211f1ca0d26243ef156eb5664"
+    },
+    {
+      "group": "evidence",
+      "path": "tests/inventory/evidence/R49-zero-stock-detail-second-local-2026-10-09.png",
+      "sha256": "c252e81769713c2e1f2ecf5f933e265d2e1ebab03ae7e9356fa3819c648b42dd"
+    }
+  ],
+  "selftest": {
+    "zeroStockDatabaseIntegration": {"passed": 17, "failed": 0, "fixturesRolledBack": true},
+    "stockSummaryTotals": {"passed": 8, "failed": 0},
+    "batchReconciliationContract": {"passed": 8, "failed": 0},
+    "detailBatchColumnsContract": {"passed": 5, "failed": 0},
+    "summaryQuantityRangeContract": {"passed": 7, "failed": 0},
+    "phpSyntax": "passed",
+    "scopeDiffCheck": "passed",
+    "localBrowser": "two_real_zero_stock_products_opened_with_matched_reconciliation_and_history",
+    "originalOnlineProduct": "failure_reproduced_before_fix_not_deployed_or_retested_online",
+    "localDataLimitation": "original_online_product_has_no_matching_local_stock_snapshot"
+  }
+}

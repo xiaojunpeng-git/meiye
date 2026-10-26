@@ -1,0 +1,116 @@
+{
+	"contractVersion": "mobile-mode-machine-v1",
+	"states": [
+		"BOOTING",
+		"PHONE_REQUIRED",
+		"MEMBER_READY",
+		"MERCHANT_CHECKING",
+		"MERCHANT_READY",
+		"SESSION_INVALID"
+	],
+	"transitions": [
+		{
+			"from": "BOOTING",
+			"event": "PHONE_REQUIRED",
+			"to": "PHONE_REQUIRED",
+			"actions": [
+				"CLEAR_ALL_SENSITIVE_STATE"
+			]
+		},
+		{
+			"from": "BOOTING",
+			"event": "VALID_MEMBER_SESSION",
+			"to": "MEMBER_READY",
+			"actions": [
+				"CLEAR_MERCHANT_ROOT",
+				"CLEAR_MERCHANT_CACHE_AND_PAGE_STACK",
+				"INCREMENT_REQUEST_GENERATION",
+				"DEFAULT_TO_MEMBER_ON_MINI_PROGRAM"
+			]
+		},
+		{
+			"from": "PHONE_REQUIRED",
+			"event": "PHONE_VERIFIED",
+			"to": "MEMBER_READY",
+			"actions": [
+				"INSTALL_APP_SESSION",
+				"INCREMENT_REQUEST_GENERATION"
+			]
+		},
+		{
+			"from": "MEMBER_READY",
+			"event": "ENTER_MERCHANT",
+			"to": "MERCHANT_CHECKING",
+			"actions": [
+				"CLEAR_MERCHANT_ROOT",
+				"CLEAR_MERCHANT_CACHE_AND_PAGE_STACK",
+				"INCREMENT_REQUEST_GENERATION"
+			]
+		},
+		{
+			"from": "MERCHANT_CHECKING",
+			"event": "VERIFIED_AND_AUTHORIZED",
+			"to": "MERCHANT_READY",
+			"actions": [
+				"INSTALL_COMPLETE_MERCHANT_ROOT"
+			]
+		},
+		{
+			"from": "MERCHANT_CHECKING",
+			"event": "DENIED_OR_CANCELLED",
+			"to": "MEMBER_READY",
+			"actions": [
+				"CLEAR_MERCHANT_ROOT",
+				"CLEAR_MERCHANT_CACHE_AND_PAGE_STACK",
+				"INCREMENT_REQUEST_GENERATION"
+			]
+		},
+		{
+			"from": "MERCHANT_READY",
+			"event": "ENTER_MEMBER",
+			"to": "MEMBER_READY",
+			"actions": [
+				"CLEAR_MERCHANT_ROOT",
+				"CLEAR_MERCHANT_CACHE_AND_PAGE_STACK",
+				"INCREMENT_REQUEST_GENERATION",
+				"PRESERVE_SERVER_DRAFTS"
+			]
+		},
+		{
+			"from": "MERCHANT_READY",
+			"event": "MERCHANT_SESSION_INVALID",
+			"to": "MEMBER_READY",
+			"actions": [
+				"CLEAR_MERCHANT_ROOT",
+				"CLEAR_MERCHANT_CACHE_AND_PAGE_STACK",
+				"INCREMENT_REQUEST_GENERATION",
+				"PRESERVE_SERVER_DRAFTS"
+			]
+		},
+		{
+			"from": "SESSION_INVALID",
+			"event": "REQUIRE_PHONE",
+			"to": "PHONE_REQUIRED",
+			"actions": [
+				"CLEAR_ALL_SENSITIVE_STATE"
+			]
+		}
+	],
+	"identityInvalidation": {
+		"event": "APP_OR_PHONE_IDENTITY_INVALID",
+		"fromAnyStateExcept": [
+			"SESSION_INVALID"
+		],
+		"to": "SESSION_INVALID",
+		"actions": [
+			"CLEAR_ALL_SENSITIVE_STATE",
+			"INCREMENT_REQUEST_GENERATION"
+		]
+	},
+	"guards": {
+		"merchantReadyOnlyFrom": "MERCHANT_CHECKING",
+		"merchantDeepLinkFailsClosed": true,
+		"appModeChoiceBypassesPhoneVerification": false,
+		"miniProgramColdStartDefault": "MEMBER"
+	}
+}

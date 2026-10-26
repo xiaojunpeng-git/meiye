@@ -1,0 +1,10 @@
+{
+  "head": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "remote": "不适用：本轮仅本地实现与自测",
+  "files": {
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "bb8350ab3b4281cc11fa885cc3bc2c33fd07b4f737436dd6f2a90e85059b09d3",
+    "tests/cashier-v3/php/r33-refund-void-rollback.php": "e01b6d8e93b6b7641746fc87b4081f9a90ba72562fa1fa30c8f44910edc5b4c0",
+    "后端代码/app/services/user/UserBalanceAtomicServices.php": "6be7ee5b7a1343e6e86f2713a8602b0c10892663fb25e56c42b6111a99299ca5"
+  },
+  "status": " M 后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php\n"
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "id": 25165,
+    "source_type": "manual_inbound",
+    "direction": 1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697356,
+    "recorded_at": 1791697356,
+    "reversal_of": 0
+  },
+  {
+    "id": 25166,
+    "source_type": "salon_usage_issue",
+    "direction": -1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697361,
+    "recorded_at": 1791697361,
+    "reversal_of": 0
+  },
+  {
+    "id": 25167,
+    "source_type": "manual_inbound_reversal",
+    "direction": -1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697411,
+    "recorded_at": 1791697411,
+    "reversal_of": 25027
+  },
+  {
+    "id": 25168,
+    "source_type": "manual_inbound_reversal",
+    "direction": -1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697419,
+    "recorded_at": 1791697419,
+    "reversal_of": 25165
+  },
+  {
+    "id": 25169,
+    "source_type": "manual_outbound",
+    "direction": -1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697496,
+    "recorded_at": 1791697496,
+    "reversal_of": 0
+  },
+  {
+    "id": 25170,
+    "source_type": "manual_outbound",
+    "direction": -1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697553,
+    "recorded_at": 1791697553,
+    "reversal_of": 0
+  },
+  {
+    "id": 25171,
+    "source_type": "stock_count_gain",
+    "direction": 1,
+    "fact_status": "SETTLED",
+    "occurred_at": 1791697635,
+    "recorded_at": 1791697635,
+    "reversal_of": 0
+  }
+]

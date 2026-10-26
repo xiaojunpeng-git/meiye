@@ -1,0 +1,16 @@
+PASS CCC-01 action is registered by both client and server manifests
+PASS CCC-02 creation locks server-discovered card shell and project SKU resources
+PASS CCC-03 configuration is immutable, idempotent, and member/workspace-bound
+PASS CCC-04 only project components and whole-yuan total authority are accepted
+PASS CCC-05 custom card cannot be mixed with normal sale lines
+PASS CCC-06 configuration resource is store-scoped and requires an in-cart version lock
+PASS CCC-07 final browser snapshot creates and locks the configuration with its member identity
+PASS CCC-08 custom validity snapshot is clock-stable before settlement
+PASS CCC-09 canonical migration provides all fields and postcheck counts index names
+PASS CCC-10 legacy hidden custom-card shell is recognized before ordinary project handling
+PASS CCC-11 component cost is frozen and initial configured total respects the cost floor
+PASS CCC-12 direct snapshots never validate the hidden custom-card shell as a sellable SKU
+PASS CCC-13 direct snapshots bind custom configuration to the browser line identity
+PASS CCC-14 final issue falls back to the exact snapshot command idempotency key
+PASS CCC-15 custom-card snapshot has cached components and cannot enter inventory settlement
+CUSTOM_CARD_CONFIGURATION_CONTRACT passed=15 failed=0

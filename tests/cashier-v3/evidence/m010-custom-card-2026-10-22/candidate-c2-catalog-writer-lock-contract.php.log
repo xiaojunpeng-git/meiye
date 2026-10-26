@@ -1,0 +1,30 @@
+PASS WRITER-GUARD-01 single guard and transaction lease exist
+PASS WRITER-GUARD-02 exact global order is card then product then SKU
+PASS WRITER-GUARD-03 same-kind ordering reuses the cashier comparator
+PASS WRITER-GUARD-04 resource locks are exact primary-key loops
+PASS WRITER-GUARD-05 low-order drift rolls back and retries
+PASS WRITER-GUARD-06 duplicate product plus unique identity fails closed
+PASS WRITER-GUARD-07 public guard refuses an inherited transaction
+PASS WRITER-GUARD-08 component reverse discovery participates in planning
+PASS WRITER-GUARD-09 new card creation pre-locks the existing component graph
+PASS WRITER-REL-01 replace remap status append and delete require a lease
+PASS WRITER-REL-02 inherited raw relation writers are blocked
+PASS WRITER-SKU-01 type-zero SKU save path is split into public guard and leased body
+PASS WRITER-SKU-02 deletion checks consume the existing lease instead of locking SKU first
+PASS WRITER-SKU-03 newly inserted identities are registered before relation remap
+PASS WRITER-SKU-03A transitions into type zero pre-lock source and target products
+PASS WRITER-SKU-04 legacy branch attr write surface is fail-closed
+PASS WRITER-SKU-05 read-triggered default SKU repair is guarded atomically
+PASS WRITER-CALL-01 product save status and physical delete share the outer lease
+PASS WRITER-CALL-02 branch sync and delete share the outer lease
+PASS WRITER-CALL-02A branch sync re-plans stale source and target snapshots
+PASS WRITER-CALL-03 ERP branch sync uses the canonical guarded service
+PASS WRITER-CALL-03A ERP creates product and initial SKU in one guarded transaction
+PASS WRITER-CALL-04 import no longer writes relation DAO directly
+PASS WRITER-CALL-05 queue writers rethrow guard failures
+PASS WRITER-CALL-06 raw runtime catalog truncation is fail-closed
+PASS WRITER-CALL-07 offline migrate requires explicit exclusive maintenance
+PASS WRITER-MIG-01 both card and reverse discovery indexes are replay-safe
+PASS WRITER-MIG-02 manifest freezes rollback-retry instead of late low-order locking
+PASS WRITER-READY-01 readiness exposes both writer contracts
+C2_CATALOG_WRITER_LOCK_CONTRACT assertions=29 passed=29 failed=0

@@ -1,0 +1,96 @@
+<?php
+
+declare(strict_types=1);
+
+$root = dirname(__DIR__, 3);
+$workspace = $root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php';
+$assembler = $root . '/后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php';
+$paidProjectPerformance = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3PaidProjectCraftsmanPerformanceServices.php';
+$adapter = $root . '/后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php';
+$service = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleProjectServiceCompletionServices.php';
+$rebuilder = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php';
+$kernel = $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php';
+$salesOrderPlan = $root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php';
+$migration = $root . '/后端代码/database/upgrades/2026-08-14-收银V3完整模式临时手工费/02-正式升级.sql';
+$view = $root . '/前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue';
+
+$checks = [
+    'workspace stores a nullable manual labor fee snapshot' => [
+        $workspace,
+        "'manual_labor_fee_cents' => \$manualLaborFeeCents",
+    ],
+    'workspace fingerprint accepts a legacy row without the optional labor fee snapshot' => [
+        $workspace,
+        "if ((\$row['manual_labor_fee_cents'] ?? null) !== null)",
+    ],
+    'workspace service projections tolerate an absent optional labor fee snapshot' => [
+        $workspace,
+        "\$manualLaborFeeCents = (\$row['manual_labor_fee_cents'] ?? null) === null",
+    ],
+    'workspace validates a nonnegative integer-yuan override' => [
+        $workspace,
+        'manualLaborFeeCents($settings[\'laborManualFee\']',
+    ],
+    'checkout source authority carries the workspace override' => [
+        $workspace,
+        "\$source['laborManualFeeCents'] = \$this->storedNonnegativeInteger",
+    ],
+    'checkout authority carries the override into the locked performance rule' => [
+        $adapter,
+        "laborManualFeeCents",
+    ],
+    'sale fact plan stores manual fees independently from labor performance' => [
+        $assembler,
+        "'laborFeeAmountCents' => (int)\$allocation['laborFeeCents']",
+    ],
+    'paid project plan reads the project labor rule and keeps a separate fee total' => [
+        $paidProjectPerformance,
+        "'laborFeeAmountCents' => array_sum(\$fees)",
+    ],
+    'completed service fact stores labor performance, manual fee and mode separately' => [
+        $service,
+        "'labor_fee_amount_cents'",
+    ],
+    'existing database migration carries workspace, draft, order and service snapshots' => [
+        $migration,
+        "eb_cashier_v3_sales_order_line",
+    ],
+    'complete mode exposes a per-craftsman labor fee field' => [
+        $view,
+        '每人手工费',
+    ],
+    'front end submits each selected craftsman labor fee with its performance type' => [
+        $view,
+        'laborFeeCents: craftsmanType(item)',
+    ],
+    'unset override is omitted from the draft authority' => [
+        $rebuilder,
+        'if (($row[\'manual_labor_fee_cents\'] ?? null) !== null)',
+    ],
+    'settlement accepts cents without whole-yuan validation' => [
+        $kernel,
+        'self::nonNegativeInt($line[\'manualLaborFeeCents\']',
+    ],
+    'sales order carries the manual labor snapshot' => [
+        $salesOrderPlan,
+        "'manual_labor_fee_cents' => \$line['manual_labor_fee_cents']",
+    ],
+    'resource discovery returns its resource result' => [
+        $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php',
+        "'resources' => \$resources",
+    ],
+];
+
+$passed = 0;
+foreach ($checks as $name => [$file, $needle]) {
+    $contents = is_file($file) ? (string)file_get_contents($file) : '';
+    if ($contents !== '' && strpos($contents, $needle) !== false) {
+        $passed++;
+        echo "PASS {$name}\n";
+    } else {
+        echo "FAIL {$name}\n";
+    }
+}
+
+echo sprintf("%d/%d PASS\n", $passed, count($checks));
+exit($passed === count($checks) ? 0 : 1);

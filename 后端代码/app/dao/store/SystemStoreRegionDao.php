@@ -1,0 +1,67 @@
+<?php
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2020 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+
+namespace app\dao\store;
+
+
+use app\dao\BaseDao;
+use app\model\store\SystemStoreRegion;
+
+/**
+ * 门店区域
+ * Class SystemStoreRegionDao
+ * @package app\dao\store
+ */
+class SystemStoreRegionDao extends BaseDao
+{
+    /**
+     * 设置模型
+     * @return string
+     */
+    protected function setModel(): string
+    {
+        return SystemStoreRegion::class;
+    }
+
+	/**
+	 * @param array $where
+	 * @param string $field
+	 * @param int $page
+	 * @param int $limit
+	 * @return array
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+	public function getList(array $where, string $field = '*', int $page = 0, int $limit = 0)
+	{
+		return $this->search($where)->field($field)
+			->when($page && $limit, function ($query) use ($page, $limit) {
+				$query->page($page, $limit);
+			})->order('sort desc,id desc')->select()->toArray();
+	}
+
+	/**
+	 * 根据城市查询区域
+	 * @param array $where
+	 * @param string $field
+	 * @return array|\mohe\basic\BaseModel|mixed|\think\Model|null
+	 * @throws \think\db\exception\DataNotFoundException
+	 * @throws \think\db\exception\DbException
+	 * @throws \think\db\exception\ModelNotFoundException
+	 */
+	public function getRegion(array $where, string $field = '*')
+	{
+		return $this->search($where)->field($field)->find();
+	}
+
+
+}

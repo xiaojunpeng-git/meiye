@@ -1,0 +1,334 @@
+{
+  "task": "R49-00001",
+  "commit": "1e17542ebc8ef3956d6884405871d6565928d4cc",
+  "productManagerAcceptance": "2026-10-09 用户明确：我测试没有问题,本轮commit,部署瑞昊,push；对应V4固定版本",
+  "deployedAt": "2026-10-09T22:02:39+08:00",
+  "target": {
+    "site": "rh.cc3798.com",
+    "database": "ruihao",
+    "migrationIdBefore": 215,
+    "migrationIdAfter": 215
+  },
+  "backup": "/www/backups/rh.cc3798.com/20261009-r49-1e17542e",
+  "backupHashes": {
+    "backend": "726ddb0fcb7eb1d433eb26f0da6cff43f6ad249e28974c0fd7051891bab89a90",
+    "formal": "480808eaa0ae9dc7a7edb373db536a992776609953cf89e778b4a1c198c8530c",
+    "preview": "f08de7ea89f18f0f6e183ba219fecafe3cd87eed5e307bd35187620b0b34d697"
+  },
+  "build": {
+    "sourceCommit": "1e17542ebc8ef3956d6884405871d6565928d4cc",
+    "source": "前端代码/cashier-v3 + inventory-vue3 + shared",
+    "entry18091": "http://127.0.0.1:18091/view_cashier_v3/#/cashier",
+    "immutableArchive": true,
+    "modules": 1994,
+    "parentBuildMatchesPreviousRuntime": true,
+    "assets": [
+      {
+        "path": "index.html",
+        "sha256": "9f71e5acdaa97e9d67409b662f9714711d02c4e22539add174a456952e7714ba"
+      },
+      {
+        "path": "assets/index-436cf8e4.js",
+        "sha256": "5a8c15e883aa329d93a3e6f21d1de62030393b8ffeb609ebe2e5a58c19de8234"
+      },
+      {
+        "path": "assets/index-b070862b.css",
+        "sha256": "b070862b8048a7ba2f8edbc82f805e3c62c402ce26c4e35adc063dc3fc7696c7"
+      }
+    ]
+  },
+  "http": [
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "sha256": "9f71e5acdaa97e9d67409b662f9714711d02c4e22539add174a456952e7714ba"
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-436cf8e4.js",
+      "status": 200,
+      "sha256": "5a8c15e883aa329d93a3e6f21d1de62030393b8ffeb609ebe2e5a58c19de8234"
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-b070862b.css",
+      "status": 200,
+      "sha256": "b070862b8048a7ba2f8edbc82f805e3c62c402ce26c4e35adc063dc3fc7696c7"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "sha256": "adfb3c9ee546baf131bda6be831a9e30c7a8a40238c53ba8c5cadaa41bb9da02"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-436cf8e4.js",
+      "status": 200,
+      "sha256": "5a8c15e883aa329d93a3e6f21d1de62030393b8ffeb609ebe2e5a58c19de8234"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-b070862b.css",
+      "status": 200,
+      "sha256": "b070862b8048a7ba2f8edbc82f805e3c62c402ce26c4e35adc063dc3fc7696c7"
+    },
+    {
+      "url": "https://rh.cc3798.com/cashierapi/config",
+      "status": 200,
+      "body": "{\"status\":410000,\"msg\":\"请登录\",\"data\":[]}"
+    }
+  ],
+  "provider": {
+    "database": [
+      {
+        "name": "ruihao",
+        "version": "5.7.44-log"
+      }
+    ],
+    "migration": 215,
+    "storeId": 23,
+    "readOnly": true,
+    "cases": {
+      "positive": {
+        "total": 86,
+        "returned": 86,
+        "stockSummary": {
+          "available_quantity": "1822.000000",
+          "inventory_amount_cents": null
+        },
+        "quantities": [
+          "20",
+          "600",
+          "130",
+          "200",
+          "108",
+          "51",
+          "55",
+          "12",
+          "5",
+          "11",
+          "47",
+          "5",
+          "4",
+          "32",
+          "15",
+          "5",
+          "6",
+          "9",
+          "8",
+          "30",
+          "6",
+          "47",
+          "20",
+          "9",
+          "5",
+          "15",
+          "30",
+          "8",
+          "14",
+          "6",
+          "25",
+          "6",
+          "5",
+          "9",
+          "16",
+          "20",
+          "5",
+          "1",
+          "2",
+          "2",
+          "1",
+          "1",
+          "1",
+          "1",
+          "2",
+          "1",
+          "2",
+          "5",
+          "2",
+          "2",
+          "4",
+          "1",
+          "2",
+          "2",
+          "2",
+          "1",
+          "2",
+          "2",
+          "3",
+          "1",
+          "1",
+          "1",
+          "31",
+          "41",
+          "1",
+          "1",
+          "3",
+          "2",
+          "2",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "2",
+          "5",
+          "1",
+          "5",
+          "2",
+          "2",
+          "40",
+          "19",
+          "5",
+          "6",
+          "1",
+          "4"
+        ]
+      },
+      "zero": {
+        "total": 2,
+        "returned": 2,
+        "stockSummary": {
+          "available_quantity": "0.000000",
+          "inventory_amount_cents": null
+        },
+        "quantities": [
+          "0",
+          "0"
+        ]
+      },
+      "all": {
+        "total": 88,
+        "returned": 88,
+        "stockSummary": {
+          "available_quantity": "1822.000000",
+          "inventory_amount_cents": null
+        },
+        "quantities": [
+          "20",
+          "600",
+          "130",
+          "200",
+          "108",
+          "51",
+          "55",
+          "12",
+          "5",
+          "11",
+          "47",
+          "5",
+          "4",
+          "32",
+          "15",
+          "5",
+          "6",
+          "9",
+          "8",
+          "30",
+          "6",
+          "47",
+          "20",
+          "9",
+          "5",
+          "15",
+          "30",
+          "8",
+          "14",
+          "6",
+          "25",
+          "6",
+          "5",
+          "9",
+          "16",
+          "20",
+          "5",
+          "1",
+          "2",
+          "2",
+          "1",
+          "1",
+          "1",
+          "1",
+          "2",
+          "1",
+          "2",
+          "5",
+          "2",
+          "2",
+          "4",
+          "1",
+          "2",
+          "2",
+          "2",
+          "1",
+          "2",
+          "2",
+          "3",
+          "1",
+          "1",
+          "1",
+          "31",
+          "41",
+          "1",
+          "1",
+          "3",
+          "2",
+          "2",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "2",
+          "5",
+          "1",
+          "5",
+          "2",
+          "2",
+          "40",
+          "19",
+          "5",
+          "6",
+          "0",
+          "1",
+          "4",
+          "0"
+        ]
+      },
+      "custom130to200": {
+        "total": 2,
+        "returned": 2,
+        "stockSummary": {
+          "available_quantity": "330.000000",
+          "inventory_amount_cents": null
+        },
+        "quantities": [
+          "130",
+          "200"
+        ]
+      }
+    }
+  },
+  "browser": {
+    "site": "preview-8080",
+    "store": "江苏江都店",
+    "zeroRows": 4,
+    "zeroQuantityTotal": 0,
+    "customMin": 130,
+    "customMax": 200,
+    "customRows": 1,
+    "customQuantityTotal": 150,
+    "exportDrawerOpened": true,
+    "exportTaskCreated": false,
+    "toplineRemoved": true,
+    "buttons": "查询 / 重置 / 导出",
+    "originalOrderPageRestored": true,
+    "newLoginTabClosed": true,
+    "screenshot": "tests/inventory/evidence/R49-stock-query-rh-online-2026-10-09.png"
+  },
+  "health": {
+    "managerCount": 1,
+    "managerPid": 18689,
+    "port20800": true,
+    "recent200LinesFatalParseUncaught": 0,
+    "envAndInitAndSharedDependencyHashesUnchanged": true
+  },
+  "databaseWrites": false,
+  "pushPending": true
+}

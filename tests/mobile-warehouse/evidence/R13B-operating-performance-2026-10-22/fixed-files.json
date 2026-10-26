@@ -1,0 +1,52 @@
+{
+  "base_head": "f97660fb5cbcf4e43da31dcaee7da8721a6554a8",
+  "supersedes": "R13A 9128e310 (not accepted)",
+  "files": [
+    {
+      "path": "tests/mobile-warehouse/js/r13-home-client.mjs",
+      "sha256": "0ae6f575fcd2b39e205e0f3f1d8bc22b4ae1e3518e5224915929fca67499bdf5",
+      "scope": "whole file"
+    },
+    {
+      "path": "tests/mobile-warehouse/php/r13-home-shared-sections-readonly.php",
+      "sha256": "ea4279fb1ddae8dda54c28805cc9ba0a2639ef445303e615ac482d50a08460b8",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/pages.json",
+      "sha256": "40de1059aaa12d389bd05976b9c81bbd22b69a51d76cf82b1dcf8cec366f59c0",
+      "scope": "category-ranking route only"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/category-ranking/index.uvue",
+      "sha256": "f7dc9912a87ffd4034e31413d22dca269f02e3f0a489cb17fc7e8022128ac05c",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/home/index.uvue",
+      "sha256": "b21a97041a6156e3c5884490ade7a25406dd074019e55d465caa5e0cabc90c86",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/api/mobile-home-client.uts",
+      "sha256": "ba3684286d1c01b11298556dd9ec77f53b2ad73d973fce805e959a12df28f046",
+      "scope": "whole file"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/platform/merchant-dashboard-presentation.uts",
+      "sha256": "63d05f7eb35861554148b1c3676f920355d7fe3fa41471af3fc7f1662486f9d4",
+      "scope": "whole file"
+    },
+    {
+      "path": "后端代码/app/services/mobile/dashboard/MobileMerchantDashboardServices.php",
+      "sha256": "9573ca2b41676e7ceb01f6512f2cc15dc7cf62c5ea94f9632d86ee4efa013358",
+      "scope": "whole file"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "026e188f9f39f361962194c35f8e69113925cfde553d9ffe96bf59d5c5d241ff",
+      "scope": "whole file"
+    }
+  ],
+  "patch_sha256": "d2a5902b0457d9d754325a0f195a9443f01a512067c7957cad949e79bceef9c5"
+}

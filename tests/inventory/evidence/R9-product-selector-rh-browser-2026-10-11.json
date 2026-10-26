@@ -1,0 +1,30 @@
+{
+  "target": "rh.cc3798.com",
+  "source_commit": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf",
+  "account": "A18156013263 (existing authenticated session)",
+  "verified": [
+    "Platform inbound list reads 2 documents with 3+6 detail rows",
+    "New inbound opens shared product selector with 573 SKU entries",
+    "Columns: selection, product name, specification, stock unit, stock quantity",
+    "Search 浅咖毛巾 returns one SKU and stock total 680",
+    "Cancel selector and unsaved form; inbound list remains 2 documents",
+    "8080 store preview renders new login page without credential entry"
+  ],
+  "navigation_comparison": {
+    "observation": "Current account navigation is empty while authorized inventory direct route works",
+    "baseline_scripts": ["app.86b3e2e9.js", "chunk-vendors.72e8295d.js"],
+    "baseline_same_observation": true,
+    "method": "Temporary verifier-tab Script requests redirected to retained before-release assets; production files were not changed",
+    "raw_interception_cleared": true,
+    "restored_scripts": ["app.1b165706.js", "chunk-vendors.256a48e4.js"],
+    "authorization_data_modified": false
+  },
+  "limitations": [
+    "Current account has no product-list permission (403 before deployment); no product edit permission was added",
+    "All production expiry flags remain at default off; no production inventory or gift writes for testing",
+    "Store preview session expired; authenticated store gift flow relies on local acceptance and regression evidence"
+  ],
+  "business_writes": false,
+  "temporary_tabs_closed": true,
+  "user_tabs_preserved": true
+}

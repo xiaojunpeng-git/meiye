@@ -1,0 +1,8 @@
+unpackage/
+**/node_modules/
+.hbuilderx/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example

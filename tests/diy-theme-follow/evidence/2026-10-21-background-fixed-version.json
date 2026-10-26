@@ -1,0 +1,48 @@
+{
+  "task": "M008-R8-BG-001",
+  "status": "self-test-pass-awaiting-product-manager-acceptance",
+  "baselineHead": "0f5ea37e314cb1058daf0c3aac21c4c387b3e108",
+  "patchSha256": "929a185ff329aa3c59db64dc8f091758aa90ebc8810b00a171483c47c34e80e5",
+  "files": [
+    {
+      "file": "前端代码/uniapp/pages/index/components/homeComb.vue",
+      "sha256": "c6418326ac75d6e3a309133a0c84e305d03736104bed1ace3805becb17f53afb"
+    },
+    {
+      "file": "tests/diy-theme-follow/contract.cjs",
+      "sha256": "aca68d4f73358645f28202e5651685fb7f6722cf9c368b518ca8d6e394876401"
+    },
+    {
+      "file": "tests/diy-theme-follow/browser.cjs",
+      "sha256": "273fd602e023f6b9bb4d63fe794ae418575a358941372b09d90c0ef051943889"
+    },
+    {
+      "file": "tests/diy-theme-follow/background-contract.cjs",
+      "sha256": "aa42b17e8845929b8a8fbe3005c922787466033ce0348eaf71c0f39df6cd2ca6"
+    }
+  ],
+  "businessFiles": 1,
+  "testFiles": 3,
+  "browserCases": 14,
+  "indicatorStylesPerCase": 4,
+  "componentWidths": [
+    320,
+    375
+  ],
+  "gradientUnitCases": 15,
+  "cssDeclarationsRemoved": 3,
+  "miniArtifact": "f1c6b0edd3770a21c6bdfe79c277595f67e0d5a7024493f2d3b6251f758b6b80",
+  "sourceOverrides": [
+    "前端代码/uniapp/pages/index/components/homeComb.vue"
+  ],
+  "stagedSha256": "67ed95909d90c15de9f0d1b8e291ff6f42ce3a2cd4bb9195047c0de4063caf80",
+  "remoteDeployment": "not applicable: local fix only",
+  "boundaries": {
+    "committed": false,
+    "deployed": false,
+    "pushed": false,
+    "miniUploaded": false,
+    "onlineDecorationSaved": false,
+    "themeChanged": false
+  }
+}

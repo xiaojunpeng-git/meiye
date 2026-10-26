@@ -1,0 +1,87 @@
+import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+
+// Runtime mirror only. The frozen JSON contract remains the source checked by tests.
+const customerCareTransportContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	endpoints: {
+		queryWorkbench: { method: 'POST', path: '/mobile/merchant/customer-care/workbench', requestMetadataProfile: 'MERCHANT_SESSION' },
+		servicePhotoUpload: { method: 'POST', path: '/mobile/merchant/customer-care/service-photo', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		createRecord: { method: 'POST', path: '/mobile/merchant/customer-care/actions/create-care-record', requestMetadataProfile: 'MERCHANT_SESSION' },
+		startTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/start-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		completeTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/complete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' },
+		deleteTask: { method: 'POST', path: '/mobile/merchant/customer-care/actions/delete-care-task', requestMetadataProfile: 'MERCHANT_SESSION' }
+	},
+	requestMetadataProfiles: {
+		MERCHANT_SESSION: {
+			required: {
+				'X-Mobile-Contract-Version': 'contractVersion',
+				'X-Mobile-Client-Session-Id': 'clientSessionId',
+				'X-Mobile-Platform': 'platform',
+				'X-Mobile-Request-Id': 'requestId',
+				Authorization: 'Bearer <merchantToken>',
+				'X-Mobile-Active-Context-Id': 'activeContextId',
+				'X-Mobile-State-Context-Id': 'stateContextId'
+			},
+			forbidden: ['X-Mobile-App-Session', 'Cookie', 'queryToken', 'bodyToken', 'headerAlias']
+		}
+	}
+}
+
+function merchantPlan(endpointName : string) : any {
+	let root = currentMerchantRoot()
+	let session = merchantRequestSession(root)
+	if (session == null) return null
+	let plan = buildMobileRequestPlan(customerCareTransportContract, endpointName, session)
+	return mobileRequestPlanMatchesContract(customerCareTransportContract, endpointName, session, plan) ? plan : null
+}
+
+function request(endpointName : string, payload : any, done : (value : any) => void) : void {
+	let plan = merchantPlan(endpointName)
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	sendMobileRequest(plan, payload, done)
+}
+
+export function queryMobileCustomerCare(payload : any, done : (value : any) => void) : void {
+	request('queryWorkbench', payload, done)
+}
+
+export function uploadMobileCustomerCarePhoto(filePath : string, idempotencyKey : string, done : (value : any) => void) : void {
+	let plan = merchantPlan('servicePhotoUpload')
+	let origin = mobileApiOrigin()
+	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+	if (origin.length == 0 || filePath.length == 0) { done({ ok: false, message: '未选择服务照片。', body: null }); return }
+	uni.uploadFile({
+		url: origin + '/api' + plan.path, filePath: filePath, name: 'file', header: plan.headers,
+		formData: { idempotencyKey: idempotencyKey },
+		success: (response : any) => {
+			let payload : any = null
+			try { payload = typeof response.data === 'string' ? JSON.parse(response.data) : response.data } catch (error) { payload = null }
+			let ok = response.statusCode >= 200 && response.statusCode < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
+			done({ ok: ok, statusCode: response.statusCode, body: payload, message: ok ? '' : String(payload != null ? payload.message || '服务照片上传未完成。' : '服务照片上传未完成。') })
+		},
+		fail: () => done({ ok: false, statusCode: 0, body: null, message: '服务照片上传失败，请检查网络后重试。' })
+	})
+}
+
+export function createMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('createTask', payload, done)
+}
+
+export function createMobileCustomerCareRecord(payload : any, done : (value : any) => void) : void {
+	request('createRecord', payload, done)
+}
+
+export function startMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('startTask', payload, done)
+}
+
+export function completeMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('completeTask', payload, done)
+}
+
+export function deleteMobileCustomerCareTask(payload : any, done : (value : any) => void) : void {
+	request('deleteTask', payload, done)
+}

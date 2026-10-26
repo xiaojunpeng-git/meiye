@@ -1,0 +1,197 @@
+<?php
+declare(strict_types=1);
+
+namespace app\controller\store\product\inventory;
+
+use app\controller\store\AuthController;
+use app\services\product\inventory\query\InventoryBatchStockQueryContract;
+use app\services\product\inventory\query\InventoryOperationalUnifiedQueryContract;
+use app\services\product\inventory\query\InventoryStatisticsUnifiedQueryContract;
+use app\services\product\inventory\query\InventoryStoreUnifiedQueryContextFactory;
+use app\services\product\inventory\query\InventoryUnifiedQueryCommandServices;
+use app\services\query\UnifiedQueryException;
+use app\services\query\UnifiedQueryRuntime;
+use think\facade\App;
+
+/** Store facade for the neutral UQ inventory provider; no client scope is accepted. */
+final class InventoryUnifiedQuery extends AuthController
+{
+    public function __construct(App $app) { parent::__construct($app); }
+
+    public function batchStock()
+    {
+        try {
+            $payload = $this->payload();
+            $cutoff = (string)($payload['queryCutoffDate'] ?? $payload['query_cutoff_date'] ?? date('Y-m-d'));
+            unset($payload['query_cutoff_date']);
+            $runtime = UnifiedQueryRuntime::runtime();
+            $contextFactory = new InventoryStoreUnifiedQueryContextFactory($runtime['contextFactory']);
+            $context = $contextFactory->make(
+                (int)$this->storeId,
+                (int)$this->storeStaffId,
+                is_array($this->auth) ? $this->auth : [],
+                $cutoff
+            );
+            $provider = $runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE);
+            return $this->success($provider->query($context, $payload));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('库存查询条件不合法。');
+        }
+    }
+
+    /** Executes an operational V3 document/ledger query through its registered provider. */
+    public function operational()
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $pageCode = $this->requestedPageCode($runtime);
+            if (!in_array($pageCode, array_merge(InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+                throw new \InvalidArgumentException('inventory_operational_page_code_invalid');
+            }
+            $payload = $this->payload($pageCode);
+            $cutoff = (string)($payload['queryCutoffDate'] ?? $payload['query_cutoff_date'] ?? date('Y-m-d'));
+            unset($payload['query_cutoff_date']);
+            $context = $this->context($runtime, $cutoff, $pageCode);
+            return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('库存业务查询条件不合法。');
+        }
+    }
+
+    public function capabilities()
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $pageCode = $this->requestedPageCode($runtime);
+            $context = $this->context($runtime, date('Y-m-d'), $pageCode);
+            $settings = $runtime['preferences']->load($context, $pageCode);
+            $capability = $runtime['capabilities']->build(
+                $context,
+                $pageCode,
+                (int)$settings['settingsVersion'],
+                (int)($context['data_as_of'] ?? time())
+            );
+            $capability['commandContext'] = [
+                'kind' => 'query_preference',
+                'id' => $pageCode,
+            ];
+            return $this->success(['unifiedQueryCapability' => $capability]);
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        }
+    }
+
+    public function command(InventoryUnifiedQueryCommandServices $services)
+    {
+        try {
+            $input = $this->request->post();
+            $input = is_array($input) ? $input : [];
+            if (($this->request->forceStoreSessionInjectedPostStoreId ?? false) === true
+                && (int)($input['store_id'] ?? 0) === (int)$this->storeId) {
+                unset($input['store_id']);
+            }
+            return $this->success($services->dispatch(
+                (int)$this->storeId,
+                (int)$this->storeStaffId,
+                is_array($this->auth) ? $this->auth : [],
+                $input
+            ));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('库存统一查询操作参数不合法。');
+        }
+    }
+
+    public function exportTask(string $taskNo)
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $pageCode = $this->requestedPageCode($runtime);
+            $context = $this->context($runtime, date('Y-m-d'), $pageCode);
+            $task = $runtime['exports']->findForAccount($context, $taskNo);
+            if ($pageCode === 'inventory_outbound' && !empty($task['downloadAvailable'])) {
+                $task['downloadUrl'] = '/storeapi/product/inventory/v3/unified-query/export-task/' . rawurlencode($taskNo) . '/download';
+            }
+            return $this->success(['exportTask' => $task]);
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        }
+    }
+
+    /** Download only the creator's outbound task after rechecking current scope, fields and expiry. */
+    public function downloadOutboundExport(string $taskNo)
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $context = $this->context($runtime, date('Y-m-d'), 'inventory_outbound');
+            $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
+            $path = $runtime['exportStorage']->absolutePath((string)$descriptor['storageKey']);
+            if (!is_file($path) || !is_readable($path)) return $this->fail('导出文件不存在或已过期。');
+            // A binary response works under the local hot-reload proxy and Swoole without File output buffering.
+            $content = file_get_contents($path);
+            if ($content === false || $content === '') return $this->fail('导出文件读取失败。');
+            return response($content, 200)->header([
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => "attachment; filename=outbound.xlsx; filename*=UTF-8''" . rawurlencode((string)$descriptor['fileName']),
+                'Cache-Control' => 'private, no-store',
+                'Content-Length' => (string)strlen($content),
+            ]);
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        }
+    }
+
+    private function context(array $runtime, string $cutoff, string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE): array
+    {
+        $contextFactory = new InventoryStoreUnifiedQueryContextFactory($runtime['contextFactory']);
+        return $contextFactory->make(
+            (int)$this->storeId,
+            (int)$this->storeStaffId,
+            is_array($this->auth) ? $this->auth : [],
+            $cutoff,
+            $pageCode
+        );
+    }
+
+    private function requestedPageCode(array $runtime): string
+    {
+        $pageCode = trim((string)$this->request->get('pageCode', InventoryBatchStockQueryContract::PAGE_CODE));
+        $runtime['registry']->page($pageCode);
+        if (!in_array($pageCode, array_merge([InventoryBatchStockQueryContract::PAGE_CODE], InventoryOperationalUnifiedQueryContract::PAGE_CODES, InventoryStatisticsUnifiedQueryContract::PAGE_CODES), true)) {
+            throw new \InvalidArgumentException('inventory_unified_query_page_code_invalid');
+        }
+        return $pageCode;
+    }
+
+    private function payload(string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE): array
+    {
+        $raw = $this->request->get();
+        $raw = is_array($raw) ? $raw : [];
+        if (($this->request->forceStoreSessionInjectedGetStoreId ?? false) === true
+            && (int)($raw['store_id'] ?? 0) === (int)$this->storeId) {
+            unset($raw['store_id']);
+        }
+        foreach (['tenant_id', 'store_id', 'organization_id', 'location_id', 'scope_dimensions', 'permissions', 'granted_features'] as $blocked) {
+            if (array_key_exists($blocked, $raw)) {
+                throw new \InvalidArgumentException('inventory_unified_query_client_scope_forbidden');
+            }
+        }
+        $allowed = ['page', 'limit', 'keyword', 'filters', 'topFilters', 'topFilterConditions', 'keywordFilters', 'filterRelation', 'sorts', 'groupBy', 'summaries', 'dataScope', 'businessStatus', 'quickFilters', 'visibleFields', 'fieldVersions', 'queryCutoffDate', 'query_cutoff_date'];
+        $payload = array_intersect_key($raw, array_fill_keys($allowed, true));
+        foreach (['filters', 'topFilters', 'topFilterConditions', 'keywordFilters', 'sorts', 'groupBy', 'summaries', 'quickFilters', 'visibleFields', 'fieldVersions'] as $key) {
+            if (!isset($payload[$key]) || !is_string($payload[$key])) continue;
+            $decoded = json_decode($payload[$key], true);
+            if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) {
+                throw new \InvalidArgumentException('inventory_unified_query_parameter_invalid');
+            }
+            $payload[$key] = $decoded;
+        }
+        $payload['pageCode'] = $pageCode;
+        return $payload;
+    }
+}

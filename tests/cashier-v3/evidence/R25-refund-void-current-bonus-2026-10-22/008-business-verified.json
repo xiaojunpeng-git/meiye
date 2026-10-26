@@ -1,0 +1,17 @@
+{
+  "instance": "008",
+  "database": "mohe_008",
+  "mode": "read_only",
+  "checks": [
+    "debit_split_0_152000",
+    "debit_split_152000_0",
+    "debit_split_100000_52000",
+    "insufficient_total_rejected",
+    "member_balance_authority_ready",
+    "authorized_order_center_operator_available",
+    "existing_refund_list_readable",
+    "existing_debt_settlement_schema_ready"
+  ],
+  "refund_list_total": 0,
+  "result": "PASS"
+}

@@ -1,0 +1,21 @@
+PASS management core: 47 checks
+R6 management gateway: 36 checks PASS (SQLite, synthetic model/facts; not live acceptance)
+R6 account-owned menu policy: 21 checks PASS (pure projections; no DB)
+PASS analysis capability catalog: 21 checks
+PASS object resolution / safe question: 16 checks
+PASS personnel analysis: 56 checks (synthetic data only)
+PASS member analysis: 19 checks (synthetic data only)
+PASS intent context merger: 64 checks (synthetic protocol only)
+PASS context delta gateway: 88 checks (SQLite, synthetic model/facts only)
+PASS date-policy: 55 checks (offline)
+PHP Fatal error:  Uncaught RuntimeException: FAIL the native mini-program workspace measures its capsule instead of stacking fixed top and safe-area gaps, while keeping the composer against the bottom safe area in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8
+Stack trace:
+#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php(36): {closure:/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8}(false, 'the native mini...')
+#1 {main}
+  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php on line 8
+
+Fatal error: Uncaught RuntimeException: FAIL the native mini-program workspace measures its capsule instead of stacking fixed top and safe-area gaps, while keeping the composer against the bottom safe area in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8
+Stack trace:
+#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php(36): {closure:/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8}(false, 'the native mini...')
+#1 {main}
+  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php on line 8

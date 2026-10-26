@@ -1,0 +1,61 @@
+{
+  "task": "R53-00002",
+  "status": "development-and-scoped-selftest-complete-awaiting-product-acceptance",
+  "baseline_head": "6d46470305799efc7198c777deb04df25ec5052a",
+  "fixed_at": "2026-10-10T09:41:03.686Z",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue",
+      "sha256": "43045512bf106a0811bb9ad4a3b25ded90b02a5b267f806670c8fa449c976795"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php",
+      "sha256": "3b7fa91ff52ee00ba8dbd4347ca92b4df251b5864b2dbc4738f233b22a5a7d37"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php",
+      "sha256": "cce6c786dd2ad778cb4388c8d354695eefb822749bab5971e43e56f6fbe3d3d6"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php",
+      "sha256": "9112ffe6a7879a65287bb615e4b3b6c656e85ace2b5897b4e64000809dfd35cb"
+    },
+    {
+      "path": "tests/cashier-v3/js/checkout-refund-source-render.mjs",
+      "sha256": "0e38736c1e988bcb054e7e7753f57066e2bd063a1bb4bd91265412f2240f6448"
+    },
+    {
+      "path": "tests/cashier-v3/php/checkout-refund-source-mysql-integration.php",
+      "sha256": "29b89cdda1b3fbe3deaebea3e0ec67852d50bc8d76bc735f0b1db42c8f7626b6"
+    }
+  ],
+  "patch_sha256": "8aae9fd7ada4fe3ae5a3b0772f978af135e54d4a6e680cda50b711564c964b07",
+  "evidence": [
+    {
+      "path": "收银来源自测.md",
+      "sha256": "23ae05078cf79cafe5e47dca3b10a4d6175cf8c255da5521ad0b9edb9e74a1fd"
+    },
+    {
+      "path": "收银来源移除K.png",
+      "sha256": "1d1dd57f411d900f2c52344a843abd6cabe539a6bf5c6f0119baaeb30523fad7"
+    }
+  ],
+  "local_build_only": [
+    {
+      "path": "/tmp/r53-checkout-no-k-build/index.html",
+      "sha256": "730816e0d3ff85b576208dd25127e8a39d7a03669db7b70b01201cef86874332"
+    },
+    {
+      "path": "/tmp/r53-checkout-no-k-build/assets/index-9e1b1129.js",
+      "sha256": "128180a27180ff3a41c1a168cffd4c7d4f9d6a576701edbae736d75da0de17ca"
+    },
+    {
+      "path": "/tmp/r53-checkout-no-k-build/assets/index-542d8dfc.css",
+      "sha256": "542d8dfcd87e9bd32c27ab0078f90e212242af760f20b58ada8a92281097aed4"
+    }
+  ],
+  "known_test_gap": "Existing frontend business-source contract expects removed recharge source command; verified pre-existing in HEAD; see record",
+  "commit": "not-performed",
+  "deployment": "not-authorized-not-performed",
+  "push": "not-performed"
+}

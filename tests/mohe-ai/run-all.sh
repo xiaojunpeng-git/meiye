@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Local contracts/fixtures only. Some suites use disposable SQLite and real
+# framework class loading, but never load application .env, a customer DB or a model.
+test_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source_root="$(cd "$test_dir/../.." && pwd)"
+php_bin="${MOHE_TEST_PHP:-php}"
+
+"$php_bin" -v
+for suite in config-contract metric-registry-contract deterministic-summary-admission round3-reaudit-regressions runtime-contract export-source-contract \
+    query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
+    gateway-components client-runtime-compat config-recovery gateway-integration recommendation-planner gateway-review-regressions overview-metric-resolver monitor-contract \
+    http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
+    export-worker-contract export-runtime-contract result-reference semantic-binding-guard date-range-guidance context-metric-rebinding r7-context-removal-audit condition-set; do
+    "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
+done
+for suite in semantic-guidance registry-execution skill-semantic-projection intent-understanding-contract state-guidance-contract \
+    opt3-model-circuit opt3-context-relation-contract opt3-gateway-recovery opt3-group-reconciliation opt3-inherited-metric-default opt3-complete-typed-condition \
+    opt3-result-reference-detail opt3-ordinal-group-boundary opt3-ordinal-clarification-boundary opt3-comparison-calendar opt3-local-driver-protocol opt3-recommendation-recovery opt3-worker-recovery opt3-service-customer-aggregate opt3-personnel-population-cache \
+    r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis member-analysis query-context context-delta-gateway date-policy; do
+    "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
+done
+"$php_bin" "$test_dir/mobile-ai-entry-transport-contract.php"
+
+while IFS= read -r source_file; do
+    "$php_bin" -l "$source_file"
+done < <(rg --files "$source_root/后端代码/app/services/ai" "$source_root/后端代码/app/services/query/metric" "$test_dir" | rg '\.php$' | sort)
+"$php_bin" -l "$source_root/后端代码/app/services/query/UnifiedQueryExportSourcePolicy.php"
+
+"$php_bin" "$source_root/tests/report-phase-seven/php/group-dashboard-stability-contract.php"
+"$php_bin" "$source_root/tests/cashier-v3/php/order-center-unified-export-contract.php"
+
+node_bin="${MOHE_TEST_NODE:-node}"
+for suite in device-session-contract browser-entry-contract browser-single-entry-contract browser-transport-contract browser-workflow-contract browser-independent-export-contract browser-guidance-contract opt3-browser-failure-contract browser-mobile-guidance-contract order-export-snapshot; do
+    "$node_bin" "$test_dir/$suite.mjs"
+done
+"$node_bin" "$test_dir/management-ui-contract.mjs"
+"$node_bin" "$test_dir/admin-router-contract.mjs"
+"$node_bin" "$test_dir/management-route-access.mjs"
+bash "$test_dir/local-entrypoint-permissions.sh"

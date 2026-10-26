@@ -1,0 +1,9 @@
+# R23 平台人员编辑“指定门店”同显：瑞昊上线记录
+
+- 产品经理确认本地固定版验收通过后，仅发布瑞昊正式实例 `rh.cc3798.com` 的平台端静态资源。未操作 007/008/012、门店端、后端、数据库、配置、Redis 或真实人员权限数据；无迁移。闭环本地提交 `bd329ce85528db538ce3e6c703a96396e75f4d3a`，只含人员弹窗源码、合同测试及自测证据 3 个文件。
+- 发布前：公网人员管理页实际仍加载 R18 主包 `app.b2072f01.js`，只有“个人、门店、组织”；瑞昊 `public/system.html` SHA-256 `e5c60372b7905a469a0fcf4b4a2a534d9d6dc8ee813f3cac5230a1802c07c2ef`，与 R18 发布记录相符。旧模板缓存 SHA-256 `0bfe9f8985113867b619a8d2968c0ac816d181d71e59d6b154b0cc3db1494df7`。目标为 `/www/wwwroot/rh.cc3798.com/`，独立备份目录可用，磁盘剩余 209G。因本轮只有前端可见性改动，数据库升级版本未变，也未连接生产库执行 SQL。
+- 隔离构建：从本地权威源码 Git 提交 `59c4548b` 导出 R18 已上线平台端及 `前端代码/shared/`，仅以 `bd329ce8` 中 `前端代码/admin/src/pages/setting/staff/add.vue` 的精确 blob 覆盖；没有带入当前脏工作区的 `admin/vue.config.js` 或其他任务的共享模块改动。源码文件 SHA-256 `4313645ef64e02e122f44a9c329b17b97bf7a55802d9573ab851fec53476eb2d`。原生 arm64 生产构建退出码 0；存在非致命历史源码 lint、Browserslist 与资源体积警告。产物 `system.html` SHA-256 `a4bc17f5bb53ab0ff05f93f0ce30548fe4d1c90a3359c4042474aafa37118845`，主包 `app.5b48c5dd.js` SHA-256 `f60e991ef8bf1622cca4fd3bbd403b15c7ca7397e1087ae6fc24ab83d061668d`。
+- 瑞昊独立备份：`/www/backups/rh.cc3798.com/20261004-r23-bd329ce8-selected-store-button/pre-release.tgz`，包含旧 `public/system.html`、完整 `public/view_admin/` 与指定页面的旧编译模板；约 50M、2226 个归档条目，压缩包 SHA-256 `063d0c558c4bb617ea030f576677cf695d7ea007ec560ec23e6bd9d93730ef47`，可读检查通过。回滚时只恢复该包的相应静态文件及模板缓存，不覆盖数据库或其他客户实例。
+- 部署：隔离构建的 1165 个前端文件先传至上述备份目录 `stage/`，条目数量和 HTML/主包指纹与本机完全一致；新哈希资源先复制到瑞昊 `public/view_admin/`，保留旧哈希资源供已打开页面使用。随后经指纹核对原子切换 `public/system.html`，把精确旧编译模板移入同一备份目录 `system-template-old.php`，由正常页面访问自动重编译；新模板 SHA-256 `34bdf7f3700916d9caa39157b03dd8aaa9554ea956eb2e4cd1207c924b669d29`。未重启服务、未删除旧资源。
+- 线上验证：公网 `/admin/setting/staff/index` 返回 HTTP 200 并引用 `app.5b48c5dd.js`；公网主包 SHA-256 与本机构建、服务器文件均一致。使用已有线上 `admin` 会话在新标签打开普通门店人员“编辑”→“数据权限”，实际看到“个人、门店、指定门店、组织”四个选项；点选“指定门店”后显示“可看门店”选择器。随即取消弹窗，未保存任何人员数据。此前已打开的旧标签须刷新才能加载新主包。
+- 状态：瑞昊平台端已部署且线上按钮实见；本轮未 `git push`（未获 push 授权）。

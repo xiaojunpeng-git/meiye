@@ -1,0 +1,30 @@
+{
+  "round": "R93",
+  "head": "2c2cadfbcada44a31415373de315cd4be52a0dd5",
+  "status": "self-tested-awaiting-product-manager-acceptance",
+  "remote": "not-applicable-local-only",
+  "files": [
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "sha256": "80926ae917067920841b6bd7009acaeea9be9d7a90965c8e484a38b59c82e3c5"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "b10380ea477d3cf0d3fe106899d8cae105760f38f5b8e4814c363587b8399d6e"
+    },
+    {
+      "path": "tests/report-phase-seven/php/group-dashboard-sale-type-contract.php",
+      "sha256": "075561c3ac3a58fb22640c29f953ab2c4b0cea84084ec6905b94a0a072ff0ef5"
+    },
+    {
+      "path": "tests/report-group-dashboard/php/category-sale-types.php",
+      "sha256": "87ab277f3d017f4a482c9741b3452f9dc550e787b54f89b9ffebbb09cd143fdc"
+    },
+    {
+      "path": "scripts/group-dashboard-sale-types-local-verification.mjs",
+      "sha256": "d7cce6d520afe4f4e29e884765342999f4a4115593e199c33440397049a63239"
+    }
+  ],
+  "patchSha256": "13d4dc451ecc8d2224d97104925969a87842b8a937cac9458780a5bb471a4086",
+  "businessChecks": 171
+}

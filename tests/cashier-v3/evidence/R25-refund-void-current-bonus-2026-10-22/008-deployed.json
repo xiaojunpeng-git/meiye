@@ -1,0 +1,11 @@
+{
+  "instance": "008",
+  "commit": "c7440b6b804a5b857dc84d372eb5a6ca49d323cb",
+  "backup": "/www/backups/008/20261022-r25-refund-void-c7440b6b",
+  "files": {
+    "app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "e19267c7e4fa681c5bc489c864d8160ec74e59b8e907f15cce562dee6993ba61",
+    "app/services/user/UserBalanceAtomicServices.php": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a"
+  },
+  "service_healthy": true,
+  "result": "installed"
+}

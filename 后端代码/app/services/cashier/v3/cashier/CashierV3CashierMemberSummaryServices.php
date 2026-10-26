@@ -1,0 +1,413 @@
+<?php
+
+namespace app\services\cashier\v3\cashier;
+
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
+use app\services\cashier\v3\CashierV3CommandException;
+use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\member\CashierV3MemberExclusiveSelectionServices;
+use think\facade\Db;
+
+/** 收银顶部当前会员的权威摘要；不写会员、权益或欠款事实。 */
+final class CashierV3CashierMemberSummaryServices
+{
+    public function read(int $memberId, int $currentStoreId): array
+    {
+        $member = Db::name('user')
+            ->where('uid', $memberId)
+            ->field('uid,nickname,real_name,phone,avatar,bar_code,belong_store_id,now_money,status,is_del,delete_time')
+            ->find();
+        if (!$this->activeMember($member)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::RESOURCE_NOT_FOUND,
+                '当前会员不存在或已经停用。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['member_id' => $memberId, 'reason' => 'cashier_selected_member_not_active']
+            );
+        }
+        $storeId = (int)($member['belong_store_id'] ?? 0);
+        if ($storeId <= 0) {
+            $storeId = $currentStoreId;
+        }
+        $storeName = (string)Db::name('system_store')->where('id', $storeId)->value('name');
+        $name = trim((string)($member['real_name'] ?? ''));
+        if ($name === '') {
+            $name = trim((string)($member['nickname'] ?? ''));
+        }
+        $accountBalance = $this->money($member['now_money'] ?? 0);
+        $cards = $this->cardSummary($memberId);
+        $debtAmount = $this->debtAmount($memberId);
+        $exclusive = $this->exclusiveServiceName($memberId);
+        // 多人仅是收银默认候选；本次购物车行的人员分配仍单独保存和校验。
+        $exclusivePeople = (new CashierV3MemberExclusiveSelectionServices())->records($memberId);
+        return [
+            'id' => (string)$memberId,
+            'memberId' => $memberId,
+            'name' => $name !== '' ? $name : '未命名会员',
+            'phone' => (string)($member['phone'] ?? ''),
+            'avatar' => (string)($member['avatar'] ?? ''),
+            'memberNo' => (string)($member['bar_code'] ?? ''),
+            'storeId' => $storeId,
+            'storeName' => $storeName,
+            'serviceAdvisorName' => $exclusive,
+            'exclusiveStaffName' => $exclusive,
+            'exclusiveServiceStaffRecords' => $exclusivePeople,
+            'accountBalance' => $accountBalance,
+            'cardBenefitAmount' => $cards['remainingAmount'],
+            'remainingProjectAmount' => $cards['remainingAmount'],
+            'remainingTimes' => $cards['remainingTimes'],
+            'activeCardCount' => $cards['activeCardCount'],
+            'totalAvailableAmount' => bcadd($accountBalance, $cards['remainingAmount'], 2),
+            'totalBalanceAmount' => bcadd($accountBalance, $cards['remainingAmount'], 2),
+            'outstandingDebtAmount' => $debtAmount,
+            'summaryContractVersion' => 'cashier-member-summary-v1',
+            'dataAsOf' => date('Y-m-d H:i:s'),
+        ];
+    }
+
+    private function cardSummary(int $memberId): array
+    {
+        $holders = $this->rows(Db::name('user_card_holder')
+            ->where('uid', $memberId)
+            ->where('is_del', 0)
+            ->where('store_id', '>', 0)
+            ->where('write_surplus_times', '>', 0)
+            ->field('id,oid,write_start,write_end,write_surplus_times')
+            ->order('id asc')
+            ->select());
+        $holderIds = array_values(array_unique(array_filter(array_map('intval', array_column($holders, 'id')))));
+        $disabledHolderIds = $this->disabledHolderIds($holderIds, $memberId);
+        $timeCardHolderIds = $this->timeCardHolderIds($holderIds, $memberId);
+        $holders = array_values(array_filter($holders, static function (array $holder) use ($disabledHolderIds): bool {
+            return !isset($disabledHolderIds[(int)($holder['id'] ?? 0)]);
+        }));
+        $orderIds = array_values(array_unique(array_filter(array_map('intval', array_column($holders, 'oid')))));
+        if (!$orderIds) {
+            return ['activeCardCount' => 0, 'remainingTimes' => 0, 'remainingAmount' => '0.00'];
+        }
+        $validOrders = $this->rows(Db::name('store_order')
+            ->whereIn('id', $orderIds)
+            ->where('uid', $memberId)
+            ->where('paid', 1)
+            ->where('is_del', 0)
+            ->where('is_system_del', 0)
+            ->where('is_user_del', 0)
+            ->where('refund_status', 0)
+            ->where('terminal_action', 0)
+            ->where('card_upgrade_use_oid', 0)
+            ->field('id,uid,store_id,pay_price')
+            ->select());
+        $validOrderIds = array_values(array_unique(array_map('intval', array_column($validOrders, 'id'))));
+        if (!$validOrderIds) {
+            return ['activeCardCount' => 0, 'remainingTimes' => 0, 'remainingAmount' => '0.00'];
+        }
+        $now = time();
+        $holderOrderIds = [];
+        $holderIdByOrder = [];
+        foreach ($holders as $holder) {
+            $oid = (int)($holder['oid'] ?? 0);
+            $start = max(0, (int)($holder['write_start'] ?? 0));
+            $end = max(0, (int)($holder['write_end'] ?? 0));
+            if (in_array($oid, $validOrderIds, true)
+                && ($start === 0 || $start <= $now)
+                && ($end === 0 || $end >= $now)) {
+                $holderOrderIds[$oid] = true;
+                $holderIdByOrder[$oid] = (int)($holder['id'] ?? 0);
+            }
+        }
+        if (!$holderOrderIds) {
+            return ['activeCardCount' => 0, 'remainingTimes' => 0, 'remainingAmount' => '0.00'];
+        }
+        $remainingTimes = 0;
+        $remainingAmount = '0.00';
+        $activeOrders = [];
+        $sharedRules = [];
+        $sharedTenants = [];
+        $combinationTenants = [];
+        foreach ($this->rows(Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', array_values($holderIdByOrder))
+            ->where('member_id', $memberId)->where('rule_type', 'combination')
+            ->field('card_holder_id,tenant_id')->select()) as $state) {
+            $combinationTenants[(int)$state['card_holder_id']] = (string)$state['tenant_id'];
+        }
+        foreach ($this->rows(Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', array_values($holderIdByOrder))
+            ->where('member_id', $memberId)
+            ->where('rule_type', 'choice_count')
+            ->field('card_holder_id,tenant_id,shared_total_times,shared_remaining_times')
+            ->select()) as $state) {
+            $id = (int)$state['card_holder_id'];
+            $sharedTenants[$id] = (string)$state['tenant_id'];
+            $sharedRules[$id] = [
+                'ruleType' => 'choice_count',
+                'totalTimes' => (int)$state['shared_total_times'],
+                'remainingTimes' => (int)$state['shared_remaining_times'],
+            ];
+        }
+        $sharedRefunds = [];
+        if ($sharedRules) {
+            foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
+                ->whereIn('card_holder_id', array_keys($sharedRules))
+                ->where('status', 'effective')
+                ->field('card_holder_id,refund_amount_cents,times_removed')
+                ->select()) as $refund) {
+                $id = (int)$refund['card_holder_id'];
+                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+                $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
+            }
+        }
+        $countedSharedHolders = [];
+        $carts = $this->rows(Db::name('store_order_cart_info')
+            ->whereIn('oid', array_keys($holderOrderIds))
+            ->where('cart_type', 2)
+            ->where('product_type', 6)
+            ->where('is_writeoff', 0)
+            ->where('write_surplus_times', '>', 0)
+            ->field('id,oid,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,cart_info')
+            ->order('oid asc,id asc')
+            ->select());
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
+            array_keys($holderOrderIds),
+            $carts
+        );
+        // 顶部可用权益金额同步排除取消额，不能与权益选择器形成两个余额。
+        $orderMap = array_column($validOrders, null, 'id');
+        $writeoff = app()->make(\app\services\order\store\WriteOffOrderServices::class);
+        foreach ($carts as $cart) {
+            $start = max(0, (int)($cart['write_start'] ?? 0));
+            $end = max(0, (int)($cart['write_end'] ?? 0));
+            $total = (int)($cart['write_times'] ?? 0);
+            $remaining = (int)($cart['write_surplus_times'] ?? 0);
+            if ($total <= 0 || $remaining <= 0 || $remaining > $total
+                || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) {
+                continue;
+            }
+            $holderId = (int)($holderIdByOrder[(int)$cart['oid']] ?? 0);
+            if (isset($combinationTenants[$holderId])) continue;
+            $snapshot = is_string($cart['cart_info'] ?? null)
+                ? json_decode((string)$cart['cart_info'], true)
+                : ($cart['cart_info'] ?? []);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            if (isset($sharedRules[$holderId])
+                && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot)) {
+                // 共享卡每个项目都映射同一余次池，顶部摘要只能把整卡金额计一次。
+                if (isset($countedSharedHolders[$holderId])) continue;
+                $countedSharedHolders[$holderId] = true;
+                $rule = $sharedRules[$holderId];
+                $sharedSnapshot = [
+                    'r26RefundedCents' => (int)($sharedRefunds[$holderId]['returned'] ?? 0),
+                    'r26RefundRemovedTimes' => (int)($sharedRefunds[$holderId]['removed'] ?? 0),
+                ];
+                $order = $orderMap[(int)$cart['oid']] ?? [];
+                $amounts = CashierV3SharedCardPurchaseAmount::project($order, $rule, $sharedSnapshot);
+                if ($amounts === null) {
+                    throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '会员卡项金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_shared_card_amount_invalid']);
+                }
+                $blocked = (new CashierV3CardOriginDebtResolver())->unavailableCardDebt(
+                    $order, $memberId, $sharedTenants[$holderId], false
+                );
+                $usable = bcsub($amounts['remainingAmount'], $blocked, 2);
+                $remainingAmount = bcadd($remainingAmount,
+                    bccomp($usable, '0', 2) > 0 ? $usable : '0.00', 2);
+                $remainingTimes += $rule['remainingTimes'];
+                $activeOrders[(int)$cart['oid']] = true;
+                continue;
+            }
+            if (!isset($timeCardHolderIds[(int)($holderIdByOrder[(int)$cart['oid']] ?? 0)])) {
+                $remainingTimes += $remaining;
+            }
+            $consumed = $total - $remaining;
+            $actualSaleAmountCents = (int)($actualSaleAmounts[(int)($cart['id'] ?? 0)] ?? -1);
+            try {
+                $amount = $actualSaleAmountCents >= 0
+                    ? $this->remainingActualSaleAmount($actualSaleAmountCents, $total, $consumed, $snapshot)
+                    : CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                        $this->money($cart['pay_price'] ?? 0),
+                        $total,
+                        $consumed,
+                        $snapshot
+                    );
+                $amount = $writeoff->usableEntitlementAmount($cart, $orderMap[(int)$cart['oid']] ?? [], $amount);
+                $remainingAmount = bcadd($remainingAmount, $amount, 2);
+            } catch (\InvalidArgumentException $exception) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '会员卡项金额资料异常，请联系管理员核对。',
+                    CashierV3ResultCode::STATUS_FAILED,
+                    ['reason' => 'cashier_member_card_amount_invalid']
+                );
+            }
+            $activeOrders[(int)$cart['oid']] = true;
+        }
+        // 组合卡逐组计算共享金额，任一种数组合项目仍按项目金额计算；
+        // 父卡总次数从持卡权威只取一次，欠款从整卡余额只扣一次。
+        $holdersById = array_column($holders, null, 'id');
+        foreach ($combinationTenants as $holderId => $tenantId) {
+            $holder = $holdersById[$holderId] ?? null;
+            if (!$holder) continue;
+            $orderId = (int)$holder['oid'];
+            $order = $orderMap[$orderId] ?? null;
+            if (!$order) continue;
+            $comboCarts = $this->rows(Db::name('store_order_cart_info')
+                ->where('oid', $orderId)->where('cart_type', 2)->where('product_type', 6)
+                ->field('id,oid,product_id,write_times,write_surplus_times,pay_price,cart_info')
+                ->order('id asc')->select());
+            $authorities = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+                ->authoritiesForHolder($tenantId, $holderId);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $comboCarts);
+            $groupsCounted = [];
+            $cardAmount = '0.00';
+            foreach ($comboCarts as $cart) {
+                $authority = $authorities[(int)$cart['id']] ?? null;
+                if (!is_array($authority) || (string)($authority['cardRuleType'] ?? '') !== 'combination') {
+                    throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡权益资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_authority_invalid']);
+                }
+                $snapshot = json_decode((string)($cart['cart_info'] ?? ''), true);
+                $snapshot = is_array($snapshot) ? $snapshot : [];
+                if ((string)$authority['ruleType'] === 'choice_count') {
+                    $groupNo = (int)$authority['combinationGroupNo'];
+                    if (isset($groupsCounted[$groupNo])) continue;
+                    $groupsCounted[$groupNo] = true;
+                    $amounts = CashierV3SharedCardPurchaseAmount::project($order, $authority, $snapshot);
+                    if ($amounts === null) throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡共享金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_amount_invalid']);
+                    $cardAmount = bcadd($cardAmount, $amounts['remainingAmount'], 2);
+                } else {
+                    $amount = (int)($allocations[(int)$cart['id']] ?? -1);
+                    if ($amount < 0) throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡项目金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_project_amount_missing']);
+                    $version = $amount % 100 === 0
+                        ? CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION
+                        : 'operation-cent-combination-project-v1';
+                    $snapshot['amountCalculationVersion'] = $version;
+                    $cardAmount = bcadd($cardAmount,
+                        CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                            bcdiv((string)$amount, '100', 2), (int)$authority['totalTimes'],
+                            (int)$authority['totalTimes'] - (int)$authority['remainingTimes'], $snapshot), 2);
+                }
+            }
+            $blocked = (new CashierV3CardOriginDebtResolver())->unavailableCardDebt(
+                $order, $memberId, $tenantId, false);
+            $usable = bcsub($cardAmount, $blocked, 2);
+            $remainingAmount = bcadd($remainingAmount,
+                bccomp($usable, '0', 2) > 0 ? $usable : '0.00', 2);
+            // 老 holder 累加所有候选项目，可能把已封锁的任选种数也算作余次。
+            $remainingTimes += CashierV3CombinationRemainingTimes::fromAuthorities($authorities);
+            $activeOrders[$orderId] = true;
+        }
+        return [
+            'activeCardCount' => count($activeOrders),
+            'remainingTimes' => $remainingTimes,
+            'remainingAmount' => $remainingAmount,
+        ];
+    }
+
+    private function remainingActualSaleAmount(
+        int $amountCents,
+        int $totalTimes,
+        int $consumedTimes,
+        array $snapshot
+    ): string {
+        $amount = bcdiv((string)$amountCents, '100', 2);
+        if ($amountCents % 100 !== 0) {
+            $snapshot['amountCalculationVersion'] = 'operation-cent-card-sale-actual-amount';
+        }
+        return CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+            $amount,
+            $totalTimes,
+            $consumedTimes,
+            $snapshot
+        );
+    }
+
+    /** @param array<int,int> $holderIds @return array<int,bool> */
+    private function disabledHolderIds(array $holderIds, int $memberId): array
+    {
+        if (!$holderIds) return [];
+        $ids = Db::name('cashier_v3_card_state')
+            ->whereIn('card_holder_id', $holderIds)
+            ->where('current_member_id', $memberId)
+            ->where('card_status', 'disabled')
+            ->column('card_holder_id');
+        return array_fill_keys(array_map('intval', $ids), true);
+    }
+
+    /** @param array<int,int> $holderIds @return array<int,bool> */
+    private function timeCardHolderIds(array $holderIds, int $memberId): array
+    {
+        if (!$holderIds) return [];
+        $ids = Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', $holderIds)
+            ->where('member_id', $memberId)
+            ->where('rule_type', 'time')
+            ->column('card_holder_id');
+        return array_fill_keys(array_map('intval', $ids), true);
+    }
+
+    private function debtAmount(int $memberId): string
+    {
+        return (new CashierV3MemberDebtProjectionServices())->amountForMember($memberId);
+    }
+
+    private function exclusiveServiceName(int $memberId): string
+    {
+        try {
+            return trim((string)Db::name('member_exclusive_service')
+                ->where('member_id', $memberId)
+                ->where('status', 1)
+                ->value('staff_name'));
+        } catch (\Throwable $exception) {
+            // 旧会员未建立专属服务人关系时，摘要允许明确为空。
+            return '';
+        }
+    }
+
+    private function activeMember($row): bool
+    {
+        if (!$row || !is_array($row) || (int)($row['uid'] ?? 0) <= 0
+            || (int)($row['status'] ?? 0) !== 1 || (int)($row['is_del'] ?? 0) !== 0) {
+            return false;
+        }
+        $deletedAt = $row['delete_time'] ?? null;
+        return $deletedAt === null || $deletedAt === '' || $deletedAt === 0 || $deletedAt === '0'
+            || $deletedAt === '0000-00-00 00:00:00';
+    }
+
+    private function money($value): string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员金额资料异常，请联系管理员核对。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'cashier_member_money_invalid']
+            );
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw) !== 1) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员金额资料异常，请联系管理员核对。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'cashier_member_money_invalid']
+            );
+        }
+        return bcadd($raw, '0', 2);
+    }
+
+    private function rows($value): array
+    {
+        if (is_object($value) && method_exists($value, 'toArray')) {
+            $value = $value->toArray();
+        }
+        return is_array($value) ? array_values($value) : [];
+    }
+}

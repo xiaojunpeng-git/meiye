@@ -1,0 +1,43 @@
+{
+  "task": "R94 member consumption ranking",
+  "status": "self-tested; awaiting product manager acceptance; not committed or deployed",
+  "initialHead": "910255676777db6fac34123b377cb74c73deb524",
+  "freezeHead": "46c4b37715880d0b6f8f22f59e5d1cf39d3ad54c",
+  "headAdvance": "M008-R5-001 is unrelated; no changes to this task files or cashier-v3/registered reader/category resolver",
+  "businessPatchSha256": "a317ed2b244f1575b5a51d76d167b640003415651adc7278c6710433dae91ece",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/MemberDashboardView.vue",
+      "sha256": "54de582bfd8e365accccafff57c26d6bac0f0a9f11b663a996aeb77fa52d1346"
+    },
+    {
+      "path": "后端代码/app/services/report/MemberManagementDashboardServices.php",
+      "sha256": "28bf95f09564d9d926c93d7de65f30e967dc9a5a80c3cb71ae45e933743c20e8"
+    },
+    {
+      "path": "tests/report-phase-seven/php/r94-member-consumption-ranking.php",
+      "sha256": "0a63fa7e84963fba7120e5b48bc507a68507dbf67bed3090840f75c063c88b72"
+    },
+    {
+      "path": "tests/report-phase-seven/php/r94-member-consumption-readonly.php",
+      "sha256": "ed392a60d29dae38d0b76ab13f49ac6dc455e830c4a07f0a6c3898a84b04e6b9"
+    },
+    {
+      "path": "tests/report-phase-seven/js/r94-member-consumption-ranking.mjs",
+      "sha256": "caf87173727883b109c188c101466e476c1ff2ac27ec8f44e47e2723d8008cb7"
+    },
+    {
+      "path": "tests/report-phase-seven/php/member-dashboard-contract.php",
+      "sha256": "647d18f6ee59a948c2a571adde9befef1d602b8223a8f506b724ad72e4bb55f3"
+    }
+  ],
+  "build": {
+    "path": "mohe-cashier-v3-src:/tmp/r94-member-consumption-dist",
+    "js": "index-0b3b8c43.js",
+    "jsSha256": "fe53f65354b9dbdf9b6ec44a5739b78384f9c7852915d79e23e4a565f2ed927e",
+    "cssSha256": "4b0f087c1a0c69e67b586cf1d3ed150e63bc3c08bdee8b3f0b581984334bf9ef",
+    "purpose": "local build verification only, not a deployable isolated release"
+  },
+  "remote": "not applicable",
+  "databaseWrites": false
+}

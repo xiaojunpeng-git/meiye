@@ -1,0 +1,30 @@
+{
+  "suite": "OPT3 inherited metric default",
+  "date": "2026-10-11",
+  "base_head": "be821109147b046734c27fcf69472af44289e1b1",
+  "files_sha256": {
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "0e5cd1ca9ecd0ff90db5e96709cc6239af66eeb9cd4eef79f63aaa4458b4e484",
+    "tests/mohe-ai/opt3-inherited-metric-default.php": "65af0ad17cda9425736ff701439d772d9c5888b43608f31d57c4c6e7993f5575"
+  },
+  "before": {
+    "checks": 35,
+    "failed": 21,
+    "passed": 14,
+    "ranking_review_metric": "cash_performance",
+    "breakdown_review_metric": "actual_performance",
+    "merged_metric": "consume_amount"
+  },
+  "after": {
+    "host": {
+      "checks": 35,
+      "passed": 35
+    },
+    "php_7_4_33_isolated": {
+      "checks": 35,
+      "passed": 35
+    }
+  },
+  "change": "Both registered default gates preserve accepted metric inheritance before or after context merge. New-topic and explicit replace defaults retain existing admission.",
+  "evidence_limit": "Synthetic structural reproduction. Actual failed model meaning/binding was not persisted; live diagnostics only confirm registered_rank_default_applied and semantic_requirement_rejected.",
+  "first_php74_attempt": "Transient bind-mount read was truncated immediately after source edit; host full file/lint and stable PHP7.4 rerun both passed."
+}

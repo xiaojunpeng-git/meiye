@@ -1,0 +1,480 @@
+<?php
+namespace app\services\ai\semantic;
+
+use app\services\query\metric\MetricSemanticCatalog;
+
+/**
+ * Admits only one or more fully closed explicit metric extrema.
+ *
+ * The admission layer does not infer synonyms, formulas or default metrics.
+ * Every measurement and analytical object must come from the active source
+ * registries, while this class owns only reusable Chinese coordination and
+ * extremum grammar.  A clause that leaves any business word unexplained is
+ * rejected so the ordinary model path keeps all open-ended AI capability.
+ */
+final class AiExactRankingCollectionAdmission
+{
+    /**
+     * Peel off one explicitly named, currently authorized store scope before
+     * the existing closed-ranking grammar runs. A demonstrative without an
+     * exact catalogue name is not a store selection; ambiguous or repeated
+     * names return to normal language understanding without choosing an ID.
+     *
+     * @param array<int,array{ref:string,kind:string,label:string}> $stores
+     * @return array{question:string,store_id:int}|null
+     */
+    public function namedStoreScope(string $question,array $stores): ?array
+    {
+        $matches=[];
+        foreach ($stores as $store) {
+            if (($store['kind']??null)!=='store' || !preg_match('/^store:([1-9][0-9]*)$/D',(string)($store['ref']??''),$id)) continue;
+            $label=trim((string)($store['label']??''));
+            if ($label==='') continue;
+            foreach ([$label.'这个门店',$label.'这家门店'] as $carrier) {
+                if (substr_count($question,$carrier)===1) $matches[$store['ref']]=['carrier'=>$carrier,'id'=>(int)$id[1]];
+            }
+        }
+        if (count($matches)!==1) return null;
+        $match=array_values($matches)[0];
+        $stripped=str_replace($match['carrier'],' ',$question,$replacements);
+        return $replacements===1?['question'=>trim($stripped),'store_id'=>$match['id']]:null;
+    }
+
+    /**
+     * A customer may explicitly replace a previously selected store/person
+     * with the entire authorised population. Strip only this scope carrier;
+     * the caller may clear private store IDs only after the remaining ranking
+     * also passes exact registry admission and normal Reader permissions.
+     *
+     * @return array{question:string,all_authorized:bool}
+     */
+    public function authorizedPopulation(string $question,array $objectVocabulary): array
+    {
+        $labels=array_values(array_unique(array_column($this->objects($objectVocabulary),'object_label')));
+        usort($labels,static function(string $a,string $b):int{return mb_strlen($b,'UTF-8')<=>mb_strlen($a,'UTF-8');});
+        foreach ($labels as $label) {
+            $pattern='/(?:我)?(?:有权限的)?(?:所有|全部|全体)(?=\s*'.preg_quote($label,'/').')/u';
+            $stripped=preg_replace($pattern,'',$question,1,$count);
+            if ($count===1 && is_string($stripped)) {
+                // A leading negation of the previous private selection is
+                // redundant once the customer explicitly requests every
+                // authorised object. Admit no trailing negative filter here:
+                // the remaining sentence must still pass exact ranking proof.
+                $withoutPrior=preg_replace('/^\s*不要只看[^，,。]{1,40}[，,]\s*(?:统计)?/u','',$stripped,1);
+                if (!is_string($withoutPrior)) return ['question'=>$question,'all_authorized'=>false];
+                $stripped=$withoutPrior;
+                return ['question'=>$stripped,'all_authorized'=>true];
+            }
+        }
+        return ['question'=>$question,'all_authorized'=>false];
+    }
+
+    /**
+     * Admit one registry-backed ranking together with a bounded set-detail view.
+     *
+     * Natural-language understanding remains the default. This narrow path is
+     * available only when the sentence itself closes every execution carrier:
+     * one registered analytical object, one direction, a bounded row limit and
+     * a genuine detail request. "Highest/lowest" alone bounds the set to one;
+     * an expressly named metric must resolve uniquely in the active registry.
+     * The caller accepts at most one calendar range;
+     * if it is omitted, the gateway first applies verified context. A new
+     * conversation retains the dimension planner's same-day default.
+     * An unnamed business metric must be the sole active registry default
+     * shared by the selected ranking capability; no synonym is invented here.
+     *
+     * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
+     * @param array<int,string> $allowedMetricCodes
+     * @param array<string,array<int,string>> $defaultRankObjectKinds
+     * @return array{ranking:array{metric_code:string,object_kind:string,direction:string,limit:int},detail:array{view:string,target:string,ordinal:null}}|null
+     */
+    public function matchPopulationDetail(
+        string $question,array $objectVocabulary,array $allowedMetricCodes,
+        array $defaultRankObjectKinds,?int $limit
+    ): ?array {
+        if ($question==='' || preg_match('//u',$question)!==1
+            || ($limit!==null && ($limit<1 || $limit>20))) return null;
+        $question=$this->normalizeLeadingDiscourseConnector($question);
+        if (!preg_match('/详情|明细|情况|具体/u',$question)) return null;
+        $explicitMetric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        // A metric name may itself contain an object noun (e.g. 销售人业绩).
+        // Remove that proved metric span before selecting the ranked object,
+        // or the inner noun can mask an explicit "员工" target.
+        $objectText=$explicitMetric!==null
+            ?str_replace($explicitMetric['term'],' ',$question):$question;
+        $matched=$this->objectsInText($objectText,$this->objects($objectVocabulary));
+        // "员工业绩前三名详情" has no second noun outside its registered
+        // measurement; its sole noun may still supply the object after the
+        // outer-text check found none. Ambiguous labels still fail closed.
+        if ($matched===[]) $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
+        if ($matched===null || count($matched)!==1) return null;
+        $kind=$matched[0]['object_kind'];
+        $direction=$this->direction($question);
+        // An explicit bounded 前N/后N is itself a direction. Conflicting
+        // carriers are not guessed and stay on the semantic model path.
+        $hasTop=(bool)preg_match('/前[0-9一二两三四五六七八九十百]+/u',$question);
+        $hasBottom=(bool)preg_match('/后[0-9一二两三四五六七八九十百]+/u',$question);
+        if ($hasTop && $hasBottom || $hasTop && $direction==='bottom' || $hasBottom && $direction==='top') return null;
+        if ($direction===null) $direction=$hasTop?'top':($hasBottom?'bottom':null);
+        if (!in_array($direction,['top','bottom'],true)) return null;
+        // A superlative without an explicit 前N/后N denotes only the first
+        // ranked object. Other unbounded detail collections stay with the
+        // semantic model rather than expanding an arbitrary population.
+        if ($limit===null) {
+            if ($hasTop || $hasBottom) return null;
+            $limit=1;
+        }
+        $candidateCodes=[];
+        if ($explicitMetric!==null) {
+            $candidateCodes[]=$explicitMetric['metric_code'];
+        } else {
+            foreach ($allowedMetricCodes as $code) {
+                if (in_array($kind,array_values(array_unique(array_filter(
+                    (array)($defaultRankObjectKinds[$code]??[]),'is_string'
+                ))),true)) $candidateCodes[]=$code;
+            }
+        }
+        if (count($candidateCodes)!==1 || $this->populationDetailResidue(
+            $question,$matched[0]['object_label'],$explicitMetric['term']??null
+        )!=='') return null;
+        return [
+            'ranking'=>['metric_code'=>$candidateCodes[0],'object_kind'=>$kind,
+                'direction'=>$direction,'limit'=>$limit],
+            'detail'=>['view'=>'summary','target'=>'set','ordinal'=>null],
+        ];
+    }
+
+    /**
+     * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
+     * @param array<int,string> $allowedMetricCodes
+     * @param array<string,array<int,string>> $defaultRankObjectKinds
+     * @return array<int,array{metric_code:string,object_kind:string,direction:string,limit:int}>|null
+     */
+    public function match(string $question,array $objectVocabulary,array $allowedMetricCodes,array $defaultRankObjectKinds=[]): ?array
+    {
+        if ($question==='' || preg_match('//u',$question)!==1) return null;
+        $question=$this->normalizeLeadingDiscourseConnector($question);
+        // Remove a fully covered shared calendar prefix before clause splitting;
+        // a comma between the period and the ranking is not a second question.
+        $calendar=AiSemanticIntentParser::calendarEvidence($question);
+        if (!$calendar['complete']) return null;
+        $question=trim($calendar['remainder']);
+        // “呢” after a complete calendar expression is a discourse particle.
+        // Removing it changes no metric, object or condition; the remaining
+        // sentence must still pass the full closed-ranking residue proof.
+        $question=preg_replace('/^呢(?=\s*(?:[，,]|哪))/u','',$question);
+        $question=trim((string)$question);
+        $objects=$this->objects($objectVocabulary);
+        $shared=$this->sharedDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
+        if ($shared!==null) return $shared;
+        $singleDefault=$this->singleDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
+        if ($singleDefault!==null) return $singleDefault;
+        $personWinner=$this->explicitPersonWinnerRanking($question,$objects,$allowedMetricCodes);
+        if ($personWinner!==null) return $personWinner;
+        $ordinalWinner=$this->explicitOrdinalWinnerRanking($question,$objects,$allowedMetricCodes);
+        if ($ordinalWinner!==null) return $ordinalWinner;
+        $bounded=$this->boundedSingleRanking($question,$objects,$allowedMetricCodes);
+        if ($bounded!==null) return $bounded;
+        $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
+        if (!is_array($clauses) || $clauses===[] || count($clauses)>6) return null;
+
+        $items=[];
+        foreach ($clauses as $rawClause) {
+            $clause=trim($rawClause);
+            if ($clause==='') continue;
+            $metric=MetricSemanticCatalog::uniqueTermInText($clause,$allowedMetricCodes);
+            // A registered measurement may contain an object noun (项目数,
+            // 销售人业绩). Remove its proven span before selecting the ranked
+            // object, otherwise the measurement's noun competes with 技师等
+            // actual subject. Never discard the span from residue validation.
+            $object=$this->uniqueObjectInText($metric!==null
+                ?str_replace($metric['term'],' ',$clause):$clause,$objects);
+            $direction=$this->direction($clause);
+
+            // A short coordinated tail such as “最低是哪个” belongs to the
+            // immediately preceding explicit metric/object clause. It may add
+            // only a ranking direction; any other residue fails closed.
+            if ($metric===null && $object===null && $direction!==null && $items!==[]
+                && $this->residue($clause,null,null)==='') {
+                $last=count($items)-1;
+                $items[$last]['direction']=$this->combineDirection($items[$last]['direction'],$direction);
+                continue;
+            }
+            if ($metric===null || $object===null || $direction===null) return null;
+            if ($this->residue($clause,$metric['term'],$object['object_label'])!=='') return null;
+            $items[]=['metric_code'=>$metric['metric_code'],'object_kind'=>$object['object_kind'],
+                'direction'=>$direction,'limit'=>1];
+        }
+        if ($items===[] || count($items)>4) return null;
+        return $items;
+    }
+
+    /**
+     * Admit one broad ranked object only when its first-answer metric is
+     * uniquely declared by the active registry. The grammar contributes the
+     * object and direction; it never selects a metric from a phrase map.
+     */
+    private function singleDefaultRanking(string $question,array $objects,array $allowedMetricCodes,array $defaults): ?array
+    {
+        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
+        $object=$this->uniqueObjectInText($question,$objects);
+        $direction=$this->direction($question);
+        if ($object===null || $direction===null
+            || $this->singleDefaultResidue($question,$object['object_label'])!=='') return null;
+        $candidateCodes=[];
+        foreach ($allowedMetricCodes as $code) {
+            $kinds=array_values(array_unique(array_filter((array)($defaults[$code]??[]),'is_string')));
+            if (in_array($object['object_kind'],$kinds,true)) $candidateCodes[]=$code;
+        }
+        if (count($candidateCodes)!==1) return null;
+        return [[
+            'metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
+            'direction'=>$direction,'limit'=>1,
+        ]];
+    }
+
+    /** A closed “first place, who” asks for one person only when the exact
+     * registered measurement itself has person fact grain. No metric label,
+     * person ID or ranking value is inferred from the pronoun; unknown extra
+     * conditions return to the ordinary semantic path. */
+    private function explicitPersonWinnerRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        if (!preg_match('/第(?:一|1)名/u',$question) || !preg_match('/谁|哪位/u',$question)) return null;
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null || !in_array('person',array_column($objects,'object_kind'),true)
+            ||(\app\services\query\metric\MetricDefinitionRegistry::get($metric['metric_code'])['filter_grain']??null)!=='person') return null;
+        $residue=str_replace($metric['term'],' ',$question);
+        // An independently named store, member or other object is not the
+        // person measured by this fact; its relationship needs model binding.
+        if ($this->objectsInText($residue,$objects)!==[]) return null;
+        $residue=preg_replace('/第(?:一|1)名|谁|哪位/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/的|是|，|,|。|？|\?|！|!|\s+/u','',(string)$calendar['remainder']);
+        if (!is_string($residue)||$residue!=='') return null;
+        return [['metric_code'=>$metric['metric_code'],'object_kind'=>'person','direction'=>'top','limit'=>1]];
+    }
+
+    /** A stated first/last place plus registered metric and object is a
+     * complete ranking, not a reference to the old answer. Any demonstrative,
+     * named scope or other business condition remains as residue and falls
+     * through to contextual understanding instead of losing its meaning. */
+    private function explicitOrdinalWinnerRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        $top=(bool)preg_match('/(?<!倒数)第(?:一|1)名/u',$question);
+        $bottom=(bool)preg_match('/倒数第(?:一|1)名/u',$question);
+        if ($top===$bottom) return null;
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null) return null;
+        $objectText=str_replace($metric['term'],' ',$question);
+        $matched=$this->objectsInText($objectText,$objects);
+        if ($matched===null || count($matched)!==1) return null;
+        $residue=str_replace([$metric['term'],$matched[0]['object_label']],' ',$question);
+        $residue=preg_replace('/倒数第(?:一|1)名|第(?:一|1)名/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/(?:的)?(?:是)?(?:谁|哪个|哪一个|哪位|什么)|的|是|，|,|。|？|\?|！|!|\s+/u',
+            '',(string)$calendar['remainder']);
+        if (!is_string($residue) || $residue!=='') return null;
+        return [['metric_code'=>$metric['metric_code'],'object_kind'=>$matched[0]['object_kind'],
+            'direction'=>$bottom?'bottom':'top','limit'=>1]];
+    }
+
+    /**
+     * Bound one explicitly measured ranking without inventing a metric or
+     * object. The shared calendar parser supplies the row limit; leftover
+     * business language keeps the request on the ordinary understanding path.
+     */
+    private function boundedSingleRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null) return null;
+        $objectText=str_replace($metric['term'],' ',$question);
+        $matched=$this->objectsInText($objectText,$objects);
+        if ($matched===null || count($matched)!==1) return null;
+        $top=(bool)preg_match('/前[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?/u',$question);
+        $bottom=(bool)preg_match('/后[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?/u',$question);
+        if ($top===$bottom) return null;
+        $direction=$this->direction($question);
+        if ($direction==='top_and_bottom' || ($top && $direction==='bottom')
+            || ($bottom && $direction==='top')) return null;
+        $projection=(new AiSemanticIntentParser())->parse($question);
+        $limit=$projection['semantic_intent']['rank_limit']??null;
+        if (!is_int($limit) || $limit<1 || $limit>20) return null;
+        $residue=str_replace([$metric['term'],$matched[0]['object_label']],' ',$question);
+        $residue=preg_replace('/(?:前|后)[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?|最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么|谁)|分别|的|是|、|，|,|；|;|。|？|\?|！|!|\s+/u','', $calendar['remainder']);
+        if (!is_string($residue) || trim($residue)!=='') return null;
+        return [[
+            'metric_code'=>$metric['metric_code'],'object_kind'=>$matched[0]['object_kind'],
+            'direction'=>$top?'top':'bottom','limit'=>$limit,
+        ]];
+    }
+
+    /**
+     * A distributive list of registered objects may share one registry-owned
+     * broad ranking perspective. The grammar proves only object order,
+     * direction and distribution; the metric is admitted only when the
+     * intersection of active registry defaults contains exactly one code.
+     */
+    private function sharedDefaultRanking(string $question,array $objects,array $allowedMetricCodes,array $defaults): ?array
+    {
+        if (!preg_match('/分别|各自/u',$question)) return null;
+        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
+        $matched=$this->objectsInText($question,$objects);
+        if ($matched===null || count($matched)<2 || count($matched)>4) return null;
+        $direction=$this->direction($question);
+        if ($direction===null || $this->sharedDefaultResidue($question,array_column($matched,'object_label'))!=='') return null;
+        $objectKinds=array_column($matched,'object_kind');$candidateCodes=[];
+        foreach ($allowedMetricCodes as $code) {
+            $kinds=array_values(array_unique(array_filter((array)($defaults[$code]??[]),'is_string')));
+            if (array_diff($objectKinds,$kinds)===[]) $candidateCodes[]=$code;
+        }
+        if (count($candidateCodes)!==1) return null;
+        return array_map(static function(array $object)use($candidateCodes,$direction):array{
+            return ['metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
+                'direction'=>$direction,'limit'=>1];
+        },$matched);
+    }
+
+    /** Ordered unique registered objects; ambiguous labels fail closed. */
+    private function objectsInText(string $text,array $objects): ?array
+    {
+        $byKind=[];$labelKinds=[];
+        foreach ($objects as $object) {
+            $label=$object['object_label'];$position=mb_strpos($text,$label,0,'UTF-8');
+            if ($position===false) continue;
+            $labelKinds[$label][$object['object_kind']]=true;
+            $length=mb_strlen($label,'UTF-8');$current=$byKind[$object['object_kind']]??null;
+            if ($current===null || $length>$current['length']) {
+                $byKind[$object['object_kind']]=['object_kind'=>$object['object_kind'],
+                    'object_label'=>$label,'position'=>$position,'length'=>$length];
+            }
+        }
+        foreach ($labelKinds as $kinds) if (count($kinds)>1) return null;
+        $matched=array_values($byKind);
+        usort($matched,static function(array $left,array $right):int{return $left['position']<=>$right['position'];});
+        return array_map(static function(array $item):array{
+            return ['object_kind'=>$item['object_kind'],'object_label'=>$item['object_label']];
+        },$matched);
+    }
+
+    /** Remove only closed broad-ranking grammar; any business residue rejects. */
+    private function sharedDefaultResidue(string $question,array $objectLabels): string
+    {
+        $residue=$question;
+        foreach ($objectLabels as $label) $residue=str_replace($label,' ',$residue);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
+        $residue=preg_replace('/业绩|卖得/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
+    }
+
+    /** Remove only the closed grammar of one registry-owned broad ranking. */
+    private function singleDefaultResidue(string $question,string $objectLabel): string
+    {
+        $residue=str_replace($objectLabel,' ',$question);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
+        $residue=preg_replace('/业绩|卖得/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪家|哪位|哪个|哪一个|谁|什么)(?:又)?|的|是|又|、|，|,|；|;|。|？|\\?|！|!|\\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
+    }
+
+    /** Remove only closed ranking/detail grammar; unexplained intent fails closed. */
+    private function populationDetailResidue(string $question,string $objectLabel,?string $metricTerm=null): string
+    {
+        $residue=str_replace($objectLabel,' ',$question);
+        if ($metricTerm!==null) $residue=str_replace($metricTerm,' ',$residue);
+        $residue=preg_replace('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*(?:[0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?/u',' ',$residue);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
+        $residue=preg_replace('/业绩|详情|明细|具体情况|情况/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么)|分别|各自|同时|以及|和|与|的|是|看看|查看|看|给我|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
+    }
+
+    /** Prefer the longest registered label and reject labels owned by different object kinds. */
+    private function uniqueObjectInText(string $text,array $objects): ?array
+    {
+        $matches=[];$longest=0;
+        foreach ($objects as $object) {
+            $label=$object['object_label'];
+            if (mb_strpos($text,$label,0,'UTF-8')===false) continue;
+            $length=mb_strlen($label,'UTF-8');
+            if ($length>$longest) {$matches=[];$longest=$length;}
+            if ($length===$longest) $matches[$object['object_kind']."\0".$label]=$object;
+        }
+        $kinds=[];foreach($matches as $match)$kinds[$match['object_kind']]=true;
+        return count($kinds)===1 ? array_values($matches)[0] : null;
+    }
+
+    /** @return array<int,array{object_kind:string,object_label:string}> */
+    private function objects(array $vocabulary): array
+    {
+        $out=[];
+        foreach ($vocabulary as $item) {
+            if (!is_array($item) || !is_string($item['object_kind']??null)
+                || !is_string($item['object_label']??null) || trim($item['object_label'])==='') continue;
+            $out[$item['object_kind']."\0".$item['object_label']]=[
+                'object_kind'=>$item['object_kind'],'object_label'=>trim($item['object_label']),
+            ];
+        }
+        return array_values($out);
+    }
+
+    private function direction(string $text): ?string
+    {
+        $top=(bool)preg_match('/最高|最多|最好|最大/u',$text);
+        $bottom=(bool)preg_match('/最低|最少|最差|最小/u',$text);
+        if ($top && $bottom) return 'top_and_bottom';
+        if ($top) return 'top';
+        if ($bottom) return 'bottom';
+        return null;
+    }
+
+    private function combineDirection(string $left,string $right): string
+    {
+        if ($left===$right) return $left;
+        return 'top_and_bottom';
+    }
+
+    /**
+     * Remove only admitted carriers and closed question grammar. Remaining
+     * text is an unhandled business instruction and must stay with the model.
+     */
+    private function residue(string $clause,?string $metricTerm,?string $objectLabel): string
+    {
+        $residue=$clause;
+        foreach (array_filter([$metricTerm,$objectLabel]) as $term) $residue=str_replace($term,' ',$residue);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $clause;
+        $residue=$calendar['remainder'];
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|同时|以及|和|与|的|是|又|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$clause;
+    }
+
+    /**
+     * Remove a sentence-leading conversational bridge only in a closed
+     * calendar question. Demonstratives such as “那家店” are deliberately
+     * outside this grammar and remain available to the normal context path.
+     */
+    public function normalizeLeadingDiscourseConnector(string $question): string
+    {
+        $normalized=preg_replace(
+            '/^(?:那么|那就|那)(?=(?:这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天|[，,\\s]))[，,\\s]*/u',
+            '',$question
+        );
+        return is_string($normalized)?$normalized:$question;
+    }
+}

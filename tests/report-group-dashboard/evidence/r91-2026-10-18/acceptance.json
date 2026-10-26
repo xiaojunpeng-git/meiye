@@ -1,0 +1,11 @@
+{
+  "round": "R91",
+  "accepted_patch_sha256": "afec3fff5b4539ad77831b7fcd79783b442db8574ee371a07aec1ba2542b0e91",
+  "product_manager_reply": "确认验收通过，仅本地提交",
+  "acceptance": "通过",
+  "precommit_head": "6f90d08dfa5c1e2f6e21125b5e9def6ac3786620",
+  "precommit_check": "全部7个业务、测试及脚本文件与固定候选指纹一致；HEAD相关文件与开发基线一致；暂存区原先为空。",
+  "verification": "93项只读对账及既有回归、PHP7.4、页面和构建验证通过，详见本目录证据。",
+  "scope_record_note": "scope.json保留提交验收时的历史状态，本文件记录后续产品经理确认。",
+  "authorization": "仅本地提交；不部署、不push、不改库。"
+}

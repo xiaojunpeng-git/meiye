@@ -1,0 +1,39 @@
+{
+  "head": "b99e8bd78c3f4709320c5c8674c942a0d636172d",
+  "file": "前端代码/admin/vue.config.js",
+  "sha256": "462e293eb344db8b6e1bf850bc8e502ae4ebe884e79168e18d596a0123eb76ed",
+  "shared_eslint": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "actual_browser": {
+    "url": "http://127.0.0.1:18081/admin/login",
+    "title": "登录 - 多门店",
+    "compile_overlay": 0,
+    "login_button_visible": true
+  },
+  "api_proxy": {
+    "http": 200,
+    "status": 410000,
+    "message": "请登录"
+  },
+  "compile_summary": [
+    " WARNING  Compiled with 263 warnings9:19:51 AM",
+    "  App running at:",
+    " WARNING  Compiled with 263 warnings9:20:20 AM",
+    "  App running at:",
+    " WARNING  Compiled with 263 warnings9:20:44 AM",
+    "  App running at:",
+    " WARNING  Compiled with 263 warnings9:21:26 AM",
+    "  App running at:"
+  ],
+  "existing_warnings": "旧页面存量 ESLint 告警仍保留，不阻止开发包运行",
+  "scope": "仅补充平台 ESLint 配置显式引用，保留原代理配置及业务源码",
+  "status": "本地开发服务恢复，尚未提交或部署",
+  "document_response": {
+    "http": 200,
+    "accept": "text/html",
+    "serves_platform_html": true,
+    "note": "按浏览器文档请求验证；此前未携带Accept的urllib请求未触发开发服务器history回退，不能代表实际浏览器访问。"
+  }
+}

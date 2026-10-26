@@ -1,0 +1,47 @@
+{
+  "localOnly": true,
+  "noCommit": true,
+  "noDeployment": true,
+  "noPush": true,
+  "noProductionDecorationSave": true,
+  "checks": [
+    "7 source templates and component contracts",
+    "real isolated MySQL save/public read/cache update",
+    "real editor DOM add/delete/image selection callback/link edit/region switch",
+    "H5 12 layouts 35 regions x 320/375, stable bounds",
+    "single-image baseline comparison 70 regions",
+    "real H5 current-frame navigation, one navigation per tap",
+    "native mini 12 layouts 35 regions, stable bounds and moving image pixels"
+  ],
+  "nativePackageTestOnly": true,
+  "generatedNativeFixtureAssets": [
+    "static/cube-proof-a.png",
+    "static/cube-proof-b.png"
+  ],
+  "notNewFeatures": [
+    "Existing 12 layouts",
+    "Existing single-image configuration",
+    "Existing image/link picker",
+    "Existing decoration save permissions and API"
+  ],
+  "architecture": {
+    "authority": "eb_diy.value -> picStyle.picList[region].slides",
+    "legacyProjection": "image/link/objectFit project first nonempty frame; docPicList keeps geometry",
+    "events": "Decoration save only; no financial/member/service facts",
+    "concurrency": "Reuse existing full-document save/version/cache boundary; no new writer",
+    "permissions": "Existing administrator decoration permissions; public member read unchanged",
+    "migration": "None",
+    "rollback": "Uncommitted exact patch against baseline; no production changes to restore"
+  },
+  "retiredBranches": {
+    "file": "前端代码/admin/src/components/mobileConfigRight/c_menu_list.vue",
+    "reason": "Cube no longer invokes shared single-image editor; navigation/hot-zone callers retained and regressed",
+    "picker": "Removed second menuConfig edit projection; selected picList region is authoritative"
+  },
+  "limits": [
+    "Native simulator uses isolated synthetic decoration and bundled existing photos, not a saved 008 production page",
+    "Shared admin baseline has no ESLint configuration; parser/template contracts run separately",
+    "Full builds include existing size warnings; no new compile errors"
+  ],
+  "time": "2026-10-22T09:22:07.263Z"
+}

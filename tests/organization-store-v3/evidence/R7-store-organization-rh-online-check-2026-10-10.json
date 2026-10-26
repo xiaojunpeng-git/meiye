@@ -1,0 +1,154 @@
+{
+  "commit": "9cebcf267f2b97b3c6655f39c6174ebd1e213aa8",
+  "integration": "687286040a37ab4816673d2467998e154fa9a629",
+  "assets": [
+    {
+      "path": "public/system.html",
+      "status": 200,
+      "sha256": "a961e8e3f00f1339518d3f660f6ec6741feb847d55b2ba9d6e1b224b3adc68d8",
+      "expected": "a961e8e3f00f1339518d3f660f6ec6741feb847d55b2ba9d6e1b224b3adc68d8"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css",
+      "status": 200,
+      "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "expected": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+    },
+    {
+      "path": "public/view_admin/css/app.b6208b14.css",
+      "status": 200,
+      "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+      "expected": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.5ad8ce84.js",
+      "status": 200,
+      "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+      "expected": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+    },
+    {
+      "path": "public/view_admin/js/app.cab4acd0.js",
+      "status": 200,
+      "sha256": "db9db862fe9535d338ceacf4dcb144fb5a90c33d1be32d3fd48f60288515dab0",
+      "expected": "db9db862fe9535d338ceacf4dcb144fb5a90c33d1be32d3fd48f60288515dab0"
+    },
+    {
+      "path": "public/view_admin/js/chunk-06bfc80c.e8fe3ab3.js",
+      "status": 200,
+      "sha256": "80d3df51f6d61961bad019a7f764f5ae71a2ca00f5df3cc3787b977a33b96876",
+      "expected": "80d3df51f6d61961bad019a7f764f5ae71a2ca00f5df3cc3787b977a33b96876"
+    }
+  ],
+  "unauthenticated": {
+    "http_status": 200,
+    "status": 410000,
+    "message": "请登录"
+  },
+  "checked_at": "2026-10-10T13:18:48.203Z",
+  "database": {
+    "before": {
+      "database": "ruihao",
+      "tables": {
+        "organization": 112,
+        "organization_store": 102,
+        "system_store": 102
+      },
+      "indexes": {
+        "organization": [
+          "PRIMARY",
+          "idx_pid",
+          "idx_legacy_manage_region"
+        ],
+        "organization_store": [
+          "PRIMARY",
+          "uk_store_id",
+          "idx_org_id"
+        ],
+        "system_store": [
+          "PRIMARY",
+          "phone",
+          "idx_manage_region_id"
+        ]
+      },
+      "latest_upgrade": {
+        "id": "216",
+        "upgrade_key": "20261010-r52-outbound-header",
+        "executed_at": "2026-10-10 16:51:44"
+      },
+      "binding_sha256": "0951dde21f4f0add3ce00a3d75717cdb465ec4cf77c353cb4b7f27ad9855c5ef",
+      "store179_sha256": "44a102349f745847222d3f3ccc199f78cae4cf92e52ff2d87ba199e3ce67ff08",
+      "store179_organization": {
+        "org_id": "178",
+        "name": "周晓玲经理"
+      }
+    },
+    "after": {
+      "database": "ruihao",
+      "tables": {
+        "organization": 112,
+        "organization_store": 102,
+        "system_store": 102
+      },
+      "indexes": {
+        "organization": [
+          "PRIMARY",
+          "idx_pid",
+          "idx_legacy_manage_region"
+        ],
+        "organization_store": [
+          "PRIMARY",
+          "uk_store_id",
+          "idx_org_id"
+        ],
+        "system_store": [
+          "PRIMARY",
+          "phone",
+          "idx_manage_region_id"
+        ]
+      },
+      "latest_upgrade": {
+        "id": "216",
+        "upgrade_key": "20261010-r52-outbound-header",
+        "executed_at": "2026-10-10 16:51:44"
+      },
+      "binding_sha256": "0951dde21f4f0add3ce00a3d75717cdb465ec4cf77c353cb4b7f27ad9855c5ef",
+      "store179_sha256": "44a102349f745847222d3f3ccc199f78cae4cf92e52ff2d87ba199e3ce67ff08",
+      "store179_organization": {
+        "org_id": "178",
+        "name": "周晓玲经理"
+      }
+    }
+  },
+  "browser": {
+    "authenticated_existing_session": true,
+    "only_reads": true,
+    "organization": "周晓玲经理",
+    "selected_store_ids": [
+      179,
+      18
+    ],
+    "selected_count": 2,
+    "clear_count": 102,
+    "reset_count": 102,
+    "clear_placeholder": true,
+    "reset_placeholder": true,
+    "temporary_tab_closed": true,
+    "original_user_tab_preserved": true
+  },
+  "screenshot_sha256": "f4e9ed670cdc6b170102cc9aafc4aba6b56caa91effac59d109af8e82a7a91d2",
+  "live_file_count": 1168,
+  "runtime": {
+    "manager_count": 1,
+    "manager_pid": 5627,
+    "listen_port": 20800
+  },
+  "backup": {
+    "directory": "/www/backups/rh.cc3798.com/20261010-r7-organization-9cebcf26",
+    "code_sha256": "d7a5710ba62d5986cd2b00d08ca39cf575b089d4a75a6539396987ed455f64eb",
+    "database_sha256": "2ad8b782bb0b14365a52d6b843f6a6ceaaf0e359000b7c69c5d2dd00e8580958",
+    "gzip_integrity": true,
+    "mode_directory": "700",
+    "mode_backups": "600"
+  },
+  "pushed_feature_commit": "687286040a37ab4816673d2467998e154fa9a629"
+}

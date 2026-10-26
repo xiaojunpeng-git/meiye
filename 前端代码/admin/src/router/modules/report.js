@@ -1,0 +1,310 @@
+// +----------------------------------------------------------------------
+// | MOHE [ MOHE赋能开发者，助力企业发展 ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2016~2021 https://www.mohe.com All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed MOHE并不是自由软件，未经许可不能去掉MOHE相关版权
+// +----------------------------------------------------------------------
+// | Author: MOHE Team <admin@mohe.com>
+// +----------------------------------------------------------------------
+import BasicLayout from '@/layouts/basic-layout';
+import Setting from '@/setting';
+import { SIX_DIMENSION_REPORTS } from '@/libs/sixDimensionReports';
+import { PHASE_FOUR_OPERATION_REPORTS, PHASE_FOUR_CROSS_END_REPORTS } from '@/libs/phaseFourReports';
+import { PHASE_SIX_REPORTS } from '@/libs/phaseSixReports';
+
+const pre = 'report_';
+
+// 客户一级菜单的兼容地址。正式入口位于 user 模块（顶部“客户”菜单），
+// 这里保留独立 report code 与权限元信息，兼容历史从“数据”菜单进入的链接。
+const CUSTOMER_ANALYTICS_REPORTS = Object.freeze([
+  ['overview', 'customer_overview', '客户概况'],
+  ['source-analysis', 'customer_source_analysis', '客户来源分析'],
+  ['visit-analysis', 'customer_visit_analysis', '到店数据分析'],
+  ['store-health', 'customer_store_health', '门店健康数据分析'],
+  ['consumption-tier', 'customer_consumption_tier', '消费分级分析'],
+  ['cash-performance', 'customer_cash_performance', '现金业绩分析'],
+  ['refund-performance', 'customer_refund_performance', '退货业绩分析'],
+  ['item-analysis', 'customer_item_analysis', '客户品相分析'],
+  ['unconsumed-analysis', 'customer_unconsumed_analysis', '客户未耗分析']
+]);
+
+export default {
+  path: `${Setting.roterPre}/report`,
+  name: 'report',
+  header: 'report',
+  meta: {
+    // 授权标识
+    auth: ['admin-report']
+  },
+  component: BasicLayout,
+  children: [
+    {
+      path: 'basic-reports/:report?', name: `${pre}basic_reports`,
+      meta: { auth: ['admin-report-basic'], title: '基础报表' },
+      component: () => import('@/pages/report/data/basic_reports')
+    },
+    // Saved directory grants must have a real landing route even when all
+    // children have moved elsewhere; child permissions remain independent.
+    ...[
+      ['sale', '日常运营', 'admin-report-sale'],
+      ['other-reports', '其他报表', 'admin-report-other-reports']
+    ].map(([path, title, auth]) => ({
+      path,
+      name: `${pre}directory_${path}`,
+      meta: { auth: [auth], title },
+      component: () => import('@/pages/report/data/report_directory')
+    })),
+    {
+      path: 'business-center',
+      name: `${pre}business_center`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店运营'
+      },
+      component: () => import('@/pages/report/data/business_hub')
+    },
+    {
+      path: 'store-operations',
+      name: `${pre}store_operations`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店运营报表'
+      },
+      component: () => import('@/pages/report/data/store_business')
+    },
+    ...PHASE_SIX_REPORTS.map(report => ({
+      path: `other-reports/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-six-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseSixReport: true
+      },
+      component: () => import('@/pages/report/data/store_business')
+    })),
+    {
+      path: 'group-management-dashboard',
+      name: `${pre}group_management_dashboard`,
+      meta: {
+        auth: ['admin-report-group-management-dashboard'],
+        title: '集团管理看板'
+      },
+      component: () => import('@/pages/report/data/group_management_dashboard')
+    },
+    {
+      path: 'product-dashboard',
+      name: `${pre}product_dashboard`,
+      meta: {
+        auth: ['admin-report-product-dashboard'],
+        title: '商品看板'
+      },
+      component: () => import('@/pages/report/data/product_dashboard')
+    },
+    {
+      // 原型阶段复用现有员工权限；真实报表权限在接口阶段配置。
+      path: 'employee-dashboard/:section?',
+      name: `${pre}employee_dashboard`,
+      meta: {
+        auth: ['admin-staff'],
+        title: '员工看板',
+        employeeDashboard: true
+      },
+      component: () => import('@/pages/report/data/employee_dashboard')
+    },
+    {
+      path: 'customer-analytics',
+      name: `${pre}customer_analytics_compatibility`,
+      hidden: true,
+      meta: {
+        auth: ['admin-customer-analytics'],
+        title: '客户分析'
+      },
+      redirect: {
+        name: `${pre}customer_overview_compatibility`
+      }
+    },
+    ...CUSTOMER_ANALYTICS_REPORTS.map(([path, code, title]) => ({
+      path: `customer-analytics/${path}`,
+      name: `${pre}${code}_compatibility`,
+      hidden: true,
+      meta: {
+        auth: [`admin-customer-analytics-${code}`],
+        title,
+        customerAnalytics: true,
+        reportCode: path
+      },
+      component: () => import('@/pages/report/data/customer_analytics')
+    })),
+    {
+      path: 'engineering-management',
+      name: `${pre}engineering_management`,
+      meta: {
+        auth: ['admin-data-engineering-management'],
+        title: '工程管理'
+      },
+      // 工程管理只是“数据”菜单下的分组入口，不承载汇总或统计页面。
+      // 进入父级时直接落到四个原始表单中的第一个。
+      redirect: (to) => ({
+        name: `${pre}engineering_store_building`,
+        query: to.query
+      })
+    },
+    ...[
+      ['store-building', 'store_building', '建店明细', 'admin-data-engineering-management-store-building'],
+      ['engineering-quality', 'engineering_quality', '工程质量', 'admin-data-engineering-management-engineering-quality'],
+      ['engineering-repair', 'engineering_repair', '工程维修', 'admin-data-engineering-management-engineering-repair'],
+      ['rent-renewal', 'rent_renewal', '降租续签', 'admin-data-engineering-management-rent-renewal']
+    ].map(([path, ledgerType, title, auth]) => ({
+      path,
+      name: `${pre}engineering_${ledgerType}`,
+      meta: { auth: [auth], title, ledgerType },
+      component: () => import('@/pages/report/data/engineering_management')
+    })),
+    {
+      path: 'member-management-dashboard',
+      name: `${pre}member_management_dashboard`,
+      meta: {
+        auth: ['admin-report-member-management-dashboard'],
+        title: '会员看板'
+      },
+      component: () => import('@/pages/report/data/member_management_dashboard')
+    },
+    {
+      // Compatibility route for a second menu entry under another parent.
+      // The page, API and permission remain shared with the canonical route.
+      path: 'member-management-dashboard-customer',
+      name: `${pre}member_management_dashboard_customer`,
+      meta: {
+        auth: ['admin-report-member-management-dashboard'],
+        title: '会员看板'
+      },
+      component: () => import('@/pages/report/data/member_management_dashboard')
+    },
+    {
+      // 每个稳定报表 code 都形成独立 URL；页面实现统一由 Vue 3 报表运行时承载。
+      path: 'store-operations/:report',
+      name: `${pre}store_operations_report`,
+      meta: {
+        // The guard resolves this dynamic leaf to its exact report grant.
+        // An empty auth list fails closed until resolved; do not inherit the
+        // layout's admin-report grant or grant access from a directory alone.
+        auth: [],
+        storeOperationReport: true,
+        title: '门店运营报表'
+      },
+      component: () => import('@/pages/report/data/store_business')
+    },
+    ...SIX_DIMENSION_REPORTS.map(report => ({
+      path: `six-dimension-center/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-six-dimension-${report.code}`],
+        title: report.title,
+        reportCode: report.code
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
+    ...PHASE_FOUR_OPERATION_REPORTS.map(report => ({
+      path: `operations-center/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-four-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseFourReport: true
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
+    ...PHASE_FOUR_CROSS_END_REPORTS.map(report => ({
+      path: `finance-center/front-desk/${report.code}`,
+      name: `${pre}${report.code}`,
+      meta: {
+        auth: [`admin-report-phase-four-${report.code}`],
+        title: report.title,
+        reportCode: report.code,
+        phaseFourReport: true
+      },
+      component: () => import('@/pages/report/data/six_dimension')
+    })),
+    {
+      // Legacy URL: keep bookmarked links safe while the six reports move
+      // into direct second-level menu entries.
+      path: 'store-business',
+      name: `${pre}store_business_legacy`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '门店业务报表（已迁移）'
+      },
+      redirect: (to) => ({
+        // Use the incoming path so generated agent routes keep their own prefix.
+        path: to.path.replace(/\/store-business$/, '/business-center'),
+        query: to.query
+      })
+    },
+    {
+      path: 'report_sale',
+      name: `${pre}report_sale`,
+      meta: {
+        auth: ['report-sale-info'],
+        title: '销售数据'
+      },
+      component: () => import('@/pages/report/data/sale_report')
+    },
+    {
+      path: 'report_pk',
+      name: `${pre}report_pk`,
+      meta: {
+        auth: ['report-pk-info'],
+        title: '销售PK报表'
+      },
+      component: () => import('@/pages/report/data/pk_report')
+    },
+    {
+      path: 'report_work',
+      name: `${pre}report_work`,
+      meta: {
+        auth: ['report-work-info'],
+        title: '销售分析'
+      },
+      component: () => import('@/pages/report/data/work_report')
+    },
+    {
+      path: 'report_xn',
+      name: `${pre}report_xn`,
+      meta: {
+        auth: ['report-xn-info'],
+        title: '门店效能分析'
+      },
+      component: () => import('@/pages/report/data/xn_report')
+    },
+    {
+      path: 'report_salary',
+      name: `${pre}report_salary`,
+      meta: {
+        auth: ['report-salary-info'],
+        title: '工资表'
+      },
+      component: () => import('@/pages/report/data/salary_report')
+    },
+    {
+      path: 'report_table',
+      name: `${pre}report_table`,
+      meta: {
+        auth: ['report-table-info'],
+        title: '其他报表'
+      },
+      component: () => import('@/pages/report/data/salary_table')
+    },
+    {
+      path: 'report_receive',
+      name: `${pre}report_receive`,
+      meta: {
+        auth: ['report-receive-info'],
+        title: '门店对账单'
+      },
+      component: () => import('@/pages/report/data/report_receive')
+    }
+  ]
+};

@@ -1,0 +1,1109 @@
+diff --git a/tests/inventory/php/operational-unified-query-registration-contract.php b/tests/inventory/php/operational-unified-query-registration-contract.php
+index b1be4ffd..3170b966 100644
+--- a/tests/inventory/php/operational-unified-query-registration-contract.php
++++ b/tests/inventory/php/operational-unified-query-registration-contract.php
+@@ -26,7 +26,9 @@ operationalUqAssert('operational inventory UQ registers one isolated page code p
+ 
+ foreach ($expected as $pageCode) {
+     $page = $registry->page($pageCode);
+-    operationalUqAssert("{$pageCode} has a stable row key and server scope dimension", $page['stableRowKey'] === 'record_id' && $page['scopeDimensions'] === ['location_id']);
++    // Outbound jobs additionally freeze account namespace; other document pages keep their existing scope.
++    $dimensions = $pageCode === 'inventory_outbound' ? ['location_id', 'inventory_actor_type'] : ['location_id'];
++    operationalUqAssert("{$pageCode} has a stable row key and server scope dimension", $page['stableRowKey'] === 'record_id' && $page['scopeDimensions'] === $dimensions);
+     operationalUqAssert("{$pageCode} uses the existing inventory view feature", $page['requiredFeature'] === 'inventory.batch.view');
+ }
+ 
+@@ -36,8 +38,9 @@ operationalUqAssert('operational provider keeps a bounded full source window ins
+     strpos($source, 'UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1') !== false
+     && strpos($source, 'list($storeId, $operatorId') === false
+ );
+-operationalUqAssert('operational document exports remain closed until a worker context can rebuild each projection',
++operationalUqAssert('only outbound enables document export with its typed worker context',
+     InventoryOperationalUnifiedQueryContract::definition('inventory_inbound')['exportFeature'] === 'inventory.operation.export'
++    && InventoryOperationalUnifiedQueryContract::definition('inventory_outbound')['exportFeature'] === 'inventory.batch.export'
+ );
+ operationalUqAssert('Excel import records are an isolated operational projection, not a local browser filter',
+     in_array('inventory_import', InventoryOperationalUnifiedQueryContract::PAGE_CODES, true)
+diff --git a/前端代码/inventory-vue3/src/App.vue b/前端代码/inventory-vue3/src/App.vue
+index 5f8e10d4..69b8941a 100644
+--- a/前端代码/inventory-vue3/src/App.vue
++++ b/前端代码/inventory-vue3/src/App.vue
+@@ -8,6 +8,7 @@ import {
+   SlidersHorizontal, Warehouse, X
+ } from '@lucide/vue'
+ import InventoryBusinessModal from './components/InventoryBusinessModal.vue'
++import InventoryOutboundExport from './components/InventoryOutboundExport.vue'
+ import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOperationalUnifiedQueryToolbar.vue'
+ import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
+ import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
+@@ -80,6 +81,9 @@ const statisticsExecutedQuery = ref({})
+ const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
+ const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
+ const storeOperationalStatus = ref('')
++const outboundTypeFilter = ref('')
++const outboundFilterTypes = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库', '手工出库', '预售领用出库']
++const outboundExecutedQuery = ref(null)
+ const recipeStatus = ref('')
+ const recipeKeyword = ref('')
+ const editor = ref('')
+@@ -191,7 +195,7 @@ const platformStockQueryBaseFields = [
+ const operationalQueryPages = {
+   // 入出库列表不展示商品摘要；商品仍保留在权威单据明细中供“查看”追溯。
+   inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['business_date', '入库日期', 'date'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+-  outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['business_date', '出库日期', 'date'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['detail_count', '出库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
++  outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['business_date', '出库日期', 'date'], ['order_type_name', '出库类型'], ['store_name', '出库门店'], ['detail_count', '出库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+   // 门店名称由服务端按单据所属仓的门店归属返回，不以当前页面门店或仓库名替代。
+   count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['store_name', '门店名称'], ['detail_count', '差异项', 'integer'], ['count_date', '盘点日期', 'date'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+   request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['business_date', '请货日期', 'date'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+@@ -330,7 +334,7 @@ const pages = {
+     crumb: '库存管理 / 出库管理',
+     filters: ['出库类型', '出库单号', '出库日期', '创建时间'],
+     action: '新建出库',
+-    columns: ['出库单号', '出库日期', '出库类型', '出库仓/门店', '商品项数', '成本金额', '状态', '操作日期', '操作人']
++    columns: ['出库单号', '出库日期', '出库类型', ...(mode.value === 'store' ? ['出库对象', '出库门店'] : ['出库仓/门店']), '商品项数', '成本金额', '状态', '操作日期', '操作人']
+   },
+   stock: {
+     title: '库存查询',
+@@ -565,6 +569,8 @@ function selectPage(key, options = {}) {
+   listDateRange.value = null
+   statusFocus.value = options.focus || ''
+   storeOperationalStatus.value = ''
++  outboundTypeFilter.value = ''
++  outboundExecutedQuery.value = null
+   if (options.tab) activeStatisticsTab.value = options.tab
+   if (key === 'statistics') {
+     statisticsInitialQuery.value = options.query && typeof options.query === 'object' ? options.query : {}
+@@ -997,7 +1003,8 @@ function mapApiRow(page, row) {
+   switch (page) {
+     // 入出库分组行与商品明细共用整数元展示口径，权威成本仍以分为单位保存和计算。
+     case 'inbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), `${text(row.detail_count, '0')} 项`, groupedDisplayMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
+-    case 'outbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), `${text(row.detail_count, '0')} 项`, groupedDisplayMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
++    // Store headers show the saved optional recipient before the owning store; HQ columns stay unchanged.
++    case 'outbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), ...(mode.value === 'store' ? [text(row.outbound_recipient), text(row.store_name)] : [text(row.location_name)]), `${text(row.detail_count, '0')} 项`, groupedDisplayMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
+     case 'stock': return row.available_quantity !== undefined
+       ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
+       : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
+@@ -1016,7 +1023,7 @@ function mapApiRow(page, row) {
+ 
+ /** Status can no longer be inferred from the last cell because audit columns follow it. */
+ function isOperationalStatusCell(page, cellIndex) {
+-  return { inbound: 6, outbound: 6, count: 6, request: 6, transfer: 5, usage: 6, import: 7 }[page] === cellIndex
++  return { inbound: 6, outbound: mode.value === 'store' ? 7 : 6, count: 6, request: 6, transfer: 5, usage: 6, import: 7 }[page] === cellIndex
+ }
+ 
+ /** The period label names the business event filtered by the backend. */
+@@ -1172,6 +1179,18 @@ async function loadCurrentList(unifiedQuery = null) {
+               : [])
+           ] }
+       : { hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value), ...query }
++    // One payload drives both the document list and the frozen export, including permission-neutral filters.
++    const storeDocumentQuery = {
++      ...query, pageCode: operationalQueryPage.value?.pageCode, dataScope: 'normal',
++      topFilterConditions: [
++        ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
++        ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
++        ...(active.value === 'outbound' && outboundTypeFilter.value ? [{ field: 'order_type_name', operator: 'eq', value: outboundTypeFilter.value }] : []),
++        ...countDateConditions,
++        ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
++          ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }] : [])
++      ]
++    }
+     const response = mode.value === 'platform' && active.value === 'inbound' && listWarehouseType === 'STORE'
+       ? await platformInventoryApi.unifiedOperationalQuery(listWarehouseQuery)
+       : mode.value === 'platform' && active.value === 'outbound' && listWarehouseType === 'STORE'
+@@ -1189,20 +1208,7 @@ async function loadCurrentList(unifiedQuery = null) {
+       : mode.value === 'platform' && active.value === 'usage'
+       ? await platformInventoryApi.list('usage', { ...query, store_id: platformUsageStoreId.value })
+       : operationalQueryPage.value && mode.value === 'store'
+-      ? await inventoryApi.unifiedOperationalQuery({
+-          ...query,
+-          pageCode: operationalQueryPage.value.pageCode,
+-          // 库存业务范围由服务端仓库权限决定；无效的通用范围选项不参与列表筛选。
+-          dataScope: 'normal',
+-          topFilterConditions: [
+-            ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
+-            ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
+-            ...countDateConditions,
+-            ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
+-              ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }]
+-              : [])
+-          ]
+-        })
++      ? await inventoryApi.unifiedOperationalQuery(storeDocumentQuery)
+       : active.value === 'stock' && hasExplicitQuery
+       ? await client.unifiedBatchStock(query)
+       : active.value === 'stock'
+@@ -1214,6 +1220,7 @@ async function loadCurrentList(unifiedQuery = null) {
+       : await client.list(active.value, query)
+     const list = Array.isArray(response?.records) ? response.records : (Array.isArray(response?.list) ? response.list : (Array.isArray(response?.items) ? response.items : (Array.isArray(response) ? response : [])))
+     if (groupedRequest && groupedRequest !== groupedListVersion) return
++    if (active.value === 'outbound' && mode.value === 'store') outboundExecutedQuery.value = JSON.parse(JSON.stringify(storeDocumentQuery))
+     const displayRows = active.value === 'stock' ? summarizeStockRows(list) : list
+     sourceRows.value = displayRows
+     remoteRows.value = displayRows.map((row) => mapApiRow(active.value, row))
+@@ -1727,10 +1734,12 @@ onBeforeUnmount(() => {
+           </section>
+           <section v-if="operationalQueryPage && mode === 'store'" class="filter-card">
+             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
++            <label v-if="active === 'outbound'">出库类型<select v-model="outboundTypeFilter" aria-label="出库类型"><option value="">全部</option><option v-for="type in outboundFilterTypes" :key="type" :value="type">{{ type }}</option></select></label>
+             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
+             <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
+             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
+             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>
++            <InventoryOutboundExport v-if="active === 'outbound'" :query="outboundExecutedQuery" :count="remoteTotal" :disabled="listLoading || Boolean(listError)" :request-action="inventoryUnifiedQueryRequestAction" :download="inventoryApi.downloadOutboundExport" />
+           </section>
+           <section v-else-if="active === 'recipe'" class="filter-card">
+             <label>配方状态<select v-model="recipeStatus" @change="loadCurrentList"><option value="">全部</option><option value="1">启用中</option><option value="0">已停用</option></select></label>
+@@ -1748,7 +1757,7 @@ onBeforeUnmount(() => {
+             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
+             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresStore && !platformUsageStoreId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
+           </section>
+-<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed, 'table-card--grouped-scroll': mode === 'store' && groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!(mode === 'store' && groupedListPages.has(active))"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="mode === 'store' && sourceRows[index].can_edit" class="text-button" @click="openTransferEditor(sourceRows[index])">编辑</button><button v-if="active === 'transfer' && mode === 'store' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="mode === 'platform' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('voidRequest', sourceRows[index], 'request')">作废</button></template><template v-else-if="active === 'usage'"><button class="text-button" @click="openUsageDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], 'usage')">作废</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' && mode === 'store' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
++<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed, 'table-card--grouped-scroll': mode === 'store' && groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!(mode === 'store' && groupedListPages.has(active))"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="mode === 'store' && sourceRows[index].can_edit" class="text-button" @click="openTransferEditor(sourceRows[index])">编辑</button><button v-if="active === 'transfer' && mode === 'store' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="mode === 'platform' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('voidRequest', sourceRows[index], 'request')">作废</button></template><template v-else-if="active === 'usage'"><button class="text-button" @click="openUsageDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], 'usage')">作废</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' && mode === 'store' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
+             </tbody></table>
+             <!-- 门店单据沿用订单列表的分组层级：单据单行信息带，商品行共用一组表头。 -->
+             <table v-else class="inventory-grouped-table" :class="`inventory-grouped-table--${active}`" :aria-label="`${currentPage.title}明细列表`">
+diff --git a/前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue b/前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue
+index b7f1e5ea..1ebbe42a 100644
+--- a/前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue
++++ b/前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue
+@@ -41,7 +41,7 @@ function initialBusinessDate() {
+ const inboundType = ref('采购入库')
+ const outboundType = ref('过期退货')
+ const inboundTypes = ['初始入库', '采购入库', '退货入库', '其他入库']
+-const outboundTypes = ['过期退货', '试用出库', '报废出库', '其他出库']
++const outboundTypes = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库']
+ const selectedRows = ref([])
+ // 盘点单标题只反映当前已加载明细的账面快照，增删、清空和恢复草稿后由响应式明细同步更新。
+ const countBookQuantityTotal = computed(() => sumCountBookQuantities(selectedRows.value))
+@@ -63,6 +63,9 @@ const inboundDate = ref(initialBusinessDate())
+ const inboundRemark = ref('')
+ const outboundDate = ref(initialBusinessDate())
+ const outboundRemark = ref('')
++// Optional recipient is a document snapshot, not a member/staff identifier.
++const outboundRecipient = ref('')
++const outboundAttempt = ref(null)
+ const countRemark = ref('')
+ const countDraftId = ref(0)
+ const countDraftVersion = ref(0)
+@@ -1087,16 +1090,21 @@ async function submitInbound() {
+ }
+ 
+ async function submitOutbound() {
+-  if (props.pageKey !== 'outbound' || !selectedRows.value.length) return
++  if (props.pageKey !== 'outbound' || !selectedRows.value.length || submitting.value) return
+   submitting.value = true
+   submitError.value = ''
+   try {
+     const payload = {
+-      idempotency_key: outboundIdempotencyKey(), business_date: outboundDate.value, remark: outboundRemark.value,
++      idempotency_key: '', business_date: outboundDate.value, remark: outboundRemark.value,
++      outbound_type: outboundType.value, outbound_recipient: outboundRecipient.value.trim(),
+       lines: selectedRows.value.map((row) => ({
+         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '')
+       }))
+     }
++    // A retry of unchanged content reuses the original key; edits start a new command.
++    const fingerprint = JSON.stringify(payload)
++    if (outboundAttempt.value?.fingerprint !== fingerprint) outboundAttempt.value = { fingerprint, key: outboundIdempotencyKey() }
++    payload.idempotency_key = outboundAttempt.value.key
+     if (isPlatformHeadquarters.value) {
+       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
+       await platformInventoryApi.createHqOutbound({ ...payload, hq_location_id: Number(props.hqLocationId) })
+@@ -1246,6 +1254,7 @@ function submitPrimaryEditor() {
+               <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>明细备注</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+             </template>
+             <template v-else-if="pageKey === 'outbound' && detail?.document">
++              <div class="detail-meta"><span>出库类型：{{ detail.document.order_type_name || '手工出库' }}</span><span>出库对象：{{ detail.document.outbound_recipient || '-' }}</span></div>
+               <div class="detail-meta"><span>出库单号：<b>{{ detail.document.order_sn }}</b></span><span>出库日期：{{ detail.document.business_date }}</span><span>出库时间：{{ detail.document.recorded_at ? new Date(Number(detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>出库主体：{{ detail.document.location_name }}</span></div>
+               <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>成本单价</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+             </template>
+@@ -1287,6 +1296,7 @@ function submitPrimaryEditor() {
+               <div class="form-grid__inline form-grid__full"><span class="field-label">{{ pageKey === 'inbound' ? '入库类型' : '出库类型' }}<i>*</i></span><div><div class="type-radio-group"><button v-for="item in pageKey === 'inbound' ? inboundTypes : outboundTypes" :key="item" :class="{ active: selectedType === item }" @click="pageKey === 'inbound' ? inboundType = item : outboundType = item">{{ item }}</button></div><p class="type-tip">{{ pageKey === 'inbound' ? '调拨入库由调拨确认自动生成，不在此处手工创建。' : '调拨出库由调拨确认自动生成；出库按所选仓库的实际批次扣减。' }}</p></div></div>
+               <label class="form-grid__inline"><span class="field-label">{{ pageKey === 'inbound' ? '入库日期' : '出库日期' }}<i>*</i></span><input v-if="pageKey === 'inbound'" v-model="inboundDate" type="date" /><input v-else v-model="outboundDate" type="date" /></label>
+               <label v-if="pageKey === 'inbound' && inboundType === '退货入库'" class="form-grid__inline"><span class="field-label">售后单号</span><span class="input-like input-like--action">+ 选择售后单据</span></label>
++              <label v-if="pageKey === 'outbound'" class="form-grid__inline"><span class="field-label">出库对象</span><input v-model="outboundRecipient" maxlength="100" placeholder="请输入出库对象" /></label>
+               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-if="pageKey === 'inbound'" v-model="inboundRemark" placeholder="请输入备注" /><input v-else v-model="outboundRemark" placeholder="请输入备注" /></label>
+             </section>
+ 
+diff --git a/前端代码/inventory-vue3/src/services/inventoryApi.js b/前端代码/inventory-vue3/src/services/inventoryApi.js
+index be191019..bd5293cb 100644
+--- a/前端代码/inventory-vue3/src/services/inventoryApi.js
++++ b/前端代码/inventory-vue3/src/services/inventoryApi.js
+@@ -213,6 +213,8 @@ export function createInventoryApi(options = {}) {
+       return request('/v3/unified-query/commands', { method: 'POST', body: { ...body, idempotencyKey } })
+     },
+     unifiedQueryExportTask(taskNo, query = {}) { return request(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}`, { query }) },
++    // Authenticated binary transport rejects JSON error envelopes instead of saving fake spreadsheets.
++    downloadOutboundExport(taskNo) { return download(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}/download`) },
+     createWarehouse(body) { return request('/v3/locations', { method: 'POST', body }) },
+     listHqInbound(query = {}) { return request('/v3/hq/inbound', { query }) },
+     hqInboundDetail(id, query = {}) { return request(`/v3/hq/inbound/${encodeURIComponent(String(id || ''))}/detail`, { query }) },
+diff --git a/后端代码/app/controller/store/product/inventory/InventoryManualOutbound.php b/后端代码/app/controller/store/product/inventory/InventoryManualOutbound.php
+index 41810270..7fd2a6a1 100644
+--- a/后端代码/app/controller/store/product/inventory/InventoryManualOutbound.php
++++ b/后端代码/app/controller/store/product/inventory/InventoryManualOutbound.php
+@@ -22,6 +22,8 @@ class InventoryManualOutbound extends AuthController
+     {
+         $data = $this->request->postMore([
+             ['idempotency_key', ''], ['business_date', ''], ['remark', ''], ['lines', []],
++            // Optional document attributes are validated and persisted by the same stock command.
++            ['outbound_type', ''], ['outbound_recipient', ''],
+         ]);
+         return $this->success($this->services->create((int)$this->storeId, (int)$this->storeStaffId, $data));
+     }
+diff --git a/后端代码/app/controller/store/product/inventory/InventoryUnifiedQuery.php b/后端代码/app/controller/store/product/inventory/InventoryUnifiedQuery.php
+index ad2f9275..1f12276a 100644
+--- a/后端代码/app/controller/store/product/inventory/InventoryUnifiedQuery.php
++++ b/后端代码/app/controller/store/product/inventory/InventoryUnifiedQuery.php
+@@ -113,7 +113,34 @@ final class InventoryUnifiedQuery extends AuthController
+             $runtime = UnifiedQueryRuntime::runtime();
+             $pageCode = $this->requestedPageCode($runtime);
+             $context = $this->context($runtime, date('Y-m-d'), $pageCode);
+-            return $this->success(['exportTask' => $runtime['exports']->findForAccount($context, $taskNo)]);
++            $task = $runtime['exports']->findForAccount($context, $taskNo);
++            if ($pageCode === 'inventory_outbound' && !empty($task['downloadAvailable'])) {
++                $task['downloadUrl'] = '/storeapi/product/inventory/v3/unified-query/export-task/' . rawurlencode($taskNo) . '/download';
++            }
++            return $this->success(['exportTask' => $task]);
++        } catch (UnifiedQueryException $exception) {
++            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
++        }
++    }
++
++    /** Download only the creator's outbound task after rechecking current scope, fields and expiry. */
++    public function downloadOutboundExport(string $taskNo)
++    {
++        try {
++            $runtime = UnifiedQueryRuntime::runtime();
++            $context = $this->context($runtime, date('Y-m-d'), 'inventory_outbound');
++            $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
++            $path = $runtime['exportStorage']->absolutePath((string)$descriptor['storageKey']);
++            if (!is_file($path) || !is_readable($path)) return $this->fail('导出文件不存在或已过期。');
++            // A binary response works under the local hot-reload proxy and Swoole without File output buffering.
++            $content = file_get_contents($path);
++            if ($content === false || $content === '') return $this->fail('导出文件读取失败。');
++            return response($content, 200)->header([
++                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++                'Content-Disposition' => "attachment; filename=outbound.xlsx; filename*=UTF-8''" . rawurlencode((string)$descriptor['fileName']),
++                'Cache-Control' => 'private, no-store',
++                'Content-Length' => (string)strlen($content),
++            ]);
+         } catch (UnifiedQueryException $exception) {
+             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+         }
+diff --git a/后端代码/app/services/product/inventory/InventoryManualOutboundServices.php b/后端代码/app/services/product/inventory/InventoryManualOutboundServices.php
+index 602780fb..0c9acce1 100644
+--- a/后端代码/app/services/product/inventory/InventoryManualOutboundServices.php
++++ b/后端代码/app/services/product/inventory/InventoryManualOutboundServices.php
+@@ -74,6 +74,7 @@ final class InventoryManualOutboundServices
+                 ->select()
+                 ->toArray();
+             if ($existing) {
++                (new InventoryOutboundHeaderServices())->assertReplay($scope, $location, $command);
+                 return $this->replay($existing, $scope, $location, $command);
+             }
+ 
+@@ -85,6 +86,8 @@ final class InventoryManualOutboundServices
+                 (int)$command['recordedAt']
+             );
+ 
++            // Header attributes and stock facts must commit or roll back together.
++            (new InventoryOutboundHeaderServices())->insert($scope, $location, $command);
+             // A stable SKU order prevents opposite multi-line requests from
+             // acquiring aggregate stock locks in different orders.
+             $ordered = $command['lines'];
+@@ -111,6 +114,9 @@ final class InventoryManualOutboundServices
+ 
+     private function normalize(array $input, int $lineLimit = 100): array
+     {
++        // Optional new attributes preserve old import callers without accepting arbitrary fields.
++        $header = (new InventoryOutboundHeaderServices())->normalize($input);
++        unset($input['outbound_type'], $input['outbound_recipient']);
+         if (array_keys($input) !== ['idempotency_key', 'business_date', 'remark', 'lines']
+             || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > $lineLimit) {
+             throw new \InvalidArgumentException('inventory_manual_outbound_input_invalid');
+@@ -146,6 +152,7 @@ final class InventoryManualOutboundServices
+             'idempotencyKey' => $key,
+             'businessDate' => $this->date((string)$input['business_date']),
+             'remark' => mb_substr(trim((string)$input['remark']), 0, 500),
++            'header' => $header,
+             'lines' => $lines,
+             'recordedAt' => time(),
+         ];
+diff --git a/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php b/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
+index 96349ad5..54c784b0 100644
+--- a/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
++++ b/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
+@@ -85,6 +85,11 @@ final class InventoryMovementQueryServices
+                 'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
+             ];
+         }
++        // Saved attributes are immutable snapshots, read only after the warehouse permission check.
++        $document['source_id'] = $sourceId;
++        $document['source_type'] = $sourceType;
++        $document['order_type_name'] = $this->outboundTypeName($sourceType);
++        $document = (new InventoryOutboundHeaderServices())->apply([$document], CashierV3ScopeResolver::TENANT_SCOPE_ID, [(int)$location['id']])[0];
+         return ['document' => $document, 'lines' => $facts];
+     }
+ 
+@@ -169,6 +174,7 @@ final class InventoryMovementQueryServices
+             }
+             unset($row);
+         }
++        $rows = (new InventoryOutboundHeaderServices())->apply($rows, CashierV3ScopeResolver::TENANT_SCOPE_ID, [$locationId]);
+         return ['count' => $count, 'list' => $rows];
+     }
+ 
+diff --git a/后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php b/后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php
+index fd2a66b9..1bb6265e 100644
+--- a/后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php
++++ b/后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php
+@@ -30,6 +30,7 @@ final class InventoryPlatformHqOutboundServices
+             ->group('f.source_id,n.document_no,f.business_date,l.location_name')->order('operation_at desc')->page($page, $limit)->select()->toArray();
+         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
+         foreach ($list as &$row) {
++            $row['source_type'] = 'manual_outbound';
+             $row['order_type_name'] = '总部手工出库';
+             if (!$canViewCost) $row['cost_amount_cents'] = null;
+         }
+@@ -37,6 +38,8 @@ final class InventoryPlatformHqOutboundServices
+         $list = (new InventoryManualDocumentReversalProjectionServices())->apply(
+             $list, (string)$location['tenant_id'], InventoryManualDocumentReversalServices::OUTBOUND, [(int)$location['id']]
+         );
++        // Shared form attributes must survive read-back for headquarters callers as well.
++        $list = (new InventoryOutboundHeaderServices())->apply($list, (string)$location['tenant_id'], [(int)$location['id']]);
+         return ['count' => $count, 'list' => $list];
+     }
+ 
+@@ -63,12 +66,15 @@ final class InventoryPlatformHqOutboundServices
+             (string)$location['tenant_id'], InventoryManualDocumentReversalServices::OUTBOUND, [$sourceId], [(int)$location['id']]
+         );
+         $voided = $reversal[$sourceId] ?? null;
+-        return ['document' => [
++        $document = [
++            'source_type' => 'manual_outbound', 'source_id' => $sourceId, 'order_type_name' => '总部手工出库',
+             'order_sn' => (string)$facts[0]['order_sn'], 'business_date' => (string)$facts[0]['business_date'],
+             'recorded_at' => (int)$facts[0]['recorded_at'], 'location_name' => (string)($location['location_name'] ?? '总部仓'),
+             'status_name' => $voided ? '已作废' : '已完成', 'can_void' => $voided === null,
+             'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
+-        ], 'lines' => $facts];
++        ];
++        $document = (new InventoryOutboundHeaderServices())->apply([$document], (string)$location['tenant_id'], [(int)$location['id']])[0];
++        return ['document' => $document, 'lines' => $facts];
+     }
+ 
+     public function create(array $adminInfo, int $locationId, array $input): array
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php
+index 76d4945d..860f4b2e 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php
+@@ -32,6 +32,10 @@ final class InventoryOperationalUnifiedQueryContract
+             // 旧查询偏好和冻结计划仍可读取真实仓名；默认不展示，不将仓名改写为门店名。
+             $common[] = UnifiedQueryPageRegistry::field('location_name', '盘点仓库', 'text', false, false);
+         }
++        if ($pageCode === 'inventory_outbound') {
++            // Retain warehouse identity for existing frozen plans without presenting it as a store.
++            $common[] = UnifiedQueryPageRegistry::field('location_name', '出库仓库', 'text', false, false);
++        }
+         $specific = [
+             'inventory_inbound' => [
+                 ['order_type_name', '入库类型', 'text', ''], ['location_name', '入库仓/门店', 'text', ''],
+@@ -40,7 +44,9 @@ final class InventoryOperationalUnifiedQueryContract
+                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
+             ],
+             'inventory_outbound' => [
+-                ['order_type_name', '出库类型', 'text', ''], ['location_name', '出库仓/门店', 'text', ''],
++                // Typed and optional header values share the list/filter/export authority.
++                ['outbound_recipient', '出库对象', 'text', ''], ['remark', '备注', 'text', ''],
++                ['order_type_name', '出库类型', 'text', ''], ['store_name', '出库门店', 'text', ''],
+                 ['product_summary', '商品摘要', 'text', ''], ['detail_count', '出库项数', 'integer', ''],
+                 ['cost_amount_cents', '成本金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
+                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
+@@ -90,16 +96,26 @@ final class InventoryOperationalUnifiedQueryContract
+         foreach ($specific[$pageCode] as [$key, $label, $type, $permission]) {
+             $common[] = UnifiedQueryPageRegistry::field($key, $label, $type, true, true, [], $permission);
+         }
++        // Detail fields are export-only: document filters must never change grain to batch lines.
++        if ($pageCode === 'inventory_outbound') {
++            foreach ([['outbound_product', '商品', 'text'], ['outbound_sku', '规格', 'text'],
++                ['outbound_batch', '扣减批次', 'text'], ['outbound_manufactured', '生产日期', 'date'],
++                ['outbound_expire', '到期日', 'date'], ['outbound_quantity', '出库数量', 'decimal'],
++                ['outbound_unit', '库存单位', 'text'], ['outbound_unit_cost_cents', '成本单价（分）', 'integer'],
++                ['outbound_cost_cents', '成本金额（分）', 'integer'], ['outbound_detail_remark', '明细备注', 'text']] as [$key, $label, $type]) {
++                $permission = in_array($key, ['outbound_unit_cost_cents', 'outbound_cost_cents'], true) ? InventoryBatchStockQueryContract::PERMISSION_COST : '';
++                $common[] = UnifiedQueryPageRegistry::field($key, $label, $type, false, false, ['display', 'export'], $permission);
++            }
++        }
+         return [
+             'pageCode' => $pageCode,
+             'label' => self::label($pageCode),
+             'stableRowKey' => 'record_id',
+             'keywordFields' => self::keywordFields($pageCode),
+             'requiredFeature' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
+-            // Export workers only exist for the batch-balance provider today. Keep
+-            // document-page export closed until each page has a worker context
+-            // that can rebuild the same store-scoped projection.
+-            'exportFeature' => 'inventory.operation.export',
++            // Outbound uses the registered operational worker and rechecks the same store grant.
++            // Other operational pages retain their existing closed export gate.
++            'exportFeature' => $pageCode === 'inventory_outbound' ? InventoryBatchStockQueryContract::PERMISSION_EXPORT : 'inventory.operation.export',
+             'fields' => $common,
+         ];
+     }
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
+index 9526c4cb..14e053d3 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
+@@ -143,15 +143,20 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
+     private function documentRows(string $tenantId, int $storeId, array $locationIds, $types, bool $canViewCost): array
+     {
+         $types = is_array($types) ? $types : [(string)$types];
++        // Resolve the document's store, not the logged-in store or warehouse label.
++        // Preserve the location's store snapshot; legacy empty snapshots use that same store ID.
++        $storeName = "COALESCE(NULLIF(l.store_name_snapshot, ''), s.name, '')";
+         $rows = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_batch b', 'b.id=f.batch_id')
+             ->leftJoin('inventory_location l', 'l.id=f.location_id')
++            ->leftJoin('system_store s', 's.id=l.store_id AND l.store_id=f.store_id')
+             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
+             ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')->where('f.tenant_id', $tenantId)->where('f.store_id', $storeId)
+             ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED')->whereIn('f.source_type', $types)
+             // Query expressions cannot be used as PHP array keys. Use one raw
+             // projection so ThinkORM receives the SQL aliases directly.
+             ->fieldRaw("f.source_id AS source_id, f.source_type AS source_type, MAX(pc.claim_status) AS presale_claim_status, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.location_id, l.location_name, MAX(f.recorded_at) AS add_time, MAX(COALESCE(NULLIF(f.occurred_at, 0), f.recorded_at)) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
+-            ->group('f.source_id,f.source_type,n.document_no,f.business_date,f.location_id,l.location_name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
++            ->fieldRaw($storeName . ' AS store_name')
++            ->group('f.source_id,f.source_type,n.document_no,f.business_date,f.location_id,l.location_name,l.store_name_snapshot,s.name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+         foreach ($rows as &$row) {
+             $row['source_id'] = (string)($row['source_id'] ?? '');
+             $presale = (string)$row['source_type'] === 'presale_claim_outbound';
+@@ -170,6 +175,8 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
+             foreach ($rows as &$row) if ((string)$row['source_type'] === 'manual_outbound') $row = $manualRows[$manualIndex++];
+             unset($row);
+         }
++        // Lists and frozen exports share the same persisted type/recipient projection.
++        $rows = (new \app\services\product\inventory\InventoryOutboundHeaderServices())->apply($rows, $tenantId, $locationIds);
+         return $this->bounded($rows);
+     }
+ 
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php
+index 97903a71..49d5766f 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php
+@@ -16,7 +16,8 @@ final class InventoryOperationalUnifiedQueryRegistrar implements UnifiedQueryPag
+                 'keywordFields' => $definition['keywordFields'],
+                 'requiredFeature' => $definition['requiredFeature'],
+                 'exportFeature' => $definition['exportFeature'],
+-                'scopeDimensions' => ['location_id'],
++                // Outbound export identity is frozen alongside warehouse scope to prevent account-id collisions.
++                'scopeDimensions' => $pageCode === 'inventory_outbound' ? ['location_id', 'inventory_actor_type'] : ['location_id'],
+             ]);
+         }
+     }
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php
+index a3a77fc3..5b289765 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php
+@@ -56,7 +56,18 @@ final class InventoryOperationalUnifiedQueryWorkerContextResolver implements Uni
+             $factory = new InventoryStoreUnifiedQueryContextFactory(
+                 UnifiedQueryRuntime::service('contextFactory')
+             );
+-            $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
++            if ($pageCode === 'inventory_outbound') {
++                // Only task-owned frozen identity selects the account namespace; no browser/session hint is trusted.
++                $previous = request()->storeStaffInfo ?? [];
++                try {
++                    request()->storeStaffInfo = (new InventoryOutboundWorkerIdentity())->profile($authoritativeTask);
++                    $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
++                } finally {
++                    request()->storeStaffInfo = $previous;
++                }
++            } else {
++                $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
++            }
+         } else {
+             throw new UnifiedQueryException(
+                 'UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED',
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php b/后端代码/app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php
+index d6f8c8fd..9d74b4f1 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php
+@@ -1,4 +1,53 @@
+ <?php
+ declare(strict_types=1);
+ namespace app\services\product\inventory\query;
+-final class InventoryOutboundUnifiedQueryProvider extends InventoryOperationalUnifiedQueryProvider { public function pageCode(): string { return 'inventory_outbound'; } }
++/** Export expands the already-filtered documents into the same settled batch lines as the list. */
++final class InventoryOutboundUnifiedQueryProvider extends InventoryOperationalUnifiedQueryProvider
++{
++    public function pageCode(): string { return 'inventory_outbound'; }
++
++    public function executeFrozenPlan(array $context, array $plan, string $exportScope, array $fieldKeys): array
++    {
++        // Always retain the business key internally, even if a saved export did not select that column.
++        $result = parent::executeFrozenPlan($context, $plan, $exportScope, array_values(array_unique(array_merge($fieldKeys, ['order_sn']))));
++        $documents = $result['exportRows'];
++        if (!$documents) return $result;
++        $numbers = array_column($documents, 'order_sn');
++        $locations = (array)($context['scope_dimensions']['location_id'] ?? []);
++        $facts = \think\facade\Db::name('inventory_batch_movement_fact')->alias('f')
++            ->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')
++            ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
++            ->where('f.tenant_id', $context['tenant_id'])->where('f.store_id', (int)$context['store_id'])
++            ->whereIn('f.location_id', $locations)->where('f.fact_status', 'SETTLED')
++            ->whereIn('f.source_type', ['manual_outbound', 'presale_claim_outbound'])
++            ->where(function ($q) use ($numbers): void { $q->whereIn('n.document_no', $numbers)->whereOr('f.source_id', 'in', $numbers); })
++            ->fieldRaw('COALESCE(n.document_no,f.source_id) AS order_sn,b.product_name_snapshot AS outbound_product,b.sku_name_snapshot AS outbound_sku,b.batch_no AS outbound_batch,b.manufactured_date AS outbound_manufactured,b.expire_date AS outbound_expire,s.stock_unit AS outbound_unit,s.quantity_scale,f.quantity_units,f.unit_cost_cents AS outbound_unit_cost_cents,f.cost_amount_cents AS outbound_cost_cents,f.detail_remark AS outbound_detail_remark')
++            ->order('f.id asc')->limit(\app\services\query\UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
++        // Expanding document headers must not bypass the shared row budget or silently truncate a workbook.
++        if (count($facts) > \app\services\query\UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) {
++            throw new \app\services\query\UnifiedQueryException('UNIFIED_QUERY_SOURCE_LIMIT_EXCEEDED', '出库明细过多，请缩小查询范围后导出。', []);
++        }
++        $canCost = in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)$context['permissions'], true);
++        $lines = [];
++        foreach ($facts as $fact) {
++            $scale = (int)$fact['quantity_scale'];
++            $digits = str_pad((string)$fact['quantity_units'], $scale + 1, '0', STR_PAD_LEFT);
++            $fact['outbound_quantity'] = $scale ? substr($digits, 0, -$scale) . '.' . substr($digits, -$scale) : $digits;
++            if (!$canCost) { $fact['outbound_unit_cost_cents'] = null; $fact['outbound_cost_cents'] = null; }
++            $lines[$fact['order_sn']][] = $fact;
++        }
++        $result['exportRows'] = [];
++        foreach ($documents as $document) {
++            // The Excel writer does not format Unix timestamps; export the same business-local time as the list.
++            if (isset($document['operation_at']) && is_numeric($document['operation_at'])) {
++                $document['operation_at'] = (int)$document['operation_at'] > 0 ? date('Y-m-d H:i:s', (int)$document['operation_at']) : '';
++            }
++            // Never silently omit a document whose authoritative details disappeared during export.
++            if (empty($lines[$document['order_sn']])) throw new \RuntimeException('inventory_outbound_export_details_missing');
++            foreach ($lines[$document['order_sn']] as $line) {
++                $result['exportRows'][] = array_intersect_key(array_merge($document, $line), array_flip($fieldKeys));
++            }
++        }
++        return $result;
++    }
++}
+diff --git a/后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php b/后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php
+index 9feab19e..0acb07a5 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php
++++ b/后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php
+@@ -87,7 +87,8 @@ final class InventoryPlatformUnifiedQueryContextFactory
+                 return $feature !== 'inventory.batch.query.manage';
+             })),
+             'manage_shared_fields' => $canManageQuery, 'share_tenant_fields' => $canManageQuery,
+-            'scope_dimensions' => ['location_id' => array_keys($locationIds)],
++            // Platform outbound jobs use a different identity namespace from store sessions.
++            'scope_dimensions' => ['location_id' => array_keys($locationIds)] + ($pageCode === 'inventory_outbound' ? ['inventory_actor_type' => ['platform']] : []),
+             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate), 'data_as_of' => time(),
+         ], ['pageCode' => $pageCode]);
+         // 总部草稿仅归当前平台创建人；门店查询不得借平台身份读到门店人员草稿。
+diff --git a/后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php b/后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php
+index 18043f52..d22e1c00 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php
++++ b/后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php
+@@ -49,6 +49,15 @@ final class InventoryStoreUnifiedQueryContextFactory
+         if (!$staff && !$organizationSession) {
+             throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '当前员工不属于门店库存范围。', []);
+         }
++        // Export creation, polling and download all recheck the outbound feature, including no-cost exports.
++        if ($pageCode === 'inventory_outbound') {
++            $profile = $organizationSession ? $sessionInfo : $staff;
++            $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
++            $allowed = !empty($profile['_cashier_v3_delegated']) ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
++            if (!in_array(self::PAGE_FEATURES[$pageCode], $allowed, true)) {
++                throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '当前账号没有出库功能权限。', []);
++            }
++        }
+         $locations = Db::name('inventory_location')->where('store_id', $storeId)
+             ->where('location_status', 'ACTIVE')->field('id,tenant_id')->select()->toArray();
+         $tenantIds = [];
+@@ -93,7 +102,11 @@ final class InventoryStoreUnifiedQueryContextFactory
+             'granted_features' => $features,
+             'manage_shared_fields' => true,
+             'share_tenant_fields' => true,
+-            'scope_dimensions' => ['location_id' => array_keys($locationIds)],
++            // Freeze a typed identity for outbound workers: session ids can collide with legacy staff ids.
++            'scope_dimensions' => ['location_id' => array_keys($locationIds)] + ($pageCode === 'inventory_outbound' ? [
++                'inventory_actor_type' => [!empty($sessionInfo['_cashier_v3_delegated']) ? 'delegated'
++                    : (!empty($sessionInfo['_cashier_v3_organization']) ? 'organization' : 'staff')],
++            ] : []),
+             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate),
+             'data_as_of' => time(),
+         ], ['pageCode' => $pageCode]);
+diff --git a/后端代码/route/store.php b/后端代码/route/store.php
+index 45694e97..f66a2d8d 100644
+--- a/后端代码/route/store.php
++++ b/后端代码/route/store.php
+@@ -616,6 +616,8 @@ Route::group('storeapi', function () {
+ 		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);
+ 		Route::post('v3/unified-query/commands', 'product.inventory.InventoryUnifiedQuery/command')->option(['real_name' => '库存统一查询操作']);
+ 		Route::get('v3/unified-query/export-task/:taskNo', 'product.inventory.InventoryUnifiedQuery/exportTask')->option(['real_name' => '库存统一查询导出任务']);
++		// Download reuses authenticated inventory context; file paths are never accepted from the browser.
++		Route::get('v3/unified-query/export-task/:taskNo/download', 'product.inventory.InventoryUnifiedQuery/downloadOutboundExport')->option(['real_name' => '出库Excel下载']);
+ 		Route::get('v3/catalog', 'product.inventory.InventoryStoreCatalog/search')->option(['real_name' => '库存商品条码搜索']);
+ 		Route::get('v3/catalog/barcode', 'product.inventory.InventoryStoreCatalog/barcode')->option(['real_name' => '库存商品精确条码查询']);
+ 		Route::get('v3/request/requester', 'product.inventory.InventoryStoreCatalog/requester')->option(['real_name' => '库存请货人默认信息']);
+diff --git a/前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue b/前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue
+new file mode 100644
+index 00000000..80c4a80e
+--- /dev/null
++++ b/前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue
+@@ -0,0 +1,62 @@
++<script setup>
++import { computed, onMounted, ref } from 'vue'
++import { FileSpreadsheet } from '@lucide/vue'
++import { UnifiedQueryExportDrawer, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
++
++const props = defineProps({ query: Object, count: Number, disabled: Boolean, requestAction: Function, download: Function })
++const busy = ref(false)
++const task = ref(null)
++const error = ref('')
++const frozenQuery = ref(null)
++// Inventory commands nest their receipt data under result; keep the shared task parser contract local.
++async function requestAction(...args) {
++  const response = await props.requestAction(...args)
++  return response?.result?.data ? { ...response, data: response.result.data } : response
++}
++const queryPage = useUnifiedQueryPage({ pageCode: 'inventory_outbound', pageName: '出库管理', baseFields: [], requestAction })
++const capability = queryPage.capability
++// Store exports use store identity; warehouse remains available only to legacy frozen plans.
++const fields = computed(() => queryPage.fields.value.filter(field => field.key !== 'location_name'))
++onMounted(() => queryPage.load())
++
++/** Retrying from the task drawer keeps the original successful query and full-result scope. */
++function createExport(configuration) {
++  return queryPage.createExport({ query: frozenQuery.value, configuration: { ...configuration, scope: 'query', includeSummary: false } })
++}
++
++/** Download with the host's existing token transport, never put credentials in a link. */
++async function downloadFile({ task: exportTask, fileName }) {
++  const blob = await props.download(exportTask.id)
++  if (!blob?.size) throw new Error('导出文件为空，请重试。')
++  const url = URL.createObjectURL(blob)
++  const anchor = document.createElement('a')
++  anchor.href = url
++  anchor.download = fileName
++  document.body.appendChild(anchor)
++  anchor.click()
++  anchor.remove()
++  setTimeout(() => URL.revokeObjectURL(url), 1000)
++}
++
++/** Freeze the successful list query; never export unsent edits or only the visible page. */
++async function start() {
++  if (busy.value || props.disabled || !props.query) return
++  busy.value = true
++  error.value = ''
++  try {
++    frozenQuery.value = JSON.parse(JSON.stringify(props.query))
++    const result = await createExport({ scope: 'query', fields: fields.value.filter(f => f.capabilities?.export === true && !f.hidden && !['product_summary', 'detail_count', 'cost_amount_cents'].includes(f.key)).map(f => f.key), includeSummary: false, fileName: '出库管理.xlsx' })
++    if (result.status === 'result_unknown' && result.idempotencyKey) {
++      task.value = { status: 'result_unknown', originalIdempotencyKey: result.idempotencyKey, fileName: '出库管理.xlsx' }
++    } else if (result.status === 'success' && result.task?.id) task.value = result.task
++    else error.value = result.message || '导出任务创建失败。'
++  } catch (e) { error.value = e.message || '导出失败。' }
++  finally { busy.value = false }
++}
++</script>
++
++<template>
++  <button class="secondary-button" :disabled="disabled || busy || !query || capability.exportCapability?.enabled !== true" @click="start"><FileSpreadsheet :size="16" />{{ busy ? '导出中' : '导出 Excel' }}</button>
++  <span v-if="error" role="alert" class="inventory-load-error">{{ error }}</span>
++  <UnifiedQueryExportDrawer v-if="task" :initial-task="task" :fields="fields.filter(f => f.capabilities?.export && !['product_summary', 'detail_count', 'cost_amount_cents'].includes(f.key))" page-name="出库管理" :result-count="count" :export-capability="{ ...capability.exportCapability, allowCurrentPage: false, allowSummary: false }" :on-create="createExport" :on-query-task="queryPage.queryExportTask" :on-download="downloadFile" @close="task = null" />
++</template>
+diff --git a/后端代码/app/services/product/inventory/InventoryOutboundHeaderServices.php b/后端代码/app/services/product/inventory/InventoryOutboundHeaderServices.php
+new file mode 100644
+index 00000000..325fd9fb
+--- /dev/null
++++ b/后端代码/app/services/product/inventory/InventoryOutboundHeaderServices.php
+@@ -0,0 +1,70 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\product\inventory;
++
++use think\facade\Db;
++
++/** Immutable manual-outbound attributes; stock quantities remain authoritative in batch facts. */
++final class InventoryOutboundHeaderServices
++{
++    public const TYPES = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库'];
++
++    /** Old callers omit attributes; do not guess a category for their historic documents. */
++    public function normalize(array $input): array
++    {
++        $type = $input['outbound_type'] ?? '';
++        $recipient = $input['outbound_recipient'] ?? '';
++        if (!is_string($type) || ($type !== '' && !in_array($type, self::TYPES, true))) {
++            throw new \InvalidArgumentException('inventory_manual_outbound_type_invalid');
++        }
++        if (!is_string($recipient) || mb_strlen(trim($recipient)) > 100) {
++            throw new \InvalidArgumentException('inventory_manual_outbound_recipient_invalid');
++        }
++        return ['outbound_type' => $type, 'outbound_recipient' => trim($recipient)];
++    }
++
++    /** Called only inside the authorized, locked stock transaction; failure rolls back the header too. */
++    public function insert(array $scope, array $location, array $command): void
++    {
++        Db::name('inventory_manual_outbound_header')->insert([
++            'tenant_id' => $scope['tenantId'], 'source_id' => $command['idempotencyKey'],
++            'store_id' => $scope['storeId'], 'location_id' => $location['id'],
++            'outbound_type' => $command['header']['outbound_type'],
++            'outbound_recipient' => $command['header']['outbound_recipient'],
++            'remark' => $command['remark'], 'created_at' => $command['recordedAt'],
++        ]);
++    }
++
++    /** Reusing a command must never silently change a recipient/type or deduct stock twice. */
++    public function assertReplay(array $scope, array $location, array $command): void
++    {
++        $header = Db::name('inventory_manual_outbound_header')->where('tenant_id', $scope['tenantId'])
++            ->where('source_id', $command['idempotencyKey'])->lock(true)->find();
++        if (!$header) {
++            if ($command['header']['outbound_type'] === '' && $command['header']['outbound_recipient'] === '') return;
++        } elseif ((int)$header['store_id'] === $scope['storeId'] && (int)$header['location_id'] === (int)$location['id']
++            && $header['outbound_type'] === $command['header']['outbound_type']
++            && $header['outbound_recipient'] === $command['header']['outbound_recipient']
++            && $header['remark'] === $command['remark']) return;
++        throw new \RuntimeException('inventory_manual_outbound_idempotency_conflict');
++    }
++
++    /** Enrich already scoped documents in one query. Unrecorded historical types remain 手工出库. */
++    public function apply(array $rows, string $tenantId, array $locationIds): array
++    {
++        $ids = [];
++        foreach ($rows as $row) if (($row['source_type'] ?? '') === 'manual_outbound') $ids[] = (string)$row['source_id'];
++        $headers = $ids && $locationIds ? Db::name('inventory_manual_outbound_header')->where('tenant_id', $tenantId)
++            ->whereIn('location_id', $locationIds)->whereIn('source_id', array_unique($ids))->select()->toArray() : [];
++        $index = array_column($headers, null, 'source_id');
++        foreach ($rows as &$row) {
++            $header = ($row['source_type'] ?? '') === 'manual_outbound' ? ($index[(string)$row['source_id']] ?? []) : [];
++            $row['outbound_recipient'] = (string)($header['outbound_recipient'] ?? $row['outbound_recipient'] ?? '');
++            $row['remark'] = (string)($header['remark'] ?? $row['remark'] ?? '');
++            if (!empty($header['outbound_type'])) $row['order_type_name'] = $header['outbound_type'];
++        }
++        unset($row);
++        return $rows;
++    }
++}
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOutboundWorkerIdentity.php b/后端代码/app/services/product/inventory/query/InventoryOutboundWorkerIdentity.php
+new file mode 100644
+index 00000000..58db8055
+--- /dev/null
++++ b/后端代码/app/services/product/inventory/query/InventoryOutboundWorkerIdentity.php
+@@ -0,0 +1,62 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\product\inventory\query;
++
++use app\services\cashier\v3\CashierV3StoreLoginServices;
++use app\services\cashier\v3\permission\CashierV3FeatureResolver;
++use app\services\organization\EmployeeDataScopeServices;
++use app\services\query\UnifiedQueryException;
++use think\facade\Db;
++
++/** Revalidate an outbound task's typed identity without persisting or replaying login tokens. */
++final class InventoryOutboundWorkerIdentity
++{
++    public function profile(array $task): array
++    {
++        $scope = json_decode((string)($task['frozen_scope'] ?? ''), true);
++        $kind = $scope['scope_dimensions']['inventory_actor_type'] ?? [];
++        $id = (int)($task['operator_id'] ?? 0);
++        $storeId = (int)($task['origin_store_id'] ?? 0);
++        if ($id <= 0 || $storeId <= 0 || !is_array($kind) || count($kind) !== 1) $this->deny();
++        if ($kind === ['staff']) {
++            $profile = Db::name('system_store_staff')->where('id', $id)->where('store_id', $storeId)
++                ->where('status', 1)->where('is_del', 0)->find();
++            if (!$profile) $this->deny();
++            if ((int)($profile['employee_id'] ?? 0) > 0 && !Db::name('employee')->where('id', (int)$profile['employee_id'])
++                ->where('status', 1)->where('is_del', 0)->find()) $this->deny();
++        } elseif ($kind === ['organization'] || $kind === ['delegated']) {
++            $session = Db::name('cashier_v3_store_session')->where('id', $id)->where('store_id', $storeId)
++                ->where('status', 1)->where('is_del', 0)->find();
++            if (!$session || (int)$session['expire_time'] < time()) $this->deny();
++            $employee = Db::name('employee')->where('id', (int)$session['employee_id'])
++                ->where('status', 1)->where('is_del', 0)->field('id,auth_version')->find();
++            if (!$employee || (int)$employee['auth_version'] !== (int)$session['auth_version']) $this->deny();
++            $allowed = app()->make(EmployeeDataScopeServices::class)->resolveEffectiveStoreIds((int)$employee['id'], 0, ['admin_type' => 3]);
++            if ($allowed !== null && !in_array($storeId, array_map('intval', $allowed), true)) $this->deny();
++            $delegated = $kind === ['delegated'];
++            $profile = ['id' => $id, 'store_id' => $storeId, 'employee_id' => (int)$employee['id'],
++                'read_only' => $delegated, 'session_mode' => $delegated ? 'store_read_only' : 'store_organization',
++                $delegated ? '_cashier_v3_delegated' : '_cashier_v3_organization' => 1];
++            if (!$delegated && $session['source'] === CashierV3StoreLoginServices::STAFF_SCOPE_SESSION_SOURCE) {
++                $profile['_cashier_v3_staff_scope'] = 1;
++            }
++        } else {
++            $this->deny();
++        }
++        // The page must still be authorized now; frozen grants never override revocation or store closure.
++        $store = Db::name('system_store')->alias('s')->leftJoin('organization_store os', 'os.store_id=s.id')
++            ->leftJoin('organization o', 'o.id=os.org_id')->where('s.id', $storeId)
++            ->where('s.is_del', 0)->where('s.is_show', 1)->field('o.is_del AS org_deleted')->find();
++        if (!$store || !empty($store['org_deleted'])) $this->deny();
++        $resolver = app()->make(CashierV3FeatureResolver::class);
++        $features = !empty($profile['_cashier_v3_delegated']) ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
++        if (!in_array('cashier.v3.inventory.outbound', $features, true)) $this->deny();
++        return $profile;
++    }
++
++    private function deny(): void
++    {
++        throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '出库导出账号或门店权限已失效，请重新登录查询。', []);
++    }
++}
+diff --git a/后端代码/database/upgrades/2026-10-10-出库类型与对象/00-说明.md b/后端代码/database/upgrades/2026-10-10-出库类型与对象/00-说明.md
+new file mode 100644
+index 00000000..1f63f7e7
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-10-出库类型与对象/00-说明.md
+@@ -0,0 +1,10 @@
++# R52 第7轮：出库类型与对象
++
++- 新增不可变出库单头，与原批次扣减事实同事务保存，唯一键为商户与来源命令号。
++- 类型：过期退货、试用出库、报废出库、其他出库、对内出库、对外出库。对象为可空文本，最多100字符。
++- 历史事实不回填分类或对象，继续显示手工出库；旧接口/导入调用未传分类时保持空值。
++- 前置核查：确认目标实例、源码版本、数据库与备份；确认现有批次库存与业务单号表存在。
++- 执行 `01-up.sql`（MySQL 5.6兼容、可重复执行），再发布依赖该表的代码。
++- 后置核查：`SHOW CREATE TABLE eb_inventory_manual_outbound_header`；验证保存、详情回读、重复提交、筛选与导出。
++- 回滚：先回退代码，保留新增表以保存已发生单据属性。禁止删除已有单头或库存事实；空表也仅在单独授权后删除。
++- 本轮仅本地实施。未部署任何远程实例；后续上线必须单独授权并登记。
+diff --git a/后端代码/database/upgrades/2026-10-10-出库类型与对象/01-up.sql b/后端代码/database/upgrades/2026-10-10-出库类型与对象/01-up.sql
+new file mode 100644
+index 00000000..aeca5e35
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-10-出库类型与对象/01-up.sql
+@@ -0,0 +1,15 @@
++-- Immutable attributes for new manual outbound documents; no historic category backfill.
++CREATE TABLE IF NOT EXISTS `eb_inventory_manual_outbound_header` (
++  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++  `tenant_id` varchar(32) NOT NULL,
++  `source_id` varchar(96) NOT NULL,
++  `store_id` int unsigned NOT NULL,
++  `location_id` bigint unsigned NOT NULL,
++  `outbound_type` varchar(32) NOT NULL DEFAULT '',
++  `outbound_recipient` varchar(100) NOT NULL DEFAULT '',
++  `remark` varchar(500) NOT NULL DEFAULT '',
++  `created_at` int unsigned NOT NULL,
++  PRIMARY KEY (`id`),
++  UNIQUE KEY `uk_tenant_source` (`tenant_id`,`source_id`),
++  KEY `idx_location_type` (`tenant_id`,`location_id`,`outbound_type`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='手工出库单不可变业务属性';
+diff --git a/tests/inventory/php/outbound-header-export-local-integration.php b/tests/inventory/php/outbound-header-export-local-integration.php
+new file mode 100644
+index 00000000..bb0adc27
+--- /dev/null
++++ b/tests/inventory/php/outbound-header-export-local-integration.php
+@@ -0,0 +1,110 @@
++<?php
++declare(strict_types=1);
++
++/** Local-only rollback test: synthetic stock never changes a user's physical inventory. */
++$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require $backend . '/vendor/autoload.php';
++use think\facade\Db;
++use app\services\product\inventory\InventoryManualOutboundServices;
++use app\services\product\inventory\InventoryOutboundHeaderServices;
++use app\services\query\UnifiedQueryRuntime;
++
++(new \think\App($backend . '/'))->initialize();
++$config = config('database.connections.mysql');
++if (!is_file('/.dockerenv') || $config['hostname'] !== 'mysql' || $config['database'] !== 'ruihao') throw new RuntimeException('local_database_required');
++$passed = 0;
++$check = static function (string $name, bool $ok) use (&$passed): void {
++    if (!$ok) throw new RuntimeException($name);
++    $passed++; echo 'PASS ' . $name . PHP_EOL;
++};
++$reject = static function (callable $f): bool { try { $f(); return false; } catch (Throwable $e) { return true; } };
++$key = 'R52-test-' . bin2hex(random_bytes(8));
++Db::startTrans();
++try {
++    $location = ['tenant_id' => '0', 'organization_id' => '110', 'organization_path' => '/110/', 'location_type' => 'HQ',
++        'owner_id' => 110, 'location_code' => $key, 'location_name' => 'R52 TEST', 'store_id' => 0, 'is_default' => 1, 'location_status' => 'ACTIVE'];
++    $location['id'] = (int)Db::name('inventory_location')->insertGetId($location);
++    $scope = ['tenantId' => '0', 'organizationId' => '110', 'organizationPath' => '/110/', 'storeId' => 0,
++        'operatorId' => 1, 'operatorType' => 'PLATFORM_ADMIN', 'operatorName' => 'R52 TEST'];
++    $stock = (int)Db::name('inventory_stock')->insertGetId(['tenant_id' => '0', 'organization_id' => '110', 'organization_path' => '/110/',
++        'location_id' => $location['id'], 'store_id' => 0, 'consumable_product_id' => 99520001, 'sku_id' => 99520001,
++        'product_unique' => $key, 'stock_unit' => '盒', 'quantity_scale' => 0, 'available_quantity_units' => 20]);
++    Db::name('inventory_batch')->insert(['stock_id' => $stock, 'batch_no' => $key, 'product_name_snapshot' => 'R52 TEST产品',
++        'sku_name_snapshot' => '默认', 'available_quantity_units' => 20, 'unit_cost_cents' => 1255,
++        'received_business_date' => date('Y-m-d'), 'expire_date' => '2028-01-01']);
++    $command = ['idempotency_key' => $key, 'business_date' => date('Y-m-d'), 'remark' => 'R52 TEST',
++        'lines' => [['product_id' => 99520001, 'sku_id' => 99520001, 'sku_unique' => $key, 'quantity' => '2']],
++        'outbound_type' => '对内出库', 'outbound_recipient' => '  测试部门  '];
++    $writer = new InventoryManualOutboundServices();
++    $first = $writer->createForHeadquarters($scope, $location, $command);
++    $replay = $writer->createForHeadquarters($scope, $location, $command);
++    $check('same request replays once', $replay['lines'][0]['idempotent'] && $first['document_no'] === $replay['document_no']
++        && (int)Db::name('inventory_stock')->where('id', $stock)->value('available_quantity_units') === 18);
++    $header = Db::name('inventory_manual_outbound_header')->where('source_id', $key)->find();
++    $check('recipient and type persisted, trimmed', $header['outbound_recipient'] === '测试部门' && $header['outbound_type'] === '对内出库');
++    foreach (['outbound_type' => '对外出库', 'outbound_recipient' => '其他', 'remark' => 'changed'] as $field => $value) {
++        $changed = array_replace($command, [$field => $value]);
++        $check('changed ' . $field . ' conflicts', $reject(fn() => $writer->createForHeadquarters($scope, $location, $changed)));
++    }
++    $headers = new InventoryOutboundHeaderServices();
++    $check('empty recipient is valid', $headers->normalize(['outbound_recipient' => ''])['outbound_recipient'] === '');
++    foreach ([['outbound_type' => '调拨出库'], ['outbound_recipient' => []], ['outbound_recipient' => str_repeat('字', 101)]] as $bad) {
++        $check('invalid header rejected', $reject(fn() => $headers->normalize($bad)));
++    }
++    $second = array_replace($command, ['idempotency_key' => $key . '-2', 'outbound_type' => '对外出库', 'outbound_recipient' => '']);
++    $writer->createForHeadquarters($scope, $location, $second);
++    $failed = array_replace($command, ['idempotency_key' => $key . '-fail', 'lines' => [array_replace($command['lines'][0], ['quantity' => '999'])]]);
++    $check('insufficient stock rolls back header', $reject(fn() => $writer->createForHeadquarters($scope, $location, $failed))
++        && !Db::name('inventory_manual_outbound_header')->where('source_id', $key . '-fail')->find());
++    $check('foreign store actor cannot write', $reject(fn() => $writer->create(999999, 999999, $command)));
++
++    $runtime = UnifiedQueryRuntime::runtime();
++    $context = $runtime['contextFactory']->make(['tenant_id' => '0', 'account_id' => 1, 'operator_id' => 1, 'store_id' => 0,
++        'organization_id' => '110', 'visible_store_ids' => null, 'ancestor_organization_ids' => ['110'],
++        'shareable_store_ids' => [], 'shareable_organization_ids' => ['110'], 'permission_version' => 'R52-test',
++        'granted_features' => ['inventory.batch.view', 'inventory.batch.export', 'inventory.cost.view'],
++        'scope_dimensions' => ['location_id' => [(string)$location['id']], 'inventory_actor_type' => ['platform']], 'query_cutoff_date' => date('Y-m-d'), 'data_as_of' => time()], ['pageCode' => 'inventory_outbound']);
++    $provider = $runtime['providers']->resolve('inventory_outbound');
++    $query = ['pageCode' => 'inventory_outbound', 'page' => 1, 'limit' => 1, 'topFilterConditions' => [
++        ['field' => 'order_type_name', 'operator' => 'eq', 'value' => '对内出库'],
++        ['field' => 'business_date', 'operator' => 'between', 'value' => [date('Y-m-d'), date('Y-m-d')]],
++    ]];
++    $list = $provider->query($context, $query);
++    $check('type/date query returns only matching document', $list['total'] === 1 && $list['records'][0]['outbound_recipient'] === '测试部门');
++    $plan = $runtime['execution']->validatedPlan('inventory_outbound', [], $query, $context);
++    $fields = ['order_sn', 'store_name', 'order_type_name', 'outbound_recipient', 'outbound_product', 'outbound_quantity', 'outbound_cost_cents'];
++    $export = $provider->executeFrozenPlan($context, $plan, 'query', $fields);
++    $check('export matches filtered document and exact batch cost', count($export['exportRows']) === 1
++        && $export['exportRows'][0]['order_sn'] === $first['document_no'] && (int)$export['exportRows'][0]['outbound_cost_cents'] === 2510
++        && $export['exportRows'][0]['outbound_quantity'] === '2');
++    $query['topFilterConditions'] = [];
++    $all = $provider->query($context, $query);
++    $plan = $runtime['execution']->validatedPlan('inventory_outbound', [], $query, $context);
++    $export = $provider->executeFrozenPlan($context, $plan, 'query', $fields);
++    $check('export full query not one-row page', count($all['records']) === 1 && $all['total'] === 2 && count($export['exportRows']) === 2);
++    $hidden = $context;
++    $hidden['permissions'] = array_values(array_diff($context['permissions'], ['inventory.cost.view']));
++    $check('no cost permission cannot export cost', $reject(fn() => $provider->executeFrozenPlan($hidden, $plan, 'query', $fields)));
++    $foreign = $context;
++    $foreign['scope_dimensions']['location_id'] = ['999999999'];
++    $check('foreign warehouse returns no rows', $provider->query($foreign, $query)['total'] === 0);
++    // Snapshot/fallback changes stay inside this rollback fixture; never rename a real warehouse.
++    Db::name('inventory_location')->where('id', $location['id'])->update(['store_name_snapshot' => '历史门店名称']);
++    $snapshotList = $provider->query($context, $query);
++    $snapshotExport = $provider->executeFrozenPlan($context, $plan, 'query', $fields);
++    $check('list and export share store snapshot', $snapshotList['records'][0]['store_name'] === '历史门店名称'
++        && $snapshotExport['exportRows'][0]['store_name'] === '历史门店名称'
++        && $snapshotList['records'][0]['location_name'] === 'R52 TEST');
++    $store = Db::name('system_store')->where('id', '>', 0)->find();
++    Db::name('inventory_location')->where('id', $location['id'])->update(['store_name_snapshot' => '', 'store_id' => $store['id']]);
++    Db::name('inventory_batch_movement_fact')->where('location_id', $location['id'])->update(['store_id' => $store['id']]);
++    $projection = new ReflectionMethod(\app\services\product\inventory\query\InventoryOperationalUnifiedQueryProvider::class, 'documentRows');
++    $projection->setAccessible(true);
++    $storeRows = $projection->invoke($provider, '0', (int)$store['id'], [$location['id']], ['manual_outbound'], true);
++    $check('empty snapshot falls back to owning store', count($storeRows) === 2 && $storeRows[0]['store_name'] === $store['name']);
++    $check('store scope still excludes foreign documents', $projection->invoke($provider, '0', 999999999, [$location['id']], ['manual_outbound'], true) === []);
++} finally {
++    Db::rollback();
++}
++$check('fixtures fully rolled back', !Db::name('inventory_manual_outbound_header')->whereLike('source_id', $key . '%')->find());
++echo "R52_OUTBOUND passed={$passed} failed=0\n";
+diff --git a/tests/inventory/php/outbound-worker-local-integration.php b/tests/inventory/php/outbound-worker-local-integration.php
+new file mode 100644
+index 00000000..306509b2
+--- /dev/null
++++ b/tests/inventory/php/outbound-worker-local-integration.php
+@@ -0,0 +1,46 @@
++<?php
++declare(strict_types=1);
++
++/** Validate a local browser-created R52 task; temporary revocation changes are rolled back. */
++$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require $backend . '/vendor/autoload.php';
++(new \think\App($backend . '/'))->initialize();
++use think\facade\Db;
++use app\services\product\inventory\query\InventoryOperationalUnifiedQueryWorkerContextResolver;
++use app\services\product\inventory\query\InventoryOutboundWorkerIdentity;
++use app\services\query\UnifiedQueryRuntime;
++
++$config = config('database.connections.mysql');
++if (!is_file('/.dockerenv') || $config['hostname'] !== 'mysql' || $config['database'] !== 'ruihao') throw new RuntimeException('local_database_required');
++$task = Db::name('unified_query_export_task')->where('task_no', (string)getenv('R52_TASK_NO'))->where('page_code', 'inventory_outbound')->find();
++if (!$task || $task['status'] !== 'succeeded') throw new RuntimeException('explicit_successful_local_task_required');
++$runtime = UnifiedQueryRuntime::runtime();
++$rows = \PhpOffice\PhpSpreadsheet\IOFactory::load($runtime['exportStorage']->absolutePath($task['storage_key']))->getActiveSheet()->toArray();
++if (count($rows) !== 2 || !in_array('R52自测对象', $rows[1], true)) throw new RuntimeException('R52_selftest_workbook_required');
++$passed = 0;
++$check = static function ($name, $ok) use (&$passed) { if (!$ok) throw new RuntimeException($name); $passed++; echo "PASS {$name}\n"; };
++$reject = static function (callable $f) { try { $f(); return false; } catch (Throwable $e) { return true; } };
++$resolver = new InventoryOperationalUnifiedQueryWorkerContextResolver();
++$identity = new InventoryOutboundWorkerIdentity();
++$context = $resolver->resolve($task);
++$check('worker restores typed organization session', $context['scope_dimensions']['inventory_actor_type'] === ['organization']);
++$check('frozen query exports internal, not unsent external filter', in_array('对内出库', $rows[1], true) && !in_array('对外出库', $rows[1], true));
++$check('authenticated creator can download', $runtime['exports']->resolveDownloadDescriptor($context, $task['task_no'])['storageKey'] === $task['storage_key']);
++$foreign = $context; $foreign['account_id']++; $foreign['operator_id']++;
++$check('other account cannot download', $reject(fn() => $runtime['exports']->resolveDownloadDescriptor($foreign, $task['task_no'])));
++$bad = $task; $bad['tenant_id'] = 'foreign';
++$check('foreign tenant task rejected', $reject(fn() => $resolver->resolve($bad)));
++$bad = $task; $bad['origin_store_id'] = 999999;
++$check('foreign store task rejected', $reject(fn() => $identity->profile($bad)));
++$bad = $task; $bad['frozen_scope'] = '{}';
++$check('missing typed identity rejected', $reject(fn() => $identity->profile($bad)));
++$session = Db::name('cashier_v3_store_session')->where('id', (int)$task['operator_id'])->find();
++Db::startTrans();
++try {
++    Db::name('cashier_v3_store_session')->where('id', (int)$session['id'])->update(['expire_time' => 1]);
++    $check('expired session rejected by worker', $reject(fn() => $identity->profile($task)));
++    Db::name('cashier_v3_store_session')->where('id', (int)$session['id'])->update(['expire_time' => $session['expire_time'], 'auth_version' => (int)$session['auth_version'] + 1]);
++    $check('revoked employee auth version rejected', $reject(fn() => $identity->profile($task)));
++} finally { Db::rollback(); }
++$check('session unchanged after tests', $identity->profile($task)['id'] === (int)$session['id']);
++echo "R52_WORKER passed={$passed} failed=0\n";
+diff --git a/tests/inventory/js/outbound-export-contract.mjs b/tests/inventory/js/outbound-export-contract.mjs
+new file mode 100644
+index 00000000..65b344fc
+--- /dev/null
++++ b/tests/inventory/js/outbound-export-contract.mjs
+@@ -0,0 +1,41 @@
++import assert from 'node:assert/strict'
++import { Blob } from 'node:buffer'
++import { readFile } from 'node:fs/promises'
++import { createInventoryApi } from '../../../前端代码/inventory-vue3/src/services/inventoryApi.js'
++
++// Exercise authenticated binary transport; JSON auth errors must never become spreadsheet files.
++let call
++const api = createInventoryApi({
++  windowRef: { localStorage: { getItem: () => 'local-test-token' } },
++  fetchImpl: async (url, options) => {
++    call = { url, options }
++    return { ok: true, headers: { get: () => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, blob: async () => new Blob(['PK-test']) }
++  }
++})
++assert.equal((await api.downloadOutboundExport('uqe_test')).size, 7)
++assert.equal(call.url, '/storeapi/product/inventory/v3/unified-query/export-task/uqe_test/download')
++assert.equal(call.options.headers['Authori-zation'], 'Bearer local-test-token')
++assert.equal(call.options.cache, 'no-store')
++const denied = createInventoryApi({ windowRef: {}, fetchImpl: async () => ({ ok: true, headers: { get: () => 'application/json' }, text: async () => JSON.stringify({ status: 403, msg: '无权限' }) }) })
++await assert.rejects(() => denied.downloadOutboundExport('uqe_test'), /无权限/)
++const component = await readFile(new URL('../../../前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue', import.meta.url), 'utf8')
++assert.match(component, /frozenQuery\.value = JSON\.parse\(JSON\.stringify\(props\.query\)\)/)
++assert.match(component, /scope: 'query', includeSummary: false/)
++assert.match(component, /response\?\.result\?\.data/)
++assert.match(component, /if \(!blob\?\.size\)/)
++assert.match(component, /field.key !== 'location_name'/)
++const app = await readFile(new URL('../../../前端代码/inventory-vue3/src/App.vue', import.meta.url), 'utf8')
++// Execute the real row mapper with display-only dependencies to protect header alignment and blanks.
++const mapRow = new Function('mode', 'text', 'groupedDisplayMoney', 'inventoryStatusLabel', 'operationTime',
++  app.slice(app.indexOf('function mapApiRow('), app.indexOf('function isOperationalStatusCell(')) + '; return mapApiRow;')
++const display = value => value === undefined || value === null || value === '' ? '-' : String(value)
++const sample = { order_sn: 'CK-test', business_date: '2026-10-10', order_type_name: '对内出库', outbound_recipient: '测试部门', store_name: '测试门店', location_name: '默认门店仓' }
++const storeMapper = mapRow({ value: 'store' }, display, display, display, display)
++assert.deepEqual(storeMapper('outbound', sample).slice(3, 5), ['测试部门', '测试门店'])
++assert.equal(storeMapper('outbound', { ...sample, outbound_recipient: '' })[3], '-')
++const hqMapper = mapRow({ value: 'platform' }, display, display, display, display)
++assert.equal(hqMapper('outbound', sample)[3], '默认门店仓')
++assert.equal(hqMapper('outbound', sample).length, 9)
++assert.match(app, /\['出库对象', '出库门店'\]/)
++assert.match(app, /\['store_name', '出库门店'\]/)
++console.log('PASS outbound export: authenticated binary, auth denial, frozen full query, receipt adapter, empty-file guard')

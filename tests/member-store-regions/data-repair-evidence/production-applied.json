@@ -1,0 +1,12 @@
+{
+  "result": "APPLIED",
+  "stores": 3,
+  "dictionaryWrites": 44707,
+  "afterDigest": "4178158c1eae48fd8a3a9ce3db71c1a0b5409d064ac754eee1cf841009ecf12d",
+  "time": "2026-10-24T03:12:27+08:00",
+  "planSha256": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d",
+  "instance": "008",
+  "commit": "de4128786921fb26bfa7780458d91ea2e67f5666",
+  "executorCommit": "9e0888ed42d64d8003287403d618c7edfc119cec",
+  "directory": "/www/backups/008.cc3798.com/20261024-region-data-1760affd"
+}

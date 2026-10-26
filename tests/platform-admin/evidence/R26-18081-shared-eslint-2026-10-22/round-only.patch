@@ -1,0 +1,17 @@
+--- a/前端代码/admin/vue.config.js
++++ b/前端代码/admin/vue.config.js
+@@ -112,6 +112,14 @@
+   // 默认设置: https://github.com/vuejs/vue-cli/tree/dev/packages/@vue/cli-service/lib/config/base.js
+ 
+   chainWebpack: (config) => {
++    // shared 模块在 Docker 中挂载为 /shared，无法向上找到 /app 的 ESLint 配置。
++    // 所有由平台工程编译的模块统一使用本工程规则，避免共享模块导致整个热更新编译失败。
++    if (config.module.rules.has("eslint")) {
++      config.module.rule("eslint").use("eslint-loader").tap((options) => ({
++        ...options,
++        configFile: resolve(".eslintrc.js")
++      }));
++    }
+     /**
+      * 删除懒加载模块的 prefetch preload，降低带宽压力
+      * https://cli.vuejs.org/zh/guide/html-and-static-assets.html#prefetch

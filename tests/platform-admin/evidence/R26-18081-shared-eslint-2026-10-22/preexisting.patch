@@ -1,0 +1,17 @@
+diff --git a/前端代码/admin/vue.config.js b/前端代码/admin/vue.config.js
+index 83b4622f..4e34519a 100644
+--- a/前端代码/admin/vue.config.js
++++ b/前端代码/admin/vue.config.js
+@@ -41,7 +41,11 @@ module.exports = {
+     // 平台页面内嵌库存时仍由 InventoryV3Bridge 直接指向 18086；这里覆盖
+     // 用户手动打开旧路径的场景，避免回退到 Admin 的空壳 index.html。
+     proxy: {
+-      '^/adminapi/fund(?:/|$)': {
++      // 本地 18081 通过同源代理访问平台 API。直接让浏览器请求 18093
++      // 会因端口不同丢失同源登录语义，管理页和魔核 AI 都会表现为
++      // “Failed to fetch”。所有 adminapi 路由统一走该代理，避免为 AI
++      // 再维护一条例外路径。
++      '^/adminapi(?:/|$)': {
+         target: process.env.VUE_APP_PLATFORM_API_PROXY_TARGET || 'http://host.docker.internal:18093',
+         changeOrigin: false
+       },

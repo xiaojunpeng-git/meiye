@@ -1,0 +1,17 @@
+{
+  "task": "M008-EMERG-R3-REGION",
+  "date": "2026-10-24",
+  "baseline": "b50fd1f13d32c157ccd13e6ef63fb139d5d09702",
+  "patchSha256": "1a8849744f6e8e2ba9c25eb520580e30913a104355928a5194774cd55a2ddbfc",
+  "productManagerResponse": "确认验收，仅本地提交",
+  "accepted": true,
+  "scope": "6 business files, 5 test files and their fixed-version evidence",
+  "knownLimitations": [
+    "Mini-program compile and package contracts passed; no device acceptance claimed",
+    "Historical store addresses were not automatically corrected"
+  ],
+  "authorizedActions": ["precise local commit"],
+  "deploymentAuthorized": false,
+  "pushAuthorized": false,
+  "miniUploadAuthorized": false
+}

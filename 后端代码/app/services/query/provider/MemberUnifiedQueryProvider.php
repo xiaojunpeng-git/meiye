@@ -1,0 +1,1368 @@
+<?php
+
+namespace app\services\query\provider;
+
+use app\services\query\UnifiedQueryCustomFieldServices;
+use app\services\query\UnifiedQueryCustomFieldKeyCollector;
+use app\services\query\UnifiedQueryException;
+use app\services\query\UnifiedQueryExecutionServices;
+use app\services\query\UnifiedQueryPreferenceServices;
+use app\services\query\UnifiedQueryProvider;
+use app\services\query\metric\StoreCustomerVisitEligibility;
+use app\services\cashier\v3\card\CashierV3HistoricalEntitlementReadServices;
+use think\facade\Db;
+
+/**
+ * 会员列表权威投影。先在 SQL 中注入 DataScope，再补齐业务字段并计算派生字段。
+ */
+class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+{
+    public const PAGE_CODE = 'member_list';
+    public const BUSINESS_TIME_ZONE = 'Asia/Shanghai';
+
+    /** @var UnifiedQueryExecutionServices */
+    protected $execution;
+
+    /** @var UnifiedQueryCustomFieldServices */
+    protected $customFields;
+
+    /** @var UnifiedQueryPreferenceServices */
+    protected $preferences;
+
+    /** @var array<string,array<string,bool>> */
+    protected $columns = [];
+
+    public function __construct(
+        UnifiedQueryExecutionServices $execution,
+        UnifiedQueryCustomFieldServices $customFields,
+        UnifiedQueryPreferenceServices $preferences
+    ) {
+        $this->execution = $execution;
+        $this->customFields = $customFields;
+        $this->preferences = $preferences;
+    }
+
+    public function pageCode(): string
+    {
+        return self::PAGE_CODE;
+    }
+
+    public function query(array $context, array $payload): array
+    {
+        $payload['pageCode'] = self::PAGE_CODE;
+        $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
+        $context['data_as_of'] = (int)($context['data_as_of'] ?? time());
+        $definitions = $this->definitionsForQuery($context, $payload);
+        // 先把 UI 输入完整校验成无 SQL 的规范化计划，再允许它影响 SQL 安全下推。
+        // 执行器仍会二次校验并执行同一口径，避免下推与内存计算分叉。
+        $validatedPlan = $this->execution->validatedPlan(
+            self::PAGE_CODE,
+            $definitions,
+            $this->executionPayload($payload),
+            $context
+        );
+        $normalizedQuery = $this->queryFromPlan($validatedPlan);
+        $result = $this->sqlPageFastPath($context, $validatedPlan, $normalizedQuery);
+        if ($result === null) {
+            $sourceRows = $this->authorizedSourceRows($context, $normalizedQuery);
+            $result = $this->execution->execute(
+                self::PAGE_CODE,
+                $sourceRows,
+                $definitions,
+                $this->executionPayload($payload),
+                $context,
+                function (array $row, array $scope): bool {
+                    return $this->rowAllowed($row, $scope);
+                },
+                $this->memberNameInitialMatcher($normalizedQuery)
+            );
+        }
+
+        $preference = $this->preferences->load($context, self::PAGE_CODE);
+        return [
+            'records' => array_map(function (array $row): array {
+                return $this->presentRow($row);
+            }, $result['rows']),
+            'total' => (int)$result['pagination']['total'],
+            'page' => (int)$result['pagination']['page'],
+            'pageSize' => (int)$result['pagination']['limit'],
+            'isLoading' => false,
+            'statusOptions' => $this->statusOptions(),
+            'querySettings' => $preference,
+            'summaries' => $result['summaries'],
+            'groups' => $result['groups'],
+            'queryCutoffDate' => $result['queryCutoffDate'],
+            'dataAsOf' => $result['dataAsOf'],
+            'metricVersion' => $result['schemaVersion'],
+            'aggregationCaughtUp' => true,
+            'consistencyFingerprint' => $result['consistencyFingerprint'],
+            'security' => $result['security'],
+        ];
+    }
+
+    /**
+     * Worker 只消费创建任务时保存的规范化计划和字段定义。
+     */
+    public function executeFrozenPlan(
+        array $context,
+        array $plan,
+        string $exportScope,
+        array $fieldKeys
+    ): array {
+        $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
+        if ((string)($plan['page_code'] ?? '') !== self::PAGE_CODE) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                '导出查询计划与页面不匹配。',
+                []
+            );
+        }
+        if ((string)($plan['query_cutoff_date'] ?? '') !== $context['query_cutoff_date']
+            || empty($plan['permission_must_be_injected_before_calculation'])) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                '导出查询计划的统计时点或权限顺序已损坏。',
+                []
+            );
+        }
+        $query = $this->queryFromPlan($plan);
+        $query['export'] = [
+            'scope' => $exportScope,
+            'fields' => array_values(array_unique(array_map('strval', $fieldKeys))),
+        ];
+        $sourceRows = $this->authorizedSourceRows($context, $query);
+        return $this->execution->execute(
+            self::PAGE_CODE,
+            $sourceRows,
+            (array)($plan['custom_definitions'] ?? []),
+            $query,
+            $context,
+            function (array $row, array $scope): bool {
+                return $this->rowAllowed($row, $scope);
+            },
+            $this->memberNameInitialMatcher($query)
+        );
+    }
+
+    protected function queryFromPlan(array $plan): array
+    {
+        return [
+            'page' => (int)($plan['pagination']['page'] ?? 1),
+            'limit' => (int)($plan['pagination']['limit'] ?? 20),
+            'filters' => (array)($plan['filters'] ?? []),
+            'topFilterConditions' => (array)($plan['top_filters'] ?? []),
+            'keywordFilters' => (array)($plan['keyword_filters'] ?? []),
+            'filterRelation' => (string)($plan['filter_relation'] ?? 'all'),
+            'sorts' => (array)($plan['sorts'] ?? []),
+            'groupBy' => (array)($plan['groups'] ?? []),
+            'summaries' => (array)($plan['summaries'] ?? []),
+            'dataScope' => (string)($plan['domain_scope']['data_scope'] ?? 'normal'),
+            'businessStatus' => (string)($plan['domain_scope']['business_status'] ?? ''),
+            'quickFilters' => (array)($plan['quick_filters'] ?? []),
+            'visibleFields' => (array)($plan['visible_fields'] ?? []),
+        ];
+    }
+
+    protected function definitionsForQuery(array $context, array $payload): array
+    {
+        $candidate = $payload;
+        unset($candidate['fieldVersions'], $candidate['field_versions']);
+        $keys = (new UnifiedQueryCustomFieldKeyCollector())->collectFromQuery($candidate);
+        if (!$keys) {
+            return [];
+        }
+        $preference = $this->preferences->load($context, self::PAGE_CODE);
+        $pinned = (array)($preference['customFieldVersions'] ?? []);
+        $visible = [];
+        foreach ($this->customFields->listVisible($context, self::PAGE_CODE, true) as $field) {
+            $visible[(string)$field['key']] = $field;
+        }
+        $definitions = [];
+        foreach ($keys as $fieldKey) {
+            if (!isset($visible[$fieldKey])) {
+                throw new UnifiedQueryException(
+                    'UNIFIED_QUERY_CUSTOM_FIELD_UNAVAILABLE',
+                    '查询使用的自定义字段已不可用，请重新设置。',
+                    ['field_key' => $fieldKey]
+                );
+            }
+            $version = (int)($pinned[$fieldKey] ?? $visible[$fieldKey]['version'] ?? 0);
+            $definition = $this->customFields->versionDefinition(
+                $context,
+                self::PAGE_CODE,
+                $fieldKey,
+                $version
+            );
+            $definition['page_code'] = self::PAGE_CODE;
+            $definitions[] = $definition;
+        }
+        return $definitions;
+    }
+
+    protected function authorizedSourceRows(array $context, array $payload): array
+    {
+        list($query, $visibleStoreIds, $allStores) =
+            $this->authorizedUserQuery($context, $payload, true);
+        if ($query === null) {
+            return [];
+        }
+        $rows = $query
+            ->order('u.uid', 'asc')
+            ->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)
+            ->select()
+            ->toArray();
+        if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE',
+                '当前数据范围超过安全计算上限，请先用会员关键词或状态缩小范围。',
+                [
+                    'max_rows' => UnifiedQueryExecutionServices::MAX_SOURCE_ROWS,
+                    'safe_pushdown' => ['data_scope', 'business_status', 'member_keyword'],
+                ]
+            );
+        }
+        return $this->projectSourceRows(
+            $context,
+            $rows,
+            $visibleStoreIds,
+            $allStores
+        );
+    }
+
+    /**
+     * 大商户的基础列表使用 SQL COUNT + 稳定分页，只补当前页的派生投影。
+     * 高级筛选、自定义字段、分组、合计和导出仍走有界统一执行器并 fail-closed。
+     */
+    protected function sqlPageFastPath(
+        array $context,
+        array $plan,
+        array $normalizedQuery
+    ): ?array {
+        if (!$this->supportsSqlPageFastPath($plan, $normalizedQuery)) {
+            return null;
+        }
+        list($query, $visibleStoreIds, $allStores) =
+            $this->authorizedUserQuery($context, $normalizedQuery, true);
+        if ($query === null) {
+            $rows = [];
+            $total = 0;
+        } else {
+            $this->applySqlPageFilters(
+                $query,
+                (array)($plan['filters'] ?? []),
+                (string)($normalizedQuery['filterRelation'] ?? 'all'),
+                $context,
+                $visibleStoreIds,
+                $allStores
+            );
+            $total = (int)(clone $query)->count('u.uid');
+            foreach ((array)$normalizedQuery['sorts'] as $sort) {
+                $fieldKey = (string)($sort['field_key'] ?? '');
+                $column = $fieldKey === 'created_at' ? 'u.add_time' : 'u.uid';
+                $query->order($column, (string)$sort['direction']);
+            }
+            $page = max(1, (int)$normalizedQuery['page']);
+            $limit = (int)$normalizedQuery['limit'];
+            $rows = $query->page($page, $limit)->select()->toArray();
+        }
+        $projected = $this->projectSourceRows(
+            $context,
+            $rows,
+            $visibleStoreIds,
+            $allStores
+        );
+        $pageQuery = $normalizedQuery;
+        $pageQuery['page'] = 1;
+        $result = $this->execution->execute(
+            self::PAGE_CODE,
+            $projected,
+            [],
+            $pageQuery,
+            $context,
+            function (array $row, array $scope): bool {
+                return $this->rowAllowed($row, $scope);
+            },
+            $this->memberNameInitialMatcher($normalizedQuery)
+        );
+        $page = max(1, (int)$normalizedQuery['page']);
+        $limit = (int)$normalizedQuery['limit'];
+        $result['pagination'] = [
+            'page' => $page,
+            'limit' => $limit,
+            'total' => $total,
+            'pages' => (int)ceil($total / $limit),
+        ];
+        $result['security']['sqlPaginatedAfterDataScope'] = true;
+        $result['security']['authorizedRowCount'] = $total;
+        return $result;
+    }
+
+    protected function supportsSqlPageFastPath(array $plan, array $query): bool
+    {
+        foreach ([
+            'custom_definitions',
+            'top_filters',
+            'groups',
+            'summaries',
+            'quick_filters',
+        ] as $key) {
+            if (!empty($plan[$key])) {
+                return false;
+            }
+        }
+        if (!$this->supportsSqlPageFilters((array)($plan['filters'] ?? []))) {
+            return false;
+        }
+        if (!empty($query['keywordFilters']) && $this->pushdownKeyword($query) === '') {
+            return false;
+        }
+        if ((string)($query['dataScope'] ?? 'normal') === 'all') {
+            $businessStatus = trim((string)($query['businessStatus'] ?? ''));
+            if ($businessStatus !== '' && !in_array($businessStatus, [
+                '正常', 'normal',
+                '已停用', 'inactive', 'disabled',
+                '已注销', 'cancelled', 'deleted',
+            ], true)) {
+                return false;
+            }
+        }
+        $sorts = (array)($query['sorts'] ?? []);
+        if (count($sorts) === 1) {
+            return (string)($sorts[0]['field_key'] ?? '') === 'member_id'
+                && (string)($sorts[0]['direction'] ?? '') === 'asc';
+        }
+        return count($sorts) === 2
+            && (string)($sorts[0]['field_key'] ?? '') === 'created_at'
+            && in_array((string)($sorts[0]['direction'] ?? ''), ['asc', 'desc'], true)
+            && (string)($sorts[1]['field_key'] ?? '') === 'member_id'
+            && (string)($sorts[1]['direction'] ?? '') === 'asc';
+    }
+
+    /**
+     * Only standard mobile audience conditions may enter the SQL paging path.
+     * Every other dynamic rule remains on the complete unified-query engine.
+     */
+    protected function supportsSqlPageFilters(array $filters): bool
+    {
+        if ($filters === []) {
+            return true;
+        }
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) return false;
+            $field = (string)($filter['field_key'] ?? '');
+            $operator = (string)($filter['operator'] ?? '');
+            $rawValue = $filter['value'] ?? '';
+            if (is_array($rawValue)) {
+                if ($field !== 'latest_visit_date' || $operator !== 'between' || count($rawValue) !== 2) return false;
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[0]) !== 1
+                    || preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$rawValue[1]) !== 1) return false;
+                continue;
+            }
+            $value = trim((string)$rawValue);
+            if ($field === 'birthday_month_day'
+                && (($operator === 'equal' && preg_match('/^\d{2}-\d{2}$/D', $value))
+                    || ($operator === 'starts_with' && preg_match('/^\d{2}-(?:\d{2})?$/D', $value)))) continue;
+            if ($field === 'latest_visit_date'
+                && in_array($operator, ['greater_or_equal', 'less_or_equal'], true)
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) === 1) continue;
+            if ($field === 'latest_purchase_date'
+                && $operator === 'greater_or_equal'
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) === 1) continue;
+            if ($field === 'remaining_project_amount'
+                && in_array($operator, ['greater_than', 'less_than'], true)
+                && is_numeric($value)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Applies a predicate already proved equivalent to the in-memory member
+     * projection. Permission scope is injected before this predicate runs.
+     */
+    protected function applySqlPageFilters($query, array $filters, string $filterRelation, array $context, array $visibleStoreIds, bool $allStores): void
+    {
+        if ($filters === []) {
+            return;
+        }
+        $predicates = [];
+        foreach ($filters as $filter) {
+            $predicate = $this->sqlPageFilterPredicate($filter, $context, $visibleStoreIds, $allStores);
+            if ($predicate === null) return;
+            $predicates[] = $predicate;
+        }
+        $join = strtolower($filterRelation) === 'any' ? ' OR ' : ' AND ';
+        $sql = '(' . implode($join, array_column($predicates, 'sql')) . ')';
+        $parameters = [];
+        foreach ($predicates as $predicate) {
+            $parameters = array_merge($parameters, $predicate['params']);
+        }
+        $query->whereRaw($sql, $parameters);
+    }
+
+    /** @return array{sql:string,params:array}|null */
+    protected function sqlPageFilterPredicate(array $filter, array $context, array $visibleStoreIds, bool $allStores): ?array
+    {
+        $field = (string)($filter['field_key'] ?? '');
+        $operator = (string)($filter['operator'] ?? '');
+        $rawValue = $filter['value'] ?? '';
+        $prefix = (string)Db::getConfig('connections.mysql.prefix');
+        $quoteTable = static function (string $name) use ($prefix): string {
+            return '`' . str_replace('`', '', $prefix . $name) . '`';
+        };
+        $storeScope = static function (string $alias, array $storeIds, bool $all): array {
+            if ($all) return ['', []];
+            $placeholders = implode(',', array_fill(0, count($storeIds), '?'));
+            return [' AND ' . $alias . '.store_id IN (' . $placeholders . ')', array_values(array_map('intval', $storeIds))];
+        };
+        if ($field === 'birthday_month_day' && !is_array($rawValue)) {
+            $value = trim((string)$rawValue);
+            return [
+                'sql' => "DATE_FORMAT(FROM_UNIXTIME(u.birthday), '%m-%d') " . ($operator === 'equal' ? '= ?' : 'LIKE ?'),
+                'params' => [$operator === 'equal' ? $value : $value . '%'],
+            ];
+        }
+        $tenantId = trim((string)($context['tenant_id'] ?? ''));
+        if ($field === 'latest_visit_date') {
+            $table = $quoteTable('cashier_v3_entitlement_service_fact');
+            // 到店筛选与会员摘要共用冻结的体验资格；人员统计标记不能影响门店日期。
+            $visitCondition = ' AND ' . StoreCustomerVisitEligibility::sqlPredicate('sf');
+            $visitCondition2 = ' AND ' . StoreCustomerVisitEligibility::sqlPredicate('sf2');
+            [$scopeSql, $scopeParams] = $storeScope('sf', $visibleStoreIds, $allStores);
+            if (is_array($rawValue) && $operator === 'between' && count($rawValue) === 2) {
+                $start = (string)$rawValue[0]; $end = (string)$rawValue[1];
+                $scope2 = str_replace('sf.', 'sf2.', $scopeSql);
+                return [
+                    'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\'' . $visitCondition . ' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
+                        . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid AND sf2.tenant_id = ? AND sf2.service_status = \'completed\'' . $visitCondition2 . ' AND sf2.business_date > ?' . $scope2 . ')',
+                    'params' => array_merge([$tenantId, $start, $end], $scopeParams, [$tenantId, $end], $scopeParams),
+                ];
+            }
+            if ($tenantId === '' || !in_array($operator, ['greater_or_equal', 'less_or_equal'], true)) return null;
+            $value = trim((string)$rawValue);
+            return [
+                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\'' . $visitCondition . ' AND sf.business_date ' . ($operator === 'greater_or_equal' ? '>= ' : '<= ') . '?' . $scopeSql . ')',
+                'params' => array_merge([$tenantId, $value], $scopeParams),
+            ];
+        }
+        if ($field === 'latest_purchase_date' && !is_array($rawValue) && $tenantId !== '' && $operator === 'greater_or_equal') {
+            $table = $quoteTable('store_order');
+            [$scopeSql, $scopeParams] = $storeScope('o', $visibleStoreIds, $allStores);
+            $optional = $this->tableColumns('store_order');
+            $extra = '';
+            if (isset($optional['is_debt_repay'])) $extra .= ' AND o.is_debt_repay = 0';
+            if (isset($optional['terminal_action'])) $extra .= ' AND o.terminal_action = 0';
+            if (isset($optional['card_upgrade_use_oid'])) $extra .= ' AND o.card_upgrade_use_oid = 0';
+            return [
+                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' o WHERE o.uid = u.uid AND o.paid = 1 AND o.refund_status IN (0,3) AND o.is_del = 0 AND o.is_system_del = 0 AND o.pid = 0 AND o.order_type = 0' . $extra . ' AND DATE(FROM_UNIXTIME(CASE WHEN o.pay_time > 0 THEN o.pay_time ELSE o.add_time END)) >= ?' . $scopeSql . ')',
+                'params' => array_merge([trim((string)$rawValue)], $scopeParams),
+            ];
+        }
+        if ($field === 'remaining_project_amount' && !is_array($rawValue)
+            && in_array($operator, ['greater_than', 'less_than'], true)) {
+            $holder = $quoteTable('user_card_holder');
+            $orders = $quoteTable('store_order');
+            $cart = $quoteTable('store_order_cart_info');
+            [$scopeSql, $scopeParams] = $storeScope('o', $visibleStoreIds, $allStores);
+            $orderColumns = $this->tableColumns('store_order');
+            $cartColumns = $this->tableColumns('store_order_cart_info');
+            foreach (['id', 'paid', 'is_del', 'is_system_del', 'refund_status', 'store_id'] as $required) {
+                if (!isset($orderColumns[$required])) return null;
+            }
+            foreach (['oid', 'pay_price', 'write_times', 'write_surplus_times'] as $required) {
+                if (!isset($cartColumns[$required])) return null;
+            }
+            $orderExtra = '';
+            if (isset($orderColumns['terminal_action'])) $orderExtra .= ' AND o.terminal_action = 0';
+            if (isset($orderColumns['card_upgrade_use_oid'])) $orderExtra .= ' AND o.card_upgrade_use_oid = 0';
+            $cartExtra = '';
+            if (isset($cartColumns['cart_type'])) $cartExtra .= ' AND c.cart_type = 2';
+            if (isset($cartColumns['product_type'])) $cartExtra .= ' AND c.product_type = 6';
+            if (isset($cartColumns['is_writeoff'])) $cartExtra .= ' AND c.is_writeoff = 0';
+            $sum = 'SUM((c.pay_price * c.write_surplus_times) / NULLIF(c.write_times, 0))';
+            return [
+                'sql' => 'u.uid IN (SELECT h.uid FROM ' . $holder . ' h JOIN ' . $orders . ' o ON o.id = h.oid JOIN ' . $cart . ' c ON c.oid = h.oid WHERE h.is_del = 0 AND h.write_surplus_times > 0 AND o.paid = 1 AND o.is_del = 0 AND o.is_system_del = 0 AND o.refund_status = 0' . $orderExtra . $scopeSql . ' AND c.write_surplus_times > 0' . $cartExtra . ' GROUP BY h.uid HAVING ' . $sum . ' ' . ($operator === 'greater_than' ? '> ' : '< ') . '?)',
+                'params' => array_merge($scopeParams, [(string)$rawValue]),
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * @return array{0:mixed,1:array,2:bool}
+     */
+    protected function authorizedUserQuery(
+        array $context,
+        array $payload,
+        bool $exactStatus
+    ): array {
+        $allStores = !empty($context['all_stores'])
+            || (array_key_exists('visible_store_ids', $context)
+                && $context['visible_store_ids'] === null);
+        $visibleStoreIds = array_values(array_unique(array_filter(array_map(
+            'intval',
+            (array)($context['visible_store_ids'] ?? [])
+        ))));
+        if (!$allStores && !$visibleStoreIds) {
+            return [null, $visibleStoreIds, $allStores];
+        }
+
+        $userColumns = $this->tableColumns('user');
+        foreach (['uid', 'nickname', 'real_name', 'phone', 'bar_code', 'birthday', 'belong_store_id', 'status', 'is_del', 'delete_time', 'add_time', 'level'] as $required) {
+            if (!isset($userColumns[$required])) {
+                throw new \RuntimeException('会员权威表缺少统一查询字段：' . $required);
+            }
+        }
+        $selectedFields = [
+            'u.uid', 'u.nickname', 'u.real_name', 'u.phone', 'u.bar_code',
+            'u.belong_store_id', 'u.status', 'u.is_del', 'u.delete_time',
+            'u.add_time', 'u.level', 'u.birthday',
+        ];
+        if (isset($userColumns['now_money'])) {
+            $selectedFields[] = 'u.now_money';
+        }
+        $initials = $this->initialKeyword($payload);
+        if ($initials !== '') {
+            $selectedFields[] = 'name_search.initials AS member_name_initials';
+        }
+        $query = Db::name('user')->alias('u')->field($selectedFields);
+        if (!$allStores) {
+            $storeUserColumns = $this->tableColumns('store_user');
+            if (!isset($storeUserColumns['uid'], $storeUserColumns['store_id'], $storeUserColumns['status'])) {
+                throw new \RuntimeException('会员门店关系表缺少数据权限字段');
+            }
+            $query->whereIn('u.uid', function ($subQuery) use ($visibleStoreIds) {
+                $subQuery->name('store_user')
+                    ->where('status', 1)
+                    ->whereIn('store_id', $visibleStoreIds)
+                    ->field('uid');
+            });
+        }
+        $this->applyStatusPushdown($query, $payload, $exactStatus);
+        if ($initials !== '') {
+            // 与收银会员选择器复用同一触发器索引；门店 DataScope 保持在本查询中。
+            $query->leftJoin('member_name_initial_search name_search', 'name_search.uid = u.uid');
+        }
+        $keyword = $this->pushdownKeyword($payload);
+        if ($keyword !== '') {
+            $needle = function_exists('mb_strtolower')
+                ? mb_strtolower($keyword, 'UTF-8')
+                : strtolower($keyword);
+            // 同一 SQL 内完成关键词匹配与计数/分页，不能只搜索当前页。
+            $query->whereRaw(
+                "(LOCATE(?,LOWER(CASE WHEN TRIM(IFNULL(u.real_name,''))<>'' THEN TRIM(u.real_name) WHEN TRIM(IFNULL(u.nickname,''))<>'' THEN TRIM(u.nickname) ELSE '未命名会员' END))>0 OR LOCATE(?,LOWER(IFNULL(u.phone,'')))>0 OR LOCATE(?,LOWER(IFNULL(u.bar_code,'')))>0"
+                . ($initials !== '' ? ' OR name_search.initials LIKE ?' : '') . ')',
+                $initials !== ''
+                    ? [$needle, $needle, $needle, $initials . '%']
+                    : [$needle, $needle, $needle]
+            );
+        }
+        return [$query, $visibleStoreIds, $allStores];
+    }
+
+    protected function projectSourceRows(
+        array $context,
+        array $rows,
+        array $visibleStoreIds,
+        bool $allStores
+    ): array {
+        if (!$rows) {
+            return [];
+        }
+
+        $uids = array_values(array_unique(array_map('intval', array_column($rows, 'uid'))));
+        $relations = $this->storeRelations($uids, $visibleStoreIds, $allStores);
+        $displayStoreIds = $this->displayStoreIds($rows, $relations, $context);
+        $stores = $this->storeNames(array_values(array_unique(array_values($displayStoreIds))));
+        $levels = $this->levelNames($rows);
+        $labels = $this->memberLabels($uids);
+        $exclusive = $this->exclusiveServicePeople($uids, $visibleStoreIds, $allStores);
+        $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores, $context);
+        $debts = $this->debtSummaries($uids, $visibleStoreIds, $allStores);
+        $purchases = $this->purchaseSummaries($uids, $visibleStoreIds, $allStores);
+        $visits = $this->visitSummaries(
+            $uids,
+            $visibleStoreIds,
+            $allStores,
+            (string)($context['tenant_id'] ?? '')
+        );
+
+        $result = [];
+        foreach ($rows as $row) {
+            $uid = (int)$row['uid'];
+            $state = $this->memberState($row);
+            // trim 只用于判定历史脏数据是否为空。投影本身必须保留权威原文，
+            // 否则列表与导出会悄悄改写姓名中的制表符、换行等字符；XLSX 层会
+            // 统一以显式字符串写入，既保持原值又避免把数据当作公式执行。
+            $realName = (string)($row['real_name'] ?? '');
+            $nickname = (string)($row['nickname'] ?? '');
+            $name = trim($realName) !== '' ? $realName : $nickname;
+            if (trim($name) === '') {
+                $name = '';
+            }
+            $tagList = $labels[$uid] ?? [];
+            $result[] = [
+                'member_id' => $uid,
+                'member_name' => $name !== '' ? $name : '未命名会员',
+                '_member_name_initials' => (string)($row['member_name_initials'] ?? ''),
+                'phone' => (string)($row['phone'] ?? ''),
+                'member_no' => (string)($row['bar_code'] ?? ''),
+                'birthday' => $this->dateValue($row['birthday'] ?? 0),
+                'birthday_month_day' => $this->birthdayMonthDay($row['birthday'] ?? 0),
+                'member_status' => $state['label'],
+                'member_level' => (string)($levels[(int)($row['level'] ?? 0)] ?? '普通会员'),
+                'member_tag' => implode('、', $tagList),
+                'store' => (string)($stores[$displayStoreIds[$uid] ?? 0] ?? ''),
+                'exclusive_service_staff' => (string)($exclusive[$uid] ?? ''),
+                'account_balance' => $this->amount($row['now_money'] ?? 0),
+                'active_card_count' => (int)($cards[$uid]['active_card_count'] ?? 0),
+                'remaining_project_times' => (int)($cards[$uid]['remaining_project_times'] ?? 0),
+                'remaining_project_amount' => (string)($cards[$uid]['remaining_project_amount'] ?? '0.00'),
+                'debt_amount' => (string)($debts[$uid] ?? '0.00'),
+                'total_consumption_amount' => (string)($purchases[$uid]['total_amount'] ?? '0.00'),
+                'visit_count' => (int)($visits[$uid]['visit_count'] ?? 0),
+                'latest_purchase_date' => (string)($purchases[$uid]['latest_date'] ?? ''),
+                'last_service_staff' => (string)($visits[$uid]['last_staff_name'] ?? ''),
+                'latest_visit_date' => (string)($visits[$uid]['latest_date'] ?? ''),
+                'created_at' => $this->dateTime($row['add_time'] ?? 0),
+                '_member_tags' => $tagList,
+                '_member_status_code' => $state['code'],
+                '_scope_store_ids' => $relations[$uid] ?? [],
+                '_display_store_id' => (int)($displayStoreIds[$uid] ?? 0),
+            ];
+        }
+        return $result;
+    }
+
+    protected function birthdayMonthDay($timestamp): string
+    {
+        $timestamp = (int)$timestamp;
+        return $timestamp > 0 ? date('m-d', $timestamp) : '';
+    }
+
+    protected function rowAllowed(array $row, array $scope): bool
+    {
+        $allStores = !empty($scope['all_stores'])
+            || (array_key_exists('visible_store_ids', $scope)
+                && $scope['visible_store_ids'] === null);
+        $visible = array_values(array_unique(array_map(
+            'intval',
+            (array)($scope['visible_store_ids'] ?? [])
+        )));
+        if (!$allStores && !array_intersect($visible, (array)($row['_scope_store_ids'] ?? []))) {
+            return false;
+        }
+        $statusCode = (string)($row['_member_status_code'] ?? '');
+        if ((string)($scope['requested_data_scope'] ?? 'normal') === 'normal') {
+            return $statusCode === 'normal';
+        }
+        $requested = trim((string)($scope['requested_business_status'] ?? ''));
+        if ($requested === '') {
+            return true;
+        }
+        $map = [
+            '正常' => 'normal', 'normal' => 'normal',
+            '已停用' => 'inactive', 'inactive' => 'inactive', 'disabled' => 'inactive',
+            '已注销' => 'cancelled', 'cancelled' => 'cancelled', 'deleted' => 'cancelled',
+        ];
+        return ($map[$requested] ?? '') === $statusCode;
+    }
+
+    protected function presentRow(array $row): array
+    {
+        $customValues = [];
+        foreach ($row as $key => $value) {
+            if (strpos((string)$key, 'cf_') === 0) {
+                $customValues[$key] = $value;
+            }
+        }
+        return [
+            'id' => (string)$row['member_id'],
+            'memberId' => (int)$row['member_id'],
+            'name' => (string)$row['member_name'],
+            'phone' => (string)$row['phone'],
+            'memberNo' => (string)$row['member_no'],
+            'birthday' => (string)$row['birthday'],
+            'status' => (string)$row['member_status'],
+            'level' => (string)$row['member_level'],
+            'tags' => (array)($row['_member_tags'] ?? []),
+            'storeId' => (int)($row['_display_store_id'] ?? 0),
+            'storeName' => (string)$row['store'],
+            'exclusiveServiceStaff' => (string)$row['exclusive_service_staff'],
+            'accountBalance' => (string)$row['account_balance'],
+            'activeCardCount' => (int)$row['active_card_count'],
+            'remainingProjectTimes' => (int)$row['remaining_project_times'],
+            'remainingProjectAmount' => (string)$row['remaining_project_amount'],
+            'debtAmount' => (string)$row['debt_amount'],
+            'totalConsumptionAmount' => (string)$row['total_consumption_amount'],
+            'visitCount' => (int)$row['visit_count'],
+            'latestPurchaseDate' => (string)$row['latest_purchase_date'],
+            'lastServiceStaff' => (string)$row['last_service_staff'],
+            'latestVisitDate' => (string)$row['latest_visit_date'],
+            'createdAt' => (string)$row['created_at'],
+            'queryFieldValues' => $customValues,
+            'queryDisplayValues' => $customValues,
+        ];
+    }
+
+    protected function storeRelations(array $uids, array $visible, bool $allStores): array
+    {
+        $columns = $this->tableColumns('store_user');
+        if (!isset($columns['uid'], $columns['store_id'], $columns['status'])) {
+            return [];
+        }
+        $query = Db::name('store_user')->whereIn('uid', $uids)->where('status', 1);
+        if (!$allStores) {
+            $query->whereIn('store_id', $visible);
+        }
+        $result = [];
+        foreach ($query->field('uid,store_id')->select()->toArray() as $row) {
+            $uid = (int)$row['uid'];
+            $storeId = (int)$row['store_id'];
+            if ($storeId > 0) {
+                $result[$uid][] = $storeId;
+            }
+        }
+        foreach ($result as &$storeIds) {
+            $storeIds = array_values(array_unique($storeIds));
+        }
+        unset($storeIds);
+        return $result;
+    }
+
+    protected function displayStoreIds(array $rows, array $relations, array $context): array
+    {
+        $current = (int)($context['store_id'] ?? 0);
+        $result = [];
+        foreach ($rows as $row) {
+            $uid = (int)$row['uid'];
+            $candidate = (array)($relations[$uid] ?? []);
+            $belong = (int)($row['belong_store_id'] ?? 0);
+            if ($current > 0 && in_array($current, $candidate, true)) {
+                $result[$uid] = $current;
+            } elseif ($belong > 0 && (in_array($belong, $candidate, true) || !$candidate)) {
+                $result[$uid] = $belong;
+            } else {
+                sort($candidate, SORT_NUMERIC);
+                $result[$uid] = (int)($candidate[0] ?? 0);
+            }
+            if (!$candidate && $result[$uid] > 0) {
+                $relations[$uid] = [$result[$uid]];
+            }
+        }
+        return $result;
+    }
+
+    protected function storeNames(array $storeIds): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        $columns = $this->tableColumns('system_store');
+        return $storeIds && isset($columns['id'], $columns['name'])
+            ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id')
+            : [];
+    }
+
+    protected function levelNames(array $rows): array
+    {
+        $columns = $this->tableColumns('system_user_level');
+        if (!isset($columns['id'], $columns['name'])) {
+            return [];
+        }
+        $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'level')))));
+        return $ids ? Db::name('system_user_level')->whereIn('id', $ids)->column('name', 'id') : [];
+    }
+
+    protected function memberLabels(array $uids): array
+    {
+        $relationColumns = $this->tableColumns('user_label_relation');
+        $labelColumns = $this->tableColumns('user_label');
+        if (!isset($relationColumns['id'], $relationColumns['uid'], $relationColumns['label_id'])
+            || !isset($labelColumns['id'], $labelColumns['label_name'])) {
+            return [];
+        }
+        $rows = Db::name('user_label_relation')->alias('r')
+            ->join('user_label l', 'l.id = r.label_id')
+            ->whereIn('r.uid', $uids)
+            ->field('r.uid,l.label_name')
+            ->order('r.id', 'asc')
+            ->select()
+            ->toArray();
+        $result = [];
+        foreach ($rows as $row) {
+            $label = trim((string)$row['label_name']);
+            if ($label !== '') {
+                $result[(int)$row['uid']][] = $label;
+            }
+        }
+        return $result;
+    }
+
+    protected function exclusiveServicePeople(array $uids, array $visible, bool $allStores): array
+    {
+        // 多人选择是当前权威关系；旧单人关系仅为尚未建立多人选择的会员回退。
+        // 先按门店权限过滤姓名，再聚合，列表和导出共用此投影避免跨店泄漏。
+        $selected = [];
+        $selectedColumns = $this->tableColumns('member_exclusive_service_selection');
+        if (isset($selectedColumns['member_id'], $selectedColumns['status'], $selectedColumns['staff_name'], $selectedColumns['store_id'], $selectedColumns['sort_order'])) {
+            $rows = Db::name('member_exclusive_service_selection')
+                ->whereIn('member_id', $uids)
+                ->where('status', 1)
+                ->field('member_id,store_id,staff_name')
+                ->order('member_id asc,sort_order asc,id asc')
+                ->select()->toArray();
+            foreach ($rows as $row) {
+                $memberId = (int)$row['member_id'];
+                $selected[$memberId] ??= [];
+                if (!$allStores && !in_array((int)$row['store_id'], $visible, true)) continue;
+                $name = trim((string)$row['staff_name']);
+                if ($name !== '') $selected[$memberId][] = $name;
+            }
+        }
+        $columns = $this->tableColumns('member_exclusive_service');
+        if (!isset($columns['member_id'], $columns['status'], $columns['staff_name'])
+            || (!$allStores && !isset($columns['store_id']))) {
+            return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
+        }
+        $query = Db::name('member_exclusive_service')
+            ->whereIn('member_id', $uids)
+            ->where('status', 1);
+        if (!$allStores) {
+            $query->whereIn('store_id', $visible);
+        }
+        $legacy = $query->column('staff_name', 'member_id');
+        foreach ($legacy as $memberId => $name) {
+            if (!array_key_exists((int)$memberId, $selected)) $selected[(int)$memberId] = [(string)$name];
+        }
+        return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
+    }
+
+    protected function cardSummaries(array $uids, array $visible, bool $allStores, array $context): array
+    {
+        $holderColumns = $this->tableColumns('user_card_holder');
+        $orderColumns = $this->tableColumns('store_order');
+        if (!isset(
+            $holderColumns['uid'],
+            $holderColumns['oid'],
+            $holderColumns['write_surplus_times'],
+            $holderColumns['is_del'],
+            $orderColumns['id'],
+            $orderColumns['paid'],
+            $orderColumns['is_del'],
+            $orderColumns['is_system_del'],
+            $orderColumns['refund_status']
+        ) || (!$allStores && !isset($orderColumns['store_id']))) {
+            return [];
+        }
+        $query = Db::name('user_card_holder')->alias('h')
+            ->join('store_order o', 'o.id = h.oid')
+            ->whereIn('h.uid', $uids)
+            ->where('h.is_del', 0)
+            ->where('h.write_surplus_times', '>', 0)
+            ->where('o.paid', 1)
+            ->where('o.is_del', 0)
+            ->where('o.is_system_del', 0)
+            ->where('o.refund_status', 0);
+        if (isset($orderColumns['terminal_action'])) {
+            $query->where('o.terminal_action', 0);
+        }
+        if (isset($orderColumns['card_upgrade_use_oid'])) {
+            $query->where('o.card_upgrade_use_oid', 0);
+        }
+        if (!$allStores) {
+            $query->whereIn('o.store_id', $visible);
+        }
+        $rows = $query->field('h.uid,h.oid,h.write_surplus_times')
+            ->select()
+            ->toArray();
+        $result = [];
+        $oids = [];
+        foreach ($rows as $row) {
+            $uid = (int)$row['uid'];
+            $result[$uid]['holder_ids'][(int)$row['oid']] = true;
+            $result[$uid]['remaining_project_times'] = (int)($result[$uid]['remaining_project_times'] ?? 0)
+                + max(0, (int)$row['write_surplus_times']);
+            $result[$uid]['remaining_project_amount'] = '0.00';
+            $oids[(int)$row['oid']] = $uid;
+        }
+        $cartColumns = $this->tableColumns('store_order_cart_info');
+        if ($oids && isset($cartColumns['oid'], $cartColumns['pay_price'], $cartColumns['write_times'], $cartColumns['write_surplus_times'])) {
+            $cartQuery = Db::name('store_order_cart_info')
+                ->whereIn('oid', array_keys($oids))
+                ->where('write_surplus_times', '>', 0);
+            if (isset($cartColumns['cart_type'])) {
+                $cartQuery->where('cart_type', 2);
+            }
+            if (isset($cartColumns['product_type'])) {
+                $cartQuery->where('product_type', 6);
+            }
+            if (isset($cartColumns['is_writeoff'])) {
+                $cartQuery->where('is_writeoff', 0);
+            }
+            foreach ($cartQuery->field('oid,pay_price,write_times,write_surplus_times')->select()->toArray() as $cart) {
+                $uid = (int)($oids[(int)$cart['oid']] ?? 0);
+                $times = (int)($cart['write_times'] ?? 0);
+                if ($uid <= 0 || $times <= 0) {
+                    continue;
+                }
+                $remaining = max(0, (int)$cart['write_surplus_times']);
+                $unit = bcdiv($this->amount($cart['pay_price'] ?? 0), (string)$times, 8);
+                $amount = bcmul($unit, (string)$remaining, 2);
+                $result[$uid]['remaining_project_amount'] = bcadd(
+                    (string)$result[$uid]['remaining_project_amount'],
+                    $amount,
+                    2
+                );
+            }
+        }
+        foreach ($result as &$summary) {
+            $summary['active_card_count'] = count((array)($summary['holder_ids'] ?? []));
+            unset($summary['holder_ids']);
+        }
+        unset($summary);
+
+        // Migrated cards have a storeless, system-hidden carrier order. They
+        // belong to the member's rights, not to a store's sales or revenue;
+        // only the authenticated operating store's organization may read them.
+        $operatorStoreId = (int)($context['store_id'] ?? 0);
+        if (!$allStores && !in_array($operatorStoreId, array_map('intval', $visible), true)) {
+            $operatorStoreId = 0;
+        }
+        $imported = (new CashierV3HistoricalEntitlementReadServices())->activeHolders(
+            $uids,
+            (string)($context['tenant_id'] ?? ''),
+            $operatorStoreId
+        );
+        foreach ($imported as $holder) {
+            $uid = (int)$holder['uid'];
+            $result[$uid]['active_card_count'] = (int)($result[$uid]['active_card_count'] ?? 0) + 1;
+            $result[$uid]['remaining_project_times'] = (int)($result[$uid]['remaining_project_times'] ?? 0)
+                + (int)$holder['write_surplus_times'];
+            // Migration carriers have zero transaction value. Historical paid
+            // price is audit-only and must not inflate member asset amount.
+            $result[$uid]['remaining_project_amount'] = (string)($result[$uid]['remaining_project_amount'] ?? '0.00');
+        }
+        return $result;
+    }
+
+    protected function debtSummaries(array $uids, array $visible, bool $allStores): array
+    {
+        $columns = $this->tableColumns('store_debt');
+        if (!isset($columns['uid'], $columns['total_debt'], $columns['repaid_debt'], $columns['status'])
+            || (!$allStores && !isset($columns['store_id']))) {
+            return [];
+        }
+        $query = Db::name('store_debt')
+            ->whereIn('uid', $uids)
+            ->where('status', 0);
+        if (!$allStores) {
+            $query->whereIn('store_id', $visible);
+        }
+        $rows = $query->field('uid,total_debt,repaid_debt')->select()->toArray();
+        $result = [];
+        foreach ($rows as $row) {
+            $pending = bcsub($this->amount($row['total_debt'] ?? 0), $this->amount($row['repaid_debt'] ?? 0), 2);
+            if (bccomp($pending, '0', 2) > 0) {
+                $uid = (int)$row['uid'];
+                $result[$uid] = bcadd((string)($result[$uid] ?? '0.00'), $pending, 2);
+            }
+        }
+        return $result;
+    }
+
+    protected function purchaseSummaries(array $uids, array $visible, bool $allStores): array
+    {
+        $columns = $this->tableColumns('store_order');
+        foreach (['uid', 'paid', 'pay_price', 'refund_status', 'is_del', 'is_system_del', 'pid', 'order_type', 'store_id', 'add_time', 'pay_time'] as $required) {
+            if (!isset($columns[$required])) {
+                return [];
+            }
+        }
+        $base = function () use ($uids, $visible, $allStores, $columns) {
+            $query = Db::name('store_order')->alias('o')
+                ->whereIn('o.uid', $uids)
+                ->where('o.paid', 1)
+                ->whereIn('o.refund_status', [0, 3])
+                ->where('o.is_del', 0)
+                ->where('o.is_system_del', 0)
+                ->where('o.pid', 0)
+                ->where('o.order_type', 0);
+            // 补交、作废和卡升级来源单不是新的购买事实，避免重复累计。
+            if (isset($columns['is_debt_repay'])) {
+                $query->where('o.is_debt_repay', 0);
+            }
+            if (isset($columns['terminal_action'])) {
+                $query->where('o.terminal_action', 0);
+            }
+            if (isset($columns['card_upgrade_use_oid'])) {
+                $query->where('o.card_upgrade_use_oid', 0);
+            }
+            if (!$allStores) {
+                $query->whereIn('o.store_id', $visible);
+            }
+            return $query;
+        };
+        $latest = $base()
+            ->field('o.uid,MAX(CASE WHEN o.pay_time > 0 THEN o.pay_time ELSE o.add_time END) AS latest_time')
+            ->group('o.uid')
+            ->select()
+            ->toArray();
+        $result = [];
+        foreach ($latest as $row) {
+            $timestamp = (int)($row['latest_time'] ?? 0);
+            $result[(int)$row['uid']] = [
+                'latest_date' => $this->businessDate($timestamp),
+                'total_amount' => '0.00',
+            ];
+        }
+        foreach ($base()
+            // 总消费金额是有效成交的实付总额，包含现金与余额，不能用现金业绩代替。
+            ->field('o.uid,SUM(o.pay_price) AS total_amount')
+            ->group('o.uid')
+            ->select()
+            ->toArray() as $row) {
+            $uid = (int)$row['uid'];
+            if (!isset($result[$uid])) {
+                $result[$uid] = ['latest_date' => '', 'total_amount' => '0.00'];
+            }
+            $result[$uid]['total_amount'] = $this->amount($row['total_amount'] ?? 0);
+        }
+        return $result;
+    }
+
+    protected function visitSummaries(array $uids, array $visible, bool $allStores, string $tenantId): array
+    {
+        if ($tenantId === '') {
+            throw new \RuntimeException('会员到店事实缺少租户范围');
+        }
+        $columns = $this->tableColumns('cashier_v3_entitlement_service_fact');
+        foreach (['id', 'tenant_id', 'store_id', 'member_id', 'business_date', 'settled_at', 'service_status', 'is_experience', 'craftsmen_snapshot_json'] as $required) {
+            if (!isset($columns[$required])) {
+                throw new \RuntimeException('会员到店事实表缺少权威字段：' . $required);
+            }
+        }
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', $tenantId)
+            ->whereIn('sf.member_id', $uids)
+            ->where('sf.service_status', 'completed');
+        // 会员列表的到店次数、最近到店及手艺人来自同一批非体验服务。
+        StoreCustomerVisitEligibility::apply($query, 'sf');
+        if (!$allStores) {
+            $query->whereIn('sf.store_id', $visible);
+        }
+        $rows = $query
+            ->field("sf.member_id AS uid,COUNT(DISTINCT sf.business_date) AS visit_count,MAX(sf.business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(sf.id ORDER BY sf.settled_at DESC,sf.id DESC), ',', 1) AS latest_service_fact_id")
+            ->group('sf.member_id')
+            ->select()
+            ->toArray();
+        $latestFactIds = array_values(array_unique(array_filter(array_map(
+            'intval',
+            array_column($rows, 'latest_service_fact_id')
+        ))));
+        $craftsmenByFact = [];
+        if ($latestFactIds) {
+            foreach (Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', $tenantId)
+                ->whereIn('id', $latestFactIds)->field('id,craftsmen_snapshot_json')->select()->toArray() as $fact) {
+                $craftsmenByFact[(int)$fact['id']] = $this->serviceCraftsmenSummary(
+                    (string)($fact['craftsmen_snapshot_json'] ?? '')
+                );
+            }
+        }
+        $result = [];
+        foreach ($rows as $row) {
+            $factId = (int)($row['latest_service_fact_id'] ?? 0);
+            $result[(int)$row['uid']] = [
+                'visit_count' => (int)($row['visit_count'] ?? 0),
+                'latest_date' => (string)($row['latest_date'] ?? ''),
+                'last_staff_name' => (string)($craftsmenByFact[$factId] ?? ''),
+            ];
+        }
+        return $result;
+    }
+
+    protected function serviceCraftsmenSummary(string $json): string
+    {
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) {
+            return '';
+        }
+        $names = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['staff_name_snapshot'] ?? $row['staffName'] ?? ''));
+            if ($name !== '' && !in_array($name, $names, true)) {
+                $names[] = $name;
+            }
+        }
+        return implode('、', $names);
+    }
+
+    protected function businessDate(int $timestamp): string
+    {
+        if ($timestamp <= 0) {
+            return '';
+        }
+        return (new \DateTimeImmutable('@' . $timestamp))
+            ->setTimezone(new \DateTimeZone(self::BUSINESS_TIME_ZONE))
+            ->format('Y-m-d');
+    }
+
+    /**
+     * 核销时选择的历史服务人员以 staff_yeji 劳动业绩快照为准。
+     * 同一次核销允许多人，按记录 id 稳定排序、去重后拼接；没有快照时调用方
+     * 才回退当前员工档案名称，避免员工改名导致历史展示漂移。
+     *
+     * @param int[] $writeoffIds
+     * @return array<int,string>
+     */
+    protected function writeoffStaffSnapshots(array $writeoffIds): array
+    {
+        if (!$writeoffIds) {
+            return [];
+        }
+        $columns = $this->tableColumns('staff_yeji');
+        foreach (['id', 'link_id', 'type', 'status', 'staff_name'] as $required) {
+            if (!isset($columns[$required])) {
+                return [];
+            }
+        }
+        $rows = Db::name('staff_yeji')
+            ->whereIn('link_id', $writeoffIds)
+            ->where('type', 3)
+            ->where('status', 0)
+            ->field('id,link_id,staff_name')
+            ->order('link_id', 'asc')
+            ->order('id', 'asc')
+            ->select()
+            ->toArray();
+        $names = [];
+        foreach ($rows as $row) {
+            $linkId = (int)($row['link_id'] ?? 0);
+            $name = trim((string)($row['staff_name'] ?? ''));
+            if ($linkId > 0 && $name !== '') {
+                $names[$linkId][$name] = true;
+            }
+        }
+        $result = [];
+        foreach ($names as $linkId => $items) {
+            $result[(int)$linkId] = implode('、', array_keys($items));
+        }
+        return $result;
+    }
+
+    protected function memberState(array $row): array
+    {
+        if ((int)($row['is_del'] ?? 0) === 1 || !empty($row['delete_time'])) {
+            return ['code' => 'cancelled', 'label' => '已注销'];
+        }
+        if ((int)($row['status'] ?? 0) !== 1) {
+            return ['code' => 'inactive', 'label' => '已停用'];
+        }
+        return ['code' => 'normal', 'label' => '正常'];
+    }
+
+    protected function statusOptions(): array
+    {
+        return [
+            ['value' => '正常', 'label' => '正常', 'normal' => true],
+            ['value' => '已停用', 'label' => '已停用', 'normal' => false],
+            ['value' => '已注销', 'label' => '已注销', 'normal' => false],
+        ];
+    }
+
+    /**
+     * 这里只下推会员状态的必要条件，最终仍由 rowAllowed 统一判定。
+     * 采用“超集下推”可缩小 10k 安全窗口，同时兼容历史脏数据而不漏合法结果。
+     */
+    protected function applyStatusPushdown(
+        $query,
+        array $payload,
+        bool $exact = false
+    ): void
+    {
+        $scope = (string)($payload['dataScope'] ?? 'normal');
+        $requested = $scope === 'normal'
+            ? 'normal'
+            : trim((string)($payload['businessStatus'] ?? ''));
+        $map = [
+            '正常' => 'normal', 'normal' => 'normal',
+            '已停用' => 'inactive', 'inactive' => 'inactive', 'disabled' => 'inactive',
+            '已注销' => 'cancelled', 'cancelled' => 'cancelled', 'deleted' => 'cancelled',
+        ];
+        $status = $map[$requested] ?? '';
+        if ($status === 'normal') {
+            // 所有最终“正常”会员必定 status=1；删除标记由最终判定继续过滤。
+            $query->where('u.status', 1);
+            if ($exact) {
+                $this->applyExactNotCancelledPushdown($query);
+            }
+        } elseif ($status === 'inactive') {
+            $query->where(function ($where) {
+                $where->where('u.status', '<>', 1)->whereOr(function ($empty) {
+                    $empty->whereNull('u.status');
+                });
+            });
+            if ($exact) {
+                $this->applyExactNotCancelledPushdown($query);
+            }
+        } elseif ($status === 'cancelled') {
+            if ($exact) {
+                // 快路径在 SQL COUNT 和分页前必须与 memberState() 使用同一套
+                // empty() 语义；历史库可能用 0 或空字符串表示未注销。
+                $query->whereRaw(
+                    "(COALESCE(u.is_del, 0) = 1 OR "
+                    . "BINARY COALESCE(CAST(u.delete_time AS CHAR), '') "
+                    . "NOT IN (_binary'', _binary'0'))"
+                );
+            } else {
+                // 非快路径只做安全超集下推，最终仍由 rowAllowed() 精确收口。
+                $query->where(function ($where) {
+                    $where->where('u.is_del', 1)->whereOr(function ($deleted) {
+                        $deleted->whereNotNull('u.delete_time');
+                    });
+                });
+            }
+        }
+    }
+
+    /**
+     * fast path 的总数和分页必须与 memberState() 的未注销定义完全一致。
+     */
+    protected function applyExactNotCancelledPushdown($query): void
+    {
+        $query->whereRaw(
+            "(COALESCE(u.is_del, 0) <> 1 AND "
+            . "BINARY COALESCE(CAST(u.delete_time AS CHAR), '') "
+            . "IN (_binary'', _binary'0'))"
+        );
+    }
+
+    /**
+     * 只识别 validatedPlan 生成的标准三字段关键字 OR，禁止从任意筛选猜测 SQL。
+     */
+    protected function pushdownKeyword(array $payload): string
+    {
+        $filters = $payload['keywordFilters'] ?? [];
+        if (!is_array($filters) || count($filters) !== 3) {
+            return '';
+        }
+        $values = [];
+        foreach ($filters as $filter) {
+            if (!is_array($filter)
+                || (string)($filter['operator'] ?? '') !== 'contains'
+                || !is_scalar($filter['value'] ?? null)) {
+                return '';
+            }
+            $fieldKey = (string)($filter['field_key']
+                ?? ($filter['fieldKey'] ?? ($filter['field'] ?? '')));
+            if (!in_array($fieldKey, ['member_name', 'phone', 'member_no'], true)
+                || isset($values[$fieldKey])) {
+                return '';
+            }
+            $values[$fieldKey] = (string)$filter['value'];
+        }
+        if (array_keys($values) !== ['member_name', 'phone', 'member_no']) {
+            ksort($values);
+            $expected = ['member_name' => true, 'member_no' => true, 'phone' => true];
+            if (array_fill_keys(array_keys($values), true) !== $expected) {
+                return '';
+            }
+        }
+        if (count(array_unique(array_values($values), SORT_STRING)) !== 1) {
+            return '';
+        }
+        return trim((string)reset($values));
+    }
+
+    /** 只有已验证的标准三字段关键词允许使用姓名首字母索引；混合字符仍按原字段查询。 */
+    protected function initialKeyword(array $payload): string
+    {
+        $keyword = $this->pushdownKeyword($payload);
+        return preg_match('/^[A-Za-z]{1,60}$/D', $keyword) === 1
+            ? strtoupper($keyword) : '';
+    }
+
+    /** SQL 候选与统一执行器的二次筛选共用前缀口径，保持分页、导出和列表一致。 */
+    protected function memberNameInitialMatcher(array $payload): ?callable
+    {
+        $initials = $this->initialKeyword($payload);
+        if ($initials === '') {
+            return null;
+        }
+        return static function (array $row) use ($initials): bool {
+            return strncmp((string)($row['_member_name_initials'] ?? ''), $initials, strlen($initials)) === 0;
+        };
+    }
+
+    protected function executionPayload(array $payload): array
+    {
+        unset($payload['queryCutoffDate'], $payload['query_cutoff_date']);
+        return $payload;
+    }
+
+    protected function trustedCutoffDate(array $context): string
+    {
+        $value = (string)($context['query_cutoff_date'] ?? '');
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        $errors = \DateTimeImmutable::getLastErrors();
+        if ($date === false
+            || ($errors !== false
+                && ((int)$errors['warning_count'] > 0 || (int)$errors['error_count'] > 0))
+            || $date->format('Y-m-d') !== $value) {
+            throw new UnifiedQueryException(
+                'UNIFIED_QUERY_CUTOFF_DATE_INVALID',
+                '查询截止日期无效，请刷新后重试。',
+                []
+            );
+        }
+        return $value;
+    }
+
+    protected function tableColumns(string $table): array
+    {
+        if (isset($this->columns[$table])) {
+            return $this->columns[$table];
+        }
+        $fullTable = (string)Db::name($table)->getTable();
+        if (!preg_match('/^[A-Za-z0-9_]+$/D', $fullTable)) {
+            throw new \RuntimeException('数据表名称不合法');
+        }
+        try {
+            $rows = Db::query('SHOW COLUMNS FROM `' . $fullTable . '`');
+        } catch (\Throwable $exception) {
+            return $this->columns[$table] = [];
+        }
+        $columns = [];
+        foreach ($rows as $row) {
+            $field = (string)($row['Field'] ?? ($row['field'] ?? ''));
+            if ($field !== '') {
+                $columns[$field] = true;
+            }
+        }
+        return $this->columns[$table] = $columns;
+    }
+
+    protected function amount($value): string
+    {
+        if (!function_exists('bcadd')) {
+            throw new \RuntimeException('统一查询金额计算需要 ext-bcmath');
+        }
+        return bcadd((string)($value === '' || $value === null ? 0 : $value), '0', 2);
+    }
+
+    protected function dateTime($value): string
+    {
+        if (is_numeric($value) && (int)$value > 0) {
+            return date('Y-m-d H:i:s', (int)$value);
+        }
+        $timestamp = strtotime((string)$value);
+        return $timestamp ? date('Y-m-d H:i:s', $timestamp) : '';
+    }
+
+    protected function dateValue($value): string
+    {
+        if (is_numeric($value) && (int)$value > 0) {
+            return date('Y-m-d', (int)$value);
+        }
+        $timestamp = strtotime((string)$value);
+        return $timestamp ? date('Y-m-d', $timestamp) : '';
+    }
+}

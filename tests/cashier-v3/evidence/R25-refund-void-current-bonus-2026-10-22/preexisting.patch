@@ -1,0 +1,85 @@
+diff --git a/后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php b/后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php
+index 63165cbe..708fbf9d 100644
+--- a/后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php
++++ b/后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php
+@@ -35,7 +35,7 @@ final class CashierV3RefundVoidServices
+             throw self::failure('当前账号没有该门店退款作废权限。', 'refund_void_permission_denied');
+         }
+         if (!preg_match('/^refund:(OLO-[A-F0-9]{40})$/D', $recordId, $matches)) {
+-            throw self::failure('只能作废新版卡项、单据或无原单退款；旧退款缺少恢复依据。', 'refund_void_record_invalid');
++            throw self::failure('只能作废新版卡项、单据、目录或余额退款；旧退款缺少恢复依据。', 'refund_void_record_invalid');
+         }
+         $tenant = $scope->tenantId();
+         $refundId = $matches[1];
+@@ -44,7 +44,7 @@ final class CashierV3RefundVoidServices
+             ->where('store_id', $operator->storeId())->where('operation_type', 'refund')->lock(true)->find();
+         $adjustment = (array)Db::name(CashierV3UnifiedRefundServices::TABLE)
+             ->where('tenant_id', $tenant)->where('operation_id', $refundId)->lock(true)->find();
+-        if (!$refund || !$adjustment || !in_array((string)$refund['source_type'], ['card', 'document', 'catalog'], true)
++        if (!$refund || !$adjustment || !in_array((string)$refund['source_type'], ['card', 'document', 'catalog', 'balance'], true)
+             || (int)$refund['member_id'] !== (int)$adjustment['member_id']
+             || (string)$refund['status'] !== 'succeeded' || (string)$adjustment['status'] !== 'effective') {
+             throw self::failure('退款记录不存在、已作废或归属门店已变化，请刷新列表。', 'refund_void_not_active');
+@@ -106,7 +106,8 @@ final class CashierV3RefundVoidServices
+         CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): void
+     {
+         $type = (string)$adjustment['target_type'];
+-        if ($type === 'catalog') return;
++        // Wallet refunds do not mutate sale rights. Their exact debit split is reversed separately.
++        if (in_array($type, ['catalog', 'balance'], true)) return;
+         if ($type === 'document') {
+             $line = (array)Db::name('cashier_v3_sales_order_line')->alias('l')
+                 ->join('cashier_v3_sales_order so', 'so.order_id=l.order_id AND so.tenant_id=l.tenant_id')
+@@ -223,6 +224,23 @@ final class CashierV3RefundVoidServices
+     private function balanceFact(array $refund, array $adjustment, CashierV3OperatorScope $operator,
+         CashierV3DataScopeContext $scope): ?array
+     {
++        if ((string)$adjustment['target_type'] === 'balance') {
++            $debit = (int)$adjustment['balance_debit_cents'];
++            $principal = (int)$adjustment['principal_debit_cents'];
++            $bonus = (int)$adjustment['bonus_debit_cents'];
++            $rows = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
++                ->where('order_id', (string)$refund['operation_id'])
++                ->where('balance_change_type', 'manual_refund_debit')
++                ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->select()->toArray();
++            if ($debit <= 0 || $principal + $bonus !== $debit || count($rows) !== 1
++                || (int)$rows[0]['member_id'] !== (int)$refund['member_id']
++                || (int)$rows[0]['principal_delta_cents'] !== -$principal
++                || (int)$rows[0]['bonus_delta_cents'] !== -$bonus
++                || $this->alreadyReversed('cashier_v3_balance_fact', $scope->tenantId(), (string)$rows[0]['fact_id'])) {
++                throw self::failure('余额退款的原始扣减流水缺失或拆分不一致，不能安全作废。', 'refund_void_balance_debit_mismatch');
++            }
++            return $rows[0];
++        }
+         $credit = (int)$adjustment['balance_credit_cents'];
+         if ($credit === 0) return null;
+         $rows = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
+@@ -247,6 +265,28 @@ final class CashierV3RefundVoidServices
+         CashierV3DataScopeContext $scope, int $now): ?array
+     {
+         if ($balanceFact === null) return null;
++        if ((string)$adjustment['target_type'] === 'balance') {
++            $principal = (int)$adjustment['principal_debit_cents'];
++            $bonus = (int)$adjustment['bonus_debit_cents'];
++            $provider = new CashierV3MemberBalanceProvider();
++            $before = $provider->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
++            try {
++                $change = (new UserBalanceAtomicServices())->creditBenGive((int)$refund['member_id'],
++                    number_format($principal / 100, 2, '.', ''), number_format($bonus / 100, 2, '.', ''),
++                    'manual_refund_debit_void', (int)$operation['id'], '余额退款作废返还',
++                    'cv3-balance-refund-void-' . hash('sha256', $scope->tenantId() . '|' . $key));
++            } catch (\Throwable $error) {
++                throw self::failure('余额退款作废返还失败，整笔作废已回滚。', 'refund_void_balance_restore_failed');
++            }
++            $after = $provider->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
++            if (empty($change['money_id']) || !empty($change['idempotent'])
++                || (int)$after['accountVersion'] !== (int)$before['accountVersion'] + 1
++                || (int)$after['principalCents'] !== (int)$before['principalCents'] + $principal
++                || (int)$after['giftCents'] !== (int)$before['giftCents'] + $bonus) {
++                throw self::failure('余额退款作废拆分与流水不一致，整笔作废已回滚。', 'refund_void_balance_restore_mismatch');
++            }
++            return $after;
++        }
+         $credit = (int)$adjustment['balance_credit_cents'];
+         try {
+             $change = (new UserBalanceAtomicServices())->deductBenGive((int)$refund['member_id'], '0.00',

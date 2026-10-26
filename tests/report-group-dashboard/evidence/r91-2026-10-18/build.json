@@ -1,0 +1,22 @@
+{
+  "source": "前端代码/cashier-v3",
+  "entry": "http://127.0.0.1:18091/view_cashier_v3/",
+  "output": "mohe-cashier-v3-src:/tmp/r91-build",
+  "purpose": "local build validation only, not a release package",
+  "result": "PASS",
+  "modules": 2014,
+  "assets": [
+    {
+      "path": "index.html",
+      "sha256": "56b25cf6d4c418eee42d8e779314673c737268e1de1f2167876fb9ea4ba86527"
+    },
+    {
+      "path": "assets/index-777331e2.js",
+      "sha256": "17a00adfb8bf152291b8d7adee66a7941523749fa380d73aad85769cbf5351fb"
+    },
+    {
+      "path": "assets/index-22f33fd3.css",
+      "sha256": "22f33fd375caa8f9a64a96daee924ea70876597653a530c9ff7d34778a46d040"
+    }
+  ]
+}

@@ -1,0 +1,517 @@
+{
+  "task": "M008-EMERG-R2",
+  "acceptedPatch": "3de28d56db8f0be34b1e13e3d52046d4f5f8978b5693b598b9e13ba3333fc00b",
+  "businessCommit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+  "push": {
+    "commit": "fb574124d2cd63652822693d6350eae98b297bf8",
+    "branch": "release/member-emerg-r2-20261022",
+    "remote": "origin",
+    "parent": "f18a326340cfc3cec55a5a1e5b26cb8c6955b0d3",
+    "businessCommit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+    "files": [
+      "tests/member-checkout/evidence/product-footer-2026-10-22/acceptance.md",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/browser-cases.json",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/fixed-version.json",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/fixed.patch",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/h5-checkout-wine-375.png",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/h5-product-wine-375.png",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/h5-result-wine-375.png",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/mini-verification.json",
+      "tests/member-checkout/evidence/product-footer-2026-10-22/stress-cases.json",
+      "前端代码/uniapp/pages/activity/therapist_list/index.vue",
+      "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+      "前端代码/uniapp/pages/goods_details/index.vue"
+    ],
+    "memberSourceTree": "050edfa9f06ef1e429e5dd891acce12ed21285b1",
+    "pushedAt": "2026-10-22T04:19:27.635Z"
+  },
+  "stations": {
+    "rh": {
+      "previousMemberCommit": "05c61feb3080bbe6e7f8192f02eaa0d924a2b73b",
+      "backup": "/www/backups/rh.cc3798.com/20261022-member-emerg-r2-3b7c7cdc",
+      "before": {
+        "front": {
+          "member": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/index.html",
+            "index": "e8842702a4f7b05d8147befa47b9369258c1200d20373d6ad6658fa3b5da25a2",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.c6dfbcee.js": "329846bd16bf130bf6993df5a10b19738237cd0e2f15f751ed95581b36a60e67",
+              "/static/js/index.79fe6274.js": "c13db587a3b9b331994c3b6e813652ca78fa28408c5ad41a39b8e6e55015ac1e"
+            }
+          },
+          "admin": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/system.html",
+            "index": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          },
+          "cashier_preview": {
+            "path": "/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "database": {
+          "name": "ruihao",
+          "port": 3306,
+          "version": "5.7.44-log"
+        },
+        "latestUpgrade": {
+          "upgrade_key": "20261021-024-reservation-shared-pool",
+          "code_version": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+          "executed_at": "2026-10-21 19:23:02"
+        }
+      },
+      "after": {
+        "front": {
+          "member": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/index.html",
+            "index": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+              "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+            }
+          },
+          "admin": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/system.html",
+            "index": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "path": "/www/wwwroot/rh.cc3798.com/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          },
+          "cashier_preview": {
+            "path": "/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "database": {
+          "name": "ruihao",
+          "port": 3306,
+          "version": "5.7.44-log"
+        },
+        "latestUpgrade": {
+          "upgrade_key": "20261021-024-reservation-shared-pool",
+          "code_version": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+          "executed_at": "2026-10-21 19:23:02"
+        }
+      },
+      "verified": {
+        "instance": "rh",
+        "result": "PASS",
+        "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+        "filesVerified": 504,
+        "installedFiles": 263,
+        "databaseWrites": 0,
+        "environmentUnchanged": true,
+        "decorationUnchanged": true,
+        "adminUnchanged": true,
+        "cashierAndPreviewUnchanged": true,
+        "publicEntries": {
+          "member": {
+            "sha256": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+              "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+            }
+          },
+          "admin": {
+            "sha256": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "sha256": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          },
+          "cashier_preview": {
+            "sha256": "1298b19687f041f376931664d2287d4dd64e09e92053024eda41fe0feae372ca",
+            "assets": {
+              "/preview-8080/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/preview-8080/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "checkedAt": "2026-10-22T04:18:54.026Z"
+      }
+    },
+    "008": {
+      "previousMemberCommit": "05c61feb3080bbe6e7f8192f02eaa0d924a2b73b",
+      "backup": "/www/backups/008.cc3798.com/20261022-member-emerg-r2-3b7c7cdc",
+      "before": {
+        "front": {
+          "member": {
+            "path": "/www/wwwroot/008.cc3798.com/public/index.html",
+            "index": "e8842702a4f7b05d8147befa47b9369258c1200d20373d6ad6658fa3b5da25a2",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.c6dfbcee.js": "329846bd16bf130bf6993df5a10b19738237cd0e2f15f751ed95581b36a60e67",
+              "/static/js/index.79fe6274.js": "c13db587a3b9b331994c3b6e813652ca78fa28408c5ad41a39b8e6e55015ac1e"
+            }
+          },
+          "admin": {
+            "path": "/www/wwwroot/008.cc3798.com/public/system.html",
+            "index": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "path": "/www/wwwroot/008.cc3798.com/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "database": {
+          "name": "mohe_008",
+          "port": 3307,
+          "version": "5.7.44"
+        },
+        "latestUpgrade": {
+          "upgrade_key": "20261021-047-sales-debt-balance-settlement",
+          "code_version": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+          "executed_at": "2026-10-21 18:15:08"
+        }
+      },
+      "after": {
+        "front": {
+          "member": {
+            "path": "/www/wwwroot/008.cc3798.com/public/index.html",
+            "index": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+              "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+            }
+          },
+          "admin": {
+            "path": "/www/wwwroot/008.cc3798.com/public/system.html",
+            "index": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "path": "/www/wwwroot/008.cc3798.com/public/view_cashier_v3/index.html",
+            "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "database": {
+          "name": "mohe_008",
+          "port": 3307,
+          "version": "5.7.44"
+        },
+        "latestUpgrade": {
+          "upgrade_key": "20261021-047-sales-debt-balance-settlement",
+          "code_version": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+          "executed_at": "2026-10-21 18:15:08"
+        }
+      },
+      "verified": {
+        "instance": "008",
+        "result": "PASS",
+        "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+        "filesVerified": 504,
+        "installedFiles": 263,
+        "databaseWrites": 0,
+        "environmentUnchanged": true,
+        "decorationUnchanged": true,
+        "adminUnchanged": true,
+        "cashierAndPreviewUnchanged": true,
+        "publicEntries": {
+          "member": {
+            "sha256": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+            "assets": {
+              "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+              "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+              "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+            }
+          },
+          "admin": {
+            "sha256": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+            "assets": {
+              "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+              "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+              "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+              "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+            }
+          },
+          "cashier": {
+            "sha256": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+            "assets": {
+              "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+              "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+            }
+          }
+        },
+        "checkedAt": "2026-10-22T04:21:03.585Z"
+      }
+    }
+  },
+  "regression": {
+    "layoutCases": 18,
+    "dualButtonCases": 2,
+    "teacherScope": "PASS",
+    "rechargeStyle": "PASS",
+    "projectScrollAndPaymentIcons": "PASS",
+    "backgroundTheme": "PASS",
+    "navigationSubscription": "PASS",
+    "assets": "PASS",
+    "staffFooterCompatibility": "PASS against latest accepted 05c61feb baseline; historical 39f927b3 equality check superseded by accepted R1 staff navigation change"
+  },
+  "mini": {
+    "customer": "渼约008",
+    "terminal": "会员端",
+    "version": "3.0.13",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "apiOrigin": "https://008.cc3798.com",
+    "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+    "sourceOverrides": [],
+    "verification": {
+      "result": "PASS",
+      "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+      "sourceFilesVerified": 916,
+      "compared": 1886,
+      "outputFiles": 1886,
+      "scriptsParsed": 423,
+      "stylesRestored": 398,
+      "mutableLoaderOptionsIsolated": true,
+      "nativeComponentMountNotApplication": true,
+      "apiOrigin": "https://008.cc3798.com",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "packages": {
+        "pages/users": 1647023,
+        "main": 2053585,
+        "pages/goods": 1957367,
+        "pages/store": 421683,
+        "pages/admin": 1797373,
+        "pages/activity": 470002,
+        "pages/discover": 206660,
+        "pages/merchant": 203197,
+        "pages/behalf": 190180,
+        "pages/annex": 958816,
+        "pages/work": 17446,
+        "pages/extension": 71286,
+        "pages/columnGoods": 98913,
+        "pages/short_video": 304929
+      },
+      "artifactSha256": "bc9943d7030fc34a9a1a3612894e11db07d7d69c0d3842b53524aab8e8163a67"
+    },
+    "uploadResult": "CLI upload exit 0, upload success",
+    "cloudSize": {
+      "total": 10250564,
+      "packages": [
+        {
+          "name": "TOTAL",
+          "size": 10250564
+        },
+        {
+          "name": "main",
+          "size": 2018167
+        },
+        {
+          "name": "/pages/activity/",
+          "size": 468942
+        },
+        {
+          "name": "/pages/admin/",
+          "size": 1791875
+        },
+        {
+          "name": "/pages/annex/",
+          "size": 957084
+        },
+        {
+          "name": "/pages/behalf/",
+          "size": 187595
+        },
+        {
+          "name": "/pages/columnGoods/",
+          "size": 17512
+        },
+        {
+          "name": "/pages/discover/",
+          "size": 203111
+        },
+        {
+          "name": "/pages/extension/",
+          "size": 69274
+        },
+        {
+          "name": "/pages/goods/",
+          "size": 1952112
+        },
+        {
+          "name": "/pages/merchant/",
+          "size": 204639
+        },
+        {
+          "name": "/pages/short_video/",
+          "size": 306152
+        },
+        {
+          "name": "/pages/store/",
+          "size": 419421
+        },
+        {
+          "name": "/pages/users/",
+          "size": 1637799
+        },
+        {
+          "name": "/pages/work/",
+          "size": 16881
+        }
+      ]
+    },
+    "trialSetConfirmed": false,
+    "reviewSubmitted": false,
+    "officialPublished": false,
+    "trialRemainingAction": "User must set uploaded 3.0.13 as experience version in WeChat platform version management. Official platform browser access blocked by site-safety policy; no workaround attempted."
+  },
+  "verificationLimitations": [
+    "No real order creation or payment.",
+    "RH production guest checkout login guard tested; authenticated RH payment flow not performed.",
+    "First isolated headless 008 product selector check timed out; live signed-in IAB product and checkout separately verified successfully."
+  ],
+  "recordedAt": "2026-10-22T04:25:00.313Z",
+  "onlineBusiness": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "cases": [
+        {
+          "page": "checkout",
+          "guestAuthGuard": true,
+          "url": "https://rh.cc3798.com/pages/users/login/index"
+        }
+      ],
+      "blockedNonGet": [],
+      "errors": [],
+      "calls": [
+        {
+          "method": "GET",
+          "url": "/api/wechat/get_logo"
+        },
+        {
+          "method": "GET",
+          "url": "/api/get_copyright"
+        },
+        {
+          "method": "GET",
+          "url": "/api/v2/diy/color_change/color_change"
+        },
+        {
+          "method": "GET",
+          "url": "/api/v2/diy/product_detail"
+        },
+        {
+          "method": "GET",
+          "url": "/api/agent/brokerage"
+        },
+        {
+          "method": "GET",
+          "url": "/api/get_script"
+        }
+      ],
+      "noOrderOrPayment": true
+    },
+    "instance008": {
+      "teacherStores": [
+        {
+          "store": 129,
+          "count": 3
+        },
+        {
+          "store": 130,
+          "count": 1
+        }
+      ],
+      "product": {
+        "id": 7210,
+        "visible": true,
+        "footer": {
+          "top": 610.6666870117188,
+          "bottom": 667.3333549499512
+        },
+        "button": {
+          "left": 138,
+          "right": 363.3333435058594,
+          "top": 620.3333740234375,
+          "bottom": 658.3333740234375
+        },
+        "centered": true,
+        "theme": "#e93323"
+      },
+      "checkout": {
+        "productId": 7210,
+        "quantity": 1,
+        "amount": 399,
+        "visibleCoupon": true,
+        "visibleIntegral": true,
+        "visibleSalesperson": true,
+        "visiblePaymentMethods": [
+          "balance",
+          "fuiou",
+          "combined"
+        ],
+        "submitCentered": true,
+        "submitNotClicked": true
+      },
+      "nativeAppid": "wx85d4bfd0b4b6aafb",
+      "nativeFooterBottom": 844,
+      "nativeBuyBottom": 800.5
+    }
+  }
+}

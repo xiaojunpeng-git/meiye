@@ -1,0 +1,120 @@
+{
+    "source_database": "morestore",
+    "source_port": 3306,
+    "target_database": "mohe_008",
+    "target_port": 3307,
+    "group": {
+        "id": "62",
+        "cate_id": "1",
+        "name": "充值金额设置",
+        "info": "设置充值金额额度选择",
+        "config_name": "user_recharge_quota",
+        "fields": "[{\"name\":\"\\u552e\\u4ef7\",\"title\":\"price\",\"type\":\"input\",\"param\":\"\"},{\"name\":\"\\u8d60\\u9001\",\"title\":\"give_money\",\"type\":\"input\",\"param\":\"\"}]"
+    },
+    "rows": [
+        {
+            "id": "177",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":\"500\"},\"give_money\":{\"type\":\"input\",\"value\":\"0\"}}",
+            "add_time": "1578884735",
+            "sort": "1",
+            "status": "0"
+        },
+        {
+            "id": "178",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":\"200\"},\"give_money\":{\"type\":\"input\",\"value\":\"0\"}}",
+            "add_time": "1578884760",
+            "sort": "1",
+            "status": "0"
+        },
+        {
+            "id": "179",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":\"100\"},\"give_money\":{\"type\":\"input\",\"value\":\"0\"}}",
+            "add_time": "1578884919",
+            "sort": "1",
+            "status": "0"
+        },
+        {
+            "id": "180",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":\"50\"},\"give_money\":{\"type\":\"input\",\"value\":\"0\"}}",
+            "add_time": "1578885008",
+            "sort": "1",
+            "status": "0"
+        },
+        {
+            "id": "583",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":1000},\"give_money\":{\"type\":\"input\",\"value\":0}}",
+            "add_time": "1713844861",
+            "sort": "9",
+            "status": "0"
+        },
+        {
+            "id": "584",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":4980},\"give_money\":{\"type\":\"input\",\"value\":2020}}",
+            "add_time": "1713844971",
+            "sort": "8",
+            "status": "0"
+        },
+        {
+            "id": "585",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":9999},\"give_money\":{\"type\":\"input\",\"value\":5001}}",
+            "add_time": "1713845131",
+            "sort": "7",
+            "status": "0"
+        },
+        {
+            "id": "586",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":29999},\"give_money\":{\"type\":\"input\",\"value\":20001}}",
+            "add_time": "1713845427",
+            "sort": "6",
+            "status": "0"
+        },
+        {
+            "id": "587",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":29999},\"give_money\":{\"type\":\"input\",\"value\":1001}}",
+            "add_time": "1713845443",
+            "sort": "5",
+            "status": "0"
+        },
+        {
+            "id": "1614",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":2000},\"give_money\":{\"type\":\"input\",\"value\":0}}",
+            "add_time": "1772287394",
+            "sort": "1",
+            "status": "1"
+        },
+        {
+            "id": "1615",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":3000},\"give_money\":{\"type\":\"input\",\"value\":0}}",
+            "add_time": "1772287428",
+            "sort": "1",
+            "status": "1"
+        },
+        {
+            "id": "1616",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":5000},\"give_money\":{\"type\":\"input\",\"value\":0}}",
+            "add_time": "1772287447",
+            "sort": "1",
+            "status": "1"
+        },
+        {
+            "id": "1617",
+            "gid": "62",
+            "value": "{\"price\":{\"type\":\"input\",\"value\":1000},\"give_money\":{\"type\":\"input\",\"value\":0}}",
+            "add_time": "1772593630",
+            "sort": "1",
+            "status": "1"
+        }
+    ]
+}

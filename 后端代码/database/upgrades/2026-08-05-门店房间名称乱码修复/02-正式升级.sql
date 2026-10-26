@@ -1,0 +1,18 @@
+-- upgrade_key: 20260805-009-store-room-name-encoding-repair
+-- Run 01 first. MySQL 5.6 compatible; repair only the exact inspected bytes.
+SET NAMES utf8mb4;
+
+UPDATE eb_table_qrcode
+SET remarks = CASE id
+  WHEN 9 THEN CONVERT(0x5141323032363038303420E9AA8CE694B6E688BFE997B441 USING utf8mb4)
+  WHEN 10 THEN CONVERT(0x5141323032363038303420E9AA8CE694B6E688BFE997B442 USING utf8mb4)
+  ELSE remarks
+END
+WHERE (id=9 AND store_id=118 AND table_number=9001 AND HEX(remarks)='5141323032363038303420C3A9C2AAC592C3A6E2809DC2B6C3A6CB86C2BFC3A9E28094C2B441')
+   OR (id=10 AND store_id=118 AND table_number=9002 AND HEX(remarks)='5141323032363038303420C3A9C2AAC592C3A6E2809DC2B6C3A6CB86C2BFC3A9E28094C2B442');
+
+SELECT ROW_COUNT() AS repaired_row_count;
+SELECT id, store_id, table_number, remarks, HEX(remarks) AS remarks_hex
+FROM eb_table_qrcode
+WHERE id IN (9, 10)
+ORDER BY id;
