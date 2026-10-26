@@ -1,0 +1,40 @@
+{
+  "instance": "008",
+  "database": "mohe_008",
+  "environment": "281edaa546251318c0c44c99c571de478507edf66d5d9582ce3f0a8b3ab833d0",
+  "files": {
+    "app/controller/api/v1/order/StoreDebt.php": "58a20362d8db5cec0f462c6a64e6c8744a0781e3110e3a02b088daae07d64ce3",
+    "app/services/order/StoreDebtServices.php": "6c976323f33e6b81cb9a62da39d2b6ee62753f23a18167c8fcba13ac50d88d3a",
+    "route/api.php": "88b124d9d9c608383a2422b8294621bc12476b43538d81c48a4fdf81e33de9a8",
+    "public/index.html": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c",
+    "public/system.html": "1954722ab061671ba2aed07804dce541e63688a0a879c4530aaa5e3fd518a8fe",
+    "public/view_cashier_v3/index.html": "627330d15fe5cc4e2928c0484d29845f01acfa4d80bef541116ef5be8c921b4a"
+  },
+  "data": {
+    "eb_store_debt": {
+      "count": 1,
+      "sha256": "4951340cc5a48da2d4a182da99c689d1b3befc82a14be0d062532dd43f14e848"
+    },
+    "eb_store_debt_item": {
+      "count": 1,
+      "sha256": "830c6e26a2279d9e8cb2c834258de0727876b5de01dd163d9037173b2dafb7e7"
+    },
+    "eb_store_debt_repay": {
+      "count": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eb_system_config": {
+      "count": 371,
+      "sha256": "a6db7815b541cae0b4cc9bd0cfd0f7320b26efaac875a4341cd620b5c7f20349"
+    },
+    "eb_diy": {
+      "count": 5,
+      "sha256": "27a7b4b98b3fe9fecf6e79f200c0602d595c673f00e3b151eb082847f4142033"
+    }
+  },
+  "upgrade": {
+    "upgrade_key": "20261025-r61-combination-fulfillment-refund",
+    "code_version": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+    "executed_at": "2026-10-25 20:15:44"
+  }
+}

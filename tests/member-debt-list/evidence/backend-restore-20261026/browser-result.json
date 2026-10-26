@@ -1,0 +1,22 @@
+{
+  "instance": "008",
+  "actualAuthenticatedMember": true,
+  "endpoint": "/api/debt/list?page=1&limit=20",
+  "before": {
+    "httpStatus": 500,
+    "businessStatus": 400,
+    "error": "method not exists:app\\controller\\api\\v1\\order\\StoreDebt->lst()"
+  },
+  "after": {
+    "httpStatus": 200,
+    "businessStatus": 200,
+    "listLength": 0,
+    "count": 0,
+    "visibleText": "暂无待还欠款"
+  },
+  "APIDataMocked": false,
+  "repaymentActions": 0,
+  "frontendDeployed": false,
+  "temporaryTabClosed": true,
+  "userOriginalTabUnchanged": true
+}
