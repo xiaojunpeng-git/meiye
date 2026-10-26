@@ -35,7 +35,8 @@ export function guideRoundText(people) {
   }).filter(Boolean).join('、') || '—'
 }
 
-export function serviceCraftsmenPerformanceText(record) {
+// 可隐藏手工费这一展示分量；只格式化原事实，不改写输入或人员分配。
+export function serviceCraftsmenPerformanceText(record, showLaborFee = true) {
   const allocations = record?.craftsmenListAllocations || record?.laborPerformanceAllocations
   if (!Array.isArray(allocations) || !allocations.length) return record?.craftsmenSummary || '—'
   return allocations.map((person) => {
@@ -45,6 +46,9 @@ export function serviceCraftsmenPerformanceText(record) {
     const type = person?.isPointCustomer === true ? '点' : '轮'
     const projectCount = person?.projectCount === undefined || person?.projectCount === null || person?.projectCount === ''
       ? '—' : String(person.projectCount)
-    return `${name}（${type}、${wholeYuan(person?.amount)}、${wholeYuan(person?.laborFeeAmount)}、${projectCount}）`
+    const parts = [type, wholeYuan(person?.amount)]
+    if (showLaborFee) parts.push(wholeYuan(person?.laborFeeAmount))
+    parts.push(projectCount)
+    return `${name}（${parts.join('、')}）`
   }).filter(Boolean).join('，') || '—'
 }
