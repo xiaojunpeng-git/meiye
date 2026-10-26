@@ -440,7 +440,9 @@ final class GroupManagementDashboardServices
             // 来源维度的进店数与 A 来源活客均是门店到店指标；体验服务不取得资格。
             $services = \app\services\query\metric\StoreCustomerVisitEligibility::filter($services);
             $activeMembers = []; foreach ($services as $row) if ((int)($row['member_id'] ?? 0) > 0) $activeMembers[(int)$row['member_id']] = true;
-            $code = strtoupper(substr(trim($name), 0, 1));
+            // 来源名称可用中文开头；按完整 UTF-8 字符提取展示代码，避免截断字节导致整页 JSON 编码失败。
+            // 英文字母仍转大写，保留仅 A 来源显示活客数的既有业务口径。
+            $code = mb_strtoupper(mb_substr(trim($name), 0, 1, 'UTF-8'), 'UTF-8');
             $item = ['source_id' => $sourceId, 'name' => $name, 'source_code' => $code, 'visit_count' => count($services), 'deal_count' => $dealCounts[$sourceId] ?? 0, 'deal_amount_cents' => $this->sum($matches, 'amount_cents')];
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
