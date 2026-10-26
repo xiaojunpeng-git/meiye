@@ -1,0 +1,112 @@
+{
+  "task": "M008-MEMBER-DEBT-PUBLISH-20261026",
+  "result": "PASS",
+  "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+  "rh": {
+    "site": "rh",
+    "result": "PASS",
+    "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+    "controllerSha256": "d8e46605b440a1a049d9d10f621f14d89e0b2169ba012ae30a2a64cd5a2b9226",
+    "serviceUnchanged": true,
+    "frontendUnchanged": true,
+    "debtDataUnchanged": true,
+    "configurationUnchanged": true,
+    "behavior": [
+      {
+        "subject": "existing-member",
+        "authorizedCount": 1,
+        "currentPageRows": 1,
+        "scopeAndAmountValid": true,
+        "repaymentGuardValid": true,
+        "summaryValid": true
+      },
+      {
+        "subject": "existing-member",
+        "authorizedCount": 1,
+        "currentPageRows": 1,
+        "scopeAndAmountValid": true,
+        "repaymentGuardValid": true,
+        "summaryValid": true
+      },
+      {
+        "subject": "nonexistent-member",
+        "authorizedCount": 0,
+        "currentPageRows": 0,
+        "scopeAndAmountValid": true,
+        "repaymentGuardValid": true,
+        "summaryValid": true
+      }
+    ],
+    "action": "INSTALLED"
+  },
+  "push": {
+    "result": "PASS",
+    "branch": "release/member-debt-20261026",
+    "commit": "ec3aa9259d191e0c8451440a369c3bb81574678d",
+    "parent": "60f709d25c3d6c9b83812fe3993aea71dcf9faa3",
+    "parentBranch": "release/r65-member-payment-return-20261026",
+    "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+    "files": [
+      "scripts/member-debt-list-008-install.php",
+      "scripts/member-debt-list-008-release.cjs",
+      "tests/member-debt-list/backend.php",
+      "tests/member-debt-list/evidence/backend-restore-20261026/README.md",
+      "tests/member-debt-list/evidence/backend-restore-20261026/after.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/attempt.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/before.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/browser-result.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/installed.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/member-after.png",
+      "tests/member-debt-list/evidence/backend-restore-20261026/release-result.json",
+      "tests/member-debt-list/evidence/backend-restore-20261026/verified.json",
+      "tests/member-debt-list/evidence/backend.txt"
+    ],
+    "controllerAlreadyInPublishedParent": true,
+    "acceptedLiveRepaymentGuardPreserved": true,
+    "unrelatedStagingUnchanged": true
+  },
+  "m010": {
+    "site": "010",
+    "result": "PASS",
+    "accepted": "e3a38f4a87dc720b5532d53360eed98caa2c269f",
+    "controllerSha256": "d8e46605b440a1a049d9d10f621f14d89e0b2169ba012ae30a2a64cd5a2b9226",
+    "serviceUnchanged": true,
+    "frontendUnchanged": true,
+    "debtDataUnchanged": true,
+    "configurationUnchanged": true,
+    "behavior": [
+      {
+        "subject": "nonexistent-member",
+        "authorizedCount": 0,
+        "currentPageRows": 0,
+        "scopeAndAmountValid": true,
+        "repaymentGuardValid": true,
+        "summaryValid": true
+      }
+    ],
+    "action": "ALREADY_TARGET"
+  },
+  "frontendDeployed": false,
+  "unacceptedWorkingChangesIncluded": false,
+  "databaseWrites": 0,
+  "otherInstancesChanged": false,
+  "miniProgramUpload": false,
+  "files": {
+    "010-after.json": "260fa61a7ee5dce5e6a6baa44e4a83c22b4ed1df39d3d1d25b7f3a262c5d39bf",
+    "010-before.json": "260fa61a7ee5dce5e6a6baa44e4a83c22b4ed1df39d3d1d25b7f3a262c5d39bf",
+    "010-behavior.json": "c7f507d923b95c78f92ba4b9e94e6a1f18b20cf065616e98ccbef4e6cf23021f",
+    "010-installed.json": "4c4a8c3295ffee99facffd8b777f264ad4bdb1e9cc3bd5491d044b9fa7ec9555",
+    "010-public-after.json": "5a2c23c18c6867ecd5e17feef40b8a8852aa9de72fbbcf9d599ac72d58f7bd41",
+    "010-public-before.json": "5a2c23c18c6867ecd5e17feef40b8a8852aa9de72fbbcf9d599ac72d58f7bd41",
+    "010-verified.json": "a53ddaffa97e1d4ffe12d76c048c8cbe7d04cb3165648a359544093c6b165b74",
+    "pushed.json": "7597e9043596e9c9ce0f4ef8af03f63037f41593a0705c690621f1bb9b66a6db",
+    "rh-after.json": "cdbdf4d3439ba2c6f9678d1a532248b9bd8eb2645ad1c96367b94a07ff9977f2",
+    "rh-attempt.json": "d27314c8d449a3676355228592686973f5b96112eaa803dfbe23a368781df2c6",
+    "rh-before.json": "4f517a87d6cc5a146e9a45124977b8b758968d8eaae538522678ed98f4e72f38",
+    "rh-behavior.json": "c03b76944859ae2a00d71e84d4a72aaeb22496f7670edc00f8ebfa5138d14490",
+    "rh-installed.json": "5be177138765823e4f282c446744643554a2e2c076580daba332e0a9f6edc029",
+    "rh-public-after.json": "921e9c1a031664e765b8fca4c0f98b06384c280773f01000480c9ab8315c4a15",
+    "rh-public-before.json": "921e9c1a031664e765b8fca4c0f98b06384c280773f01000480c9ab8315c4a15",
+    "rh-verified.json": "01873ec2283721a8afafc66ac3efa0896fc97281af2eb1cc59d5e6680eec9325"
+  }
+}

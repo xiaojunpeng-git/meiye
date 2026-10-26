@@ -1,0 +1,18 @@
+{
+  "site": "010",
+  "result": "PASS",
+  "realControllerServiceAndDatabase": true,
+  "readOnlyTransaction": true,
+  "authenticatedHttpMemberTested": false,
+  "checks": [
+    {
+      "subject": "nonexistent-member",
+      "authorizedCount": 0,
+      "currentPageRows": 0,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    }
+  ],
+  "repaymentActions": 0
+}

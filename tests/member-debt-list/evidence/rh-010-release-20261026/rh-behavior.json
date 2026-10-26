@@ -1,0 +1,34 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "realControllerServiceAndDatabase": true,
+  "readOnlyTransaction": true,
+  "authenticatedHttpMemberTested": false,
+  "checks": [
+    {
+      "subject": "existing-member",
+      "authorizedCount": 1,
+      "currentPageRows": 1,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    },
+    {
+      "subject": "existing-member",
+      "authorizedCount": 1,
+      "currentPageRows": 1,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    },
+    {
+      "subject": "nonexistent-member",
+      "authorizedCount": 0,
+      "currentPageRows": 0,
+      "scopeAndAmountValid": true,
+      "repaymentGuardValid": true,
+      "summaryValid": true
+    }
+  ],
+  "repaymentActions": 0
+}
