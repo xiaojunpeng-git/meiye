@@ -344,7 +344,7 @@ final class CashierV3PresaleClaimServices
     {
         return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input, $sessionInfo): array {
             return $this->voidInTx($this->storeScope($storeId, $operatorId, true, $sessionInfo,
-                'cashier.v3.inventory.presale_claim.void'), $claimId, $input, false);
+                'cashier.v3.inventory.presale_claim.void'), $claimId, $input);
         });
     }
 
@@ -392,14 +392,14 @@ final class CashierV3PresaleClaimServices
     public function voidInExistingTransaction(array $scope, string $claimId, array $input): array
     {
         CashierV3TransactionGuard::assertInTransaction('presaleClaim.voidInExistingTransaction');
-        return $this->voidInTx($scope, $claimId, $input, true);
+        return $this->voidInTx($scope, $claimId, $input);
     }
 
     public function voidForPlatform(array $adminInfo, string $claimId, array $input): array
     {
         return Db::transaction(function () use ($adminInfo, $claimId, $input): array {
             $storeId = $this->positiveInt($input['store_id'] ?? 0, 'presale_claim_store_invalid');
-            return $this->voidInTx($this->platformScope($adminInfo, $storeId), $claimId, $input, false);
+            return $this->voidInTx($this->platformScope($adminInfo, $storeId), $claimId, $input);
         });
     }
 
@@ -624,7 +624,7 @@ final class CashierV3PresaleClaimServices
         return ['claim_id' => $claimId, 'claim_no' => $claimNo, 'quantity' => $command['quantity'], 'status' => self::CLAIM_SETTLED, 'idempotent' => false];
     }
 
-    private function voidInTx(array $scope, string $claimId, array $input, bool $sourceLifecycleReversal): array
+    private function voidInTx(array $scope, string $claimId, array $input): array
     {
         $claimId = $this->token($claimId, 64, 'presale_claim_id_invalid');
         $command = $this->voidCommand($input);
@@ -636,11 +636,9 @@ final class CashierV3PresaleClaimServices
         }
         if ((string)$claim['claim_status'] !== self::CLAIM_SETTLED) throw new \RuntimeException('presale_claim_status_invalid');
         $claimable = $this->authorizedClaimable($scope, (string)$claim['claimable_line_id'], true);
-        // The source row is frozen for direct actions after manual void. A separate
-        // source lifecycle reversal may still reconcile its already delivered stock.
-        if (!$sourceLifecycleReversal && (string)$claimable['claim_status'] === self::STATUS_VOIDED) {
-            throw new \RuntimeException('presale_claimable_already_voided');
-        }
+        // A voided source closes only the remaining claim right. Its previously settled
+        // outbound remains an independent stock fact that may be reversed once; the
+        // source status is retained below so reversing stock never reopens claiming.
         $batches = Db::name(self::CLAIM_BATCH_TABLE)->where('tenant_id', $scope['tenantId'])->where('claim_id', $claimId)->order('stock_id', 'asc')->order('batch_id', 'asc')->lock(true)->select()->toArray();
         if (!$batches) throw new \RuntimeException('presale_claim_batch_missing');
         $now = $command['now'];

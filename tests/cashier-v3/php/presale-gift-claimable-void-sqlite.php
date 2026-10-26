@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/** Isolated transaction regression: source void keeps delivered claims and never needs stock tables. */
+/** Isolated transaction regression: source closure preserves deliveries until each outbound is explicitly reversed. */
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 if (!class_exists(\Swoole\Table::class)) {
     eval('namespace Swoole; final class Table { public const TYPE_STRING = 7; public const TYPE_INT = 1; }');
@@ -48,7 +48,7 @@ Db::execute('CREATE TABLE eb_system_store_staff (id INTEGER PRIMARY KEY, store_i
 Db::execute('CREATE TABLE eb_employee_store_isolation (id INTEGER PRIMARY KEY, employee_id INTEGER, store_id INTEGER, status INTEGER, is_del INTEGER)');
 Db::execute('CREATE TABLE eb_cashier_v3_presale_claimable_line (id INTEGER PRIMARY KEY, claimable_line_id TEXT, tenant_id TEXT, store_id INTEGER, source_kind TEXT, quantity INTEGER, claimed_quantity INTEGER, claim_status TEXT, close_operation_id TEXT, closed_at INTEGER, version INTEGER, updated_at INTEGER)');
 Db::execute('CREATE TABLE eb_cashier_v3_presale_claimable_void (id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT UNIQUE, tenant_id TEXT, claimable_line_id TEXT UNIQUE, store_id INTEGER, source_kind TEXT, previous_status TEXT, previous_close_operation_id TEXT, remaining_quantity INTEGER, reason_snapshot TEXT, operator_type TEXT, operator_id INTEGER, operator_name_snapshot TEXT, idempotency_key TEXT UNIQUE, created_at INTEGER)');
-Db::execute('CREATE TABLE eb_cashier_v3_presale_claim (id INTEGER PRIMARY KEY, claim_id TEXT, tenant_id TEXT, claimable_line_id TEXT, store_id INTEGER, claim_no TEXT, idempotency_key TEXT, claim_status TEXT, void_idempotency_key TEXT, remark TEXT, remark_version INTEGER, quantity INTEGER)');
+Db::execute('CREATE TABLE eb_cashier_v3_presale_claim (id INTEGER PRIMARY KEY, claim_id TEXT, tenant_id TEXT, claimable_line_id TEXT, store_id INTEGER, location_id INTEGER, source_kind TEXT, claim_no TEXT, idempotency_key TEXT, claim_status TEXT, void_idempotency_key TEXT, void_reason_snapshot TEXT, void_operator_id INTEGER, voided_at INTEGER, updated_at INTEGER, remark TEXT, remark_version INTEGER, quantity INTEGER)');
 Db::name('system_store_staff')->insert(['id' => 7, 'store_id' => 10, 'employee_id' => 77, 'status' => 1, 'is_del' => 0, 'staff_name' => '本地测试员工']);
 
 $fixtures = [
@@ -64,7 +64,7 @@ foreach ($fixtures as $row) {
 }
 Db::name(CashierV3PresaleClaimServices::CLAIM_TABLE)->insert([
     'id' => 1, 'claim_id' => 'PCC-DELIVERED', 'tenant_id' => '0', 'claimable_line_id' => 'PCL-AVAILABLE',
-    'store_id' => 10, 'claim_no' => 'OUT-1', 'idempotency_key' => 'original-claim', 'claim_status' => 'SETTLED', 'void_idempotency_key' => '',
+    'store_id' => 10, 'location_id' => 1, 'source_kind' => 'PRESALE', 'claim_no' => 'OUT-1', 'idempotency_key' => 'original-claim', 'claim_status' => 'SETTLED', 'void_idempotency_key' => '',
     'remark' => '已交付', 'remark_version' => 1, 'quantity' => 2,
 ]);
 
@@ -134,13 +134,43 @@ $expectFailure(static fn() => $service->voidClaimableForStore(10, 7, 'PCL-ISOLAT
     ['idempotency_key' => 'isolated-store-denied']), 'presale_claimable_line_not_found');
 Db::name('employee_store_isolation')->where('id', 1)->delete();
 
-Db::execute('CREATE TABLE eb_inventory_location (id INTEGER PRIMARY KEY, tenant_id TEXT, store_id INTEGER, organization_id TEXT, organization_path TEXT, location_type TEXT, is_default INTEGER, location_status TEXT)');
-Db::name('inventory_location')->insert(['id' => 1, 'tenant_id' => '0', 'store_id' => 10, 'organization_id' => 'ORG-10', 'organization_path' => '/', 'location_type' => 'STORE', 'is_default' => 1, 'location_status' => 'ACTIVE']);
-$expectFailure(static fn() => $service->voidForStore(10, 7, 'PCC-DELIVERED', ['idempotency_key' => 'direct-claim-void-key', 'reason' => '重新入库']), 'presale_claimable_already_voided');
+Db::execute('CREATE TABLE eb_inventory_location (id INTEGER PRIMARY KEY, tenant_id TEXT, store_id INTEGER, owner_id INTEGER, organization_id TEXT, organization_path TEXT, location_type TEXT, is_default INTEGER, location_status TEXT)');
+Db::name('inventory_location')->insert(['id' => 1, 'tenant_id' => '0', 'store_id' => 10, 'owner_id' => 10, 'organization_id' => 'ORG-10', 'organization_path' => '/', 'location_type' => 'STORE', 'is_default' => 1, 'location_status' => 'ACTIVE']);
 $expectFailure(static fn() => $service->updateRemarkForStore(10, 7, 'PCC-DELIVERED', ['expected_version' => 1, 'remark' => '修改']), 'presale_claimable_already_voided');
 $expectFailure(static fn() => $service->claimForStore(10, 7, [
     'idempotency_key' => 'new-claim-after-void', 'claimable_line_id' => 'PCL-AVAILABLE',
     'quantity' => 1, 'business_date' => date('Y-m-d'),
 ]), 'presale_claimable_already_voided');
+
+// A previously delivered outbound owns its batch and stock reversal even after
+// the source closes; the source must stay closed and the reversal must be idempotent.
+Db::execute('CREATE TABLE eb_inventory_stock (id INTEGER PRIMARY KEY, tenant_id TEXT, organization_id TEXT, organization_path TEXT, store_id INTEGER, location_id INTEGER, available_quantity_units INTEGER, version INTEGER, updated_at INTEGER)');
+Db::execute('CREATE TABLE eb_inventory_batch (id INTEGER PRIMARY KEY, stock_id INTEGER, available_quantity_units INTEGER, version INTEGER, updated_at INTEGER)');
+Db::execute('CREATE TABLE eb_cashier_v3_presale_claim_batch (id INTEGER PRIMARY KEY, tenant_id TEXT, claim_id TEXT, stock_id INTEGER, batch_id INTEGER, movement_fact_id INTEGER, quantity_units INTEGER, unit_cost_cents INTEGER, cost_amount_cents INTEGER)');
+Db::execute('CREATE TABLE eb_inventory_batch_movement_fact (id INTEGER PRIMARY KEY AUTOINCREMENT, fact_key TEXT UNIQUE, tenant_id TEXT, organization_id TEXT, organization_path TEXT, location_id INTEGER, store_id INTEGER, operator_type TEXT, operator_id INTEGER, operator_name_snapshot TEXT, stock_id INTEGER, batch_id INTEGER, direction INTEGER, quantity_units INTEGER, unit_cost_cents INTEGER, cost_amount_cents INTEGER, fact_status TEXT, source_type TEXT, source_id TEXT, source_detail_id TEXT, detail_remark TEXT, reversal_of INTEGER, business_date TEXT, occurred_at INTEGER, settled_at INTEGER, recorded_at INTEGER)');
+Db::name('inventory_stock')->insert(['id' => 1, 'tenant_id' => '0', 'organization_id' => 'ORG-10', 'organization_path' => '/', 'store_id' => 10, 'location_id' => 1, 'available_quantity_units' => 3, 'version' => 1, 'updated_at' => 1]);
+Db::name('inventory_batch')->insert(['id' => 1, 'stock_id' => 1, 'available_quantity_units' => 3, 'version' => 1, 'updated_at' => 1]);
+Db::name('inventory_batch_movement_fact')->insert(['id' => 1, 'fact_key' => 'original-outbound', 'tenant_id' => '0', 'stock_id' => 1, 'batch_id' => 1, 'direction' => -1, 'quantity_units' => 2, 'unit_cost_cents' => 100, 'cost_amount_cents' => 200]);
+Db::name(CashierV3PresaleClaimServices::CLAIM_BATCH_TABLE)->insert(['id' => 1, 'tenant_id' => '0', 'claim_id' => 'PCC-DELIVERED', 'stock_id' => 1, 'batch_id' => 1, 'movement_fact_id' => 1, 'quantity_units' => 2, 'unit_cost_cents' => 100, 'cost_amount_cents' => 200]);
+$voidInput = ['idempotency_key' => 'direct-claim-void-key', 'reason' => '重新入库'];
+$voided = $service->voidForStore(10, 7, 'PCC-DELIVERED', $voidInput);
+if ($voided['status'] !== 'VOIDED' || $voided['idempotent'] !== false) throw new RuntimeException('delivered_claim_void_failed');
+$sourceAfter = Db::name(CashierV3PresaleClaimServices::CLAIMABLE_TABLE)->where('id', 1)->find();
+$claimAfter = Db::name(CashierV3PresaleClaimServices::CLAIM_TABLE)->where('id', 1)->find();
+$reversal = Db::name('inventory_batch_movement_fact')->where('reversal_of', 1)->find();
+if ($sourceAfter['claim_status'] !== 'VOIDED' || (int)$sourceAfter['claimed_quantity'] !== 0
+    || $claimAfter['claim_status'] !== 'VOIDED' || (int)$claimAfter['void_operator_id'] !== 7
+    || (int)Db::name('inventory_stock')->where('id', 1)->value('available_quantity_units') !== 5
+    || (int)Db::name('inventory_batch')->where('id', 1)->value('available_quantity_units') !== 5
+    || !$reversal || (int)$reversal['direction'] !== 1 || (int)$reversal['quantity_units'] !== 2
+    || (int)Db::name('inventory_batch_movement_fact')->count() !== 2) {
+    throw new RuntimeException('closed_source_claim_reversal_mismatch');
+}
+$replay = $service->voidForStore(10, 7, 'PCC-DELIVERED', $voidInput);
+if ($replay['idempotent'] !== true || (int)Db::name('inventory_stock')->where('id', 1)->value('available_quantity_units') !== 5
+    || (int)Db::name('inventory_batch_movement_fact')->count() !== 2) throw new RuntimeException('claim_reversal_replayed_twice');
+$expectFailure(static fn() => $service->voidForStore(10, 7, 'PCC-DELIVERED', [
+    'idempotency_key' => 'different-void-key', 'reason' => '重复作废',
+]), 'presale_claim_already_voided');
 
 echo "PRESALE_GIFT_CLAIMABLE_VOID_SQLITE=PASS\n";

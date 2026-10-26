@@ -452,7 +452,8 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
               <!-- 来源单作废只关闭剩余领用权益，已发生的出库仍保持自己的真实状态。 -->
               <td><span class="presale-status" :class="`presale-status--${String(row.source_status || '').toLowerCase()}`">{{ statusLabel(row.source_status) }}</span></td>
               <td class="presale-record-remark">{{ row.remark || '-' }}</td>
-              <td class="presale-claim-table__actions"><button class="button button--text" type="button" @click="openRecordDetail(row)">详情</button><button v-if="row.status === 'SETTLED' && row.source_status !== 'VOIDED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废</button></td>
+              <!-- 出库单独立于来源单作废；只依据出库自身状态和操作权限开放回冲。 -->
+              <td class="presale-claim-table__actions"><button class="button button--text" type="button" @click="openRecordDetail(row)">详情</button><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废</button></td>
             </tr>
             <tr v-if="!recordLoading && !recordRows.length"><td colspan="13" class="presale-empty">暂无领用记录</td></tr>
           </tbody>
@@ -491,9 +492,9 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
         <div v-if="detailLoading" class="presale-loading"><FileClock :size="22" />加载中...</div>
         <template v-else>
           <p v-if="detail.claimable" class="presale-detail-summary">{{ detail.claimable.product_name }}：{{ sourceQuantityLabel }} {{ detail.claimable.quantity }}，已领用 {{ detail.claimable.claimed_quantity }}，未领用 {{ detail.claimable.unclaimed_quantity }}</p>
-          <p v-if="detail.claimable?.claim_status === 'VOIDED'" class="presale-void-note">该记录已作废，剩余未领用数量不可再操作；已领用出库保留。</p>
+          <p v-if="detail.claimable?.claim_status === 'VOIDED'" class="presale-void-note">来源单已作废，剩余数量不可领用；已领用出库可逐笔作废并退回库存。</p>
           <table class="presale-detail-table"><thead><tr><th>{{ outboundDocumentLabel }}</th><th class="align-right">数量</th><th>状态</th><th>操作人</th><th>领用时间</th><th>备注</th><th>作废时间</th><th>作废原因</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td class="presale-detail-table__remark">{{ row.remark || '-' }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td class="presale-detail-table__actions"><button v-if="detail.claimable?.claim_status !== 'VOIDED' && canClaim" class="button button--text" type="button" @click="openRemark(row)">修改备注</button><button v-if="detail.claimable?.claim_status !== 'VOIDED' && row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-if="detail.claimable?.claim_status === 'VOIDED' || row.status !== 'SETTLED'" class="muted">{{ detail.claimable?.claim_status === 'VOIDED' ? '记录已作废' : '已作废' }}</span></td></tr>
+            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td class="presale-detail-table__remark">{{ row.remark || '-' }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td class="presale-detail-table__actions"><button v-if="detail.claimable?.claim_status !== 'VOIDED' && canClaim" class="button button--text" type="button" @click="openRemark(row)">修改备注</button><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-if="row.status !== 'SETTLED'" class="muted">已作废</span></td></tr>
             <tr v-if="!(detail.claims || []).length"><td colspan="9" class="presale-empty">暂无领用记录</td></tr>
           </tbody></table>
         </template>
@@ -546,7 +547,8 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
     <section v-if="sourceVoidOpen" class="presale-modal-backdrop" role="presentation" @click.self="closeSourceVoid">
       <div class="presale-modal" role="dialog" aria-modal="true" aria-labelledby="presale-source-void-title">
         <header><div><p>{{ sourceLabel }}</p><h2 id="presale-source-void-title">作废记录</h2></div><button class="icon-button" title="关闭" type="button" @click="closeSourceVoid"><X :size="18" /></button></header>
-        <p class="presale-void-note">{{ sourceVoidTarget?.presale_order_no }} · {{ sourceVoidTarget?.product_name }}。作废后不再领用，已领用出库保持原状。</p>
+        <!-- 来源单作废不会自动退库，突出逐笔作废领用记录的操作提示，避免误以为库存已返回。 -->
+        <p class="presale-void-note presale-source-void-warning">{{ sourceVoidTarget?.presale_order_no }} · {{ sourceVoidTarget?.product_name }}。作废后不再领用，已领用出库保持原状。如果要把库存退回，需要去作废领用记录。</p>
         <label class="presale-modal__field">作废说明（选填）<textarea v-model="sourceVoidReason" rows="3" maxlength="500" placeholder="选填" /></label>
         <p v-if="sourceVoidError" class="presale-alert-message" role="alert">{{ sourceVoidError }}</p>
         <footer><button class="button button--secondary" type="button" @click="closeSourceVoid">取消</button><button class="button button--danger" type="button" :disabled="sourceVoidSubmitting" @click="submitSourceVoid">确认作废</button></footer>
@@ -581,4 +583,5 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
 .presale-modal--record { width: min(560px, 100%); }
 .presale-record-summary { grid-template-columns: 100px minmax(0, 1fr); }
 .presale-record-summary dd { overflow-wrap: anywhere; }
+.presale-source-void-warning { border-left: 3px solid #c83c3c; background: #fff4f4; color: #b4232b; font-weight: 700; }
 </style>
