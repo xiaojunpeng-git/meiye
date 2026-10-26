@@ -1,0 +1,12 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "previousRelease": "5722f99e0caaf5319824eea20826f374247d4ea2",
+  "files": {
+    "前端代码/admin/src/pages/product/productAdd/index.vue": "4116d680181907e3a3532fee921895594d9573a58478fc3160b1914b198d00a3",
+    "后端代码/app/services/product/product/StoreProductServices.php": "08397bb6421698aa598217552744391cb7704e09d046d763c407c6add89a3878",
+    "tests/cashier-v3/js/r37-card-labor-display.mjs": "207b021958086a2c96673956efa84431bfc129bcd8fdbbbeac2564d09c7b86aa",
+    "tests/cashier-v3/php/r37-card-labor-display.php": "681f0541811765d83ca24156f5a7e70ca7558328165e2b7b3184eec96a906d9c"
+  },
+  "patchSha256": "5534d60c0b16071ebfdb177e39e3199f6e1acf7b8a1bae4a3a6798991019df80",
+  "status": "2026-10-27 产品经理已确认本补漏验收并授权依序发布；测试仅增加不可编辑候选路径参数"
+}

@@ -1,0 +1,17 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "previousRelease": "5722f99e0caaf5319824eea20826f374247d4ea2",
+  "remote": "不适用：本地补漏开发",
+  "files": {
+    "前端代码/admin/src/pages/product/productAdd/index.vue": {
+      "sha256": "da775002ef4ed5add36bb076cfe8eb65d439a8dfe9241efcf9c26ab0cb809223",
+      "blob": "09b07e6ff90589a093bd3d1c13df49b30a65b23e",
+      "status": "M 前端代码/admin/src/pages/product/productAdd/index.vue"
+    },
+    "后端代码/app/services/product/product/StoreProductServices.php": {
+      "sha256": "f2235d44ec375d9605772b347c570b8c707f2ea959ed1072d8b0a5bb3fab49b8",
+      "blob": "0bb24e1e98e8b05934b8cf25b9f4b48d61b96e7e",
+      "status": ""
+    }
+  }
+}

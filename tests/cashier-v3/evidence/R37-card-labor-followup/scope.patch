@@ -1,0 +1,41 @@
+--- a/前端代码/admin/src/pages/product/productAdd/index.vue
++++ b/前端代码/admin/src/pages/product/productAdd/index.vue
+@@ -1768,6 +1768,8 @@
+   name: 'productAdd',
+   data() {
+     return {
++      // 来自后端实例显示配置；独立于商品表单，隐藏列时不清空或删除卡内手工费。
++      cardLaborFeeVisible: true,
+ 	  priceSetType:0,//区间改价类型
+ 	  priceSetNum:0,//区间改价输入的价格
+       ruleValidate: {
+@@ -2317,7 +2319,8 @@
+         columns.push({ title: '单次核销金额', slot: 'writeoff_amount', minWidth: 160 });
+       }
+       columns.push({ title: '操作', slot: 'action', minWidth: 80 });
+-      return columns;
++      // 普通卡与组合卡共用列定义，仅省略显示，不参与卡内项目数据组装或保存。
++      return columns.filter(column => this.cardLaborFeeVisible || column.slot !== 'labor_fee');
+     },
+   },
+   destroyed() {
+@@ -4450,6 +4453,7 @@
+     getProductBrokerage() {
+       productBrokerage((this.$route.params.id || this.$route.query.copy || 0), 0).then((res) => {
+         const { storeInfo, attrValue, level_list, store_brokerage_ratio, store_brokerage_two } = res.data;
++        this.cardLaborFeeVisible = res.data.labor_fee_visible !== false;
+         const { is_vip, level_type, is_brokerage, is_sub } = storeInfo;
+         this.isVip = is_vip;
+         this.levelType = level_type;
+--- a/后端代码/app/services/product/product/StoreProductServices.php
++++ b/后端代码/app/services/product/product/StoreProductServices.php
+@@ -4354,6 +4354,9 @@
+             }
+             $data['level_list'] = $level_list;
+         }
++        // 商品编辑（含新增、复制）共用的只读元数据；与R37收银显隐读取同一配置。
++        // 仅隐藏卡内项目列，不能据此重算、清空商品配置或历史手工费。
++        if ($type === 0) $data['labor_fee_visible'] = (int)sys_config('cashier_labor_fee_mode', 0) !== 1;
+         return $data;
+     }
+ 
