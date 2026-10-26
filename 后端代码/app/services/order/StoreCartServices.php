@@ -247,8 +247,12 @@ class StoreCartServices extends BaseServices
         $attrValueServices = app()->make(StoreProductAttrValueServices::class);
         $isSet = $this->getItem('is_set', 0);
         $tourist_uid = $this->getItem('tourist_uid', 0);
-        //验证限量
-        if($isSet >= 0) $this->checkLimit($uid, $productId, $cartNum, $new, $store_id);
+        // 普通商品限购按底层商品累计；拼团限购则必须按活动 ID 独立累计。
+        // 同一底层商品可用于多个拼团活动，不得让旧活动的购买记录占用新活动额度；
+        // 当前活动的单次/总限购仍由 checkCombinationStock 在下方权威校验。
+        if ($isSet >= 0 && $type !== 3) {
+            $this->checkLimit($uid, $productId, $cartNum, $new, $store_id);
+        }
         switch ($type) {
             case 0://普通
                 if ($unique == '') {
