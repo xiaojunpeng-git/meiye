@@ -17,6 +17,7 @@ const state = useCashierV3State()
 const router = useRouter()
 const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
+const queryToolbarResetKey = ref(0)
 // 日历是单日资源排班，列表是日期区间记录检索；两种视图的状态筛选
 // 及查询快照必须独立，切换视图不能把另一种日期语义带过来。
 const calendarQuickKey = ref('all')
@@ -396,6 +397,16 @@ function switchReservationView(nextViewMode) {
   queryReservations(querySnapshotForView(nextViewMode))
 }
 
+/** 当前门店全部待确认入口清空旧检索并回到列表第一页，不沿用当天或会员条件。
+ * 数字与记录均由服务端在当前门店授权范围内查询，列表仍按20条分页。
+ */
+function showAllPendingReservations() {
+  viewMode.value = 'list'
+  listQuickKey.value = 'all_pending_confirmation'
+  queryToolbarResetKey.value += 1
+  return queryReservations({ ...emptyReservationQuery('all_pending_confirmation'), pageSize: 20 })
+}
+
 function reservationFieldValue(record, fieldKey) {
   const values = {
     appointment_time: record.appointmentTime,
@@ -417,7 +428,8 @@ const quickFilters = computed(() => [
   { key: 'all', label: '全部', count: quickCounts.value.all, active: activeQuickKey.value === 'all' },
   { key: 'pending_confirmation', label: '待确认', count: quickCounts.value.pendingConfirmation ?? quickCounts.value.pending_confirmation, active: activeQuickKey.value === 'pending_confirmation' },
   { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
-  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' }
+  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
+  { key: 'all_pending_confirmation', label: '全部待确认', count: quickCounts.value.allPendingConfirmation ?? 0, active: activeQuickKey.value === 'all_pending_confirmation' }
 ])
 
 const timeSlots = computed(() => {
@@ -1036,6 +1048,7 @@ async function selectQuickFilter(payload = {}) {
   // 也不能让快捷筛选覆盖此前已经提交的关键词、范围或组合筛选。
   const filter = payload.filter && typeof payload.filter === 'object' ? payload.filter : payload
   const selectedKey = typeof filter?.key === 'string' && filter.key ? filter.key : activeQuickKey.value
+  if (selectedKey === 'all_pending_confirmation') return showAllPendingReservations()
   const nextQuickKey = selectedKey === 'pending' ? 'pending_confirmation' : selectedKey
   const suppliedQuery = payload.query && typeof payload.query === 'object'
     ? payload.query
@@ -1623,6 +1636,7 @@ onBeforeUnmount(() => {
   <section class="reservation-page" :class="{ 'reservation-page--list': viewMode === 'list' }" aria-label="预约列表">
     <header class="reservation-page__toolbar">
       <UnifiedQueryToolbar
+        :key="queryToolbarResetKey"
         :show-keyword-search="false"
         :inline-quick-controls="true"
         :show-data-scope="false"
@@ -1715,6 +1729,7 @@ onBeforeUnmount(() => {
       </main>
 
       <TablePagination
+        :show-page-count="activeQuickKey === 'all_pending_confirmation'"
         :total="total"
         :page="page"
         :page-size="pageSize"
@@ -1771,7 +1786,8 @@ onBeforeUnmount(() => {
                 <span class="reservation-calendar-status">{{ reservationStatus(block).label }}</span>
               </span>
               <span>{{ blockTimeLabel(block) }} · {{ block.projectCount }}项</span>
-              <span>{{ block.roomName }}</span>
+              <span :class="{ 'reservation-calendar-block__room-with-custom-service': block.hasCustomServices }">{{ block.roomName }}</span>
+              <span v-if="block.hasCustomServices" class="reservation-calendar-block__custom-service" title="含定制服务" aria-label="含定制服务">定制服务</span>
             </button>
           </div>
         </div>
@@ -1824,3 +1840,21 @@ onBeforeUnmount(() => {
     />
   </section>
 </template>
+
+<style scoped>
+/* 标识固定在卡片右下角；房间文本预留宽度，不覆盖状态，也不拦截卡片点击。 */
+.reservation-calendar-block__room-with-custom-service { padding-right: 58px; }
+.reservation-calendar-block .reservation-calendar-block__custom-service {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+  pointer-events: none;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: #475467;
+  background: #fff;
+  font-size: 10px;
+  line-height: 15px;
+}
+</style>

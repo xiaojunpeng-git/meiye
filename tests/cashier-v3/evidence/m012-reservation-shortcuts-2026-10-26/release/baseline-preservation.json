@@ -1,0 +1,35 @@
+[
+  {
+    "site": "rh",
+    "baselineReproducesLive": true,
+    "frontendDelta": [
+      "前端代码/cashier-v3/src/views/ReservationListView.vue"
+    ],
+    "identicalAcceptedReservationPage": true,
+    "binding": "rh",
+    "baselineTree": "fe2c7ea28ce9012c068431826226c67a22eaaac3",
+    "candidateTree": "d1adcc61f2640f948e4a1a12f4e7c37e7a4844e4"
+  },
+  {
+    "site": "008",
+    "baselineReproducesLive": true,
+    "frontendDelta": [
+      "前端代码/cashier-v3/src/views/ReservationListView.vue"
+    ],
+    "identicalAcceptedReservationPage": true,
+    "binding": "existing-report-month",
+    "baselineTree": "2108f670c5dd5052d8d0ebdb313b8ab88cad1c89",
+    "candidateTree": "82e29bdd3ba29165d6933ed024d468ae3342496e"
+  },
+  {
+    "site": "010",
+    "baselineReproducesLive": true,
+    "frontendDelta": [
+      "前端代码/cashier-v3/src/views/ReservationListView.vue"
+    ],
+    "identicalAcceptedReservationPage": true,
+    "binding": "existing-report-month",
+    "baselineTree": "2108f670c5dd5052d8d0ebdb313b8ab88cad1c89",
+    "candidateTree": "82e29bdd3ba29165d6933ed024d468ae3342496e"
+  }
+]

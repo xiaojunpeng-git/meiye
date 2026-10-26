@@ -1,0 +1,380 @@
+diff --git a/前端代码/cashier-v3/src/views/ReservationListView.vue b/前端代码/cashier-v3/src/views/ReservationListView.vue
+index 542c2ea3..ece5e766 100644
+--- a/前端代码/cashier-v3/src/views/ReservationListView.vue
++++ b/前端代码/cashier-v3/src/views/ReservationListView.vue
+@@ -17,6 +17,7 @@ const state = useCashierV3State()
+ const router = useRouter()
+ const viewMode = ref('calendar')
+ const calendarResourceMode = ref('staff')
++const queryToolbarResetKey = ref(0)
+ // 日历是单日资源排班，列表是日期区间记录检索；两种视图的状态筛选
+ // 及查询快照必须独立，切换视图不能把另一种日期语义带过来。
+ const calendarQuickKey = ref('all')
+@@ -396,6 +397,16 @@ function switchReservationView(nextViewMode) {
+   queryReservations(querySnapshotForView(nextViewMode))
+ }
+ 
++/** 当前门店全部待确认入口清空旧检索并回到列表第一页，不沿用当天或会员条件。
++ * 数字与记录均由服务端在当前门店授权范围内查询，列表仍按20条分页。
++ */
++function showAllPendingReservations() {
++  viewMode.value = 'list'
++  listQuickKey.value = 'all_pending_confirmation'
++  queryToolbarResetKey.value += 1
++  return queryReservations({ ...emptyReservationQuery('all_pending_confirmation'), pageSize: 20 })
++}
++
+ function reservationFieldValue(record, fieldKey) {
+   const values = {
+     appointment_time: record.appointmentTime,
+@@ -417,7 +428,8 @@ const quickFilters = computed(() => [
+   { key: 'all', label: '全部', count: quickCounts.value.all, active: activeQuickKey.value === 'all' },
+   { key: 'pending_confirmation', label: '待确认', count: quickCounts.value.pendingConfirmation ?? quickCounts.value.pending_confirmation, active: activeQuickKey.value === 'pending_confirmation' },
+   { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
+-  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' }
++  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
++  { key: 'all_pending_confirmation', label: '全部待确认', count: quickCounts.value.allPendingConfirmation ?? 0, active: activeQuickKey.value === 'all_pending_confirmation' }
+ ])
+ 
+ const timeSlots = computed(() => {
+@@ -1036,6 +1048,7 @@ async function selectQuickFilter(payload = {}) {
+   // 也不能让快捷筛选覆盖此前已经提交的关键词、范围或组合筛选。
+   const filter = payload.filter && typeof payload.filter === 'object' ? payload.filter : payload
+   const selectedKey = typeof filter?.key === 'string' && filter.key ? filter.key : activeQuickKey.value
++  if (selectedKey === 'all_pending_confirmation') return showAllPendingReservations()
+   const nextQuickKey = selectedKey === 'pending' ? 'pending_confirmation' : selectedKey
+   const suppliedQuery = payload.query && typeof payload.query === 'object'
+     ? payload.query
+@@ -1623,6 +1636,7 @@ onBeforeUnmount(() => {
+   <section class="reservation-page" :class="{ 'reservation-page--list': viewMode === 'list' }" aria-label="预约列表">
+     <header class="reservation-page__toolbar">
+       <UnifiedQueryToolbar
++        :key="queryToolbarResetKey"
+         :show-keyword-search="false"
+         :inline-quick-controls="true"
+         :show-data-scope="false"
+@@ -1715,6 +1729,7 @@ onBeforeUnmount(() => {
+       </main>
+ 
+       <TablePagination
++        :show-page-count="activeQuickKey === 'all_pending_confirmation'"
+         :total="total"
+         :page="page"
+         :page-size="pageSize"
+@@ -1771,7 +1786,8 @@ onBeforeUnmount(() => {
+                 <span class="reservation-calendar-status">{{ reservationStatus(block).label }}</span>
+               </span>
+               <span>{{ blockTimeLabel(block) }} · {{ block.projectCount }}项</span>
+-              <span>{{ block.roomName }}</span>
++              <span :class="{ 'reservation-calendar-block__room-with-custom-service': block.hasCustomServices }">{{ block.roomName }}</span>
++              <span v-if="block.hasCustomServices" class="reservation-calendar-block__custom-service" title="含定制服务" aria-label="含定制服务">定制服务</span>
+             </button>
+           </div>
+         </div>
+@@ -1824,3 +1840,21 @@ onBeforeUnmount(() => {
+     />
+   </section>
+ </template>
++
++<style scoped>
++/* 标识固定在卡片右下角；房间文本预留宽度，不覆盖状态，也不拦截卡片点击。 */
++.reservation-calendar-block__room-with-custom-service { padding-right: 58px; }
++.reservation-calendar-block .reservation-calendar-block__custom-service {
++  position: absolute;
++  right: 7px;
++  bottom: 6px;
++  pointer-events: none;
++  padding: 0 4px;
++  border: 1px solid currentColor;
++  border-radius: 3px;
++  color: #475467;
++  background: #fff;
++  font-size: 10px;
++  line-height: 15px;
++}
++</style>
+diff --git a/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php b/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php
+index ed317746..463c7cb6 100644
+--- a/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php
++++ b/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php
+@@ -26,9 +26,11 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+         $storeId = $operatorScope->storeId();
+         $now = time();
+         $workflow = strtolower(trim((string)($hints['workflow'] ?? '')));
+-        // 仅服务页可跨日期查看；桌面日历与预约确认继续按显式日期或默认当天取数。
+-        $allDates = $workflow === 'service' && !empty($hints['allDates']);
+         $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
++        // “全部待确认”只放开默认日期，仍强制当前租户/门店与待确认状态；
++        // 不让任意 allDates 参数改变普通日历，显式提交的列表筛选继续生效。
++        $allDates = ($workflow === 'service' && !empty($hints['allDates']))
++            || $quickFilter === 'all_pending_confirmation';
+         $page = max(1, (int)($hints['page'] ?? 1));
+         $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));
+         $topFilters = (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []);
+@@ -50,7 +52,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+             ->where('tenant_id', $tenantId)->where('store_id', $storeId)
+             ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+             ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+-        if ($quickFilter === 'pending_confirmation') {
++        if (in_array($quickFilter, ['pending_confirmation', 'all_pending_confirmation'], true)) {
+             $recordsQuery->where('status', 'PENDING_CONFIRMATION');
+         } elseif ($quickFilter === 'service') {
+             $recordsQuery->whereIn('status', ['UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+@@ -71,6 +73,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+         self::applyListTopFilters($recordsQuery, $topFilters);
+         if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($recordsQuery, $calendarDate);
+         $total = (int)(clone $recordsQuery)->count();
++        // 待确认状态被其他设备处理后，保留筛选并收回到有效页，避免末页假空白。
++        $page = min($page, max(1, (int)ceil($total / $pageSize)));
+         $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
+         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
+         $ids = [];
+@@ -172,6 +176,11 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+             'serving' => (int)(clone $countBase)->where('status', 'IN_SERVICE')->count(),
+             'ended' => (int)(clone $countBase)->where('status', 'COMPLETED')->count(),
+             'dueNotArrived' => $dueNotArrivedCount,
++            // 入口数字不受当前日历日期、姓名或分页影响，和点击后的无筛选列表同源。
++            'allPendingConfirmation' => (int)Db::name('cashier_v3_reservation')
++                ->where('tenant_id', $tenantId)->where('store_id', $storeId)
++                ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
++                ->where('status', 'PENDING_CONFIRMATION')->count(),
+         ];
+         foreach ($rows as $row) {
+             $id = (int)($row['id'] ?? 0);
+@@ -234,7 +243,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+         // 日历只有一个时间轴；当顶部使用日期范围时，按起始日渲染，确保
+         // 操作员修改日期后日历与当前查询处在同一个业务日，而不再依赖已移除的
+         // “上一天 / 今天 / 下一天”按钮。
+-        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames);
++        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames, $customServices);
+         return ['ready' => true, 'payload' => [
+             'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
+             'quickCounts' => $counts, 'records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize,
+@@ -247,7 +256,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+      * Calendar is a read model over V3 reservations only.  It deliberately
+      * does not try to infer availability from legacy reservation tables.
+      */
+-    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames): array
++    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames, array $customServices = []): array
+     {
+         $store = Db::name('system_store')->where('id', $storeId)->field('day_start,day_end')->find();
+         $start = self::timeOfDay((string)($store['day_start'] ?? ''));
+@@ -326,6 +335,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+                 'start' => self::businessTimeFromTimestamp($at, 'H:i'),
+                 'end' => self::businessTimeFromTimestamp(max($at + 60, (int)($row['appointment_end_at'] ?? 0)), 'H:i'),
+                 'projectCount' => $projectCount,
++                // 使用已按预约/门店批量读取的历史快照，停用服务菜单也不抹掉提示。
++                'hasCustomServices' => !empty($customServices[$reservationId]),
+                 // 同一预约在手艺人、房间日历中的副本读取同一个持久化颜色。
+                 'colorMark' => (string)($row['calendar_color'] ?? ''),
+                 'status' => self::statusLabel((string)($row['status'] ?? '')),
+@@ -452,7 +463,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
+         $value = trim((string)$value);
+         if ($workflow === 'confirmation') return 'pending_confirmation';
+         if ($workflow === 'service' && $value === '') return 'service';
+-        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'service'], true) ? $value : 'all';
++        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'all_pending_confirmation', 'service'], true) ? $value : 'all';
+     }
+ 
+     private static function timeOfDay(string $value): string
+diff --git a/tests/cashier-v3/php/m012-reservation-pending-mysql.php b/tests/cashier-v3/php/m012-reservation-pending-mysql.php
+new file mode 100644
+index 00000000..7586650d
+--- /dev/null
++++ b/tests/cashier-v3/php/m012-reservation-pending-mysql.php
+@@ -0,0 +1,86 @@
++<?php
++declare(strict_types=1);
++
++/** Local rollback-only fixtures exercise the real partition and custom-service reader.
++ * Never run against a customer connection or invoke reservation lifecycle commands.
++ */
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++set_exception_handler(static function (Throwable $error): void {
++    fwrite(STDERR, $error->getMessage() . PHP_EOL);
++    exit(1);
++});
++use think\facade\Db;
++use app\services\cashier\v3\CashierV3OperatorScope;
++use app\services\cashier\v3\CashierV3DataScopeContext;
++use app\services\cashier\v3\reservation\CashierV3ReservationPartitionProvider;
++use app\services\cashier\v3\reservation\CashierV3ReservationLifecycleServices;
++
++$config = config('database.connections.mysql');
++if (getenv('M012_LOCAL_TEST') !== '1' || $config['hostname'] !== 'mysql' || $config['database'] !== 'ruihao') throw new RuntimeException('LOCAL_DATABASE_REQUIRED');
++$check = static function (bool $ok, string $message): void {
++    if (!$ok) throw new RuntimeException($message);
++    echo "PASS {$message}\n";
++};
++$header = Db::name('cashier_v3_reservation')->order('id desc')->find();
++if (!$header) throw new RuntimeException('Local fixture header required');
++$store = (int)$header['store_id'];
++$tenant = 'm012-' . bin2hex(random_bytes(6));
++$operator = new CashierV3OperatorScope($store, 1, '', $tenant);
++$scope = new CashierV3DataScopeContext(1, 1, $store, $tenant, '', [$store], 'stores', [], false, '', 'm012-local', ['cashier.v3.reservation'], []);
++$read = static function (array $hints) use ($operator, $scope): array {
++    return (new CashierV3ReservationPartitionProvider())->readPartition('', '', $operator, $scope, $hints)['payload'];
++};
++$countsBefore = [Db::name('cashier_v3_reservation')->count(), Db::name('user_card_holder')->count()];
++Db::startTrans();
++try {
++    unset($header['id']);
++    $header['tenant_id'] = $tenant;
++    $header['lifecycle_generation'] = CashierV3ReservationLifecycleServices::GENERATION;
++    $header['service_order_id'] = 0;
++    $header['actual_service_started_at'] = 0;
++    $header['actual_service_ended_at'] = 0;
++    $ids = [];
++    $zone = new DateTimeZone('Asia/Shanghai');
++    for ($i = 0; $i < 27; $i++) {
++        $row = $header;
++        $row['reservation_no'] = 'M012-' . bin2hex(random_bytes(8));
++        $row['reservation_id'] = 'M012-' . bin2hex(random_bytes(8));
++        $row['member_name_snapshot'] = 'M012 fixture ' . $i;
++        $row['appointment_start_at'] = (new DateTimeImmutable('2030-01-0' . (1 + $i % 3) . ' 12:00', $zone))->getTimestamp();
++        $row['appointment_end_at'] = $row['appointment_start_at'] + 3600;
++        $row['status'] = $i === 23 ? 'COMPLETED' : 'PENDING_CONFIRMATION';
++        if ($i === 24) $row['store_id'] = $store + 100000;
++        if ($i === 25) $row['tenant_id'] = $tenant . '-other';
++        if ($i === 26) $row['lifecycle_generation'] = 'M012_LEGACY';
++        $ids[] = (int)Db::name('cashier_v3_reservation')->insertGetId($row);
++    }
++    Db::name('cashier_v3_reservation_custom_service')->insert([
++        'tenant_id' => $tenant, 'store_id' => $store, 'reservation_id' => $ids[0],
++        'service_name_id' => 1, 'name_snapshot' => '历史定制服务', 'quantity' => 1, 'created_at' => time(),
++    ]);
++    $hints = ['calendarDate' => '2030-01-01', 'quickFilter' => 'all_pending_confirmation', 'pageSize' => 20];
++    $all = $read($hints);
++    $check($all['total'] === 23 && count($all['records']) === 20, 'all-date pending returns total 23 and first page 20');
++    $check($all['quickCounts']['allPendingConfirmation'] === 23, 'global count excludes other store, tenant, generation and completed');
++    $second = $read($hints + ['page' => 2]);
++    $check(count($second['records']) === 3 && $second['total'] === 23, 'last page contains remaining three records');
++    $beyond = $read($hints + ['page' => 99]);
++    $check($beyond['page'] === 2 && count($beyond['records']) === 3, 'out-of-range page is clamped to final page');
++    $check(!array_intersect(array_column($all['records'], 'id'), array_column($second['records'], 'id')), 'stable page order has no duplicate IDs');
++    $check(count(array_unique(array_map(static function ($r) { return substr($r['appointmentTime'], 0, 10); }, $all['records']))) > 1, 'results span multiple business dates');
++    $day = $read(['calendarDate' => '2030-01-01', 'pageSize' => 100]);
++    $check($day['total'] === 8 && $day['quickCounts']['pendingConfirmation'] === 8, 'normal calendar retains its single-day scope');
++    $check($day['quickCounts']['allPendingConfirmation'] === 23, 'shortcut count remains cross-date in normal calendar');
++    $marked = array_values(array_filter($day['calendar']['blocks'], static function ($b) use ($ids) { return $b['reservationId'] === $ids[0]; }));
++    $check(count($marked) >= 2 && !in_array(false, array_column($marked, 'hasCustomServices'), true), 'staff and room blocks both retain custom-service indicator');
++    $plain = array_values(array_filter($day['calendar']['blocks'], static function ($b) use ($ids) { return $b['reservationId'] !== $ids[0]; }));
++    $check(!in_array(true, array_column($plain, 'hasCustomServices'), true), 'ordinary booking blocks have no indicator');
++    $filtered = $read($hints + ['topFilters' => [['field' => 'member_name', 'operator' => 'eq', 'value' => 'M012 fixture 0']]]);
++    $check($filtered['total'] === 1 && $filtered['quickCounts']['allPendingConfirmation'] === 23, 'explicit subsequent member search narrows list but not global shortcut count');
++    $empty = $read($hints + ['topFilters' => [['field' => 'member_name', 'operator' => 'eq', 'value' => 'no-such-member']]]);
++    $check($empty['total'] === 0 && $empty['records'] === [], 'empty result retains authoritative zero total');
++    $check(Db::name('user_card_holder')->count() === $countsBefore[1], 'card rights are untouched');
++} finally { Db::rollback(); }
++$check([Db::name('cashier_v3_reservation')->count(), Db::name('user_card_holder')->count()] === $countsBefore, 'all local appointment fixtures rolled back');
++echo "M012_RESERVATION_MYSQL=PASS\n";
+diff --git a/tests/cashier-v3/js/m012-reservation-shortcuts-browser.cjs b/tests/cashier-v3/js/m012-reservation-shortcuts-browser.cjs
+new file mode 100644
+index 00000000..b5430080
+--- /dev/null
++++ b/tests/cashier-v3/js/m012-reservation-shortcuts-browser.cjs
+@@ -0,0 +1,103 @@
++// Exercise the actual page, shared query toolbar, pagination and CSS in Chrome.
++// Only transport and unrelated overlays are fixtures; no customer endpoint is used.
++const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
++const { pathToFileURL } = require('node:url')
++const root = path.resolve(__dirname, '../../..'), project = path.join(root, '前端代码/cashier-v3')
++const output = path.join(root, 'tests/cashier-v3/evidence/m012-reservation-shortcuts-2026-10-26')
++const runtime = process.env.CODEX_NODE_MODULES || '/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'
++const { chromium } = require(path.join(runtime, 'playwright'))
++const fixtures = Array.from({ length: 23 }, (_, i) => ({ id: i + 1, reservationId: i + 1, reservationNo: `TEST-${i + 1}`, memberName: `跨日会员${i + 1}`, appointmentTime: `2030-01-0${1 + i % 3} 12:00`, status: '待确认', projectSummary: '测试项目' }))
++const calendar = { date: '2030-01-01', timeSlots: ['12:00', '12:30', '13:00'], resources: [{ id: 'staff:1', type: 'staff', name: '测试手艺人' }, { id: 'room:1', type: 'room', name: 'VIP1' }], blocks: [true, false].flatMap((custom, i) => ['staff:1', 'room:1'].map(resourceId => ({ id: `${i}:${resourceId}`, reservationId: i + 1, resourceId, memberName: custom ? '含定制服务会员' : '普通预约会员', start: i ? '13:00' : '12:00', end: i ? '14:00' : '13:00', projectCount: 1, roomName: 'VIP1', status: '已结束', hasCustomServices: custom, colorMark: 'purple' }))) }
++const bridge = `import {reactive} from 'vue';
++const initial=${JSON.stringify({ records: fixtures.slice(0, 2), total: 2, page: 1, pageSize: 20, calendar, quickCounts: { all: 2, pendingConfirmation: 0, unstarted: 0, serving: 0, allPendingConfirmation: 23 } })};
++const rows=${JSON.stringify(fixtures)};
++export const state=reactive({operator:{account:'m012-test'},currentStore:{id:1,name:'本地隔离测试'},reservation:structuredClone(initial)});
++window.__m012Requests=[];
++export const useCashierV3State=()=>state;
++export const getCashierV3PublicVersion=()=>1;
++export const openCashierV3QueryEntitySelector=()=>{};
++export const createCashierV3CommandId=()=>crypto.randomUUID();
++export async function requestCashierV3Action(action,payload){
++ window.__m012Requests.push({action,payload:structuredClone(payload)});
++ if(action==='query-reservations'){
++   if(payload.quickFilter==='all_pending_confirmation'){
++     let found=rows;
++     for(const f of payload.topFilters||[])if(f.field==='member_name')found=found.filter(r=>r.memberName.includes(f.value));
++     const page=payload.page||1,size=payload.pageSize||20;
++     state.reservation={...structuredClone(initial),quickCounts:{...initial.quickCounts,all:24,pendingConfirmation:23},records:found.slice((page-1)*size,page*size),total:found.length,page,pageSize:size};
++   }else state.reservation=structuredClone(initial);
++ }
++ return {result:{status:'success'}};
++}`
++;(async () => {
++  const { createServer } = await import(pathToFileURL(path.join(project, 'node_modules/vite/dist/node/index.js')))
++  const vue = (await import(pathToFileURL(path.join(project, 'node_modules/@vitejs/plugin-vue/dist/index.mjs')))).default
++  const server = await createServer({ root: project, configFile: false, logLevel: 'error',
++    resolve: { dedupe: ['vue'], alias: { '@': path.join(project, 'src'), '@lucide/vue': path.join(project, 'node_modules/@lucide/vue') } },
++    optimizeDeps: { entries: [], include: ['vue', 'vue-router'], exclude: ['@mohe/unified-query-vue3'] },
++    server: { host: '127.0.0.1', port: 0, fs: { allow: [root] } },
++    plugins: [{ name: 'm012-fixture', enforce: 'pre',
++      resolveId(id) {
++        if (id.endsWith('/cashierV3Bridge') || id.endsWith('/cashierV3Bridge.js')) return '\0m012-bridge'
++        if (/\/Reservation(Editor|Detail)Overlay.vue$/.test(id)) return '\0m012-overlay'
++      },
++      load(id) { if (id === '\0m012-bridge') return bridge; if (id === '\0m012-overlay') return 'export default {template:"<div/>"}' },
++      configureServer(s) { s.middlewares.use('/__m012', async (_, res) => {
++        res.setHeader('Content-Type', 'text/html'); res.end(await s.transformIndexHtml('/__m012', '<!doctype html><meta charset="utf-8"><div id="app" style="height:100vh;padding:12px;box-sizing:border-box"></div><script type="module">import {createApp} from "vue";import {createRouter,createMemoryHistory} from "vue-router";import Page from "/src/views/ReservationListView.vue";import "/src/styles/base.css";createApp(Page).use(createRouter({history:createMemoryHistory(),routes:[]})).mount("#app")</script>'))
++      }) }
++    }, vue()] })
++  let browser
++  try {
++    await server.listen()
++    browser = await chromium.launch({ channel: 'chrome', headless: true })
++    const page = await browser.newPage({ viewport: { width: 1280, height: 877 } })
++    const errors = []; page.on('pageerror', e => errors.push(e.message))
++    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__m012`)
++    const shortcut = () => page.getByRole('button', { name: '全部待确认（23）', exact: true })
++    await shortcut().waitFor()
++    const buttons = await page.locator('.reservation-calendar-toolbar__quick button').allTextContents()
++    assert.match(buttons.at(-2), /服务中/); assert.match(buttons.at(-1), /全部待确认/)
++    const customCard = () => page.locator('.reservation-calendar-block').filter({ hasText: '含定制服务会员' })
++    assert.equal(await customCard().locator('[aria-label="含定制服务"]').count(), 1)
++    assert.equal(await page.locator('.reservation-calendar-block').filter({ hasText: '普通预约会员' }).locator('[aria-label="含定制服务"]').count(), 0)
++    const bounds = await customCard().evaluate(el => { const a=el.getBoundingClientRect(),b=el.querySelector('[aria-label="含定制服务"]').getBoundingClientRect();return {right:a.right-b.right,bottom:a.bottom-b.bottom} })
++    assert(bounds.right >= 6 && bounds.right <= 10 && bounds.bottom >= 5 && bounds.bottom <= 9)
++    assert.equal(await customCard().locator('.reservation-calendar-status').innerText(), '已结束')
++    await page.screenshot({ path: path.join(output, 'calendar-desktop.png') })
++    await page.getByRole('button', { name: '按房间', exact: true }).click()
++    assert.equal(await customCard().locator('[aria-label="含定制服务"]').count(), 1)
++    const member = page.getByPlaceholder('请输入会员姓名')
++    await member.fill('旧会员条件')
++    await shortcut().click()
++    await page.locator('.reservation-page--list').waitFor()
++    assert.equal(await member.inputValue(), '')
++    const latest = await page.evaluate(() => window.__m012Requests.at(-1))
++    assert.equal(latest.action, 'query-reservations'); assert.equal(latest.payload.quickFilter, 'all_pending_confirmation')
++    assert.deepEqual(latest.payload.topFilters, []); assert.equal(latest.payload.page, 1); assert.equal(latest.payload.pageSize, 20)
++    assert.equal(await page.locator('.reservation-list-table tbody tr').count(), 20)
++    await page.getByRole('button', { name: '下一页', exact: true }).click()
++    await page.waitForFunction(() => window.__m012Requests.at(-1).payload.page === 2)
++    assert.equal(await page.locator('.reservation-list-table tbody tr').count(), 3)
++    await member.fill('跨日会员23'); await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.waitForFunction(() => window.__m012Requests.at(-1).payload.page === 1)
++    assert.equal(await page.locator('.reservation-list-table tbody tr').count(), 1)
++    await shortcut().click()
++    assert.equal(await member.inputValue(), '')
++    await page.screenshot({ path: path.join(output, 'all-pending-list.png') })
++    for (const width of [1280, 768, 528]) {
++      await page.setViewportSize({ width, height: 877 })
++      // The existing desktop shell keeps a 1120px minimum width. Narrow-window
++      // checks must actually reach controls via its existing horizontal scroll.
++      const next = page.getByRole('button', { name: '下一页', exact: true })
++      await next.scrollIntoViewIfNeeded()
++      const control = await next.boundingBox()
++      assert(control && control.x >= 0 && control.x + control.width <= width + 1, `next page reachable at ${width}`)
++      const footer = await page.getByLabel('列表分页').boundingBox()
++      assert(footer && footer.y >= 0 && footer.y + footer.height <= 878, `pagination visible at ${width}`)
++    }
++    await page.screenshot({ path: path.join(output, 'all-pending-528.png') })
++    assert.deepEqual(errors, [])
++    fs.writeFileSync(path.join(output, 'browser-result.json'), JSON.stringify({ status: 'PASS', widths: [1280, 768, 528], actualPageAndToolbar: true, customerRequests: 0, errors }, null, 2) + '\n')
++    console.log('M012_BROWSER=PASS: shortcut, reset, paging, filtering, two calendar modes, bottom-right indicator, three viewport widths')
++  } finally { if (browser) await browser.close(); await server.close() }
++})().catch(e => { console.error(e); process.exitCode = 1 })
