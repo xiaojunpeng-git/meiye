@@ -2824,7 +2824,8 @@ onBeforeUnmount(() => {
             <h1>{{ pageTitle }}</h1>
             <nav v-if="route.name === 'cashier-v3-presale-claim'" class="presale-header-tabs" aria-label="会员领用页签">
               <button type="button" :class="{ 'is-active': route.query.tab !== 'records' }" :aria-current="route.query.tab !== 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: undefined } })">会员领用</button>
-              <button v-if="canUseFeature('cashier.v3.inventory.presale_claim.detail')" type="button" :class="{ 'is-active': route.query.tab === 'records' }" :aria-current="route.query.tab === 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: 'records' } })">领用记录</button>
+              <!-- 领用记录属于操作权限；与列表明细及服务端读取权限保持一致。 -->
+              <button v-if="canUseCashierV3Operation('cashier.v3.inventory.presale_claim.detail')" type="button" :class="{ 'is-active': route.query.tab === 'records' }" :aria-current="route.query.tab === 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: 'records' } })">领用记录</button>
             </nav>
           </div>
         </div>
