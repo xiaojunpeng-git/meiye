@@ -379,6 +379,10 @@
 					let status = res.data.status,
 					orderId = result.order_id || '',
 					jsConfig = result.jsConfig || {};
+					// 下单页传入的可能是临时结算号；支付接口返回的 order_id 才是
+					// 当前会员可查询的真实订单号。支付发起后所有查单、跳转必须固定
+					// 使用真实订单号，避免已经扣款却用临时号得到“订单不存在”。
+					if (orderId) that.orderId = orderId;
           let qr_code=jsConfig.qr_code || '';
           let urlLink=jsConfig.url_link || '';
           if(qr_code != ''){
