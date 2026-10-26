@@ -297,6 +297,8 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.fund': false,
     'cashier.v3.care': false,
     'cashier.v3.data': false,
+    // 登录首屏须识别服务端已授权的基础报表容器；逐表叶权限仍由后端按实时规则校验。
+    'cashier.v3.basic_reports': false,
     'cashier.v3.targets': false,
     'cashier.v3.management.staff': false,
     'cashier.v3.management.rooms': false,
@@ -493,6 +495,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.fund': true,
     'cashier.v3.care': true,
     'cashier.v3.data': true,
+    'cashier.v3.basic_reports': true,
     'cashier.v3.targets': true,
     'cashier.v3.management.staff': true,
     'cashier.v3.management.rooms': true,
