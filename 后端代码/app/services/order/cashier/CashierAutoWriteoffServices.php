@@ -6,7 +6,7 @@ namespace app\services\order\cashier;
 use app\model\order\StoreOrder;
 use app\model\order\StoreOrderCartInfo;
 use app\model\product\product\StoreProduct;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\services\BaseServices;
 use app\services\order\StoreCartServices;
 use app\services\order\store\WriteOffOrderServices;
@@ -111,7 +111,7 @@ class CashierAutoWriteoffServices extends BaseServices
             }
         }
 
-        // Yeji：ORDER BY id ASC 每 product_id 取首行，对齐 value() 在唯一行场景；多行禁止无序 column 覆盖
+        // 自动核销只取当前项目默认值；旧提成表的耗卡金额不再是新服务的来源。
         $yejiPids = [];
         foreach ($cartInfos as $c) {
             $c = is_object($c) ? $c->toArray() : (array)$c;
@@ -122,7 +122,7 @@ class CashierAutoWriteoffServices extends BaseServices
                 $yejiPids[$pid] = $pid;
             }
         }
-        $yejiByPid = $this->prefetchYejiCommissionByProductIds(array_values($yejiPids));
+        $yejiByPid = LegacyCraftsmanPerformanceDefault::projectUnitsYuan(array_values($yejiPids));
         $giftShellCache = [];
 
         foreach ($cartInfos as $cartOne) {
@@ -162,7 +162,10 @@ class CashierAutoWriteoffServices extends BaseServices
                 'service_object' => $svcObj,
             ]];
 
-            $onePrice = $yejiByPid[$pid] ?? null;
+            // 卡项逐行取当前手动值；普通项目命中批量规则，缺源时沿用本次实际单价。
+            $onePrice = (int)($cartOne['cart_type'] ?? 0) === 2
+                ? $writeOffOrderServices->resolveUnitPerformancePublic($cartOne, $cartInfoDecoded)
+                : ($yejiByPid[$pid] ?? $writeOffOrderServices->resolveUnitPerformancePublic($cartOne, $cartInfoDecoded));
             $syncAll = [];
             $matchedServiceYeji = $this->findServiceYejiForCart($serviceYejiAll, $cartOne, $productId);
             if ($matchedServiceYeji) {
@@ -184,13 +187,12 @@ class CashierAutoWriteoffServices extends BaseServices
                             $totalAssigned = bcadd($totalAssigned, (string)($nvChoose['yeji'] ?? 0), 2);
                         }
                         if (bccomp($totalAssigned, (string)$syncOne['price'], 2) !== 0) {
-                            $onceYeji = bcdiv((string)$syncOne['price'], (string)$len, 2);
-                            $yu = bcsub((string)$syncOne['price'], bcmul($onceYeji, (string)$len, 2), 2);
+                            // 新服务按整数元分配，最后一人承接尾差。
+                            $parts = LegacyCraftsmanPerformanceDefault::splitYuan(
+                                (string)(int)$syncOne['price'], $len
+                            );
                             foreach ($syncOne['staffChoose'] as $nkChoose => &$nvChoose) {
-                                $nvChoose['yeji'] = $onceYeji;
-                                if ($nkChoose === $len - 1 && bccomp($yu, '0', 2) > 0) {
-                                    $nvChoose['yeji'] = bcadd($onceYeji, $yu, 2);
-                                }
+                                $nvChoose['yeji'] = $parts[$nkChoose];
                             }
                             unset($nvChoose);
                         }
@@ -278,43 +280,6 @@ class CashierAutoWriteoffServices extends BaseServices
         return $hit;
     }
 
-    /**
-     * 批量取 yeji：每个 product_id 取 id 最小的一行（ORDER BY id ASC），与 value() 在单行时一致。
-     * 若发现同 product_id 多行，打日志告警，不以无序 column 覆盖。
-     * @param list<int> $productIds
-     * @return array<int, mixed> product_id => yeji
-     */
-    protected function prefetchYejiCommissionByProductIds(array $productIds): array
-    {
-        $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds))));
-        if (!$productIds) {
-            return [];
-        }
-        $rows = YejiCommission::whereIn('product_id', $productIds)
-            ->order('id', 'asc')
-            ->field('id,product_id,yeji')
-            ->select()
-            ->toArray();
-        $map = [];
-        $dup = [];
-        foreach ($rows as $row) {
-            $pid = (int)($row['product_id'] ?? 0);
-            if ($pid <= 0) {
-                continue;
-            }
-            if (!array_key_exists($pid, $map)) {
-                $map[$pid] = $row['yeji'] ?? null;
-            } else {
-                $dup[$pid] = true;
-            }
-        }
-        if ($dup) {
-            \think\facade\Log::warning('yeji_commission duplicate product_id; using ORDER BY id ASC first row', [
-                'product_ids' => array_keys($dup),
-            ]);
-        }
-        return $map;
-    }
 
     /**
      * 匹配手艺人业绩：优先 cart_id / old_cart_id，拆单后兜底 goods_id

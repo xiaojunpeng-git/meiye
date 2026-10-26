@@ -205,7 +205,8 @@ class BatchWriteoffServices extends BaseServices
                         'available_times' => $available,
                         'pay_price' => $payPrice,
                         'next_writeoff_amount' => $nextAmount,
-                        'unit_performance' => (float)$writeOffServices->resolveUnitPerformancePublic($cart, $decoded),
+                        // 已售卡按此持卡实例的当前卡内项目取值，不能猜同订单另一张卡。
+                        'unit_performance' => (float)$writeOffServices->resolveUnitPerformancePublic($cart, $decoded, (int)$holder['id']),
                         'write_start' => $writeStart,
                         'write_end' => $writeEnd,
                         'expired' => $expired ? 1 : 0,
@@ -474,6 +475,7 @@ class BatchWriteoffServices extends BaseServices
                         $cartIds[] = [
                             'cart_id' => $item['cart_id'],
                             'cart_num' => (int)$item['cart_num'],
+                            'holder_id' => (int)$item['holder_id'],
                             'service_object' => $item['service_object'] ?? '本人',
                         ];
                         if (!empty($item['sync']) && is_array($item['sync'])) {

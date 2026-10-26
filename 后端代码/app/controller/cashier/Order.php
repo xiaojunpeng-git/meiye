@@ -21,7 +21,7 @@ use app\model\store\SystemStoreStaff;
 use app\model\user\UserCardHolder;
 use app\model\yeji\CashSource;
 use app\model\yeji\CashType;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\Request;
 use app\services\activity\coupon\StoreCouponUserServices;
 use app\services\order\OtherOrderServices;
@@ -331,14 +331,9 @@ class Order extends AuthController
             ['product_id', '']
         ]);
         $product_id=$data['product_id'];
-        $pid=StoreProduct::where('id',$product_id)->value("pid");
-        if(empty($pid)){
-            $pid=$product_id;
-        }
-        $oncePrice=YejiCommission::where("product_id",$pid)->value("yeji");
-        if(empty($oncePrice)){
-            $oncePrice=0;
-        }
+        // 旧收银选项目也显示当前商品默认值；未配置时保留默认售价供手艺人分配。
+        $oncePrice = LegacyCraftsmanPerformanceDefault::projectUnitYuan((int)$product_id)
+            ?? (StoreProduct::where('id', $product_id)->value('price') ?? 0);
         $result['price']=$oncePrice;
         return $this->success($result);
     }

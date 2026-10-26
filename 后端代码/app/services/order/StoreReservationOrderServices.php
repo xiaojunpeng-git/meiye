@@ -22,7 +22,7 @@ use app\model\order\StoreOrderCartInfo;
 use app\model\order\StoreOrderWriteoff;
 use app\model\product\product\StoreProduct;
 use app\model\yeji\StaffYeji;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\services\BaseServices;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\cashier\v3\reservation\ImportedEntitlementReservationStoreServices;
@@ -1259,7 +1259,12 @@ class StoreReservationOrderServices extends BaseServices
         if ($cartInfo) {
             $productId = (int)($cartInfo['product_id'] ?? $reservationOrderInfo['product_id'] ?? 0);
             if ($productId) {
-                $cartInfo['yeji'] = $this->resolveProductLaborYeji($productId);
+                $cartInfo['yeji'] = $this->resolveProductLaborYeji(
+                    $productId, (int)($reservationOrderInfo['oid'] ?? 0),
+                    (int)($reservationOrderInfo['cart_info_id'] ?? 0)
+                ) ?? LegacyCraftsmanPerformanceDefault::actualUnitYuan(
+                    (string)($cartInfo['truePrice'] ?? $cartInfo['price'] ?? 0)
+                );
             }
         }
         $reservationOrderInfo['cart_info'] = $cartInfo;
@@ -1489,20 +1494,28 @@ class StoreReservationOrderServices extends BaseServices
         return $staffChoose ? json_encode($staffChoose, JSON_UNESCAPED_UNICODE) : '';
     }
 
-    /**
-     * 商品劳动业绩（与收银台消耗列表 YejiCommission 一致）
-     */
-    protected function resolveProductLaborYeji(int $productId): string
+    /** 已售卡预约按当前卡内项目取值；无显式设置才沿用本次实际单价。 */
+    protected function resolveProductLaborYeji(int $productId, int $oid = 0, int $detailId = 0): ?string
     {
         if ($productId <= 0) {
-            return '0';
+            return null;
         }
-        $pid = (int)StoreProduct::where('id', $productId)->value('pid');
-        if ($pid <= 0) {
-            $pid = $productId;
+        if ($oid > 0 && $detailId > 0) {
+            $detail = StoreOrderCartInfo::where('id', $detailId)->where('oid', $oid)->find();
+            if (!$detail) throw new ValidateException('预约项目来源不匹配，无法确定手艺人业绩');
+            // 预约可能传主项目而订单行保存子商品；核对同一主项目后只用订单行身份取值。
+            $detailProductId = (int)$detail['product_id'];
+            if ($detailProductId !== $productId) {
+                $requestedMaster = (int)(StoreProduct::where('id', $productId)->value('pid') ?: $productId);
+                $detailMaster = (int)(StoreProduct::where('id', $detailProductId)->value('pid') ?: $detailProductId);
+                if ($requestedMaster !== $detailMaster) {
+                    throw new ValidateException('预约项目与订单明细不匹配');
+                }
+            }
+            return app()->make(WriteOffOrderServices::class)
+                ->resolveUnitPerformancePublic($detail->toArray());
         }
-        $yeji = YejiCommission::where('product_id', $pid)->value('yeji');
-        return bcadd((string)($yeji ?? 0), '0', 2);
+        return LegacyCraftsmanPerformanceDefault::projectUnitYuan($productId);
     }
 
     /**
@@ -1522,14 +1535,10 @@ class StoreReservationOrderServices extends BaseServices
             unset($row);
             return $staffChoose;
         }
-        $onceYeji = bcdiv($laborYeji, (string)$len, 2);
-        $yu = bcsub($laborYeji, bcmul($onceYeji, (string)$len, 2), 2);
-        $lastNk = $len - 1;
+        // 总额按整数元守恒，尾差固定归最后一名手艺人。
+        $parts = LegacyCraftsmanPerformanceDefault::splitYuan($laborYeji, $len);
         foreach ($staffChoose as $k => &$row) {
-            $row['yeji'] = $onceYeji;
-            if (bccomp($yu, '0', 2) > 0 && $lastNk === $k) {
-                $row['yeji'] = bcadd($onceYeji, $yu, 2);
-            }
+            $row['yeji'] = $parts[$k];
         }
         unset($row);
         return $staffChoose;
@@ -1567,7 +1576,8 @@ class StoreReservationOrderServices extends BaseServices
                 }
             }
         }
-        $laborYeji = $this->resolveProductLaborYeji($productId);
+        $laborYeji = $this->resolveProductLaborYeji($productId, $oid, $cartInfoId)
+            ?? LegacyCraftsmanPerformanceDefault::actualUnitYuan((string)($cartInfo['pay_price'] ?? 0));
         $row['price'] = $laborYeji;
         $row['once_price'] = $laborYeji;
         $row['true_price'] = $laborYeji;
@@ -1603,10 +1613,9 @@ class StoreReservationOrderServices extends BaseServices
             if (empty($row['type'])) {
                 $row['type'] = 3;
             }
-            $laborYeji = $this->resolveProductLaborYeji((int)($row['goods_id'] ?? $productId));
-            if (bccomp($laborYeji, '0', 2) <= 0 && $unitPrice !== '') {
-                $laborYeji = bcadd($unitPrice, '0', 2);
-            }
+            $laborYeji = $this->resolveProductLaborYeji(
+                (int)($row['goods_id'] ?? $productId), $oid, (int)($cartInfo['id'] ?? 0)
+            ) ?? LegacyCraftsmanPerformanceDefault::actualUnitYuan($unitPrice !== '' ? $unitPrice : '0');
             $row['price'] = $laborYeji;
             $row['once_price'] = $laborYeji;
             $row['true_price'] = $laborYeji;

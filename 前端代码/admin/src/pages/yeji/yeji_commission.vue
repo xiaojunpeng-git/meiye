@@ -136,11 +136,6 @@ export default {
           minWidth: 100,
         },
         {
-          title: "耗卡业绩",
-          key: "yeji",
-          minWidth: 100,
-        },
-        {
           title: "操作",
           slot: "action",
           fixed: "right",
