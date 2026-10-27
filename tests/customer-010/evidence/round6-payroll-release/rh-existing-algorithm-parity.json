@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "mode": 0,
+  "store_id": 5,
+  "comparisons": {
+    "basic_salary_realtime": {
+      "rows": 16,
+      "sha256": "7f040e3e5bf97592e33dd10e88dd2aa19a77ae4d2749e446c86c08017bc40ce3"
+    },
+    "basic_employee_summary": {
+      "rows": 12,
+      "sha256": "1d070bb26337c62397c5c988c2a7f6d8452db65d92d88191c3b351ff67247ff5"
+    }
+  },
+  "business_writes": 0
+}

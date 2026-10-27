@@ -1,0 +1,53 @@
+{
+  "source_commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
+  "accepted_archive": "f00479df294349e92ce0a41b6cc4ec06ebafa9e3",
+  "authorized_order": [
+    "deploy rh",
+    "verify rh",
+    "push",
+    "deploy 008",
+    "deploy 010",
+    "upload merchant rh",
+    "upload merchant 008",
+    "upload merchant 010"
+  ],
+  "mini_candidates": [
+    {
+      "site": "rh",
+      "appid": "wx29d9b63c92555701",
+      "origin": "https://rh.cc3798.com",
+      "version": "0.66.0",
+      "commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
+      "pages": 31,
+      "result": "PASS"
+    },
+    {
+      "site": "008",
+      "appid": "wx14666197911d052b",
+      "origin": "https://008.cc3798.com",
+      "version": "0.66.0",
+      "commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
+      "pages": 31,
+      "result": "PASS"
+    },
+    {
+      "site": "010",
+      "appid": "wxd92c6d010bd6bf01",
+      "origin": "https://010.cc3798.com",
+      "version": "0.66.0",
+      "commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
+      "pages": 31,
+      "result": "PASS"
+    }
+  ],
+  "production_deployed": false,
+  "pushed": false,
+  "uploaded": false,
+  "pending": "Product scope clarification: sixth-round compatibility only, or migrate prior 010 report-permission/API prerequisites",
+  "known_production_contract_differences": [
+    "Legacy basic reports use cashier.v3.data grant; 010 candidate uses cashier.v3.basic_reports",
+    "Production report scope uses prior organization endpoint; 010 candidate calls /adminapi/report/basic/scope",
+    "Legacy commission modal retains required yeji field, while 010 has retired it"
+  ],
+  "source_governance": "No downloaded server code, no overwrite of dirty canonical workspace, fixed read-only Git exports only"
+}

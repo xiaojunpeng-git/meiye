@@ -1,0 +1,17 @@
+{
+  "pm_confirmed": true,
+  "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "patch_fingerprint": "ae965a66e53730f1f8bf6b873c4d3e47ee68111f4780f7f69613e9c0b7bd969a",
+  "release_files": {
+    "后端代码/app/services/product/product/StoreProductServices.php": "16aa3aa36bd69eb92441deadf6dabf767da96a4ec5cfd42078e7233a305fbc6c",
+    "scripts/payroll/release-inspect.php": "b9a9d7ca483ad068ee75cdf4d22bdcd0ffa7dd613f1682fd6a5bc5e3ae3c0ffe",
+    "scripts/payroll/release-inspect.py": "590b24ea92d670954e00ef784e9aaee0bd191259b105f2221e9da74674870d32",
+    "scripts/payroll/release-install.php": "8c31429ee9753623ba5fc789a1b6a5c9aca661c7eac7a46fa4a576c9b3b259e8",
+    "scripts/payroll/release-mini-build.cjs": "9128441f16ecd0a1d3d7fb49020984f722cfdf9172f087072e6a8388aa84db80",
+    "scripts/payroll/release-mini-overlay.cjs": "c1056fd170ef5d58d52089ea401204e832fab6df045514e472ca8baa070620f5",
+    "scripts/payroll/release-parity.py": "26aa11d9ae702035a591628f8d41440830234a605fc943492bae5be6f50f77a5",
+    "scripts/payroll/release-prepare.py": "cfedbb08e906b514c24cbfa0f64a532370e6ae3efaf3c4a5a6b11e955f22e1d3",
+    "scripts/payroll/release-run.py": "4d5d38ea270f0ef00e5deeb2999fba1b329028765d6feafcc47c6ef7e025036e"
+  },
+  "authorization": "产品经理确认补验通过，继续执行；顺序rh部署验证、push、008、010、三家指定商家端体验版"
+}

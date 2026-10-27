@@ -1,0 +1,165 @@
+{
+  "后端代码/app/controller/admin/v1/position/PositionLevel.php": {
+    "candidate_sha256": "9c86d016cd3ec8f9f6c045767c5a4978b3dc84723737d0c3e42b0c7b57ddb000",
+    "matched_old_blobs": {
+      "984e8b9143145817f9716f032602c9230a575fe68c255c3a4fcac3917ce74686": "bb3631104792f9643b172ed68a26bb509b39749a"
+    }
+  },
+  "后端代码/app/controller/admin/v1/report/UnifiedReport.php": {
+    "candidate_sha256": "cbb9147a4ec0844451124d2cfd4944232c871c532cb26a0b9bb77081f6f9a76c",
+    "matched_old_blobs": {
+      "b0552be60782d885d8bf893581c800e7b141fb19502b54230b262ae291e6c41e": "9186596c58540a763bcb3b638e310a7581234073"
+    }
+  },
+  "后端代码/app/controller/admin/v1/yeji/Yeji.php": {
+    "candidate_sha256": "f3345f5feeb01e0d22ca8c9eee814710c9848bf9dd2ebe52bf41304682394218",
+    "matched_old_blobs": {
+      "103c0ba38491a600b847003ca3df94236a521a5f86f68d7a47dc338208b536cf": "fa1f26aad6a11a12c3f60fcba6efe9e04638c17a"
+    }
+  },
+  "后端代码/app/controller/cashier/Order.php": {
+    "candidate_sha256": "1ccd9f29294ead1e522dd865eb8d1310393b92e937e7ef3e3aee607489e2c6f3",
+    "matched_old_blobs": {
+      "e24dd0adde512f230a5b4a7c37163c6aaecab9b4dfd6cb9ea696942a910ea026": "11cbdbb905c6ae6a430b7ba221e1521bbfa860d1"
+    }
+  },
+  "后端代码/app/controller/cashier/v3/Report.php": {
+    "candidate_sha256": "ef69a9faefe0b4eb0ea861b3b08e78b4b53da7160ed43bafe10e7a69cb3139d1",
+    "matched_old_blobs": {
+      "3832a331af7141a8676eb7edfa0aeebebf8e001b023456d8a6b5f617d139c32f": "704badfc214aa93ab5cfb3cd538a097ae6a8735a"
+    }
+  },
+  "后端代码/app/controller/store/yeji/Yeji.php": {
+    "candidate_sha256": "59b02071c3e7b7be4c4a27802f1f1e4cf4bd6162db625915ad1774912f46505c",
+    "matched_old_blobs": {
+      "02c394ccd9ab0ca1118da26b08bb5f9c77fc0817d55871bb976e59c5c216cabf": "a7451b77c1d1b0f59f3853a24f5de54d4acbf35c"
+    }
+  },
+  "后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php": {
+    "candidate_sha256": "74b7853ab7d396cf4328b2037d2e5a4688448fe2aab29de5a6eccb62bc784f3e",
+    "matched_old_blobs": {
+      "707c6f3953dd712d3a775b5f267c3fe939772bca1c16f405515afc61a74d87f8": "549875f9acc5cd95c76ec4b3191a90690aab78b5"
+    }
+  },
+  "后端代码/app/jobs/order/SpliteOrderAfterJob.php": {
+    "candidate_sha256": "3a6ebdb999338ca761217de681df944d0ca0fc9491e918e85fd0ce0181537f02",
+    "matched_old_blobs": {
+      "d1989cac70d17bb089721831252bdc52b9ff89381972b61d842374d8a83afefa": "ebfda0ecc77a759b752f33d395b1eb6c066bc150"
+    }
+  },
+  "后端代码/app/services/cashier/v3/permission/CashierV3FeatureResolver.php": {
+    "candidate_sha256": "4211af0e16fa2a9c2fd8a5c450f868871aaf22a26b8c698ad7dec2702f7781bf",
+    "matched_old_blobs": {
+      "05952328cb1fc8b13d364abfb21e97260bd211b4655b32c1c60f0e0c5b11027b": "94ebec9e67fba4f4f23cd5fcea7fc898d6b1e6e6"
+    }
+  },
+  "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php": {
+    "candidate_sha256": "9f62bfa9ace900ceea62eb4aa4304aafdd9baf599185f77d14aa71d5370fc6bb",
+    "matched_old_blobs": {
+      "4f7d858bdea6bb91bda535b075e08d0555ec926ab66ddaeff77341a32e6c4fb5": "e9956b941e455fdc8615939d641c06fe69113647"
+    }
+  },
+  "后端代码/app/services/order/BatchWriteoffServices.php": {
+    "candidate_sha256": "8a256ac636832cede54d1bb76c3dab401ab3100faeb315ed4c34545f23fec7f5",
+    "matched_old_blobs": {
+      "681dd8cc450c5957378a89db72e54a8a12441074bd7bbe4a6dfcffd83450e0bd": "91f8358d9e33c6f93a5eb6ca927cbdebfa2c06af"
+    }
+  },
+  "后端代码/app/services/order/StoreReservationOrderServices.php": {
+    "candidate_sha256": "3afae4db8770e00e40e07267beacb92062443e830d5c941cc7b98dc6ba104f61",
+    "matched_old_blobs": {
+      "14f8756bd94f59cdd5bbbed092a0c0921e5e3713e350947a6a42f1454d42442a": "83c2e98df3091981b5955780b43229a4e41eaf49"
+    }
+  },
+  "后端代码/app/services/order/cashier/CashierAutoWriteoffServices.php": {
+    "candidate_sha256": "5b6b633dedb5219ab532b84812c5dea6a1954a934c87ddce7a66f915eda2edfd",
+    "matched_old_blobs": {
+      "78f4791cc101a4ed7cf3398f38f09904bc3518a17177e7c2d6e458eb7df30d73": "03820941623d00bb65e95fc1f6c2e9affacbb35f"
+    }
+  },
+  "后端代码/app/services/order/store/WriteOffOrderServices.php": {
+    "candidate_sha256": "b7aee98dcbb2b959608f73161a99bc97d5c14c81c93ebb2df83c9fec8554d057",
+    "matched_old_blobs": {
+      "378e9f81a2135c1b850be3e908ede18e13f1620a68ff0515f5352ebeaed49e67": "a6bd6a8ca15741243804d25a2e3eab82d525e3fe"
+    }
+  },
+  "后端代码/app/services/organization/JobPositionPolicyServices.php": {
+    "candidate_sha256": "711b041ccb9f87817e0d68f844fc23e70c09f54770bd7c66b689708a4c04f752",
+    "matched_old_blobs": {
+      "b7a24b5e571ff36a481eb437696b5cf9a9ad45a6b62829c8c809bd52b5297421": "8e6d24c91b58f9e7795bc6ca6d8d3a16e22c5ebe"
+    }
+  },
+  "后端代码/app/services/organization/StorePermissionCatalogServices.php": {
+    "candidate_sha256": "81718a8d8ed4a1f8990b4facdc7a8c5dd5bc2dd857289deb17a751b2082f197e",
+    "matched_old_blobs": {
+      "f84ffa3450bcc16a758a88e04f19b171f1042fccc0ecd4195f7243d8b7d7dc3b": "657f9418a4a02bd712dfe56b0a1dd5133e8c9519"
+    }
+  },
+  "后端代码/app/services/position/PositionServices.php": {
+    "candidate_sha256": "c8deddaba7714fa9e3ed640a44619bb14ffde68ce9964dcc83dffe6ef55e2fcb",
+    "matched_old_blobs": {
+      "233bfd0c1d0dee4ec878d6a2491a9768ca2a288ae108767e1d0359b5be47436b": "46256a747d9c6fa404c24a33551890b043e6095b"
+    }
+  },
+  "后端代码/app/services/position/PositionYejiServices.php": {
+    "candidate_sha256": "0cdcf55d2e7cc3a07e3dd447590496d8f14f1f4ef46b8834a6d5e564d80b5349",
+    "matched_old_blobs": {
+      "e0d4dad002187afc27cf8d87ae5113ce4bace6753e1d5de3c79578f127a2100f": "2bd322d3f23357ffefca282dd697f58bafd9ecfd"
+    }
+  },
+  "后端代码/app/services/product/product/StoreProductServices.php": {
+    "candidate_sha256": "cacb2a10f4a0c4141aca7e6cac4716dc8a63c90f13a689fed9e0d7d2b8d304ad",
+    "matched_old_blobs": {
+      "16aa3aa36bd69eb92441deadf6dabf767da96a4ec5cfd42078e7233a305fbc6c": "7a64930b0a18812db1103014df2d4c98529bee19",
+      "08397bb6421698aa598217552744391cb7704e09d046d763c407c6add89a3878": "9588ce8727a002e94ca9e59f2e459c55affea328"
+    }
+  },
+  "后端代码/app/services/report/BasicActivityReportServices.php": {
+    "candidate_sha256": "6a25e4476941341f2675438f3cc45fe8746645e1a40ef977f1cb909bdd06ad6e",
+    "matched_old_blobs": {
+      "a6235bf0d6ff7ef2134128db8d8a3b3bb75f3d69c2a14c1599770a3de4b8077f": "80091404a8e9e351f25615ab73395536c47ae08c"
+    }
+  },
+  "后端代码/app/services/report/BasicReportHostServices.php": {
+    "candidate_sha256": "42522c827042d78f489ea96fb4c77a3313bce6c68bb3c752e668cc3b9a2f4981",
+    "matched_old_blobs": {
+      "bc35a471b13cefc2a1925e7f1273fe8b1452348f792f279a7402954ba2061150": "d970e6f9cb0eee5a67c324a3c62584008bf5ca8c"
+    }
+  },
+  "后端代码/app/services/report/BasicSalaryReportServices.php": {
+    "candidate_sha256": "162cf7437fce706f2b61f24b0667c2a1c6da154bff21a53b7e830651b41c7845",
+    "matched_old_blobs": {
+      "9aca202a79981fa4465a99677a27aa629ca1787915e7cb4d8b4c095911fc4f71": "4e9a5c0a2442378ef6a071fd0f44304a727c64e8"
+    }
+  },
+  "后端代码/app/services/report/query/BasicRegistrationWorkerContextResolver.php": {
+    "candidate_sha256": "549c8e6e2ea2d519d05011c3a2e448c5d0a42cf74ced79a245736957ff6964b3",
+    "matched_old_blobs": {
+      "903e1c85347462d5b346877366bc41d9125ee35e84a35959311a3bc0a6dc354a": "c48b5c45683beaedbaae66aa0b71c626c643de87"
+    }
+  },
+  "后端代码/app/services/system/SystemMenusServices.php": {
+    "candidate_sha256": "31dc628ca78dd58af3bbe30089207fab38560d5b4b5bc07ce35e22df3af280de",
+    "matched_old_blobs": {
+      "b151e99e17b1534fa0b2e8a2a20a3b204715e7c400365b1a26cd495f00384fe2": "ef0fb872448a84a1653e6524f951cd08a4645619"
+    }
+  },
+  "后端代码/app/services/system/config/SystemConfigServices.php": {
+    "candidate_sha256": "d80106fac7e0873f2fa225e5e28adc1aa1a351f3cf88a29f4a6623b12e5647d3",
+    "matched_old_blobs": {
+      "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8": "217aca14cc7c956cb6f33be2d0bfae1696f552a7"
+    }
+  },
+  "后端代码/app/services/yeji/YejiCommissionServices.php": {
+    "candidate_sha256": "eac0a7c0046f6d71cc58a8695471b9ebc73e740fad12a04ba265c786c1e38680",
+    "matched_old_blobs": {
+      "b65f8c1bb5aecc3788270feb0238c7c8fd8196a0c14783d2a687e7fc1c66c563": "50cb059057a771d09413e10db2c1ab2792e08dff"
+    }
+  },
+  "后端代码/route/admin.php": {
+    "candidate_sha256": "f69e1c5e4c11bd7239fd1f09ad6269b25fa605d81075501fddecf8821bf288f2",
+    "matched_old_blobs": {
+      "fd51afab8d4b72303a0aa214f2167b8848945578299859b62eeb0655685e7d1c": "b9f369ccb0b73559f30bfebddc8baffbef33dbc6"
+    }
+  }
+}

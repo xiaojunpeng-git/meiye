@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "files": 2,
+  "sha256": "aebb5ac3afd43da4ca76edc1b556fd08edec4e066fd3dd46aa82d3ded3631441",
+  "source_only_baseline_restore": true,
+  "scope_includes_prior_permission_prerequisites": true
+}
