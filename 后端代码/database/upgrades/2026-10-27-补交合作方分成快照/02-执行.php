@@ -44,9 +44,10 @@ if (isset($args['apply'])) {
             $added[] = $column;
         }
     }
-    // ThinkPHP caches table fields on first access. Force-refresh after ALTER so
-    // the same idempotent invocation can safely write the newly added snapshots.
-    if ($added !== []) Db::connect()->getSchemaInfo($table, true);
+    // ThinkPHP caches table fields on first access. Refresh on every apply, not
+    // only after ALTER: a previous interrupted run may have created the columns
+    // without completing the backfill, and its retry must remain idempotent.
+    Db::connect()->getSchemaInfo($table, true);
 }
 $schemaReady = isset($existing['partner_snapshot_frozen_at']) || isset($args['apply']);
 $pending = $schemaReady ? (int)Db::name('cashier_v3_debt_repayment_item_settlement')->alias('settlement')
