@@ -1,0 +1,20 @@
+{
+  "baseline_head": "06a4baee7b214dc76dff97f3f3bdb64ed89bc876",
+  "main_checkout_head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "main_checkout_page_sha256": "9ecc978749f4dc555af6b016dfeb524a417fa734bfe8220abaa9c7cbb279fa45",
+  "files": {
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue": "d8b4558059c12c84a645d14f11a3b41024c604a1ea4b525bd5b5fdbfaf9d0228"
+  },
+  "patch_fingerprint": "0e566c8e513526390d630394376187f43f2a77e057d255401ae5c59fc5f23653",
+  "remote": "not accessed for this supplement",
+  "deployed": false,
+  "committed": false,
+  "tests": [
+    "component isolation calculated and existing modes PASS",
+    "original commission proof retained PASS",
+    "mobile warehouse contracts PASS",
+    "H5 build PASS",
+    "mp-weixin build PASS",
+    "git diff --check PASS"
+  ]
+}

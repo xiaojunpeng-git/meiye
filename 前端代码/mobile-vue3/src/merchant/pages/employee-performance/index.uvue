@@ -135,10 +135,10 @@
 	function installProjection(payload : any, append : boolean) : void {
 		employeeName.value = String(payload.employee != null ? payload.employee.name || '员工' : '员工')
 		periodLabel.value = String(payload.period != null ? payload.period.label || '当前范围' : '当前范围')
-        // 算法由服务端开关投影决定，只隐藏手工费展示；项目数和既有金额/计数均不重算。
+        // 净销售基数仅在计算依据中展示；计算法另隐藏手工费，项目数与后端计算保持不变。
         calculated.value = payload.laborAlgorithm != null && payload.laborAlgorithm.code === 'project_tiers'
         let nextMetrics = Array.isArray(payload.metrics) ? payload.metrics : []
-        metrics.value = calculated.value ? nextMetrics.filter((metric : any) => metric.code !== 'staff_labor_fee') : nextMetrics
+        metrics.value = nextMetrics.filter((metric : any) => metric.code !== 'staff_net_sales' && (!calculated.value || metric.code !== 'staff_labor_fee'))
         if (!append) expandedFact.value = ''
 		let nextDetails = Array.isArray(payload.details) ? payload.details : []
 		details.value = append ? details.value.concat(nextDetails) : nextDetails
