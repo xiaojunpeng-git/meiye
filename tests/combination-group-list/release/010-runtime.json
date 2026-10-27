@@ -1,0 +1,32 @@
+{
+  "site": "010",
+  "domain": "010.cc3798.com",
+  "database": "mohe_010_app",
+  "version": "5.7.44",
+  "environment": "f9523832d80fc50e35eb0355cfcb6e06aade6d5f5a15788b973c00c0f458de4a",
+  "migration": {
+    "upgrade_key": "20261027-basic-salary-manual-freeze",
+    "code_version": "e888c787e5d921284d18879167015d3431ce1a5c",
+    "executed_at": "2026-10-27 17:49:08"
+  },
+  "result": "PASS",
+  "list_count": 21,
+  "page_rows": 20,
+  "export_rows": 21,
+  "columns": [
+    "门店名称",
+    "团长",
+    "类型",
+    "手机号码",
+    "拼团名称",
+    "品项名称",
+    "拼团单价",
+    "拼团总数",
+    "参加人数",
+    "到期时间",
+    "状态"
+  ],
+  "deny_all_valid": true,
+  "financial_commands": 0,
+  "authenticated_http_tested": false
+}

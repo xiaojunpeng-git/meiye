@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "refs": [
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.33283ef6.js",
+    "/view_admin/js/app.2baaf85d.js"
+  ],
+  "unauthenticatedResponse": "{\"status\":410000,\"msg\":\"请登录\",\"data\":[]}",
+  "financialCommands": 0
+}
