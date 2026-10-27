@@ -1,0 +1,41 @@
+{
+  "site": "010",
+  "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+  "deploymentCommit": "9a0ac8f36280acd38d906e6ccb23b5a797aade47",
+  "sourceTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+  "targets": {
+    "app/services/product/product/StoreProductServices.php": {
+      "before": "cacb2a10f4a0c4141aca7e6cac4716dc8a63c90f13a689fed9e0d7d2b8d304ad",
+      "after": "16aa3aa36bd69eb92441deadf6dabf767da96a4ec5cfd42078e7233a305fbc6c"
+    },
+    "public/view_admin/css/chunk-38445f6a.a6bfddcd.css": {
+      "before": null,
+      "after": "0eb6c996380a417ee273275d27d9a6219ebfdbb9eacfdc11e6195e148ef3ce17"
+    },
+    "public/view_admin/css/chunk-a2fe0924.addea187.css": {
+      "before": null,
+      "after": "52fc6d740f77a5827016cc2d7b93932cb203f51b0f65786ecfb2115ebc326049"
+    },
+    "public/view_admin/js/app.5315a49e.js": {
+      "before": null,
+      "after": "6f8bca13a6d7376febe535efd38f24f8cf2dd020629215b5af1ff40fea282204"
+    },
+    "public/view_admin/js/chunk-0f56252a.abfa9628.js": {
+      "before": null,
+      "after": "109635e61441932e40f37abfb0d151efc6cdc1052b69c3e19208601e91d67ca8"
+    },
+    "public/view_admin/js/chunk-38445f6a.d1326289.js": {
+      "before": null,
+      "after": "256c932e7a3a9f3c1f1477d6c08dd2437003d665b3d5fbb270e44db351b58c38"
+    },
+    "public/view_admin/js/chunk-a2fe0924.76e25c89.js": {
+      "before": null,
+      "after": "3ab0620a462cafc7060fd32417586f56579b8eb2d174e8ccd1fe856a3e130032"
+    },
+    "public/system.html": {
+      "before": "96ca8a35676084b9ef0a0d5136cb36db26bcf95f3e0819969a1d496af8e916fd",
+      "after": "b065d8f217ec80ba176bc24c9bd6bab3f8f2fd9b1e98f3ef6f5aa9914248df82"
+    }
+  },
+  "scope": "R37-00002 only; no DB/config mutations; preserve 010 menu style, R68 link options and all other deployed functions"
+}

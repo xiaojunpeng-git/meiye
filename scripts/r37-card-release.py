@@ -43,16 +43,21 @@ def commit():
  finally:Path(idx).unlink(missing_ok=True)
 
 def deploy(s):
- builds((s,));info=read('commit.json');c=info['commit'];p=plan(s);variant=read('trees.json')['siteVariants'][s];b=read(variant+'/candidate-admin-build.json');baseline=read('canonical-runtime-baseline.json') if s!='010' else read('styled/baseline-admin-build.json');before=read(s+'-before.json');assert probe(s)==before,'LIVE_BASELINE_CHANGED';assert read(s+'-preflight.json')['result']=='PASS'
+ builds((s,));info=read('commit.json');c=info['commit'];p=plan(s);variant=read('trees.json')['siteVariants'][s];b=read(variant+'/candidate-admin-build.json');baseline=read('canonical-runtime-baseline.json') if s!='010' else {'assets':{}};before=read(s+'-before.json');assert probe(s)==before,'LIVE_BASELINE_CHANGED';assert read(s+'-preflight.json')['result']=='PASS'
  if s=='008':assert read('rh-verified.json')['result']=='PASS'and read('push.json')['result']=='PASS'
  if s=='010':assert read('008-verified.json')['result']=='PASS'
- root=before['root'];d='/www/backups/'+s+'/r37-card-labor-'+c[:8];backend=p['backendPaths'][0].removeprefix('后端代码/');files={backend:g('show',c+':'+p['backendPaths'][0])}
+ deployment_commit=read('010-source.json')['commit'] if s=='010' else c
+ # 010使用补验后保留现网默认业绩的合并提交，禁止以瑞昊文件覆盖该站已上线功能。
+ assert g('rev-parse',deployment_commit+':'+p['paths'][0])==g('rev-parse',p['candidateTree']+':'+p['paths'][0])
+ root=before['root'];d='/www/backups/'+s+'/r37-card-labor-'+c[:8];backend=p['backendPaths'][0].removeprefix('后端代码/');files={backend:g('show',deployment_commit+':'+p['backendPaths'][0])}
  # 只发布候选相对完整基线变化的派生文件；不覆盖favicon、图片或客户独立公共资源。
  for n,h in b['assets'].items():
+  # 010原包已更新，逐文件读取现网CAS，仅发布HTML与JS/CSS，不覆盖客户图片等公共资源。
+  if s=='010' and not (n=='system.html' or (n.startswith('view_admin/') and n.endswith(('.js','.css')))):continue
   if baseline['assets'].get(n)==h:continue
   assert n=='system.html'or n.startswith('view_admin/'),n;data=(Path(b['output'])/n).read_bytes();assert sha(data)==h;files['public/'+n]=data
  encoded=base64.b64encode(json.dumps(list(files)).encode()).decode();php="<?php $r='"+root+"';$o=[];foreach(json_decode(base64_decode('"+encoded+"'),true)as$n)$o[$n]=is_file($r.'/'.$n)?hash_file('sha256',$r.'/'.$n):null;echo json_encode($o);";old=json.loads(ssh(s,'/www/server/php/74/bin/php',php.encode()));front=next(x for x in before['frontends']if x['kind']=='admin'and x['root']==root);assert old[front['entry']]==front['sha256']and old[backend]==before['backend'][backend];files={n:data for n,data in files.items()if old[n]!=sha(data)}
- manifest={'site':s,'commit':c,'sourceTree':p['candidateTree'],'targets':dict(sorted({n:{'before':old[n],'after':sha(data)}for n,data in files.items()}.items(),key=lambda x:(x[0]=='public/system.html',x[0]))),'scope':'R37-00002 only; no DB/config mutations; preserve 010 menu style, R68 link options and all other deployed functions'}
+ manifest={'site':s,'commit':c,'deploymentCommit':deployment_commit,'sourceTree':p['candidateTree'],'targets':dict(sorted({n:{'before':old[n],'after':sha(data)}for n,data in files.items()}.items(),key=lambda x:(x[0]=='public/system.html',x[0]))),'scope':'R37-00002 only; no DB/config mutations; preserve 010 menu style, R68 link options and all other deployed functions'}
  payload=io.BytesIO()
  with tarfile.open(fileobj=payload,mode='w:gz')as tar:
   for n,data in [('payload/'+n,data)for n,data in files.items()]+[('payload/manifest.json',json.dumps(manifest).encode()),('install.php',Path('scripts/r37-card-release-install.php').read_bytes())]:item=tarfile.TarInfo(n);item.size=len(data);item.mode=0o600;tar.addfile(item,io.BytesIO(data))
@@ -67,7 +72,7 @@ def deploy(s):
  subprocess.run([sys.executable,'scripts/r37-card-release-public.py',s],check=True);print('FILES/RUNTIME/PUBLIC PASS; browser proof required',s,flush=True)
 
 def finish(s):
- info=read('commit.json');assert read(s+'-public.json')['result']=='PASS'and read(s+'-browser.json')['result']=='PASS';assert probe(s)==read(s+'-after.json');save(s+'-verified.json',{'site':s,'commit':info['commit'],'result':'PASS','sourceTree':plan(s)['candidateTree'],'rollback':'/www/backups/'+s+'/r37-card-labor-'+info['commit'][:8],'existingFunctionsPreserved':True,'configurationAndCardFeesUnchanged':True,'businessWrites':0,'timeUTC':datetime.datetime.now(datetime.timezone.utc).isoformat()});print('DEPLOY VERIFIED',s,flush=True)
+ info=read('commit.json');assert read(s+'-public.json')['result']=='PASS'and read(s+'-browser.json')['result']=='PASS';assert probe(s)==read(s+'-after.json');save(s+'-verified.json',{'site':s,'commit':info['commit'],'deploymentCommit':read('010-source.json')['commit'] if s=='010' else info['commit'],'result':'PASS','sourceTree':plan(s)['candidateTree'],'rollback':'/www/backups/'+s+'/r37-card-labor-'+info['commit'][:8],'existingFunctionsPreserved':True,'configurationAndCardFeesUnchanged':True,'businessWrites':0,'timeUTC':datetime.datetime.now(datetime.timezone.utc).isoformat()});print('DEPLOY VERIFIED',s,flush=True)
 def push():
  i=read('commit.json');assert read('rh-verified.json')['result']=='PASS';g('push','origin','refs/heads/'+BRANCH+':refs/heads/'+BRANCH);assert g('ls-remote','origin','refs/heads/'+BRANCH).decode().split()[0]==i['commit'];save('push.json',{'commit':i['commit'],'result':'PASS'});print('PUSH PASS',flush=True)
 if __name__=='__main__':

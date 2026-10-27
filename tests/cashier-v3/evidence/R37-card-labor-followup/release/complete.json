@@ -2,10 +2,9 @@
   "round": 37,
   "closure": "R37-00002",
   "sourceCommit": "eb178be21ce8bc5e09c49aab37039813648ad307",
-  "result": "PARTIAL_010_REACCEPTANCE_PENDING",
-  "pending": [
-    "010"
-  ],
+  "merged010Commit": "9a0ac8f36280acd38d906e6ccb23b5a797aade47",
+  "result": "PASS",
+  "pending": [],
   "instances": {
     "rh": {
       "site": "rh",
@@ -28,8 +27,20 @@
       "configurationAndCardFeesUnchanged": true,
       "businessWrites": 0,
       "timeUTC": "2026-10-26T20:45:11.501089+00:00"
+    },
+    "010": {
+      "site": "010",
+      "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+      "deploymentCommit": "9a0ac8f36280acd38d906e6ccb23b5a797aade47",
+      "result": "PASS",
+      "sourceTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+      "rollback": "/www/backups/010/r37-card-labor-eb178be2",
+      "existingFunctionsPreserved": true,
+      "configurationAndCardFeesUnchanged": true,
+      "businessWrites": 0,
+      "timeUTC": "2026-10-27T00:59:10.147892+00:00"
     }
   },
-  "finishedAtUTC": "2026-10-26T20:46:33.758455+00:00",
-  "configuration": "配置值不变，无数据库写入"
+  "finishedAtUTC": "2026-10-27T00:59:46.913544+00:00",
+  "configuration": "配置及卡内金额不变，无数据库写入"
 }

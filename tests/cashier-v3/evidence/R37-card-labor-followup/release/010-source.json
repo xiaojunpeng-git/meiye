@@ -1,0 +1,16 @@
+{
+  "commit": "9a0ac8f36280acd38d906e6ccb23b5a797aade47",
+  "baselineCommit": "3a1e5fca36337d5eec9c430306091e8c5fa72139",
+  "candidateTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+  "paths": [
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "sharedHEADAndIndexUntouched": true,
+  "acceptance": {
+    "approved": true,
+    "candidateTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+    "userQuote": "确认010合并候选通过并部署",
+    "timeUTC": "2026-10-27T00:54:25.620754+00:00"
+  }
+}
