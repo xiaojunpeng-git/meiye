@@ -139,6 +139,10 @@ class CanonicalUserIdentityServices extends BaseServices
                 $this->releaseIdentity($oldIdentity, $audit, 'RELEASE');
             }
             $this->bindReservedIdentity($newIdentity, $uid, $phone, $audit, 'BIND');
+            // 真正换号才撤销登录；重复保存同号不踢人，初次补号仍走原绑定流程。
+            if ((string)$user['phone'] !== '' && (string)$user['phone'] !== $phone) {
+                app()->make(MemberPhoneResetServices::class)->revokeLocked($uid, $audit);
+            }
             return $uid;
         });
     }
@@ -166,6 +170,9 @@ class CanonicalUserIdentityServices extends BaseServices
                 $this->releaseIdentity($identity, $audit, 'RELEASE_ON_PHONE_CLEAR');
             }
             Db::name('user')->where('uid', $uid)->update(['phone' => '']);
+            if ($oldPhone !== '') {
+                app()->make(MemberPhoneResetServices::class)->revokeLocked($uid, $audit);
+            }
         });
     }
 

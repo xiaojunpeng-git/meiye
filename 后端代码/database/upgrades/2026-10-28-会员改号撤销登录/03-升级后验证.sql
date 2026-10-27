@@ -1,0 +1,6 @@
+-- 只读验证，表和查询索引均须存在；不输出会员号码或微信身份。
+SELECT CASE WHEN COUNT(*) = 1 THEN 'POSTCHECK_TABLE_OK' ELSE 'STOP_RESET_TABLE_MISSING' END AS result
+ FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'eb_member_phone_login_reset';
+SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX FROM information_schema.STATISTICS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'eb_member_phone_login_reset'
+ ORDER BY INDEX_NAME, SEQ_IN_INDEX;

@@ -1,0 +1,18 @@
+PASS real headimgurl column is NOT NULL
+PASS new account without avatar persists an empty string through real DAO
+PASS missing update omits avatar
+PASS existing account preserves original avatar through real DAO
+PASS missing update omits avatar
+PASS existing account preserves original avatar through real DAO
+PASS provided avatar still updates normally
+PASS all fabricated rows rolled back
+AVATAR_DATABASE_PASS; no provider calls, no real account authorization
+PASS MP single-page login save enters member centre once
+PASS MP deep-link save returns to its caller once
+PASS failed return falls back to member centre
+PASS unrelated profile modal keeps its existing configured return
+PASS H5 existing profile return remains unchanged
+PASS failed save stays on profile form
+PASS missing phone authorization still blocks business navigation
+PASS close-profile existing success path retained
+LOGIN_NAVIGATION_FLOW_PASS

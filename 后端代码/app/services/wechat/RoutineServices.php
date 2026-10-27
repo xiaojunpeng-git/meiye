@@ -322,7 +322,10 @@ class RoutineServices extends BaseServices
             throw new ValidateException('获取用户信息失败');
         }
 		$uid = (int)$user['uid'];
-        $token = $this->createToken($uid, $userType, $user['pwd']);
+        // proof 属于本次已验证登录，不随用户资料返回，也不能签发时重新认领新代际。
+        $proof = $user['_member_login_proof'] ?? '';
+        unset($user['_member_login_proof']);
+        $token = $this->createToken($uid, $userType, $user['pwd'], $proof);
         if (!$token) {
             throw new ValidateException('登录失败!');
         }

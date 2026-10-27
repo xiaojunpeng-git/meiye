@@ -66,10 +66,18 @@ abstract class BaseServices
      * @param $type
      * @return array
      */
-    public function createToken(int $id, $type, string $pwd = '')
+    public function createToken(int $id, $type, string $pwd = '', ?string $memberProof = null)
     {
         /** @var JwtAuth $jwtAuth */
         $jwtAuth = app()->make(JwtAuth::class);
+        // 只处理会员身份，绝不把同数字 ID 的平台/员工/门店 token 当作会员撤销。
+        if (in_array($type, ['api', 'routine', 'wechat'], true)) {
+            return app()->make(\app\services\user\MemberPhoneResetServices::class)->issue(
+                $id, $memberProof, function (string $proof) use ($jwtAuth, $id, $type, $pwd): array {
+                    return $jwtAuth->createToken($id, $type, ['auth' => md5($pwd), 'member_login_nonce' => $proof]);
+                }
+            );
+        }
         return $jwtAuth->createToken($id, $type, ['auth' => md5($pwd)]);
     }
 

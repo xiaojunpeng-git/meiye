@@ -81,6 +81,15 @@ class UserAuthServices extends BaseServices
             throw new AuthException('登录状态有误,请重新登录', 410002);
         }
 
+        // 数据库撤销校验不能被 user 缓存或旧 token 桶绕过；只影响会员 API。
+        try {
+            app()->make(MemberPhoneResetServices::class)->assertToken((int)$user->uid, (string)($tokenData['member_login_nonce'] ?? ''));
+        } catch (AuthException $e) {
+            // 旧凭证首次再用时清掉其令牌桶；未再使用的其他旧凭证也仍由数据库门禁拒绝。
+            CacheService::clearToken($md5Token);
+            throw $e;
+        }
+
         //有密码在检测
         if ($user['pwd'] != md5('123456') && $auth !== md5($user['pwd'])) {
             throw new AuthException('登录已过期,请重新登录', 410001);

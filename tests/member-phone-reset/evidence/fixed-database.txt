@@ -1,0 +1,35 @@
+PASS legacy token accepted before any change
+PASS real JWT Redis bucket and API parser accept original session
+PASS saving unchanged phone does not revoke
+PASS rollback preserves old phone and login generation
+PASS rollback preserves original WeChat binding
+PASS phone change creates durable unverified revocation
+PASS old WeChat binding removed with historical row retained
+PASS audit links original member to revoked historical binding
+PASS old openid no longer resolves original member
+PASS pre-change legacy session immediately denied even with warm user cache
+PASS all original mini sessions denied
+PASS original H5 member session denied
+PASS cannot mint replacement token before phone authorization
+PASS shared token factory leaves same numeric platform identity outside member revocation
+PASS old verified phone cannot reclaim changed member
+PASS stale authorization cache without phone cannot clear gate
+PASS silent login requires fresh phone grant
+PASS same original WeChat using old phone resolves separate empty account, never original assets
+PASS old number can enter only its separate member; original revocation does not block unrelated UID
+PASS new authorized phone returns exact original UID through real OAuth service
+PASS new phone authorization unlocks current generation
+PASS actual mini login response strips internal proof from member profile
+PASS new authorized session enters original account
+PASS new authorization never revives old session
+PASS login started before phone change cannot mint token afterwards
+PASS fresh authorization creates one active binding without reviving historical row
+PASS original phone updated; UID balance and points unchanged
+PASS duplicate target phone rejects atomically without revoking current valid login
+PASS changing back to old digits still creates a distinct revocation
+PASS second phone change invalidates the newly issued session too
+PASS initial legacy token stays invalid after digits change back
+PASS clearing phone also requires reauthorization
+PASS all synthetic database facts rolled back
+MEMBER_PHONE_RESET_DATABASE_PASS 33 checks; no provider calls or production data changes
+FIXED_SOURCE_PROVENANCE_PASS

@@ -382,6 +382,13 @@ class WechatUserServices extends BaseServices
 				/** @var UserServices $userServices */
 				$userServices = app()->make(UserServices::class);
 				$user = $userServices->getUserInfo($uid);
+
+                // 改号期间即使有旧授权缓存也不能静默进入；proof 只在内存传给签发边界。
+                if ($user) {
+                    $proof = app()->make(\app\services\user\MemberPhoneResetServices::class)->silentProof((int)$uid);
+                    if ($proof === null) return [];
+                    $user['_member_login_proof'] = $proof;
+                }
 				if (isset($user['status']) && !$user['status'])
 					throw new AuthException('您已被禁止登录，请联系管理员', 410020);
 			}
@@ -482,6 +489,9 @@ class WechatUserServices extends BaseServices
         $wechatInfo['user_type'] = $userType;
         //user表存在和wechat_user表同时存在
         return $this->transaction(function () use ($openid, $uid, $userInfo, $wechatInfo, $userServices, $spread_uid, $userType) {
+            $security = app()->make(\app\services\user\MemberPhoneResetServices::class);
+            // 选择账号后在写入前加锁重验，不能信任事务外查到的旧手机号/微信关系。
+            $proof = $uid ? $security->authorizeWechatLocked($uid, trim((string)($wechatInfo['phone'] ?? ''))) : '';
             $wechatInfo['spread_uid'] = $spread_uid;
             $wechatInfo['uid'] = $uid;
             if ($userInfo) {
@@ -534,6 +544,7 @@ class WechatUserServices extends BaseServices
                     throw new AuthException('生成微信用户失败!');
                 }
             }
+            $userInfo['_member_login_proof'] = $proof;
             return $userInfo;
         });
     }

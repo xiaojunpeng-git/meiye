@@ -1,0 +1,35 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "parent": "9ab7ade9279b646da5e7baa2f4e1f3cd39833e81",
+  "sourceTree": "5c4e506b2c8d2d33f8ace53bde3860ef068f9d7f",
+  "patchSHA256": "857aedc9283b73e11ba00b0f185bdd5262e75387d89bc21d32cf3038cbf682e3",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/BaseServices.php": "09d6847737582e85c35ec0a74892fe986ff7a7d8649f9d3bb55c3980badd7c8a",
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/CanonicalUserIdentityServices.php": "c1463ed416ec7cc6759d9ce8d552248c5962d058737cd0f5571ecfc9571894ef",
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/UserAuthServices.php": "db4435232e913aefdbdcc64a9370734a88d06c97e70784a6c91cdaea16f49197",
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/MemberPhoneResetServices.php": "5325def8b69ef265752d4c15b262f5648add3e65cbb41c53a946a958bc24f88b",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/WechatUserServices.php": "519c53e5c30a75417276181342a6329b34ad869a49f7f4b3b334e1ec860942d6",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/RoutineServices.php": "16a27ca3c3ad5d01040a94aedef77cc32e686e582b9b76a405217107eefe5398",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/WechatServices.php": "a6138742440d759b2d2119ef5f9a2f6b51dcc3656b6f9c5ee97191cba5b7f60f",
+    "\u540e\u7aef\u4ee3\u7801/mohe/utils/JwtAuth.php": "f15c921e6193eeff001124c7a06e1a43398fc21afcfcf06d124b13890dd490bb",
+    "\u540e\u7aef\u4ee3\u7801/database/upgrades/2026-10-28-\u4f1a\u5458\u6539\u53f7\u64a4\u9500\u767b\u5f55/01-\u5347\u7ea7\u524d\u68c0\u67e5.sql": "24a35a42adae451026d306066712535e661b11402be8427a6a8df6c07f2eea6d",
+    "\u540e\u7aef\u4ee3\u7801/database/upgrades/2026-10-28-\u4f1a\u5458\u6539\u53f7\u64a4\u9500\u767b\u5f55/02-\u6b63\u5f0f\u5347\u7ea7.sql": "b7db8d113882d8114cff434c4a56ee14c8785d37f2efcf082ac82e49a59bb462",
+    "\u540e\u7aef\u4ee3\u7801/database/upgrades/2026-10-28-\u4f1a\u5458\u6539\u53f7\u64a4\u9500\u767b\u5f55/03-\u5347\u7ea7\u540e\u9a8c\u8bc1.sql": "199ff759905dbc2099d9b2aafd82f2cf0a464af962323fe4810df5756af6d2de"
+  },
+  "tests": {
+    "tests/member-phone-reset/client-expiry.cjs": "c5d8bc3c2dc6c9128e903629ba35eb4807da0e561fdd21e599fad85e2561617a",
+    "tests/member-phone-reset/concurrency.php": "21c95c0a836817456ccb5161df8b47021be22b1a0494d9c50ae26e25ace62be5",
+    "tests/member-phone-reset/concurrency.py": "37aa64267f7229721cded197afce59b5c9cad0c688b996b9556d779c2cdaeef6",
+    "tests/member-phone-reset/fixed-runtime.py": "81b7d0e198826a6e8c9471dc3f7caad9311a0419271f9f8eab843bcd8271f4cc",
+    "tests/member-phone-reset/freeze.py": "02be9f54efded9dc39d12fd113e69364e7701f8825bafaa9ce885514052a159e",
+    "tests/member-phone-reset/local-database.php": "ab0eeba101c108be83e50215bdc6c83c6c1673c483f86efe1501b08345deb673"
+  },
+  "excludedPreexistingChanges": [
+    "RoutineServices: three preexisting unaccepted mandatory-phone gate changes"
+  ],
+  "remote": "not applicable; no production connection or writes",
+  "acceptedByUser": true,
+  "authorizedActions": [
+    "precise local commit only"
+  ]
+}

@@ -103,7 +103,10 @@ class JwtAuth
     {
         $tokenInfo = $this->getToken($id, $type, $params);
         $exp = $tokenInfo['params']['exp'] - $tokenInfo['params']['iat'] + 60;
-        $res = CacheService::setTokenBucket(md5($tokenInfo['token']), ['uid' => $id, 'type' => $type, 'token' => $tokenInfo['token'], 'exp' => $exp], (int)$exp, $type);
+        // 与签名 token 同步保存会员撤销证明；历史 token 无此键时只兼容未发生改号的账号。
+        $bucket = ['uid' => $id, 'type' => $type, 'token' => $tokenInfo['token'], 'exp' => $exp];
+        if (array_key_exists('member_login_nonce', $params)) $bucket['member_login_nonce'] = $params['member_login_nonce'];
+        $res = CacheService::setTokenBucket(md5($tokenInfo['token']), $bucket, (int)$exp, $type);
         if (!$res) {
             throw new AdminException(ApiErrorCode::ERR_SAVE_TOKEN);
         }
