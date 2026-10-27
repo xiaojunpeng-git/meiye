@@ -149,6 +149,21 @@ if (getenv('R61_MODE') === 'seed-ui') {
 Db::startTrans();
 try {
     $fulfill=new CombinationFulfillmentServices();$groups=new CombinationGroupManagementServices();
+    // Group orders stay hidden from consumption lists before completion. The visibility flag must
+    // not suppress a safe per-member refund, while an ordinary deleted order remains blocked.
+    $hidden=fixture(6);Db::name('store_order')->where('id',$hidden['oid'])->update(['is_del'=>1]);
+    $gateway=R61Gateway::local();$gateway->original=$hidden['channel'];$service=new CombinationRefundServices($gateway);
+    $description=$service->describe($hidden['oid']);
+    check($description['refund_action']==='refund','managed hidden group participant exposes per-user refund action');
+    $refund=$service->refundOrder($hidden['oid'],'本地隐藏拼团单退款验收',1);
+    if($refund['state']!=='success')echo 'HIDDEN REFUND DEBUG '.json_encode($refund,JSON_UNESCAPED_UNICODE)
+        .' terminal='.json_encode(Db::name('store_order_terminal_operation')->where('store_order_id',$hidden['oid'])->find(),JSON_UNESCAPED_UNICODE)."\n";
+    check($refund['state']==='success','managed hidden group participant refunds through original channel');
+    $deleted=fixture(6);Db::name('store_order')->where('id',$deleted['oid'])->update(['is_del'=>1]);
+    Db::name('combination_order_fulfillment')->where('order_id',$deleted['oid'])->delete();
+    $gateway=R61Gateway::local();$gateway->original=$deleted['channel'];
+    check((new CombinationRefundServices($gateway))->describe($deleted['oid'])['refund_action']==='',
+        'ordinary deleted order cannot borrow hidden-group refund eligibility');
     foreach([0,5,6] as $type){
         $f=fixture($type,3);$blocked=false;try{$fulfill->assertUsable($f['oid'],true);}catch(think\exception\ValidateException $e){$blocked=true;}
         check($blocked,'type '.$type.' cannot use paid rights before group completion');

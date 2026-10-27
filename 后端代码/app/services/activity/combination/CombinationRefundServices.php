@@ -32,6 +32,34 @@ class CombinationRefundServices
         return (bool)Db::name('store_pink')->where('order_id_key', $orderId)->find();
     }
 
+    /**
+     * Group orders hidden before completion are active business orders, not deleted orders.
+     * The participant and fulfillment receipt are the authoritative proof; callers must not
+     * infer this exception from type/is_del alone or ordinary deleted orders could be refunded.
+     */
+    public static function isManagedHiddenRefundOrder(array $order, bool $lock = false): bool
+    {
+        if ((int)($order['is_del'] ?? 0) !== 1 || (int)($order['type'] ?? 0) !== 3) return false;
+        $orderId = (int)($order['id'] ?? 0);
+        if ($orderId <= 0) return false;
+        $participantQuery = Db::name('store_pink')->where('order_id_key', $orderId);
+        $fulfillmentQuery = Db::name('combination_order_fulfillment')->where('order_id', $orderId);
+        if ($lock) {
+            $participantQuery->lock(true);
+            $fulfillmentQuery->lock(true);
+        }
+        $participant = $participantQuery->find();
+        $fulfillment = $fulfillmentQuery->find();
+        return (bool)$participant
+            && (int)$participant['is_virtual'] === 0
+            && (int)$participant['uid'] > 0
+            && (int)$participant['uid'] === (int)($order['uid'] ?? 0)
+            && (int)$participant['is_refund'] === 0
+            && in_array((int)$participant['status'], [1, 2], true)
+            && (bool)$fulfillment
+            && in_array((string)$fulfillment['state'], ['pending', 'issued'], true);
+    }
+
     /** No amount supplied by the browser is accepted. Admin identity comes from authenticated context. */
     public function refundOrder(int $orderId, string $reason, int $operatorId = 0, bool $retry = true, int $kickGroupId = 0): array
     {
@@ -146,17 +174,21 @@ class CombinationRefundServices
     public function assertUnused(array $order): void
     {
         $id = (int)$order['id'];
+        // Pending group purchases are intentionally hidden from ordinary consumption lists with
+        // store_order.is_del=1 until the group succeeds. That visibility flag is not a cancellation:
+        // only an authoritative real participant plus its fulfillment receipt may cross this boundary.
+        $managedHiddenOrder = self::isManagedHiddenRefundOrder($order, true);
+        $fulfillment = Db::name('combination_order_fulfillment')->where('order_id', $id)->lock(true)->find();
         if ((int)$order['store_id'] <= 0 || !Db::name('system_store')->where('id', (int)$order['store_id'])->count())
             throw new ValidateException('订单缺少可核实的交易门店，不能快捷退款');
         // Preflight authoritative payment parts before any external request or freeze.
         app()->make(StoreOrderRefundDomainServices::class)->resolveAndValidateRefundMoney(
             $order, ['refund_amount' => (string)$order['pay_price']], false);
         if (!(int)$order['paid'] || (int)$order['refund_status'] !== 0 || (int)$order['terminal_action'] !== 0
-            || (int)$order['is_del'] || (int)$order['is_system_del'] || (int)$order['pid'] !== 0
+            || ((int)$order['is_del'] !== 0 && !$managedHiddenOrder) || (int)$order['is_system_del'] || (int)$order['pid'] !== 0
             || (int)$order['status'] !== 0 || (int)$order['card_upgrade_use_oid'] !== 0
             || bccomp((string)$order['pay_price'], '0', 2) <= 0)
             throw new ValidateException('仅支持已支付且未使用、未发货、未退款的完整拼团订单');
-        $fulfillment = Db::name('combination_order_fulfillment')->where('order_id', $id)->find();
         if ($fulfillment && !in_array($fulfillment['state'], ['pending','issued'], true))
             throw new ValidateException('产品已进入发货或领取流程，不能快捷全额退款');
         if (Db::name('store_order')->where('pid', $id)->count()

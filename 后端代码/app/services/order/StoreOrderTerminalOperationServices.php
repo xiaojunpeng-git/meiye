@@ -139,7 +139,13 @@ class StoreOrderTerminalOperationServices extends BaseServices
         // channel. A converted card cannot also refund its original sale value.
         \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted($storeOrderId);
 
-        if ((int)($order['is_del'] ?? 0) === 1 || (int)($order['is_system_del'] ?? 0) === 1) {
+        // Pending group purchases use is_del=1 only to stay out of consumption lists. A refund may
+        // cross that presentation boundary only with the same authoritative participant/receipt
+        // proof used by the combination refund domain; voids and ordinary deleted orders stay blocked.
+        $managedHiddenGroupRefund = $actionType === StoreOrderTerminalOperation::ACTION_REFUND
+            && \app\services\activity\combination\CombinationRefundServices::isManagedHiddenRefundOrder($order, true);
+        if (((int)($order['is_del'] ?? 0) === 1 && !$managedHiddenGroupRefund)
+            || (int)($order['is_system_del'] ?? 0) === 1) {
             OrderTerminalError::throw(OrderTerminalError::ORDER_DELETED);
         }
         if ((int)($order['paid'] ?? 0) !== 1) {
