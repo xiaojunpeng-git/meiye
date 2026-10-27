@@ -58,5 +58,40 @@
     "remote": "origin"
   },
   "business_import": false,
-  "upload_status": "All three requests pending local WechatIDE confirmation; not yet counted uploaded"
+  "upload_status": "All three merchant 0.66.0 uploads confirmed successful by original WechatIDE task receipts",
+  "merchant_uploads": [
+    {
+      "site": "rh",
+      "appid": "wx29d9b63c92555701",
+      "origin": "https://rh.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_da7d87cc-0e20-4310-8d51-4093482686e8",
+      "package_size": 1752793,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    },
+    {
+      "site": "008",
+      "appid": "wx14666197911d052b",
+      "origin": "https://008.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_41404dbf-6ce1-43bf-97de-bc12a665dc3a",
+      "package_size": 1752794,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    },
+    {
+      "site": "010",
+      "appid": "wxd92c6d010bd6bf01",
+      "origin": "https://010.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_a1fab3e2-c2c5-4375-9f13-d358dc0decb4",
+      "package_size": 1752794,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    }
+  ]
 }

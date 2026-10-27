@@ -6,10 +6,40 @@
     "appid": "wx29d9b63c92555701",
     "version": "0.66.0",
     "taskId": "confirmation_upload_da7d87cc-0e20-4310-8d51-4093482686e8",
-    "status": "pending",
-    "polls": 0,
+    "status": "success",
+    "polls": 1,
     "user_action_required": "Confirm upload in WechatIDE",
-    "do_not_resend": true
+    "do_not_resend": true,
+    "final_response": {
+      "ok": true,
+      "tool": "polling_task_result",
+      "clientName": "Codex",
+      "result": {
+        "success": true,
+        "taskId": "confirmation_upload_da7d87cc-0e20-4310-8d51-4093482686e8",
+        "taskType": "confirmation_upload",
+        "status": "success",
+        "createdAt": 1793090073442,
+        "updatedAt": 1793090083606,
+        "detail": "execution_success",
+        "result": {
+          "info": {
+            "size": {
+              "total": 1752793,
+              "packages": [
+                {
+                  "name": "TOTAL",
+                  "size": 1752793
+                }
+              ]
+            }
+          },
+          "success": true
+        }
+      }
+    },
+    "final_status": "success",
+    "user_confirmed_in_ide": true
   },
   {
     "site": "008",
@@ -18,10 +48,40 @@
     "appid": "wx14666197911d052b",
     "version": "0.66.0",
     "taskId": "confirmation_upload_41404dbf-6ce1-43bf-97de-bc12a665dc3a",
-    "status": "pending",
-    "polls": 0,
+    "status": "success",
+    "polls": 1,
     "user_action_required": "Confirm upload in WechatIDE",
-    "do_not_resend": true
+    "do_not_resend": true,
+    "final_response": {
+      "ok": true,
+      "tool": "polling_task_result",
+      "clientName": "Codex",
+      "result": {
+        "success": true,
+        "taskId": "confirmation_upload_41404dbf-6ce1-43bf-97de-bc12a665dc3a",
+        "taskType": "confirmation_upload",
+        "status": "success",
+        "createdAt": 1793090128356,
+        "updatedAt": 1793090138544,
+        "detail": "execution_success",
+        "result": {
+          "info": {
+            "size": {
+              "total": 1752794,
+              "packages": [
+                {
+                  "name": "TOTAL",
+                  "size": 1752794
+                }
+              ]
+            }
+          },
+          "success": true
+        }
+      }
+    },
+    "final_status": "success",
+    "user_confirmed_in_ide": true
   },
   {
     "site": "010",
@@ -30,9 +90,39 @@
     "appid": "wxd92c6d010bd6bf01",
     "version": "0.66.0",
     "taskId": "confirmation_upload_a1fab3e2-c2c5-4375-9f13-d358dc0decb4",
-    "status": "pending",
-    "polls": 0,
+    "status": "success",
+    "polls": 1,
     "user_action_required": "Confirm upload in WechatIDE",
-    "do_not_resend": true
+    "do_not_resend": true,
+    "final_response": {
+      "ok": true,
+      "tool": "polling_task_result",
+      "clientName": "Codex",
+      "result": {
+        "success": true,
+        "taskId": "confirmation_upload_a1fab3e2-c2c5-4375-9f13-d358dc0decb4",
+        "taskType": "confirmation_upload",
+        "status": "success",
+        "createdAt": 1793090179140,
+        "updatedAt": 1793090189017,
+        "detail": "execution_success",
+        "result": {
+          "info": {
+            "size": {
+              "total": 1752794,
+              "packages": [
+                {
+                  "name": "TOTAL",
+                  "size": 1752794
+                }
+              ]
+            }
+          },
+          "success": true
+        }
+      }
+    },
+    "final_status": "success",
+    "user_confirmed_in_ide": true
   }
 ]
