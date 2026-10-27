@@ -1,0 +1,38 @@
+[
+  {
+    "site": "rh",
+    "tool": "upload",
+    "appid": "wx29d9b63c92555701",
+    "version": "0.68.1",
+    "project": "/private/tmp/beauty-round8-remove-net-release/rh",
+    "taskId": "confirmation_upload_a7b2949c-637a-4647-a02f-6fc75f491d43",
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload success; binding not separately verified",
+    "package_size_bytes": 1753423
+  },
+  {
+    "site": "008",
+    "tool": "upload",
+    "appid": "wx14666197911d052b",
+    "version": "0.68.1",
+    "project": "/private/tmp/beauty-round8-remove-net-release/008",
+    "taskId": "confirmation_upload_b359d413-82f6-4ff3-8222-778717fd404a",
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload success; binding not separately verified",
+    "package_size_bytes": 1753424
+  },
+  {
+    "site": "010",
+    "tool": "upload",
+    "appid": "wxd92c6d010bd6bf01",
+    "version": "0.68.1",
+    "project": "/private/tmp/beauty-round8-remove-net-release/010",
+    "taskId": "confirmation_upload_5eb97385-5a87-478f-8367-57de8a32bb43",
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload success; binding not separately verified",
+    "package_size_bytes": 1753424
+  }
+]

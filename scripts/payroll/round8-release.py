@@ -4,8 +4,9 @@ import subprocess,json,hashlib,shlex,tarfile,io,sys,re
 from datetime import datetime
 from round8_preflight import inspect
 ROOT=Path(__file__).resolve().parents[2]
-E=ROOT/'tests/customer-010/evidence/round8-release'
-SOURCE='872b22e3'
+SUPPLEMENT='--remove-net' in sys.argv
+E=ROOT/('tests/customer-010/evidence/round8-remove-net-release' if SUPPLEMENT else 'tests/customer-010/evidence/round8-release')
+SOURCE='0100bf16' if SUPPLEMENT else '872b22e3'
 HOSTS={'rh':'rh-server','008':'mohe-server','010':'mohe-server'}
 def run(args,**kw):return subprocess.check_output(args,cwd=ROOT,stderr=subprocess.PIPE,**kw)
 def sha(b):return hashlib.sha256(b).hexdigest()
@@ -13,7 +14,7 @@ def read(n):return json.loads((E/n).read_text())
 def write(n,d):(E/n).write_text(json.dumps(d,ensure_ascii=False,indent=2))
 def ssh(site,cmd,data=None):return run(['ssh','-q','-o','BatchMode=yes',HOSTS[site],cmd],input=data,timeout=180)
 def source_check():
- fixed=json.loads((ROOT/'tests/customer-010/evidence/round8-mobile-fee-project-count/fixed-candidate.json').read_text())
+ fixed=json.loads((ROOT/('tests/customer-010/evidence/round8-remove-net-card/fixed-candidate.json' if SUPPLEMENT else 'tests/customer-010/evidence/round8-mobile-fee-project-count/fixed-candidate.json')).read_text())
  for p,h in fixed['files'].items():assert sha(run(['git','show',SOURCE+':'+p]))==h and sha((ROOT/p).read_bytes())==h,'Accepted source drift: '+p
  return fixed
 def prepare():
@@ -32,7 +33,7 @@ def prepare():
   changed={p:b for p,b in files.items() if sha(b)!=current['files'][p]}
   # 两后端固定文件始终保留在只读候选中，供同事务差异测试使用。
   assert all(p in changed for p in files if p.startswith('app/'))
-  m={'site':site,'source_commit':full,'files':{p:sha(b) for p,b in changed.items()},'before':{p:current['files'][p] for p in changed},'baseline_files':prior['files']|prior['mobile_assets'],'preserve':{p:h for p,h in prior['files'].items() if p not in changed},'bounds':prior['bounds'],'business':prior['business'],'mode':prior['mode'],'position_model':prior['position_model']}
+  m={'site':site,'source_commit':full,'files':{p:sha(b) for p,b in changed.items()},'before':{p:current['files'][p] for p in changed},'baseline_files':prior['files']|prior['mobile_assets'],'preserve':{p:h for p,h in prior['files'].items() if p not in changed},'bounds':prior['bounds'],'business':prior['business'],'mode':prior['mode'],'position_model':prior['position_model'],'static_only':SUPPLEMENT}
   write(site+'-manifest.json',m)
   package=E/(site+'-payload.tar.gz')
   with tarfile.open(package,'w:gz') as archive:
@@ -52,7 +53,8 @@ def deploy(site):
  run(['scp','-q','-O',str(package),str(installer),str(probe),HOSTS[site]+':'+backup+'/'])
  command='/www/server/php/74/bin/php '+shlex.quote(backup+'/round8-release-install.php')+' '+site+' '+shlex.quote(backup)
  probe_command='/www/server/php/74/bin/php '+shlex.quote(backup+'/round8-mobile-probe.php')+' '+site+' '+shlex.quote(backup)
- restart='/etc/init.d/ruihao_swoole restart' if site=='rh' else 'systemctl restart mohe-'+site+'-swoole.service'
+ # 纯手机展示补丁不重启后端，原服务保持运行；原发布流程仍按后端范围重启。
+ restart='true' if SUPPLEMENT else ('/etc/init.d/ruihao_swoole restart' if site=='rh' else 'systemctl restart mohe-'+site+'-swoole.service')
  health="ss -lnt | grep -q ':20800 '" if site=='rh' else 'systemctl is-active --quiet mohe-'+site+'-swoole.service'
  script=f'''set -euo pipefail
 umask 077
@@ -63,7 +65,7 @@ test "$(sha256sum round8-mobile-probe.php | cut -d' ' -f1)" = '{sha(probe.read_b
 tar -xzf {package.name}
 find payload/files -type f -name '*.php' -exec /www/server/php/74/bin/php -l {{}} \\;
 {command} prepare > prepare.json
-{probe_command} parity > parity.json
+{probe_command} {'live' if SUPPLEMENT else 'parity'} > parity.json
 rollback() {{ set +e; {command} rollback; {restart}; exit 1; }}
 trap rollback ERR
 {command} install > install.json
@@ -111,7 +113,8 @@ def upload(site):
  for p,h in build['assets'].items():assert sha((output/p).read_bytes())==h,'Mini asset drift: '+p
  marker=E/(site+'-upload-started.json');assert not marker.exists(),'Reconcile original upload task before retry'
  write(marker.name,{'site':site,'appid':build['appid'],'version':build['version'],'project':str(output)})
- proc=subprocess.run(['/Applications/wechatwebdevtools.app/Contents/MacOS/wechatide','-c','Codex','upload','--project',str(output),'--upload-version',build['version'],'--desc','第8轮：计算法隐藏手工费，劳动明细始终显示项目数；保留原算法'],cwd=ROOT,text=True,capture_output=True,timeout=180)
+ description='第8轮补验：去掉净销售汇总卡片，保留提成算法与计算依据' if SUPPLEMENT else '第8轮：计算法隐藏手工费，劳动明细始终显示项目数；保留原算法'
+ proc=subprocess.run(['/Applications/wechatwebdevtools.app/Contents/MacOS/wechatide','-c','Codex','upload','--project',str(output),'--upload-version',build['version'],'--desc',description],cwd=ROOT,text=True,capture_output=True,timeout=180)
  (E/(site+'-upload-response.json')).write_text(proc.stdout);(E/(site+'-upload-tool.log')).write_text(proc.stderr)
  if proc.returncode:raise RuntimeError('Upload outcome requires inspection: '+site)
  response=json.loads(proc.stdout);write(site+'-upload-result.json',response);print(json.dumps(response,ensure_ascii=False),flush=True)

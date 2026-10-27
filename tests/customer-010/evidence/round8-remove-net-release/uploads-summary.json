@@ -1,0 +1,39 @@
+{
+  "result": "PASS",
+  "original_tasks_only": true,
+  "reuploaded": false,
+  "targets": [
+    {
+      "site": "rh",
+      "appid": "wx29d9b63c92555701",
+      "version": "0.68.1",
+      "taskId": "confirmation_upload_a7b2949c-637a-4647-a02f-6fc75f491d43",
+      "last_status": "success",
+      "uploaded": true,
+      "package_size_bytes": 1753423,
+      "experience_binding": "upload success; binding not separately verified"
+    },
+    {
+      "site": "008",
+      "appid": "wx14666197911d052b",
+      "version": "0.68.1",
+      "taskId": "confirmation_upload_b359d413-82f6-4ff3-8222-778717fd404a",
+      "last_status": "success",
+      "uploaded": true,
+      "package_size_bytes": 1753424,
+      "experience_binding": "upload success; binding not separately verified"
+    },
+    {
+      "site": "010",
+      "appid": "wxd92c6d010bd6bf01",
+      "version": "0.68.1",
+      "taskId": "confirmation_upload_5eb97385-5a87-478f-8367-57de8a32bb43",
+      "last_status": "success",
+      "uploaded": true,
+      "package_size_bytes": 1753424,
+      "experience_binding": "upload success; binding not separately verified"
+    }
+  ],
+  "review_submitted": false,
+  "production_published": false
+}

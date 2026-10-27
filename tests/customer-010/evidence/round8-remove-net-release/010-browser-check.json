@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "authenticated_http_session": true,
+  "cash_summary_card_removed": true,
+  "labor_summary_card_removed": true,
+  "labor_project_counts_visible": true,
+  "calculated_handwork_fee_hidden": true,
+  "commission_proof_preserved": true,
+  "private_screenshot": "/tmp/beauty-round8-remove-net-private/010-mobile.png"
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "site": "rh",
+    "appid": "wx29d9b63c92555701",
+    "origin": "https://rh.cc3798.com",
+    "version": "0.68.1",
+    "source_commit": "0100bf165f3eaafe0dabec6e085c8796dcdb3cde",
+    "assets": 165,
+    "result": "PASS"
+  },
+  {
+    "site": "008",
+    "appid": "wx14666197911d052b",
+    "origin": "https://008.cc3798.com",
+    "version": "0.68.1",
+    "source_commit": "0100bf165f3eaafe0dabec6e085c8796dcdb3cde",
+    "assets": 165,
+    "result": "PASS"
+  },
+  {
+    "site": "010",
+    "appid": "wxd92c6d010bd6bf01",
+    "origin": "https://010.cc3798.com",
+    "version": "0.68.1",
+    "source_commit": "0100bf165f3eaafe0dabec6e085c8796dcdb3cde",
+    "assets": 165,
+    "result": "PASS"
+  }
+]
