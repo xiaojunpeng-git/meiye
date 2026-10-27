@@ -1,0 +1,47 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "previousAcceptedCommit": "4f63da06527987786ff0f2a54c4ecd9afd8276ef",
+  "remote": "not applicable: local development only",
+  "files": {
+    "\u524d\u7aef\u4ee3\u7801/admin/src/pages/user/list/index.vue": {
+      "sha256": "0eace1d186d38c79794cff21f15821288084c293591f35090b31e4afe68980ed",
+      "gitBlob": "0bddffe7212721f53344a2e479cdbaa78186889c"
+    },
+    "\u524d\u7aef\u4ee3\u7801/cashier-v3/src/views/MemberListView.vue": {
+      "sha256": "5161a39514d7255dc8e22999cfa012c122148869694abefc4b3c6d0acdd1087d",
+      "gitBlob": "0966ae5015ac47bf8eabf26238fb86d0aa8e5b9f"
+    },
+    "\u524d\u7aef\u4ee3\u7801/cashier-v3/src/components/member/MemberCreatorPanel.vue": {
+      "sha256": "a830828d86bd4775c872795fb69ff539c4845a3d648a065dbd9226c76bbc72c8",
+      "gitBlob": "deb9ef902e28378b75b36822d2daf5515688e1c2"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/cashier/v3/member/CashierV3MemberModule.php": {
+      "sha256": "d1f6f7d8569f93df5242fc57bc7b549dded8d98926a8696335ab5330310b93d8",
+      "gitBlob": "263e6a05796b775bf81ea3e5bdb8cb613455c3e2"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/query/provider/MemberUnifiedQueryProvider.php": {
+      "sha256": "f34b196b880eb62bebe4163a76fb9f6ce775f9141327eb18fd089abd15beab32",
+      "gitBlob": "6091c369a09077efacbaba495c6ec784fb1ba18c"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php": {
+      "sha256": "47c53ef0e7cbdfa1959fec98ffe01b43a1b5ae7774e11831e5f739cc737421c6",
+      "gitBlob": "dd91f5bab2da5b937417fab791d0ced58e0370b1"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/LoginServices.php": {
+      "sha256": "979c0af516dc53166b7991188826a30f96133d78efb954dce67c7ed6e097894d",
+      "gitBlob": "5b7a1af441be587114b86693dc4346945ebf39a2"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/MemberPhoneResetServices.php": {
+      "sha256": "5325def8b69ef265752d4c15b262f5648add3e65cbb41c53a946a958bc24f88b",
+      "gitBlob": "c4ce2d36cad6c804a5ae4b58d7df6337aed2a324"
+    },
+    "\u524d\u7aef\u4ee3\u7801/cashier-v3/vite.config.js": {
+      "sha256": "d2be4f1d0fe7f9ade2da1963c23090a38ee80e8c347413ad2951da9ad00e7567",
+      "gitBlob": "7fea4a5058d30606a39861cbfbaf13e0b2cb7a17"
+    },
+    "\u524d\u7aef\u4ee3\u7801/cashier-v3/src/main.js": {
+      "sha256": "c33e0442f1baf9cdf14ffbd3840bb3dece131d645dd1a28e2661d1c6c382776e",
+      "gitBlob": "c3d0a9965115ea5962cc192ac8b879430eb3de91"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+
+> mohe-cashier-v3@0.1.0 prebuild
+> node ../../tests/cashier-v3/js/entitlement-experience-checkout-snapshot.mjs
+
+ENTITLEMENT_EXPERIENCE_CHECKOUT_SNAPSHOT=PASS checks=70
+
+> mohe-cashier-v3@0.1.0 build
+> vite build
+
+vite v4.5.14 building for production...
+transforming...
+✓ 2049 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  0.48 kB │ gzip:   0.33 kB
+dist/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+dist/assets/index-50a0065c.css                 712.43 kB │ gzip: 107.51 kB
+dist/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 269.76 kB
+dist/assets/index-51d92d41.js                2,211.40 kB │ gzip: 652.39 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.75s

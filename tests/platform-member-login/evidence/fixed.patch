@@ -1,0 +1,3726 @@
+diff --git a/前端代码/admin/src/pages/user/list/index.vue b/前端代码/admin/src/pages/user/list/index.vue
+index 0bddffe7..c996b11c 100644
+--- a/前端代码/admin/src/pages/user/list/index.vue
++++ b/前端代码/admin/src/pages/user/list/index.vue
+@@ -1,2338 +1,64 @@
+ <template>
+-  <!-- 用户-用户列表 -->
+-  <div>
+-    <Card :bordered="false" dis-hover class="ivu-mt" :padding="0">
+-      <div class="padding-add">
+-        <!-- 筛选条件 -->
+-        <Form
+-            ref="userFrom"
+-            :model="userFrom"
+-            :label-width="labelWidth"
+-            :label-position="labelPosition"
+-            @submit.native.prevent
+-        >
+-          <Row :gutter="24">
+-            <Col span="18">
+-              <Row>
+-                <Col>
+-                  <FormItem label="用户搜索：" label-for="nickname">
+-                    <Input
+-                        v-model="userFrom.nickname"
+-                        placeholder="请输入"
+-                        element-id="nickname"
+-                        clearable
+-                        class="input-add"
+-                    >
+-                      <Select
+-                          v-model="field_key"
+-                          slot="prepend"
+-                          style="width: 80px"
+-                      >
+-                        <Option value="all">全部</Option>
+-                        <Option value="uid">UID</Option>
+-                        <Option value="phone">手机号</Option>
+-                        <Option value="nickname">用户昵称</Option>
+-                      </Select>
+-                    </Input>
+-                  </FormItem>
+-                </Col>
+-                <Col>
+-                  <FormItem label="归属门店：">
+-                    <Select
+-                        v-model="userFrom.store_id"
+-                        placeholder="请选择"
+-                        clearable
+-                        class="input-add"
+-                        @on-change="userSearchs"
+-                    >
+-                      <Option v-for="item in storeList"
+-                              :value="item.id"
+-                              :key="item.id">
+-                        {{ item.name }}
+-                      </Option>
+-                    </Select>
+-                  </FormItem>
+-                </Col>
+-              </Row>
+-            </Col>
+-            <template v-if="collapse">
+-              <Col span="18">
+-                <Row>
+-                  <Col>
+-                    <FormItem label="会员等级：" label-for="level">
+-                      <Select
+-                          v-model="userFrom.level"
+-                          placeholder="请选择"
+-                          element-id="level"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <!--                        <Option value="">全部</Option>-->
+-                        <Option
+-                            :value="item.id"
+-                            v-for="(item, index) in levelList"
+-                            :key="index"
+-                        >{{ item.name }}</Option
+-                        >
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="付费会员：" label-for="isMember">
+-                      <Select
+-                          v-model="userFrom.isMember"
+-                          placeholder="请选择"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <!--                        <Option value="">全部</Option>-->
+-                        <Option value="1">是</Option>
+-                        <Option value="0">否</Option>
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="用户标签：" label-for="label_id">
+-                      <div
+-                          class="labelInput acea-row row-between-wrapper input-add"
+-                          @click="openLabelList"
+-                      >
+-                        <div>
+-                          <div v-if="dataLabel.length">
+-                            <Tag
+-                                closable
+-                                v-for="(item, index) in dataLabel"
+-                                :key="index"
+-                                @on-close="closeLabel(item)"
+-                            >{{ item.label_name }}</Tag
+-                            >
+-                          </div>
+-                          <span class="span" v-else>请选择</span>
+-                        </div>
+-                        <div class="iconfont iconxiayi"></div>
+-                      </div>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="用户分组：" label-for="group_id">
+-                      <Select
+-                          v-model="userFrom.group_id"
+-                          placeholder="请选择"
+-                          element-id="group_id"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <Option
+-                            :value="item.id"
+-                            v-for="(item, index) in groupList"
+-                            :key="index"
+-                        >{{ item.group_name }}</Option
+-                        >
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="用户身份：">
+-                      <Select
+-                          v-model="userFrom.is_promoter"
+-                          placeholder="请选择"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <!--                        <Option value="">全部</Option>-->
+-                        <Option value="1">推广员</Option>
+-                        <Option value="0">普通用户</Option>
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="性别：" label-for="sex">
+-                      <Select
+-                          v-model="userFrom.sex"
+-                          placeholder="请选择"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <!--                        <Option value="">全部</Option>-->
+-                        <Option value="1">男</Option>
+-                        <Option value="2">女</Option>
+-                        <Option value="0">未知</Option>
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="当前积分：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="integralStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="integralEnd" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="账户余额：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="nowMoneyPeiceStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="nowMoneyPeiceEnd" />
+-                    </FormItem>
+-                  </Col>
+-                  <!-- <Col>
+-                    <FormItem label="累计充值次数：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="rechargeSumStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="rechargeSumEnd" />
+-                    </FormItem>
+-                  </Col> -->
+-                  <!-- <Col>
+-                    <FormItem label="累计充值金额：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="rechargePriceStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="rechargePriceEnd" />
+-                    </FormItem>
+-                  </Col> -->
+-                  <!-- <Col>
+-                    <FormItem label="消费金额：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="payPriceStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="payPriceEnd" />
+-                    </FormItem>
+-                  </Col> -->
+-                  <Col>
+-                    <FormItem label="消费现金金额：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision="0" v-model="cashConsumePriceStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision="0" v-model="cashConsumePriceEnd" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col class="dateMedia">
+-                    <FormItem label="销售日期：">
+-                      <DatePicker
+-                          :editable="false"
+-                          @on-change="onSaleDateTime"
+-                          :value="saleDateTimeVal"
+-                          format="yyyy/MM/dd HH:mm:ss"
+-                          type="datetimerange"
+-                          placement="bottom-start"
+-                          placeholder="仅影响消费现金金额、消费次数"
+-                          class="input-add"
+-                      ></DatePicker>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="最近有消费：">
+-                      <Select v-model="recentConsumeType" placeholder="请选择" clearable class="w-118 fs-12 mr8">
+-                        <Option value="days">几天内</Option>
+-                        <Option value="range">时间段</Option>
+-                      </Select>
+-                      <InputNumber v-if="recentConsumeType === 'days'" class="w-118 fs-12" placeholder="天数" :min="1" :precision="0" v-model="recentConsumeDays" />
+-                      <DatePicker v-if="recentConsumeType === 'range'" :editable="false" @on-change="onRecentConsumeTime" :value="recentConsumeTimeVal" format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="消费时间" class="input-add" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="最近无消费：">
+-                      <Select v-model="noConsumeType" placeholder="请选择" clearable class="w-118 fs-12 mr8">
+-                        <Option value="days">几天内</Option>
+-                        <Option value="range">时间段</Option>
+-                      </Select>
+-                      <InputNumber v-if="noConsumeType === 'days'" class="w-118 fs-12" placeholder="天数" :min="1" :precision="0" v-model="noConsumeDays" />
+-                      <DatePicker v-if="noConsumeType === 'range'" :editable="false" @on-change="onNoConsumeTime" :value="noConsumeTimeVal" format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="时间范围" class="input-add" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="到店次数：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="writeoffCountStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="writeoffCountEnd" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="最近有到店：">
+-                      <Select v-model="recentWriteoffType" placeholder="请选择" clearable class="w-118 fs-12 mr8">
+-                        <Option value="days">几天内</Option>
+-                        <Option value="range">时间段</Option>
+-                      </Select>
+-                      <InputNumber v-if="recentWriteoffType === 'days'" class="w-118 fs-12" placeholder="天数" :min="1" :precision="0" v-model="recentWriteoffDays" />
+-                      <DatePicker v-if="recentWriteoffType === 'range'" :editable="false" @on-change="onRecentWriteoffTime" :value="recentWriteoffTimeVal" format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="到店时间" class="input-add" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="最近无到店：">
+-                      <Select v-model="noWriteoffType" placeholder="请选择" clearable class="w-118 fs-12 mr8">
+-                        <Option value="days">几天内</Option>
+-                        <Option value="range">时间段</Option>
+-                      </Select>
+-                      <InputNumber v-if="noWriteoffType === 'days'" class="w-118 fs-12" placeholder="天数" :min="1" :precision="0" v-model="noWriteoffDays" />
+-                      <DatePicker v-if="noWriteoffType === 'range'" :editable="false" @on-change="onNoWriteoffTime" :value="noWriteoffTimeVal" format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="时间范围" class="input-add" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="消费次数：">
+-                      <InputNumber class="w-118 fs-12" placeholder='开始' :max="9999999999" :min="0" :precision='0' v-model="payCountStart" />
+-                      ~
+-                      <InputNumber class="w-118 fs-12 mr14" placeholder='结尾' :max="9999999999" :min="0" :precision='0' v-model="payCountEnd" />
+-                    </FormItem>
+-                  </Col>
+-                  <Col class="dateMedia">
+-                    <FormItem label="访问时间：" label-for="user_time">
+-                      <DatePicker
+-                          :editable="false"
+-                          @on-change="onchangeTime"
+-                          :value="timeVal"
+-                          format="yyyy/MM/dd"
+-                          type="daterange"
+-                          placement="bottom-start"
+-                          placeholder="自定义时间"
+-                          :options="options"
+-                          class="input-add"
+-                      ></DatePicker>
+-                    </FormItem>
+-                  </Col>
+-                  <Col>
+-                    <FormItem label="访问情况：" label-for="user_time_type">
+-                      <Select
+-                          v-model="userFrom.user_time_type"
+-                          placeholder="请选择"
+-                          element-id="user_time_type"
+-                          clearable
+-                          class="input-add"
+-                          @on-change="userSearchs"
+-                      >
+-                        <!--                        <Option value="all">全部</Option>-->
+-                        <Option value="visitno">时间段未访问</Option>
+-                        <Option value="visit">时间段访问过</Option>
+-                        <Option value="add_time">首次访问</Option>
+-                      </Select>
+-                    </FormItem>
+-                  </Col>
+-                </Row>
+-              </Col>
+-            </template>
+-            <Col span="6" class="ivu-text-right userFrom" style="display: flex;justify-content: flex-end;align-items: flex-end;">
+-              <FormItem>
+-                <Button
+-                    type="primary"
+-                    label="default"
+-                    class="mr15"
+-                    @click="userSearchs"
+-                >查询</Button
+-                >
+-                <Button class="ResetSearch" @click="reset('userFrom')"
+-                >重置</Button
+-                >
+-                <a v-font="14" class="ivu-ml-8" @click="collapse = !collapse">
+-                  <template v-if="!collapse">
+-                    展开 <Icon type="ios-arrow-down" />
+-                  </template>
+-                  <template v-else>
+-                    收起 <Icon type="ios-arrow-up" />
+-                  </template>
+-                </a>
+-              </FormItem>
+-            </Col>
+-          </Row>
+-        </Form>
+-      </div>
+-    </Card>
+-    <Card :bordered="false" dis-hover class="ivu-mt listbox">
+-      <div class="new_tab">
+-        <!-- Tab栏切换 -->
+-        <Tabs v-model="headeType" @on-click="onClickTab">
+-          <TabPane
+-              :label="item.name"
+-              :name="item.type"
+-              v-for="(item, index) in headeNum"
+-              :key="index"
+-          />
+-        </Tabs>
+-      </div>
+-      <Row type="flex" justify="space-between" v-auth="['admin-user-user-add','admin-user-coupon','admin-wechat-news','admin-user-user-batch_process']">
+-        <!-- 相关操作 -->
+-        <Col span="24">
+-          <div class="flex-between-center">
+-            <div>
+-              <Button
+-                  v-auth="['admin-user-user-add']"
+-                  type="primary"
+-                  class="mr20"
+-                  @click="save"
+-              >添加用户</Button
+-              >
+-              <Tooltip
+-                  content="本页至少选中一项"
+-                  :disabled="!!checkUidList.length && isAll==0"
+-              >
+-                <Button
+-                    v-auth="['admin-user-coupon']"
+-                    type="primary"
+-                    class="mr20"
+-                    :disabled="!checkUidList.length && isAll==0"
+-                    @click="onSend"
+-                >发送优惠券</Button
+-                >
+-              </Tooltip>
+-              <Tooltip
+-                  content="本页至少选中一项"
+-                  :disabled="!!checkUidList.length && isAll==0"
+-              >
+-                <Button
+-                    v-auth="['admin-wechat-news']"
+-                    class="greens mr20"
+-                    size="default"
+-                    :disabled="!checkUidList.length && isAll==0"
+-                    @click="onSendPic"
+-                    v-if="userFrom.user_type === 'wechat'"
+-                >
+-                  <Icon type="md-list"></Icon>
+-                  发送图文消息
+-                </Button>
+-              </Tooltip>
+-              <Tooltip
+-                  content="本页至少选中一项"
+-                  :disabled="!!checkUidList.length && isAll==0"
+-              >
+-                <Button
+-                    v-auth="['admin-user-user-batch_process']"
+-                    class="mr20"
+-                    :disabled="!checkUidList.length && isAll==0"
+-                    @click="setBatch"
+-                >批量设置</Button
+-                >
+-              </Tooltip>
+-              <Button
+-                  type="primary"
+-                  class="mr20"
+-                  @click="userMove"
+-              >用户导入</Button
+-              >
+-              <Button
+-                  type="primary"
+-                  class="mr20"
+-                  @click="exports"
+-              >导出</Button
+-              >
+-            </div>
+-            <router-link :to="`${roterPre}/system/import/record/user`">用户导入记录</router-link>
+-          </div>
+-        </Col>
+-      </Row>
+-      <!-- 用户列表表格 -->
+-      <vxe-table
+-          ref="xTable"
+-          class="mt25"
+-          :loading="loading"
+-          row-id="uid"
+-          :expand-config="{accordion: true}"
+-          :checkbox-config="{reserve: true}"
+-          @checkbox-all="checkboxAll"
+-          @checkbox-change="checkboxItem"
+-          :data="userLists">
+-        <vxe-column type="" width="0"></vxe-column>
+-        <vxe-column type="expand" width="35">
+-          <template #content="{ row }">
+-            <div class="tdinfo">
+-              <Row class="expand-row">
+-                <Col span="6">
+-                  <span class="expand-key">首次访问：</span>
+-                  <span class="expand-value"> {{row.add_time | formatDate}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">上次访问：</span>
+-                  <span class="expand-value">{{row.last_time  | formatDate}}</span>
+-                </Col>
+-                <!-- <Col span="6">
+-                  <span class="expand-key">身份证号：</span>
+-                  <span class="expand-value">{{row.card_id}}</span>
+-                </Col> -->
+-                <Col span="6">
+-                  <span class="expand-key">生日：</span>
+-                  <span class="expand-value">{{row.birthday || '-'}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">真实姓名：</span>
+-                  <span class="expand-value">{{row.real_name || '-'}}</span>
+-                </Col>
+-                <!-- <Col span="6">
+-                    <span class="expand-key">手机号：</span>
+-                    <span class="expand-value">{{row.phone}}</span>
+-                </Col> -->
+-              </Row>
+-              <Row class="expand-row">
+-                <Col span="6">
+-                  <span class="expand-key">用户身份：</span>
+-                  <span class="expand-value">{{row.spread_open ? '分销员' : '-'}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">付费会员到期时间：</span>
+-                  <span class="expand-value">{{row.overdue_time || '-'}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">消费次数：</span>
+-                  <span class="expand-value">{{row.pay_count}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">标签：</span>
+-                  <span class="expand-value">{{row.labels || '-'}}</span>
+-                </Col>
+-                <!-- <Col span="6">
+-                  <span class="expand-key">累计充值次数：</span>
+-                  <span class="expand-value">{{row.recharge_sum}}</span>
+-                </Col> -->
+-                <!-- <Col span="6">
+-                  <span class="expand-key">累计充值金额：</span>
+-                  <span class="expand-value">{{row.recharge_price}}</span>
+-                </Col> -->
+-                <!-- <Col span="6">
+-                    <span class="expand-key">真实姓名：</span>
+-                    <span class="expand-value">{{row.real_name}}</span>
+-                </Col> -->
+-              </Row>
+-              <Row class="expand-row">
+-                <!-- <Col span="6">
+-                    <span class="expand-key">真实姓名：</span>
+-                    <span class="expand-value">{{row.real_name}}</span>
+-                </Col> -->
+-                <!-- <Col span="6">
+-                  <span class="expand-key">消费金额：</span>
+-                  <span class="expand-value">{{row.order_price}}</span>
+-                </Col> -->
+-                <Col span="6">
+-                  <span class="expand-key">地址：</span>
+-                  <span class="expand-value">{{row.addres || '-'}}</span>
+-                </Col>
+-                <Col span="6">
+-                  <span class="expand-key">备注：</span>
+-                  <span class="expand-value">{{row.mark || '-'}}</span>
+-                </Col>
+-              </Row>
+-              <!-- <Row class="expand-row">
+-
+-              </Row> -->
+-            </div>
+-          </template>
+-        </vxe-column>
+-        <vxe-column type="checkbox" width="100">
+-          <template #header>
+-            <div>
+-              <Dropdown transfer @on-click="allPages">
+-                <a href="javascript:void(0)" class="acea-row row-middle">
+-                  <span>全选({{isAll==1?(total-checkUidList.length):checkUidList.length}})</span>
+-                  <Icon type="ios-arrow-down"></Icon>
+-                </a>
+-                <template #list>
+-                  <DropdownMenu>
+-                    <DropdownItem name="0">当前页</DropdownItem>
+-                    <DropdownItem name="1">所有页</DropdownItem>
+-                  </DropdownMenu>
+-                </template>
+-              </Dropdown>
+-            </div>
+-          </template>
+-        </vxe-column>
+-        <vxe-column field="uid" title="UID" width="60"></vxe-column>
+-        <vxe-column field="avatars" title="头像" width="50">
+-          <template v-slot="{ row }">
+-            <viewer>
+-              <div class="tabBox_img">
+-                <img v-lazy="row.avatar" />
+-              </div>
+-            </viewer>
+-          </template>
+-        </vxe-column>
+-        <vxe-column field="nickname" title="昵称" min-width="150">
+-          <template v-slot="{ row }">
+-            <div class="acea-row">
+-              <!-- <Icon
+-                  type="md-male"
+-                  v-show="row.sex === '男'"
+-                  color="#2db7f5"
+-                  size="15"
+-                  class="mr5"
+-              />
+-              <Icon
+-                  type="md-female"
+-                  v-show="row.sex === '女'"
+-                  color="#ed4014"
+-                  size="15"
+-                  class="mr5"
+-              /> -->
+-              <div v-if="row.delete_time != null" style="color:#ed4014;">{{row.nickname}} (已注销)</div>
+-              <div v-else v-text="row.nickname"></div>
+-              <span class="iconfont icona-xingbietubiaonan ml-4 fs-12 text-wlll-2d8cf0" v-if="row.sex === '男'"></span>
+-              <span class="iconfont icona-xingbietubiaonv ml-4 fs-12 text-wlll-FF448F" v-else-if="row.sex === '女'"></span>
+-              <span class="iconfont icona-xingbietubiaobaomi ml-4 fs-12 text--w111-999" v-else></span>
+-            </div>
+-          </template>
+-        </vxe-column>
+-        <vxe-column field="real_name" title="真实姓名" min-width="90"></vxe-column>
+-        <vxe-column field="isMember" title="付费会员" min-width="90">
+-          <template v-slot="{ row }">
+-            <div>{{ row.isMember ? "是" : "否" }}</div>
+-          </template>
+-        </vxe-column>
+-        <vxe-column field="level" title="用户等级" min-width="90"></vxe-column>
+-        <vxe-column field="group_id" title="分组" min-width="100"></vxe-column>
+-        <vxe-column field="phone" title="手机号" min-width="110"></vxe-column>
+-        <vxe-column field="user_type" title="用户类型" min-width="100"></vxe-column>
+-        <vxe-column field="spread_uid_nickname" title="推荐人" min-width="100"></vxe-column>
+-        <vxe-column field="salesman_name" title="绑定店员" min-width="100"></vxe-column>
+-        <vxe-column field="belong_store_name" title="归属门店" min-width="100"></vxe-column>
+-        <vxe-column field="now_money" title="余额" min-width="100"></vxe-column>
+-        <vxe-column field="ben_money" title="本金" min-width="100"></vxe-column>
+-        <vxe-column field="give_money" title="赠送金额" min-width="100"></vxe-column>
+-        <vxe-column field="cash_consume_amount" title="消费现金金额" min-width="120"></vxe-column>
+-        <vxe-column field="cash_consume_count" title="消费次数" min-width="90"></vxe-column>
+-        <vxe-column field="writeoff_count" title="到店次数" min-width="90"></vxe-column>
+-        <vxe-column field="action" title="操作" width="230" fixed="right">
+-          <template v-slot="{ row }">
+-            <span v-auth="['admin-user-user-edit']" v-if="row.delete_time != null" style="color: #c5c8ce;">编辑</span>
+-            <a v-auth="['admin-user-user-edit']" v-else @click="edit(row)">编辑</a>
+-            <Divider v-auth="['admin-user-user-edit']" type="vertical" v-if="row.is_extend_info"/>
+-            <a v-auth="['admin-user-user-extend_info']" @click="extendInfo(row)" v-if="row.is_extend_info">信息补充</a>
+-            <Divider v-auth="['admin-user-user-extend_info']" type="vertical" />
+-            <a @click="changeMenu(row, '1')">详情</a>
+-            <Divider type="vertical" />
+-            <a v-if="row.delete_time == null" @click="openMemberTransfer(row)">调店</a>
+-            <span v-else style="color: #c5c8ce;">调店</span>
+-          </template>
+-        </vxe-column>
+-      </vxe-table>
+-      <div class="acea-row row-right page">
+-        <Page
+-            :total="total"
+-            :current="userFrom.page"
+-            show-elevator
+-            show-total
+-            @on-change="pageChange"
+-            :page-size="userFrom.limit"
+-        />
+-      </div>
+-    </Card>
+-    <!-- 调店只改变会员归属门店；原因随归属历史落库，不联动订单、卡项、余额或店员。 -->
+-    <Modal
+-        v-model="memberTransferModal"
+-        title="会员调店"
+-        width="560"
+-        :mask-closable="false"
+-        @on-cancel="resetMemberTransfer"
+-    >
+-      <Alert show-icon>仅变更会员所属门店，会员的订单、卡项、权益、余额和绑定店员不会改变。</Alert>
+-      <Form
+-          ref="memberTransferForm"
+-          :model="memberTransferForm"
+-          :rules="memberTransferRules"
+-          :label-width="100"
+-      >
+-        <FormItem label="会员">
+-          <span>{{ memberTransferForm.member_name || '-' }}</span>
+-        </FormItem>
+-        <FormItem label="当前门店">
+-          <span>{{ memberTransferForm.current_store_name || '未设置' }}</span>
+-        </FormItem>
+-        <FormItem label="目标门店" prop="store_id">
+-          <Select
+-              v-model="memberTransferForm.store_id"
+-              filterable
+-              placeholder="请选择目标门店"
+-              :loading="memberTransferOptionsLoading"
+-          >
+-            <Option
+-                v-for="store in memberTransferStoreList"
+-                :key="store.id"
+-                :value="store.id"
+-                :disabled="Number(store.id) === Number(memberTransferForm.current_store_id)"
+-            >{{ store.name }}</Option>
+-          </Select>
+-        </FormItem>
+-        <FormItem label="调店原因" prop="reason">
+-          <Input
+-              v-model="memberTransferForm.reason"
+-              type="textarea"
+-              :rows="4"
+-              :maxlength="200"
+-              show-word-limit
+-              placeholder="请输入调店原因"
+-          />
+-        </FormItem>
+-      </Form>
+-      <div slot="footer">
+-        <Button @click="resetMemberTransfer">取消</Button>
+-        <Button type="primary" :loading="memberTransferSubmitting" @click="saveMemberTransfer">保存</Button>
+-      </div>
+-    </Modal>
+-    <!-- 用户标签 -->
+-    <Modal
+-        v-model="labelListShow"
+-        scrollable
+-        title="选择用户标签"
+-        :closable="true"
+-        width="540"
+-        :footer-hide="true"
+-        :mask-closable="false"
+-    >
+-      <labelList
+-          ref="labelList"
+-          @activeData="activeData"
+-          @close="labelListClose"
+-      ></labelList>
+-    </Modal>
+-    <!-- 编辑表单 积分余额-->
+-    <edit-from
+-        ref="edits"
+-        :FromData="FromData"
+-        :userEdit="1"
+-        @submitFail="submitFail"
+-    ></edit-from>
+-    <!-- 发送优惠券-->
+-    <send-from
+-        ref="sends"
+-        :is-all="isAll"
+-        :where="userFrom"
+-        :userIds="checkUidList.join(',')"
+-    ></send-from>
+-    <!-- 会员详情-->
+-    <user-details ref="userDetails" :group-list="groupList" @cardHolderOpen="cardHolderOpen"></user-details>
+-    <!--发送图文消息 -->
+-    <Modal
+-        v-model="modal13"
+-        scrollable
+-        title="发送消息"
+-        width="1200"
+-        height="800"
+-        footer-hide
+-        class="modelBox"
+-    >
+-      <news-category
+-          v-if="modal13"
+-          :isShowSend="isShowSend"
+-          :is-all="isAll"
+-          :where="userFrom"
+-          :userIds="checkUidList.join(',')"
+-          :scrollerHeight="scrollerHeight"
+-          :contentTop="contentTop"
+-          :contentWidth="contentWidth"
+-          :maxCols="maxCols"
+-      ></news-category>
+-    </Modal>
+-    <!--修改推广人-->
+-    <Modal
+-        v-model="promoterShow"
+-        scrollable
+-        title="修改推广人"
+-        class="order_box"
+-        :closable="false"
+-    >
+-      <Form
+-          ref="formInline"
+-          :model="formInline"
+-          :label-width="100"
+-          @submit.native.prevent
+-      >
+-        <FormItem label="用户头像：" prop="image">
+-          <div class="picBox" @click="customer">
+-            <div class="pictrue" v-if="formInline.image">
+-              <img v-lazy="formInline.image" />
+-            </div>
+-            <div class="upLoad acea-row row-center-wrapper" v-else>
+-              <Icon type="ios-camera-outline" size="26" />
+-            </div>
+-          </div>
+-        </FormItem>
++  <section class="platform-member-frame">
++    <iframe ref="frame" :src="frameUrl" title="用户列表" />
++    <Modal v-model="transferOpen" title="会员调店" :mask-closable="false" :closable="!saving" :width="560">
++      <Form ref="transferForm" :model="form" :rules="rules" :label-width="96">
++        <FormItem label="会员">{{ form.member_name }}</FormItem>
++        <FormItem label="当前门店">{{ form.current_store_name || '未设置' }}</FormItem>
++        <FormItem label="目标门店" prop="store_id"><Select v-model="form.store_id" filterable :loading="loading" :disabled="saving" placeholder="请选择目标门店"><Option v-for="store in stores" :key="store.id" :value="Number(store.id)" :disabled="Number(store.id) === form.current_store_id">{{ store.name }}</Option></Select></FormItem>
++        <FormItem label="调店原因" prop="reason"><Input v-model="form.reason" type="textarea" :rows="4" :maxlength="200" show-word-limit :disabled="saving" placeholder="请输入调店原因" /></FormItem>
+       </Form>
+-      <div slot="footer">
+-        <Button type="primary" @click="putSend('formInline')">提交</Button>
+-        <Button @click="cancel('formInline')">取消</Button>
+-      </div>
+-    </Modal>
+-    <Modal
+-        v-model="customerShow"
+-        scrollable
+-        title="请选择商城用户"
+-        :closable="false"
+-        width="900"
+-    >
+-      <customerInfo
+-          v-if="customerShow"
+-          @imageObject="imageObject"
+-      ></customerInfo>
+-    </Modal>
+-    <Modal
+-        v-model="labelShow"
+-        scrollable
+-        title="选择用户标签"
+-        :closable="true"
+-        width="540"
+-        :footer-hide="true"
+-    >
+-      <userLabel :uid="labelActive.uid" @close="labelClose"></userLabel>
+-    </Modal>
+-    <Modal
+-        v-model="cardHolderShow"
+-        scrollable
+-        title="卡项详情"
+-        closable
+-        footer-hide
+-        width="900"
+-    >
+-      <cardHolder :cardHolder="cardHolderData"></cardHolder>
+-    </Modal>
+-    <!-- 批量设置 -->
+-    <Modal v-model="batchModal" title="批量设置" width="750" class-name="batch-modal" @on-visible-change="batchVisibleChange">
+-      <Alert show-icon>每次只能修改一项，如需修改多项，请多次操作。</Alert>
+-      <Row type="flex" align="middle">
+-        <Col span="4">
+-          <Menu :active-name="menuActive" width="auto" @on-select="menuSelect">
+-            <MenuItem :name="1">用户分组</MenuItem>
+-            <MenuItem :name="2">用户标签</MenuItem>
+-            <MenuItem :name="3">用户等级</MenuItem>
+-            <MenuItem :name="4">积分余额</MenuItem>
+-            <MenuItem :name="5">赠送会员</MenuItem>
+-            <MenuItem :name="6">上级推广人</MenuItem>
+-          </Menu>
+-        </Col>
+-        <Col span="20">
+-          <Form :model="batchData" :label-width="122">
+-            <FormItem v-if="menuActive === 1" label="用户分组：">
+-              <Select v-model="batchData.group_id">
+-                <Option v-for="item in groupList" :key="item.id" :value="item.id">{{ item.group_name }}</Option>
+-              </Select>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 2" label="用户标签：">
+-              <div class="select-tag" @click="openLabelList">
+-                <div v-if="batchLabel.length">
+-                  <Tag v-for="item in batchLabel" :key="item.id" closable @on-close="tagClose(item.id)">{{ item.label_name }}</Tag>
+-                </div>
+-                <span v-else class="placeholder">请选择</span>
+-                <Icon type="ios-arrow-down" />
+-              </div>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 3" label="用户等级：">
+-              <Select v-model="batchData.level_id">
+-                <Option v-for="item in levelList" :key="item.id" :value="item.id">{{ item.name }}</Option>
+-              </Select>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 4" label="修改余额：">
+-              <RadioGroup v-model="batchData.money_status">
+-                <Radio :label="1">增加</Radio>
+-                <Radio :label="2">减少</Radio>
+-              </RadioGroup>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 4" label="余额：">
+-              <InputNumber v-model="batchData.money" :min="0" :max="999999"></InputNumber>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 4" label="修改积分：">
+-              <RadioGroup v-model="batchData.integration_status">
+-                <Radio :label="1">增加</Radio>
+-                <Radio :label="2">减少</Radio>
+-              </RadioGroup>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 4" label="积分：">
+-              <InputNumber v-model="batchData.integration" :min="0" :max="999999"></InputNumber>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 5" label="修改时长：">
+-              <RadioGroup v-model="batchData.days_status">
+-                <Radio :label="1">增加</Radio>
+-                <Radio :label="2">减少</Radio>
+-              </RadioGroup>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 5" label="修改时长(天)：">
+-              <InputNumber v-model="batchData.day" :min="0" :max="999999"></InputNumber>
+-            </FormItem>
+-            <FormItem v-if="menuActive === 6" label="上级推广员：">
+-              <Input :value="spread_name" placeholder="请选择" icon="ios-arrow-down" @on-click="customer" @on-focus="customer"></Input>
+-            </FormItem>
+-          </Form>
+-        </Col>
+-      </Row>
+-      <div slot="footer">
+-        <Button @click="cancelBatch">取消</Button>
+-        <Button type="primary" @click="saveBatch">保存</Button>
+-      </div>
++      <template #footer><Button :disabled="saving" @click="transferOpen = false">取消</Button><Button type="primary" :loading="saving" @click="saveTransfer">确认调店</Button></template>
+     </Modal>
+-    <Modal
+-        v-model="importShow"
+-        scrollable
+-        :mask-closable="false"
+-        title="用户导入"
+-        footer-hide
+-        width="900"
+-    >
+-      <userImport v-if="importShow" @close="importShow = false"></userImport>
+-    </Modal>
+-  </div>
++  </section>
+ </template>
+ 
+ <script>
+-import { formatDate } from '@/utils/validate';
+-import userLabel from "../../../components/userLabel";
+-import labelList from "@/components/labelList";
+-import { mapState } from "vuex";
+-import expandRow from "./tableExpand.vue";
+-import {
+-  userList,
+-  getUserData,
+-  isShowApi,
+-  editOtherApi,
+-  giveLevelApi,
+-  userSetGroup,
+-  userGroupApi,
+-  levelListApi,
+-  userSetLabelApi,
+-  userLabelApi,
+-  userSynchro,
+-  getUserSaveForm,
+-  giveLevelTimeApi,
+-  extendInfo,
+-  batchProcess,
+-  exportUserData,
+-  memberTransferStoreOptionsApi,
+-  memberTransferStoreApi,
+-} from "@/api/user";
+-import { agentSpreadApi } from "@/api/agent";
+-import { staffListInfo } from "@/api/store";
+-import editFrom from "../../../components/from/from";
+-import sendFrom from "@/components/sendCoupons/index";
+-import userDetails from "./handle/userDetails";
+-import cardHolder from "./handle/cardHolder";
+-import newsCategory from "@/components/newsCategory/index";
+-// import city from "@/utils/city";
+-import customerInfo from "@/components/customerInfo";
+-import userImport from "./handle/userImport.vue";
+-import exportExcel from "@/utils/newToExcel.js";
+-import Setting from "@/setting";
++import { memberTransferStoreOptionsApi, memberTransferStoreApi } from '@/api/user';
++
++// 平台壳复用Vue3会员模块；调店保留原接口、原因与所属门店变更边界。
+ export default {
+-  name: "user_list",
+-  filters: {
+-    formatDate (time) {
+-      if (time !== 0) {
+-        let date = new Date(time * 1000);
+-        return formatDate(date, 'yyyy-MM-dd hh:mm');
+-      }
+-    }
+-  },
+-  components: {
+-    expandRow,
+-    editFrom,
+-    sendFrom,
+-    userDetails,
+-    cardHolder,
+-    newsCategory,
+-    customerInfo,
+-    userLabel,
+-    labelList,
+-    userImport,
+-  },
+-  data() {
+-    return {
+-      roterPre: Setting.roterPre,
+-      dataLabel: [],
+-      labelListShow: false,
+-      labelShow: false,
+-      cardHolderShow: false,
+-      cardHolderData: {},
+-      customerShow: false,
+-      promoterShow: false,
+-      labelActive: {
+-        uid: 0,
+-      },
+-      formInline: {
+-        uid: 0,
+-        spread_uid: 0,
+-        image: "",
+-      },
+-      options: {
+-        shortcuts: [
+-          {
+-            text: "今天",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  new Date(
+-                      new Date().getFullYear(),
+-                      new Date().getMonth(),
+-                      new Date().getDate()
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "昨天",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  start.setTime(
+-                      new Date(
+-                          new Date().getFullYear(),
+-                          new Date().getMonth(),
+-                          new Date().getDate() - 1
+-                      )
+-                  )
+-              );
+-              end.setTime(
+-                  end.setTime(
+-                      new Date(
+-                          new Date().getFullYear(),
+-                          new Date().getMonth(),
+-                          new Date().getDate() - 1
+-                      )
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "最近7天",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  start.setTime(
+-                      new Date(
+-                          new Date().getFullYear(),
+-                          new Date().getMonth(),
+-                          new Date().getDate() - 6
+-                      )
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "最近30天",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  start.setTime(
+-                      new Date(
+-                          new Date().getFullYear(),
+-                          new Date().getMonth(),
+-                          new Date().getDate() - 29
+-                      )
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "上月",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              const day = new Date(start.getFullYear(), start.getMonth(), 0).getDate();
+-              start.setTime(
+-                  start.setTime(
+-                      new Date(new Date().getFullYear(), new Date().getMonth()-1, 1)
+-                  )
+-              );
+-              end.setTime(
+-                  end.setTime(
+-                      new Date(new Date().getFullYear(), new Date().getMonth()-1, day)
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "本月",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  start.setTime(
+-                      new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+-                  )
+-              );
+-              return [start, end];
+-            },
+-          },
+-          {
+-            text: "本年",
+-            value() {
+-              const end = new Date();
+-              const start = new Date();
+-              start.setTime(
+-                  start.setTime(new Date(new Date().getFullYear(), 0, 1))
+-              );
+-              return [start, end];
+-            },
+-          },
+-        ],
+-      },
+-      collapse: false,
+-      headeType: "-1",
+-      headeNum: [
+-        { type: "-1", name: "全部" },
+-        { type: "wechat", name: "微信公众号" },
+-        { type: "routine", name: "微信小程序" },
+-        { type: "h5", name: "H5" },
+-        { type: "pc", name: "PC" },
+-        { type: "app", name: "APP" },
+-        { type: "cashier", name: "收银台录入" },
+-        { type: "import", name: "外部导入" },
+-      ],
+-      // address: [],
+-      // addresData: city,
+-      isShowSend: true,
+-      modal13: false,
+-      maxCols: 4,
+-      scrollerHeight: "600",
+-      contentTop: "130",
+-      contentWidth: "98%",
+-      grid2: {
+-        xl: 18,
+-        lg: 16,
+-        md: 12,
+-        sm: 24,
+-        xs: 24,
+-      },
+-      loading: false,
+-      total: 0,
+-      userFrom: {
+-        label_id: "",
+-        user_type: "",
+-        status: "",
+-        sex: "",
+-        is_promoter: "",
+-        // country: "",
+-        isMember: "",
+-        pay_count: "",
+-        user_time_type: "",
+-        user_time: "",
+-        nickname: "",
+-        // province: "",
+-        // city: "",
+-        page: 1,
+-        limit: 15,
+-        level: "",
+-        group_id: "",
+-        field_key: "",
+-        store_id:''
+-      },
+-      field_key: "",
+-      level: "",
+-      group_id: "",
+-      label_id: "",
+-      user_time_type: "",
+-      // pay_count: "",
+-      userLists: [],
+-      FromData: null,
+-      selectionList: [],
+-      user_ids: "",
+-      // selectedData: [],
+-      timeVal: [],
+-      array_ids: [],
+-      groupList: [],
+-      levelList: [],
+-      labelFrom: {
+-        page: 1,
+-        limit: "",
+-      },
+-      labelLists: [],
+-      display: "none",
+-      checkBox: false,
+-      selectionCopy: [],
+-      isCheckBox: false,
+-      isAll: 0,
+-      userId: 0,
+-      checkUidList:[],
+-      batchModal: false,
+-      menuActive: 1,
+-      batchLabel: [],
+-      batchData: {
+-        group_id: 0,
+-        label_id: [],
+-        level_id: 0,
+-        money_status: 0,
+-        money: 0,
+-        integration_status: 0,
+-        integration: 0,
+-        days_status: 1,
+-        day: 0,
+-        spread_uid: '',
+-      },
+-      spread_name: '',
+-      storeList: [],
+-      memberTransferModal: false,
+-      memberTransferSubmitting: false,
+-      memberTransferOptionsLoading: false,
+-      memberTransferStoreList: [],
+-      memberTransferForm: {
+-        uid: 0,
+-        member_name: '',
+-        current_store_id: 0,
+-        current_store_name: '',
+-        store_id: '',
+-        reason: '',
+-      },
+-      memberTransferRules: {
+-        store_id: [{ required: true, type: 'number', message: '请选择目标门店', trigger: 'change' }],
+-        reason: [
+-          { required: true, message: '请输入调店原因', trigger: 'blur' },
+-          { min: 2, max: 200, message: '调店原因请输入 2-200 个字符', trigger: 'blur' },
+-        ],
+-      },
+-      importShow: false,
+-      importCardShow: false,
+-      integralStart: null,
+-      integralEnd: null,
+-      nowMoneyPeiceStart: null,
+-      nowMoneyPeiceEnd: null,
+-      rechargeSumStart: null,
+-      rechargeSumEnd: null,
+-      rechargePriceStart: null,
+-      rechargePriceEnd: null,
+-      payPriceStart: null,
+-      payPriceEnd: null,
+-      cashConsumePriceStart: null,
+-      cashConsumePriceEnd: null,
+-      recentConsumeType: '',
+-      recentConsumeDays: null,
+-      recentConsumeTimeVal: [],
+-      noConsumeType: '',
+-      noConsumeDays: null,
+-      noConsumeTimeVal: [],
+-      writeoffCountStart: null,
+-      writeoffCountEnd: null,
+-      recentWriteoffType: '',
+-      recentWriteoffDays: null,
+-      recentWriteoffTimeVal: [],
+-      noWriteoffType: '',
+-      noWriteoffDays: null,
+-      noWriteoffTimeVal: [],
+-      payCountStart: null,
+-      payCountEnd: null,
+-      saleDateTimeVal: [],
+-    };
+-  },
+-  watch: {
+-    selectionList(value) {
+-      let arr = value.map((item) => item.uid);
+-      this.array_ids = arr;
+-      this.user_ids = arr.join();
+-    },
+-    userLists: {
+-      deep: true,
+-      handler(value) {
+-        value.forEach((item) => {
+-          this.selectionList.forEach((itm) => {
+-            if (itm.uid === item.uid) {
+-              item.checkBox = true;
+-            }
+-          });
+-        });
+-        const arr = this.userLists.filter((item) => item.checkBox);
+-        if (this.userLists.length) {
+-          this.checkBox = this.userLists.length === arr.length;
+-        } else {
+-          this.checkBox = false;
+-        }
+-      },
+-    },
++  name: 'UserList',
++  data () {
++    return { transferOpen: false, saving: false, loading: false, stores: [], form: { uid: 0, member_name: '', current_store_id: 0, current_store_name: '', store_id: '', reason: '' }, rules: { store_id: [{ required: true, type: 'number', message: '请选择目标门店', trigger: 'change' }], reason: [{ required: true, message: '请输入调店原因', trigger: 'blur' }] } };
+   },
+   computed: {
+-    ...mapState("admin/layout", ["isMobile"]),
+-    labelWidth() {
+-      return this.isMobile ? undefined : 100;
+-    },
+-    labelPosition() {
+-      return this.isMobile ? "top" : "right";
+-    },
+-  },
+-  created() {
+-    this.allStore();
+-    this.getList();
+-  },
+-  mounted() {
+-    this.userGroup();
+-    this.levelLists();
+-    this.groupLists();
++    frameUrl () {
++      const origin = String(process.env.VUE_APP_CASHIER_V3_DEV_ORIGIN || window.location.origin).replace(/\/$/, '');
++      return `${origin}/view_cashier_v3/?platformHostOrigin=${encodeURIComponent(window.location.origin)}#/platform/member-list`;
++    }
+   },
++  mounted () { window.addEventListener('message', this.receiveMemberAction); },
++  beforeDestroy () { window.removeEventListener('message', this.receiveMemberAction); },
+   methods: {
+-    allStore(){
+-      staffListInfo().then(res=>{
+-        this.storeList = res.data;
+-      }).catch(err=>{
+-        this.$Message.error(err.msg);
+-      })
+-    },
+-    /**
+-     * 打开会员调店弹窗。目标门店使用专用全集接口，避免复用列表筛选的组织范围。
+-     */
+-    openMemberTransfer(row) {
+-      if (this.$refs.memberTransferForm) {
+-        this.$refs.memberTransferForm.resetFields();
+-      }
+-      this.memberTransferForm = {
+-        uid: Number(row.uid),
+-        member_name: row.nickname || row.real_name || `会员 ${row.uid}`,
+-        current_store_id: Number(row.belong_store_id || 0),
+-        current_store_name: row.belong_store_name || '',
+-        store_id: '',
+-        reason: '',
+-      };
+-      this.memberTransferModal = true;
+-      this.memberTransferOptionsLoading = true;
+-      memberTransferStoreOptionsApi()
+-          .then((res) => {
+-            this.memberTransferStoreList = Array.isArray(res.data) ? res.data : [];
+-          })
+-          .catch((err) => {
+-            this.$Message.error(err.msg || '门店列表加载失败');
+-          })
+-          .finally(() => {
+-            this.memberTransferOptionsLoading = false;
+-          });
+-    },
+-    /**
+-     * 保存独立调店命令；提交中禁用按钮，成功后刷新列表显示新的归属门店。
+-     */
+-    saveMemberTransfer() {
+-      this.$refs.memberTransferForm.validate((valid) => {
+-        if (!valid || this.memberTransferSubmitting) return;
+-        if (Number(this.memberTransferForm.store_id) === Number(this.memberTransferForm.current_store_id)) {
+-          return this.$Message.warning('目标门店不能与当前门店相同');
+-        }
+-        this.memberTransferSubmitting = true;
+-        memberTransferStoreApi(this.memberTransferForm.uid, {
+-          store_id: Number(this.memberTransferForm.store_id),
+-          reason: this.memberTransferForm.reason.trim(),
+-        })
+-            .then((res) => {
+-              this.$Message.success(res.msg || '调店成功');
+-              this.memberTransferModal = false;
+-              this.getList();
+-            })
+-            .catch((err) => {
+-              this.$Message.error(err.msg || '调店失败');
+-            })
+-            .finally(() => {
+-              this.memberTransferSubmitting = false;
+-            });
+-      });
+-    },
+-    /** 清理弹窗草稿，避免下一位会员继承上一次的目标门店或原因。 */
+-    resetMemberTransfer() {
+-      if (this.memberTransferSubmitting) return;
+-      this.memberTransferModal = false;
+-      this.memberTransferForm = {
+-        uid: 0,
+-        member_name: '',
+-        current_store_id: 0,
+-        current_store_name: '',
+-        store_id: '',
+-        reason: '',
+-      };
+-      this.$nextTick(() => this.$refs.memberTransferForm && this.$refs.memberTransferForm.resetFields());
+-    },
+-    checkboxItem(e){
+-      let uid = parseInt(e.rowid);
+-      let index = this.checkUidList.indexOf(uid);
+-      if(index !== -1){
+-        this.checkUidList = this.checkUidList.filter((item)=> item !== uid);
+-      }else{
+-        this.checkUidList.push(uid);
+-      }
+-    },
+-    checkboxAll(){
+-      // 获取选中当前值
+-      let obj2 = this.$refs.xTable.getCheckboxRecords(true);
+-      // 获取之前选中值
+-      let obj = this.$refs.xTable.getCheckboxReserveRecords(true);
+-      if(this.isAll == 0 && this.checkUidList.length <= obj.length && !this.isCheckBox){
+-        obj = [];
+-      }
+-      obj = obj.concat(obj2);
+-      let uids = [];
+-      obj.forEach((item)=>{
+-        uids.push(parseInt(item.uid))
+-      })
+-      this.checkUidList = uids;
+-      if(!obj2.length){
+-        this.isCheckBox = false;
+-      }
+-    },
+-    allPages(e){
+-      this.isAll = e;
+-      if(e==0){
+-        this.$refs.xTable.toggleAllCheckboxRow();
+-        // this.checkboxAll();
+-      }else{
+-        if(!this.isCheckBox){
+-          this.$refs.xTable.setAllCheckboxRow(true);
+-          this.isCheckBox = true;
+-          this.isAll = 1;
+-        }else{
+-          this.$refs.xTable.setAllCheckboxRow(false);
+-          this.isCheckBox = false;
+-          this.isAll = 0;
+-        }
+-        this.checkUidList = []
+-      }
+-    },
+-    closeLabel(label) {
+-      let index = this.dataLabel.indexOf(
+-          this.dataLabel.filter((d) => d.id == label.id)[0]
+-      );
+-      this.dataLabel.splice(index, 1);
+-      this.userSearchs();
+-    },
+-    activeData(dataLabel) {
+-      this.labelListShow = false;
+-      if (this.batchModal && this.menuActive === 2) {
+-        this.batchLabel = dataLabel;
+-        this.batchData.label_id = dataLabel.map(item => item.id);
+-      } else {
+-        this.dataLabel = dataLabel;
+-      }
+-    },
+-    openLabelList(row) {
+-      this.labelListShow = true;
+-      let data = JSON.parse(JSON.stringify(this.dataLabel));
+-      if (this.batchModal && this.menuActive === 2) {
+-        data = JSON.parse(JSON.stringify(this.batchLabel));
+-      }
+-      this.$refs.labelList.userLabel(data);
+-    },
+-    // 标签弹窗关闭
+-    labelListClose() {
+-      this.labelListShow = false;
+-    },
+-    // 标签弹窗关闭
+-    labelClose(e) {
+-      if (!e) {
+-        this.getList();
+-      }
+-      this.labelShow = false;
+-      this.labelActive.uid = 0;
+-    },
+-    // 提交
+-    putSend(name) {
+-      this.$refs[name].validate((valid) => {
+-        if (valid) {
+-          if (!this.formInline.spread_uid) {
+-            return this.$Message.error("请上传用户");
+-          }
+-          agentSpreadApi(this.formInline)
+-              .then((res) => {
+-                this.promoterShow = false;
+-                this.$Message.success(res.msg);
+-                this.getList();
+-                this.$refs[name].resetFields();
+-              })
+-              .catch((res) => {
+-                this.$Message.error(res.msg);
+-              });
+-        }
++    async receiveMemberAction (event) {
++      // 不信任其他标签/弹窗消息；不通过消息传送任何登录凭证。
++      if (event.origin !== new URL(this.frameUrl).origin || event.source !== this.$refs.frame.contentWindow || (!event.data || event.data.type) !== 'platform-member:transfer') return;
++      const row = event.data.member || {};
++      if (!Number.isInteger(Number(row.uid)) || Number(row.uid) <= 0) return;
++      this.form = { uid: Number(row.uid), member_name: String(row.nickname || ''), current_store_id: Number(row.belong_store_id || 0), current_store_name: String(row.belong_store_name || ''), store_id: '', reason: '' };
++      this.transferOpen = true; this.loading = true;
++      try { const response = await memberTransferStoreOptionsApi(); this.stores = Array.isArray(response.data) ? response.data : []; }
++      catch (error) { this.$Message.error(error.msg || '门店列表加载失败'); }
++      finally { this.loading = false; }
++    },
++    saveTransfer () {
++      this.$refs.transferForm.validate(async valid => {
++        if (!valid || this.saving) return;
++        if (Number(this.form.store_id) === this.form.current_store_id) return this.$Message.warning('目标门店不能与当前门店相同');
++        this.saving = true;
++        try {
++          const response = await memberTransferStoreApi(this.form.uid, { store_id: Number(this.form.store_id), reason: this.form.reason.trim() });
++          this.$Message.success(response.msg || '调店成功'); this.transferOpen = false;
++          this.$refs.frame.contentWindow.postMessage({ type: 'platform-member:refresh' }, new URL(this.frameUrl).origin);
++        } catch (error) { this.$Message.error(error.msg || '调店失败'); }
++        finally { this.saving = false; }
+       });
+-    },
+-    save() {
+-      this.$modalForm(getUserSaveForm()).then(() => this.getList());
+-    },
+-    synchro() {
+-      userSynchro()
+-          .then((res) => {
+-            this.$Message.success(res.msg);
+-          })
+-          .catch((err) => {
+-            this.$Message.error(err.msg);
+-          });
+-    },
+-    // 分组列表
+-    groupLists() {
+-      this.loading = true;
+-      userLabelApi(this.labelFrom)
+-          .then(async (res) => {
+-            let data = res.data;
+-            this.labelLists = data.list;
+-          })
+-          .catch((res) => {
+-            this.loading = false;
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    onClickTab(type) {
+-      this.isAll = 0;
+-      this.isCheckBox = false;
+-      this.$refs.xTable.setAllCheckboxRow(false);
+-      this.checkUidList = [];
+-      this.userFrom.page = 1;
+-      this.userFrom.user_type = type==-1?'':type;
+-      this.getList();
+-    },
+-    userGroup() {
+-      let data = {
+-        page: 1,
+-        limit: "",
+-      };
+-      userGroupApi(data).then((res) => {
+-        this.groupList = res.data.list;
+-      });
+-    },
+-    levelLists() {
+-      let data = {
+-        page: 1,
+-        limit: "",
+-        title: "",
+-        is_show: 1,
+-      };
+-      levelListApi(data).then((res) => {
+-        this.levelList = res.data.list;
+-      });
+-    },
+-    // 批量设置分组；
+-    setGroup() {
+-      if (this.selectionList.length === 0) {
+-        this.$Message.warning("请选择要设置分组的用户");
+-      } else {
+-        let uids = {
+-          all: this.isAll,
+-          uids: this.array_ids
+-        };
+-        if (this.isAll == 1) {
+-          uids.where = this.userFrom;
+-          uids.where = {
+-            // city: this.userFrom.city,
+-            // country: this.userFrom.country,
+-            field_key: this.userFrom.field_key,
+-            group_id: this.userFrom.group_id,
+-            isMember: this.userFrom.isMember,
+-            is_promoter: this.userFrom.is_promoter,
+-            label_id: this.userFrom.label_id,
+-            level: this.userFrom.level,
+-            nickname: this.userFrom.nickname,
+-            pay_count: this.userFrom.pay_count,
+-            // province: this.userFrom.province,
+-            sex: this.userFrom.sex,
+-            status: this.userFrom.status,
+-            user_time: this.userFrom.user_time,
+-            user_time_type: this.userFrom.user_time_type,
+-            user_type: this.userFrom.user_type,
+-          };
+-        }
+-        this.$modalForm(userSetGroup(uids)).then(() => this.getList());
+-      }
+-    },
+-    // 批量设置标签；
+-    setLabel() {
+-      if (this.selectionList.length === 0) {
+-        this.$Message.warning("请选择要设置标签的用户");
+-      } else {
+-        let uids = {
+-          all: this.isAll,
+-          uids: this.array_ids
+-        };
+-        if (this.isAll == 1) {
+-          uids.where = {
+-            // city: this.userFrom.city,
+-            // country: this.userFrom.country,
+-            field_key: this.userFrom.field_key,
+-            group_id: this.userFrom.group_id,
+-            isMember: this.userFrom.isMember,
+-            is_promoter: this.userFrom.is_promoter,
+-            label_id: this.userFrom.label_id,
+-            level: this.userFrom.level,
+-            nickname: this.userFrom.nickname,
+-            pay_count: this.userFrom.pay_count,
+-            // province: this.userFrom.province,
+-            sex: this.userFrom.sex,
+-            status: this.userFrom.status,
+-            user_time: this.userFrom.user_time,
+-            user_time_type: this.userFrom.user_time_type,
+-            user_type: this.userFrom.user_type,
+-          };
+-        }
+-        this.labelShow = true;
+-        this.labelActive.uid = uids;
+-      }
+-    },
+-    // 是否为付费会员；
+-    changeMember() {
+-      this.userFrom.page = 1;
+-      this.getList();
+-    },
+-    // 选择国家
+-    changeCountry() {
+-      // if (this.userFrom.country === "abroad" || !this.userFrom.country) {
+-      //   this.selectedData = [];
+-      //   this.userFrom.province = "";
+-      //   this.userFrom.city = "";
+-      //   this.address = [];
+-      // }
+-    },
+-    // 选择地址
+-    handleChange(value, selectedData) {
+-      // this.selectedData = selectedData.map((o) => o.label);
+-      // this.userFrom.province = this.selectedData[0];
+-      // this.userFrom.city = this.selectedData[1];
+-    },
+-    // 具体日期
+-    onchangeTime(e) {
+-      this.timeVal = e;
+-      this.userFrom.user_time = this.timeVal[0] ? this.timeVal.join("-") : "";
+-    },
+-    onRecentConsumeTime(e) {
+-      this.recentConsumeTimeVal = e || [];
+-    },
+-    onNoConsumeTime(e) {
+-      this.noConsumeTimeVal = e || [];
+-    },
+-    onRecentWriteoffTime(e) {
+-      this.recentWriteoffTimeVal = e || [];
+-    },
+-    onNoWriteoffTime(e) {
+-      this.noWriteoffTimeVal = e || [];
+-    },
+-    onSaleDateTime(e) {
+-      this.saleDateTimeVal = e || [];
+-    },
+-    formatSaleDateTimeRange(val) {
+-      if (!val || !val.length) return '';
+-      const fmt = 'yyyy/MM/dd HH:mm:ss';
+-      const formatOne = (d, isEnd = false) => {
+-        if (!d) return '';
+-        let text = '';
+-        if (typeof d === 'string') {
+-          text = d.trim();
+-        } else if (d instanceof Date && !isNaN(d.getTime())) {
+-          text = formatDate(d, fmt);
+-        } else {
+-          text = String(d).trim();
+-        }
+-        if (isEnd && /00:00:00$/.test(text)) {
+-          text = text.replace(/00:00:00$/, '23:59:59');
+-        }
+-        return text;
+-      };
+-      const start = formatOne(val[0]);
+-      const end = formatOne(val[1], true);
+-      return start && end ? `${start}~${end}` : '';
+-    },
+-    // 操作
+-    changeMenu(row, name, index) {
+-      this.userId = row.uid;
+-      let uid = [];
+-      uid.push(row.uid);
+-      let uids = { uids: uid };
+-      switch (name) {
+-        case "1":
+-          this.$refs.userDetails.modals = true;
+-          this.$refs.userDetails.getDetails(row.uid);
+-          this.$refs.userDetails.changeType('card_holder');
+-          break;
+-        case "2":
+-          this.getOtherFrom(row.uid,'money');
+-          break;
+-        case "3":
+-          // this.giveLevel(row.uid);
+-          this.giveLevelTime(row.uid);
+-          break;
+-        case "4":
+-          this.del(
+-              row,
+-              "清除 【 " + row.nickname + " 】的会员等级",
+-              index,
+-              "user"
+-          );
+-          break;
+-        case "5":
+-          this.$modalForm(userSetGroup(uids)).then(() =>
+-              this.$refs.sends.getList()
+-          );
+-          break;
+-        case "6":
+-          this.openLabel(row);
+-          break;
+-        case "7":
+-          this.editS(row);
+-          break;
+-        case "8":
+-          this.getOtherFrom(row.uid,'integral');
+-          break;
+-        default:
+-          this.del(
+-              row,
+-              "解除【 " + row.nickname + " 】的上级推广人",
+-              index,
+-              "tuiguang"
+-          );
+-          break;
+-      }
+-    },
+-    openLabel(row) {
+-      this.labelShow = true;
+-      this.labelActive.uid = row.uid;
+-    },
+-    editS(row) {
+-      this.promoterShow = true;
+-      this.formInline.uid = row.uid;
+-    },
+-    customer() {
+-      this.customerShow = true;
+-    },
+-    imageObject(e) {
+-      this.customerShow = false;
+-      if (this.batchModal && this.menuActive === 6) {
+-        this.batchData.spread_uid = e.uid;
+-        this.spread_name = e.name;
+-      } else {
+-        this.formInline.spread_uid = e.uid;
+-        this.formInline.image = e.image;
+-      }
+-    },
+-    cancel(name) {
+-      this.promoterShow = false;
+-      this.$refs[name].resetFields();
+-    },
+-    // 赠送会员等级
+-    giveLevel(id) {
+-      giveLevelApi(id)
+-          .then(async (res) => {
+-            if (res.data.status === false) {
+-              return this.$authLapse(res.data);
+-            }
+-            this.FromData = res.data;
+-            this.$refs.edits.modals = true;
+-          })
+-          .catch((res) => {
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    // 赠送会员等级
+-    giveLevelTime(id) {
+-      giveLevelTimeApi(id)
+-          .then(async (res) => {
+-            if (res.data.status === false) {
+-              return this.$authLapse(res.data);
+-            }
+-            this.FromData = res.data;
+-            this.$refs.edits.modals = true;
+-          })
+-          .catch((res) => {
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    // 删除
+-    del(row, tit, num, name) {
+-      let delfromData = {
+-        title: tit,
+-        num: num,
+-        url:
+-            name === "user"
+-                ? `user/del_level/${row.uid}`
+-                : `agent/stair/delete_spread/${row.uid}`,
+-        method: name === "user" ? "DELETE" : "PUT",
+-        ids: "",
+-      };
+-      this.$modalSure(delfromData)
+-          .then((res) => {
+-            this.$Message.success(res.msg);
+-            this.getList();
+-          })
+-          .catch((res) => {
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    // 清除会员删除成功
+-    submitModel() {
+-      this.getList();
+-    },
+-    // 会员列表
+-    buildQueryParams() {
+-      let activeIds = [];
+-      this.dataLabel.forEach((item) => {
+-        activeIds.push(item.id);
+-      });
+-      return {
+-        ...this.userFrom,
+-        label_id: activeIds.join(",") || "",
+-        user_type: this.userFrom.user_type || "",
+-        status: this.userFrom.status || "",
+-        sex: this.userFrom.sex || "",
+-        is_promoter: this.userFrom.is_promoter || "",
+-        user_time_type: this.userFrom.user_time_type || "",
+-        field_key: this.field_key === "all" ? "" : this.field_key,
+-        level: this.userFrom.level === "all" ? "" : this.userFrom.level,
+-        group_id: this.userFrom.group_id === "all" ? "" : this.userFrom.group_id,
+-        integral: `${this.integralStart === null ? '' : this.integralStart}-${this.integralEnd === null ? '' : this.integralEnd}`,
+-        now_money_peice: `${this.nowMoneyPeiceStart === null ? '' : this.nowMoneyPeiceStart}-${this.nowMoneyPeiceEnd === null ? '' : this.nowMoneyPeiceEnd}`,
+-        recharge_sum: `${this.rechargeSumStart === null ? '' : this.rechargeSumStart}-${this.rechargeSumEnd === null ? '' : this.rechargeSumEnd}`,
+-        recharge_price: `${this.rechargePriceStart === null ? '' : this.rechargePriceStart}-${this.rechargePriceEnd === null ? '' : this.rechargePriceEnd}`,
+-        pay_price: `${this.payPriceStart === null ? '' : this.payPriceStart}-${this.payPriceEnd === null ? '' : this.payPriceEnd}`,
+-        cash_consume_price: `${this.cashConsumePriceStart === null ? '' : this.cashConsumePriceStart}-${this.cashConsumePriceEnd === null ? '' : this.cashConsumePriceEnd}`,
+-        recent_consume_type: this.recentConsumeType || '',
+-        recent_consume_days: this.recentConsumeDays || 0,
+-        recent_consume_time: this.recentConsumeTimeVal.length ? this.recentConsumeTimeVal.join('-') : '',
+-        no_consume_type: this.noConsumeType || '',
+-        no_consume_days: this.noConsumeDays || 0,
+-        no_consume_time: this.noConsumeTimeVal.length ? this.noConsumeTimeVal.join('-') : '',
+-        writeoff_count: `${this.writeoffCountStart === null ? '' : this.writeoffCountStart}-${this.writeoffCountEnd === null ? '' : this.writeoffCountEnd}`,
+-        recent_writeoff_type: this.recentWriteoffType || '',
+-        recent_writeoff_days: this.recentWriteoffDays || 0,
+-        recent_writeoff_time: this.recentWriteoffTimeVal.length ? this.recentWriteoffTimeVal.join('-') : '',
+-        no_writeoff_type: this.noWriteoffType || '',
+-        no_writeoff_days: this.noWriteoffDays || 0,
+-        no_writeoff_time: this.noWriteoffTimeVal.length ? this.noWriteoffTimeVal.join('-') : '',
+-        pay_count: `${this.payCountStart === null ? '' : this.payCountStart}-${this.payCountEnd === null ? '' : this.payCountEnd}`,
+-        sale_date_time: this.formatSaleDateTimeRange(this.saleDateTimeVal),
+-      };
+-    },
+-    getList() {
+-      this.loading = true;
+-      const queryParams = this.buildQueryParams();
+-      Object.assign(this.userFrom, queryParams);
+-      userList(queryParams)
+-          .then(async (res) => {
+-            let data = res.data;
+-            data.list.forEach((item) => {
+-              item.checkBox = false;
+-            });
+-            this.userLists = data.list;
+-            this.total = data.count;
+-            this.loading = false;
+-            this.$nextTick(function(){
+-              if (this.isAll == 1) {
+-                this.selectionList = this.userLists;
+-                if(this.isCheckBox){
+-                  let flag = false;
+-                  data.list.forEach(item=>{
+-                    this.checkUidList.forEach(j=>{
+-                      if(item.uid == j){
+-                        flag = true;
+-                      }
+-                    })
+-                  })
+-                  if(!flag){
+-                    this.$refs.xTable.setAllCheckboxRow(true);
+-                  }
+-                }else{
+-                  this.$refs.xTable.setAllCheckboxRow(false);
+-                }
+-              }else{
+-                let obj = this.$refs.xTable.getCheckboxReserveRecords(true);
+-                if(!this.checkUidList.length || this.checkUidList.length <= obj.length){
+-                  this.$refs.xTable.setAllCheckboxRow(false);
+-                }
+-              }
+-            })
+-
+-          })
+-          .catch((res) => {
+-            this.loading = false;
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    pageChange(index) {
+-      this.userFrom.page = index;
+-      this.getList();
+-    },
+-    // 搜索
+-    userSearchs() {
+-      if (this.userFrom.user_time_type && !this.timeVal.length) {
+-        return this.$Message.error("请选择访问时间");
+-      }
+-      if (this.timeVal.length && !this.userFrom.user_time_type) {
+-        return this.$Message.error("请选择访问情况");
+-      }
+-      if (this.recentConsumeType === 'days' && !this.recentConsumeDays) {
+-        return this.$Message.error('请填写最近有消费的天数');
+-      }
+-      if (this.recentConsumeType === 'range' && !this.recentConsumeTimeVal.length) {
+-        return this.$Message.error('请选择最近有消费的时间范围');
+-      }
+-      if (this.noConsumeType === 'days' && !this.noConsumeDays) {
+-        return this.$Message.error('请填写最近无消费的天数');
+-      }
+-      if (this.noConsumeType === 'range' && !this.noConsumeTimeVal.length) {
+-        return this.$Message.error('请选择最近无消费的时间范围');
+-      }
+-      if (this.recentWriteoffType === 'days' && !this.recentWriteoffDays) {
+-        return this.$Message.error('请填写最近有到店的天数');
+-      }
+-      if (this.recentWriteoffType === 'range' && !this.recentWriteoffTimeVal.length) {
+-        return this.$Message.error('请选择最近有到店的时间范围');
+-      }
+-      if (this.noWriteoffType === 'days' && !this.noWriteoffDays) {
+-        return this.$Message.error('请填写最近无到店的天数');
+-      }
+-      if (this.noWriteoffType === 'range' && !this.noWriteoffTimeVal.length) {
+-        return this.$Message.error('请选择最近无到店的时间范围');
+-      }
+-      this.isAll = 0;
+-      this.$refs.xTable.setAllCheckboxRow(false);
+-      this.checkUidList = [];
+-      this.userFrom.page = 1;
+-      this.selectionList = [];
+-      this.getList();
+-    },
+-    // 重置
+-    reset(name) {
+-      this.$refs.xTable.setAllCheckboxRow(false);
+-      this.checkUidList = []
+-      this.headeType = "-1";
+-      this.userFrom = {
+-        user_type: "",
+-        status: "",
+-        sex: "",
+-        is_promoter: "",
+-        // country: "",
+-        pay_count: "",
+-        user_time_type: "",
+-        user_time: "",
+-        nickname: "",
+-        field_key: "",
+-        level: "",
+-        group_id: "",
+-        label_id: "",
+-        page: 1, // 当前页
+-        limit: 20, // 每页显示条数
+-      };
+-      this.field_key = "";
+-      this.level = "";
+-      this.group_id = "";
+-      this.label_id = "";
+-      this.user_time_type = "";
+-      // this.pay_count = "";
+-      this.timeVal = [];
+-      this.selectionList = [];
+-      this.dataLabel = [];
+-      this.integralStart = null;
+-      this.integralEnd = null;
+-      this.nowMoneyPeiceStart = null;
+-      this.nowMoneyPeiceEnd = null;
+-      this.rechargeSumStart = null;
+-      this.rechargeSumEnd = null;
+-      this.rechargePriceStart = null;
+-      this.rechargePriceEnd = null;
+-      this.payPriceStart = null;
+-      this.payPriceEnd = null;
+-      this.cashConsumePriceStart = null;
+-      this.cashConsumePriceEnd = null;
+-      this.recentConsumeType = '';
+-      this.recentConsumeDays = null;
+-      this.recentConsumeTimeVal = [];
+-      this.noConsumeType = '';
+-      this.noConsumeDays = null;
+-      this.noConsumeTimeVal = [];
+-      this.writeoffCountStart = null;
+-      this.writeoffCountEnd = null;
+-      this.recentWriteoffType = '';
+-      this.recentWriteoffDays = null;
+-      this.recentWriteoffTimeVal = [];
+-      this.noWriteoffType = '';
+-      this.noWriteoffDays = null;
+-      this.noWriteoffTimeVal = [];
+-      this.payCountStart = null;
+-      this.payCountEnd = null;
+-      this.saleDateTimeVal = [];
+-      this.getList();
+-    },
+-    // 获取编辑表单数据
+-    getUserFrom(id) {
+-      this.$modalForm(getUserData(id)).then(() => this.getList());
+-    },
+-    // 获取积分余额表单
+-    getOtherFrom(id,name) {
+-      this.$modalForm(editOtherApi(id,{type:name})).then(async (res) => {
+-        this.$refs.userDetails.getDetails(this.userId);
+-        this.$refs.edits.modals = true;
+-      }).catch((res) => {
+-        this.$Message.error(res.msg);
+-      });
+-    },
+-    // 修改状态
+-    onchangeIsShow(row) {
+-      let data = {
+-        id: row.uid,
+-        status: row.status,
+-      };
+-      isShowApi(data)
+-          .then(async (res) => {
+-            this.$Message.success(res.msg);
+-          })
+-          .catch((res) => {
+-            this.$Message.error(res.msg);
+-          });
+-    },
+-    // 点击发送优惠券
+-    onSend() {
+-      if (this.checkUidList.length === 0 && this.isAll==0) {
+-        return this.$Message.warning("请选择要发送优惠券的用户");
+-      }
+-      this.$refs.sends.modals = true;
+-      this.$refs.sends.getList();
+-    },
+-    // 发送图文消息
+-    onSendPic() {
+-      if (this.checkUidList.length === 0 && this.isAll==0) {
+-        this.$Message.warning("请选择要发送图文消息的用户");
+-      } else {
+-        this.modal13 = true;
+-      }
+-    },
+-    // 编辑
+-    edit(row) {
+-      this.getUserFrom(row.uid);
+-    },
+-    //信息补充
+-    extendInfo(row) {
+-      extendInfo(row.uid).then(async (res) => {
+-        if(res.data.status === false){
+-          return this.$authLapse(res.data);
+-        }
+-        this.FromData = res.data;
+-        this.$refs.edits.modals = true;
+-        // this.getList()
+-      }).catch(err=>{
+-        this.$Message.error(err.msg);
+-      })
+-    },
+-    // 修改成功
+-    submitFail(p) {
+-      if (this.$refs.userDetails.modals) {
+-        this.$refs.userDetails.getDetails(this.userId);
+-      }
+-    },
+-    menuSelect(name) {
+-      this.menuActive = name;
+-    },
+-    setBatch() {
+-      this.batchModal = true;
+-    },
+-    tagClose(id) {
+-      let index = this.batchLabel.findIndex(item => item.id === id);
+-      this.batchLabel.splice(index, 1);
+-    },
+-    cancelBatch() {
+-      this.batchModal = false;
+-    },
+-    // 保存批量操作
+-    saveBatch() {
+-      batchProcess({
+-        type: this.menuActive,
+-        uids: this.checkUidList,
+-        all: this.isAll,
+-        where: this.userFrom,
+-        data: this.batchData
+-      }).then(res => {
+-        this.$Message.success(res.msg);
+-        this.batchModal = false;
+-      }).catch(res => {
+-        this.$Message.error(res.msg);
+-      });
+-    },
+-    batchVisibleChange() {
+-      this.batchData = {
+-        group_id: 0,
+-        label_id: [],
+-        level_id: 0,
+-        money_status: 0,
+-        money: 0,
+-        integration_status: 0,
+-        integration: 0,
+-        days_status: 1,
+-        day: 0,
+-        spread_uid: '',
+-      };
+-      this.batchLabel = [];
+-      this.spread_name = '';
+-      this.menuActive = 1;
+-    },
+-    cardHolderOpen(row) {
+-      this.cardHolderData = {};
+-      this.$nextTick(() => {
+-        this.cardHolderData = row;
+-        this.cardHolderShow = true;
+-      });
+-    },
+-    userMove() {
+-      this.importShow = !this.importShow;
+-    },
+-    userCardMove() {
+-      this.importCardShow = !this.importCardShow;
+-    },
+-    async exports() {
+-      if (!this.checkUidList.length && !this.isAll)
+-        return this.$Message.error("本页至少选中一项");
+-      let [th, filekey, data, fileName] = [[], [], [], ""];
+-      let excelData = this.buildQueryParams();
+-      excelData.page = 1;
+-      excelData.limit = 500;
+-      if (this.isAll == 1) {
+-        delete excelData.ids;
+-      } else {
+-        excelData.ids = this.checkUidList.join(",");
+-      }
+-      for (let i = 0; i < excelData.page + 1; i++) {
+-        let lebData = await this.getExcelData(excelData);
+-        if (!fileName) fileName = lebData.filename;
+-        if (!filekey.length) {
+-          filekey = lebData.filekey;
+-        }
+-        if (!th.length) th = lebData.header;
+-        if (lebData.export.length) {
+-          data = data.concat(lebData.export);
+-          excelData.page++;
+-        } else {
+-          exportExcel(th, filekey, fileName, data);
+-          return;
+-        }
+-      }
+-    },
+-    getExcelData(excelData) {
+-      return new Promise((resolve, reject) => {
+-        exportUserData(excelData).then((res) => {
+-          return resolve(res.data);
+-        });
+-      });
+-    },
+-  },
++    }
++  }
+ };
+ </script>
+ 
+-<style scoped lang="stylus">
+-/deep/.ivu-dropdown-item{
+-  font-size: 12px!important;
+-}
+-/deep/.vxe-table--render-default .vxe-cell{
+-  font-size: 12px;
+-}
+-.expand-row{
+-  margin-bottom: 16px;
+-  font-size: 12px;
+-}
+-.tdinfo {
+-  margin-left: 88px;
+-  margin-top: 15px;
+-}
+-.padding-add {
+-  padding: 20px 20px 0;
+-}
+-.input-add {
+-  max-width:250px;
+-}
+-.labelInput {
+-  max-width:250px;
+-  border: 1px solid #dcdee2;
+-  padding: 0 5px;
+-  border-radius: 5px;
+-  min-height: 30px;
+-  cursor: pointer;
+-
+-.span {
+-  color: #c5c8ce;
+-}
+-
+-.iconxiayi {
+-  font-size: 12px;
+-}
+-}
+-
+-.picBox {
+-  display: inline-block;
+-  cursor: pointer;
+-
+-.upLoad {
+-  width: 58px;
+-  height: 58px;
+-  line-height: 58px;
+-  border: 1px dotted rgba(0, 0, 0, 0.1);
+-  border-radius: 4px;
+-  background: rgba(0, 0, 0, 0.02);
+-}
+-
+-.pictrue {
+-  width: 60px;
+-  height: 60px;
+-  border: 1px dotted rgba(0, 0, 0, 0.1);
+-  margin-right: 10px;
+-
+-img {
+-  width: 100%;
+-  height: 100%;
+-}
+-}
+-}
+-
+-.userFrom {
+->>> .ivu-form-item-content {
+-  margin-left: 0px !important;
+-}
+-}
+-
+-.userAlert {
+-  margin-top: 20px;
+-}
+-
+-.userI {
+-  color: #1890FF;
+-  font-style: normal;
+-}
+-
+-img {
+-  height: 36px;
+-  display: block;
+-}
+-
+-.tabBox_img {
+-  width: 36px;
+-  height: 36px;
+-  border-radius: 4px;
+-  cursor: pointer;
+-
+-img {
+-  width: 100%;
+-  height: 100%;
+-}
+-}
+-
+-.tabBox_tit {
+-  width: 60%;
+-  font-size: 12px !important;
+-  margin: 0 2px 0 10px;
+-  letter-spacing: 1px;
+-  padding: 5px 0;
+-  box-sizing: border-box;
+-}
+-
+-.modelBox {
+->>> .ivu-modal-body {
+-  padding: 0 16px 16px 16px !important;
+-}
+-}
+-
+-.vipName {
+-  color: #dab176;
+-}
+-
+-.listbox {
+->>>.ivu-divider-horizontal {
+-  margin: 0 !important;
+-}
+-}
+-
+-/deep/.ivu-table-header {
+-// overflow visible
+-}
+-
+-/deep/.ivu-table th {
+-  overflow: visible;
+-}
+-
+-/deep/.select-item:hover {
+-  background-color: #f3f3f3;
+-}
+-
+-/deep/.select-on {
+-  display: block;
+-}
+-
+-/deep/.select-item.on {
+-  /* background: #f3f3f3; */
+-}
+-.pane_pd{
+-  padding:4px 16px 20px !important;
+-  font-weight: 500;
+-}
+-.new_tab {
+->>>.ivu-tabs-nav .ivu-tabs-tab{
+-  padding:4px 16px 20px !important;
+-  font-weight: 500;
+-}
+-}
+-.dateMedia{
+-/deep/.ivu-form-item-content{
+-  max-width 250px;
+-/deep/.ivu-date-picker{
+-  width 100%;
+-}
+-}
+-}
+-.select-tag{
+-  position: relative;
+-  min-height: 32px;
+-  padding: 0 24px 0 4px;
+-  border: 1px solid #dcdee2;
+-  border-radius: 4px;
+-  line-height: normal;
+-  user-select: none;
+-  cursor: pointer;
+-
+-&:hover {
+-   border-color: #57a3f3;
+- }
+-
+-.ivu-icon {
+-  position: absolute;
+-  top: 50%;
+-  right: 8px;
+-  line-height: 1;
+-  transform: translateY(-50%);
+-  font-size: 14px;
+-  color: #808695;
+-  transition: all .2s ease-in-out;
+-}
+-
+-.ivu-tag {
+-  position: relative;
+-  max-width: 99%;
+-  height: 24px;
+-  margin: 3px 4px 3px 0;
+-  line-height: 22px;
+-}
+-
+-.placeholder {
+-  display: block;
+-  height: 30px;
+-  line-height: 30px;
+-  color: #c5c8ce;
+-  font-size: 12px;
+-  overflow: hidden;
+-  text-overflow: ellipsis;
+-  white-space: nowrap;
+-  padding-left: 4px;
+-  padding-right: 22px;
+-}
+-}
+-
+->>> .batch-modal {
+-.ivu-modal-body {
+-  padding: 0;
+-}
+-
+-.ivu-alert {
+-  margin: 12px 24px;
+-}
+-
+-.ivu-col-span-4 {
+-  flex: none;
+-  width: 130px;
+-}
+-
+-.ivu-col-span-20 {
+-  padding-right: 37px;
+-}
+-
+-.ivu-input-number {
+-  width: 100%;
+-}
+-
+-.ivu-menu-light.ivu-menu-vertical .ivu-menu-item-active:not(.ivu-menu-submenu) {
+-  z-index: auto;
+-}
+-
+-.ivu-menu-light.ivu-menu-vertical .ivu-menu-item-active:not(.ivu-menu-submenu):after {
+-  right: auto;
+-  left: 0;
+-}
+-
+-.ivu-menu-item {
+-  padding-right: 0;
+-}
+-}
++<style scoped>
++.platform-member-frame{height:calc(100vh - 118px);min-height:500px;background:#f5f7fa}.platform-member-frame>iframe{display:block;border:0;width:100%;height:100%;background:#f5f7fa}
+ </style>
+diff --git a/前端代码/cashier-v3/src/components/member/MemberCreatorPanel.vue b/前端代码/cashier-v3/src/components/member/MemberCreatorPanel.vue
+index deb9ef90..bb55e5ef 100644
+--- a/前端代码/cashier-v3/src/components/member/MemberCreatorPanel.vue
++++ b/前端代码/cashier-v3/src/components/member/MemberCreatorPanel.vue
+@@ -1,6 +1,7 @@
+ <script setup>
+ import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
+ import { computed, nextTick, reactive, ref, watch } from 'vue'
++import MemberLoginPanel from './MemberLoginPanel.vue'
+ 
+ /**
+  * 会员选择大弹窗内的建档步骤，不提供自己的遮罩或弹窗。
+@@ -16,6 +17,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
+  * 命令完成收银工作台回填。组件不会在浏览器伪造会员或直接改写收银状态。
+  */
+ const props = defineProps({
++  loginAdapter: { type: Object, default: null },
+   currentStoreName: {
+     type: String,
+     default: ''
+@@ -797,6 +799,7 @@ function cancelCreation() {
+             >
+               基本信息
+             </button>
++            <button v-if="isEditing && loginAdapter" type="button" role="tab" :aria-selected="activeTab === 'login'" :class="{ 'member-creator__tab--active': activeTab === 'login' }" @click="chooseTab('login')">登录信息</button>
+             <button
+               type="button"
+               role="tab"
+@@ -814,6 +817,7 @@ function cancelCreation() {
+         </div>
+ 
+         <div class="member-creator__tab-body">
++          <MemberLoginPanel v-if="activeTab === 'login' && isEditing && loginAdapter" :member-id="initialMember.memberId || initialMember.id" :adapter="loginAdapter" />
+           <div v-show="activeTab === 'basic'" class="member-creator__basic" role="tabpanel">
+             <div class="member-creator__form-grid">
+               <label class="member-creator__field" data-error-key="name">
+@@ -1004,7 +1008,7 @@ function cancelCreation() {
+       {{ submitMessage }}
+     </div>
+ 
+-    <footer class="member-creator__footer">
++    <footer v-show="activeTab !== 'login'" class="member-creator__footer">
+       <button type="button" class="member-creator__button" :disabled="isSubmitting || isOutcomeUncertain" @click="cancelCreation">{{ cancelLabel }}</button>
+       <button type="button" class="member-creator__button member-creator__button--primary" :disabled="!canSubmit" @click="submitMember">
+         {{ isSubmitting ? '正在保存…' : (isEditing ? '保存修改' : submitLabel) }}
+diff --git a/前端代码/cashier-v3/src/components/member/MemberLoginPanel.vue b/前端代码/cashier-v3/src/components/member/MemberLoginPanel.vue
+new file mode 100644
+index 00000000..88f595f8
+--- /dev/null
++++ b/前端代码/cashier-v3/src/components/member/MemberLoginPanel.vue
+@@ -0,0 +1,55 @@
++<script setup>
++import { onBeforeUnmount, ref, watch } from 'vue'
++const props = defineProps({ memberId: { type: [Number, String], required: true }, adapter: { type: Object, required: true } })
++const info = ref(null), password = ref(''), loading = ref(false), busy = ref(false), message = ref(''), failed = ref(false), confirmClear = ref(false)
++let sequence = 0
++// 密码仅留在当前输入控件内存，切换会员/离开页签即清空，不加入会员资料草稿。
++onBeforeUnmount(() => { password.value = ''; sequence++ })
++async function load() {
++  const current = ++sequence
++  info.value = null; password.value = ''; message.value = ''; failed.value = false; confirmClear.value = false; busy.value = false; loading.value = true
++  try { const data = await props.adapter.read(props.memberId); if (current === sequence) info.value = data }
++  catch (error) { if (current === sequence) { message.value = error.message; failed.value = true } }
++  finally { if (current === sequence) loading.value = false }
++}
++watch(() => props.memberId, load, { immediate: true })
++async function submit(clear = false) {
++  if (busy.value || !info.value) return
++  busy.value = true; message.value = ''; failed.value = false
++  // 请求只更新发起时的会员；切换会员后迟到的响应不能回填另一人的登录信息。
++  const current = sequence, memberId = props.memberId
++  const data = { revision: info.value.revision, requestId: crypto.randomUUID().replaceAll('-', '') }
++  if (!clear) data.newPassword = password.value
++  try {
++    const saved = await (clear ? props.adapter.clear(memberId, data) : props.adapter.password(memberId, data))
++    if (current !== sequence) return
++    info.value = saved
++    password.value = ''; confirmClear.value = false
++    message.value = clear ? '微信绑定已清除，旧登录已失效，会员需重新授权手机号登录。' : '密码已更新，旧登录已失效。'
++  } catch (error) { if (current === sequence) { message.value = error.message; failed.value = true } }
++  finally { if (current === sequence) busy.value = false }
++}
++</script>
++
++<template>
++  <section class="member-login-panel" aria-label="登录信息" :aria-busy="loading || busy">
++    <p v-if="loading" role="status">正在读取登录信息…</p>
++    <template v-if="info">
++      <label class="member-login-panel__field"><span>会员端登录账号</span><input :value="info.account" readonly aria-readonly="true"><small>登录账号为手机号，修改手机号请到基本信息。</small></label>
++      <label class="member-login-panel__field"><span>新密码</span><input v-model="password" type="text" autocomplete="off" maxlength="20" placeholder="输入6至20位新密码" :disabled="busy"><small>输入内容直接显示。原密码不回显，不填写则不修改。</small></label>
++      <button type="button" class="member-creator__button member-creator__button--primary" :disabled="busy || !password" @click="submit(false)">{{ busy ? '处理中…' : '修改密码' }}</button>
++      <section class="member-login-panel__bindings"><h3>微信绑定信息</h3>
++        <p v-if="!info.bindings?.length">未绑定微信</p>
++        <div v-for="binding in info.bindings" :key="`${binding.channel}:${binding.boundAt}`" class="member-login-panel__binding"><strong>{{ binding.label }}</strong><span>{{ binding.nickname || '未设置昵称' }}</span><small>{{ binding.boundAt || '绑定时间未记录' }}</small></div>
++        <button type="button" class="member-creator__button" :disabled="busy || !info.bindings?.length" @click="confirmClear = true">清除绑定信息</button>
++        <div v-if="confirmClear" class="member-login-panel__confirm" role="alert"><p>清除后，原微信关联及旧登录失效；会员需重新授权当前手机号才能进入原账号。余额、卡项和订单保留。</p><button type="button" class="member-creator__button" :disabled="busy" @click="confirmClear = false">取消</button><button type="button" class="member-creator__button member-creator__button--primary" :disabled="busy" @click="submit(true)">确认清除</button></div>
++      </section>
++    </template>
++    <p v-if="message" :role="failed ? 'alert' : 'status'" :class="{ 'member-login-panel__error': failed }">{{ message }}</p>
++    <button v-if="!info && !loading" type="button" class="member-creator__button" @click="load">重新读取</button>
++  </section>
++</template>
++
++<style scoped>
++.member-login-panel{display:grid;gap:18px;padding:6px 0 16px;color:#334155}.member-login-panel__field{display:grid;gap:8px;font-size:13px}.member-login-panel__field input{box-sizing:border-box;width:100%;height:40px;padding:0 12px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:#25374e}.member-login-panel__field input[readonly]{background:#f5f7fa}.member-login-panel small{color:#738298}.member-login-panel button{justify-self:start;min-height:36px;padding:8px 16px;border:1px solid #dce3ed;border-radius:5px;background:#fff;color:#334155;cursor:pointer}.member-login-panel .member-creator__button--primary{background:#477caf;color:#fff;border-color:#477caf}.member-login-panel button:disabled{opacity:.5;cursor:default}.member-login-panel__bindings{border-top:1px solid #edf0f5;padding-top:16px}.member-login-panel__bindings h3{margin:0 0 14px;font-size:14px}.member-login-panel__binding{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:0 0 14px;padding:12px;background:#f7f9fc;border-radius:6px}.member-login-panel__binding small{margin-left:auto}.member-login-panel__confirm{margin-top:14px;padding:14px;border:1px solid #e3d5be;border-radius:6px;background:#fffcf5}.member-login-panel__confirm button+button{margin-left:10px}.member-login-panel__error{color:#b42318}
++</style>
+diff --git a/前端代码/cashier-v3/src/main.js b/前端代码/cashier-v3/src/main.js
+index c3d0a996..5449182b 100644
+--- a/前端代码/cashier-v3/src/main.js
++++ b/前端代码/cashier-v3/src/main.js
+@@ -5,8 +5,10 @@ import './styles/base.css'
+ import { installCashierV3HttpAdapter } from './services/cashierV3HttpAdapter'
+ 
+ const isPlatformOrderCenter = String(window.location.hash || '').startsWith('#/platform/order-center')
+-installCashierV3HttpAdapter(isPlatformOrderCenter ? { mode: 'platform-order-center' } : {})
+-if (!isPlatformOrderCenter && !String(window.location.hash || '').startsWith('#/login')) {
++const isPlatformMemberCenter = String(window.location.hash || '').startsWith('#/platform/member-list')
++// 平台会员页拥有独立的管理员适配器，不能顺带启动/读取门店工作台会话。
++if (!isPlatformMemberCenter) installCashierV3HttpAdapter(isPlatformOrderCenter ? { mode: 'platform-order-center' } : {})
++if (!isPlatformMemberCenter && !isPlatformOrderCenter && !String(window.location.hash || '').startsWith('#/login')) {
+   ensureCashierV3RouterBootstrap({ reason: 'app-boot', silent: false })
+ }
+ createApp(App).use(router).mount('#app')
+diff --git a/前端代码/cashier-v3/src/router/index.js b/前端代码/cashier-v3/src/router/index.js
+index ecf9c782..31aa2955 100644
+--- a/前端代码/cashier-v3/src/router/index.js
++++ b/前端代码/cashier-v3/src/router/index.js
+@@ -7,6 +7,7 @@ import ProjectReplacementView from '@/views/ProjectReplacementView.vue'
+ import RoomStatusView from '@/views/RoomStatusView.vue'
+ import ReservationListView from '@/views/ReservationListView.vue'
+ import MemberListView from '@/views/MemberListView.vue'
++import PlatformMemberListView from '@/views/PlatformMemberListView.vue'
+ import HangOrderListView from '@/views/HangOrderListView.vue'
+ import OrderCenterView from '@/views/OrderCenterView.vue'
+ import ManagementCenterView from '@/views/ManagementCenterView.vue'
+@@ -87,6 +88,7 @@ export function firstGrantedRouteName() {
+ }
+ 
+ const routes = [
++  { path: '/platform/member-list', name: 'cashier-v3-platform-member-list', component: PlatformMemberListView, meta: { platformReport: true, title: '用户列表' } },
+   { path: '/platform/basic-reports/:report?', name: 'cashier-v3-platform-basic-reports', component: BasicReportsView, meta: { platformReport: true, title: '基础报表' } },
+   { path: '/entry', name: 'cashier-v3-entry', component: RoutePlaceholderView },
+   { path: '/login', name: 'cashier-v3-login', component: StoreLoginView, meta: { title: '门店端登录' } },
+diff --git a/前端代码/cashier-v3/src/services/memberLoginApi.js b/前端代码/cashier-v3/src/services/memberLoginApi.js
+new file mode 100644
+index 00000000..4c936a1a
+--- /dev/null
++++ b/前端代码/cashier-v3/src/services/memberLoginApi.js
+@@ -0,0 +1,19 @@
++import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
++
++/** 登录管理不进入通用命令草稿，防止当前输入密码被根状态或操作回执保存。 */
++export function memberLoginAdapter(platform = false) {
++  const prefix = platform ? '/adminapi/user/member-center/login/' : '/cashierapi/v3/member-login/'
++  async function request(id, suffix = '', data = null) {
++    const cookie = platform ? document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/) : null
++    const token = platform ? (cookie ? decodeURIComponent(cookie[1]) : '') : readStoreV3SessionToken()
++    const response = await fetch(`${prefix}${Number(id)}${suffix}`, {
++      method: data ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
++      headers: { 'Content-Type': 'application/json', 'Authori-zation': `Bearer ${token}` },
++      ...(data ? { body: JSON.stringify(data) } : {})
++    })
++    const result = await response.json()
++    if (!response.ok || Number(result.status) !== 200) throw new Error(result.msg || '登录信息操作失败')
++    return result.data
++  }
++  return { read: id => request(id), password: (id, data) => request(id, '/password', data), clear: (id, data) => request(id, '/clear-wechat', data) }
++}
+diff --git a/前端代码/cashier-v3/src/views/MemberListView.vue b/前端代码/cashier-v3/src/views/MemberListView.vue
+index 0966ae50..b3b8ffa2 100644
+--- a/前端代码/cashier-v3/src/views/MemberListView.vue
++++ b/前端代码/cashier-v3/src/views/MemberListView.vue
+@@ -19,10 +19,14 @@ import {
+   unifiedQueryActionSucceeded
+ } from '@/services/unifiedQueryContract'
+ import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
+-
+-const state = useCashierV3State()
+-const canCreateMember = computed(() => canUseCashierV3Operation('cashier.v3.member.create'))
+-const canEditMember = computed(() => canUseCashierV3Operation('cashier.v3.member.edit'))
++import { memberLoginAdapter } from '@/services/memberLoginApi'
++// 只允许宿主注入本模块的已认证适配器；门店入口继续使用原会话和命令网关。
++const props = defineProps({ platformAdapter: { type: Object, default: null } })
++const loginAdapter = memberLoginAdapter(Boolean(props.platformAdapter))
++
++const state = props.platformAdapter?.state || useCashierV3State()
++const canCreateMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.create === true : canUseCashierV3Operation('cashier.v3.member.create'))
++const canEditMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.edit === true : canUseCashierV3Operation('cashier.v3.member.edit'))
+ const selectedMemberIds = ref([])
+ const isMemberCreatorOpen = ref(false)
+ const editingMember = ref(null)
+@@ -56,7 +60,7 @@ const memberCenter = computed(() => ({
+ }))
+ const records = computed(() => Array.isArray(memberCenter.value.records) ? memberCenter.value.records : [])
+ const statusOptions = computed(() => Array.isArray(memberCenter.value.statusOptions) ? memberCenter.value.statusOptions : [])
+-const creatorSchema = ref({})
++const creatorSchema = ref(props.platformAdapter?.creatorSchema || {})
+ const hasSuccessfulQuery = computed(() => Boolean(lastSuccessfulQuery.value) && Boolean(memberQueryProjection.value) && !queryError.value)
+ const canBatchOperate = computed(() => hasSuccessfulQuery.value && !isQueryLoading.value && Boolean(memberCenter.value.canBatchOperate))
+ const isAllSelected = computed(() => records.value.length > 0 && selectedMemberIds.value.length === records.value.length)
+@@ -64,7 +68,7 @@ const total = computed(() => Math.max(Number(memberCenter.value.total) || 0, rec
+ const page = computed(() => Math.max(1, Number(memberCenter.value.page) || 1))
+ const pageSize = computed(() => Math.max(1, Number(memberCenter.value.pageSize) || 20))
+ 
+-const MEMBER_QUERY_PAGE_CODE = 'member_list'
++const MEMBER_QUERY_PAGE_CODE = props.platformAdapter ? 'platform_member_list' : 'member_list'
+ const baseQueryFields = [
+   { key: 'member_name', label: '会员姓名', defaultVisible: true, defaultQuick: true, recordKey: 'name', display: 'member-link' },
+   { key: 'phone', label: '完整手机号', defaultVisible: true, defaultQuick: true, recordKey: 'phone' },
+@@ -84,7 +88,8 @@ const baseQueryFields = [
+   { key: 'latest_purchase_date', label: '最近购买日期', defaultVisible: true, type: 'date', recordKey: 'latestPurchaseDate' },
+   { key: 'last_service_staff', label: '上次服务人员', defaultVisible: true, type: 'person', recordKey: 'lastServiceStaff' },
+   { key: 'latest_visit_date', label: '最近到店日期', defaultVisible: true, type: 'date', recordKey: 'latestVisitDate' },
+-  { key: 'created_at', label: '建档时间', defaultVisible: true, type: 'date', recordKey: 'createdAt' }
++  { key: 'created_at', label: '建档时间', defaultVisible: true, type: 'date', recordKey: 'createdAt' },
++  { key: 'wechat_binding', label: '微信绑定信息', defaultVisible: true, recordKey: 'wechatBinding' }
+ ]
+ 
+ const unifiedQuery = useUnifiedQueryPage({
+@@ -116,6 +121,11 @@ const visibleFields = computed(() => {
+     keys.splice(keys.indexOf('member_no'), 1)
+     keys.splice(keys.indexOf('created_at'), 0, 'member_no')
+   }
++  // 新增绑定列只呈现服务端授权的字段，固定紧邻建档时间右侧。
++  if (keys.includes('wechat_binding') && keys.includes('created_at')) {
++    keys.splice(keys.indexOf('wechat_binding'), 1)
++    keys.splice(keys.indexOf('created_at') + 1, 0, 'wechat_binding')
++  }
+   return keys.map((key) => queryFieldMap.value.get(key)).filter(Boolean)
+ })
+ const summaryEntries = computed(() => {
+@@ -208,6 +218,7 @@ function groupValueLabel(values) {
+ }
+ 
+ async function requestAction(action, payload = {}) {
++  if (props.platformAdapter) return props.platformAdapter.request(action, payload)
+   return requestCashierV3Action(action, payload)
+ }
+ 
+@@ -267,6 +278,7 @@ async function submitMemberMutation(payload = {}) {
+ }
+ 
+ async function selectMemberCreatorServicePerson({ selectedRecords = [] } = {}) {
++  if (props.platformAdapter) return props.platformAdapter.selectPeople(selectedRecords)
+   const selection = await openCashierV3QueryEntitySelector({
+     entityType: 'person',
+     title: '选择专属服务人',
+@@ -283,6 +295,7 @@ async function selectMemberCreatorServicePerson({ selectedRecords = [] } = {}) {
+ }
+ 
+ function selectMemberReferrer({ selectedRecord = null, excludeMemberId = 0 } = {}) {
++  if (props.platformAdapter) return props.platformAdapter.selectReferrer(selectedRecord, excludeMemberId)
+   if (typeof window === 'undefined') return Promise.resolve(null)
+   return new Promise((resolve) => {
+     const cleanup = () => {
+@@ -448,6 +461,7 @@ watch(
+ )
+ 
+ function openMemberDetail(record) {
++  if (props.platformAdapter) return props.platformAdapter.openDetail(record)
+   const memberId = memberRecordId(record)
+   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
+     detail: { memberId, record }
+@@ -620,7 +634,8 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+ 
+   // 会员列表不增加单独的导出权限：能执行当前查询即可导出该查询的完整命中结果。
+   // 下载接口仍需要当前登录令牌；普通链接缺少令牌会把失败 JSON 误存为 xlsx，因此落盘前还要校验 ZIP 文件头。
+-  const token = readStoreV3SessionToken()
++  if (props.platformAdapter) endpoint.pathname = endpoint.pathname.replace('/cashierapi/v3/unified-query/exports/', '/adminapi/user/member-center/exports/')
++  const token = props.platformAdapter ? props.platformAdapter.token() : readStoreV3SessionToken()
+   const response = await fetch(endpoint.href, {
+     credentials: 'same-origin',
+     cache: 'no-store',
+@@ -720,9 +735,12 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+             <td>
+               <div class="member-row-actions">
+                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
++                <button v-if="platformAdapter" type="button" class="button button--text" @click="platformAdapter.transfer(record)">调店</button>
+                 <button v-if="canEditMember && record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
+-                <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
+-                <button v-else type="button" class="button button--text" @click="restoringMember = record; memberRestoreError = ''">恢复</button>
++                <template v-if="!platformAdapter || platformAdapter.permissions.deactivate">
++                  <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
++                  <button v-else type="button" class="button button--text" @click="restoringMember = record; memberRestoreError = ''">恢复</button>
++                </template>
+               </div>
+             </td>
+           </tr>
+@@ -738,6 +756,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+         <section class="member-mutation-modal__card member-mutation-modal__card--creator">
+           <header><h2>{{ editingMember ? '编辑会员' : '新增会员' }}</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="closeMemberMutation">关闭</button></header>
+           <MemberCreatorPanel
++            :login-adapter="loginAdapter"
+             initial-profile-mode="full"
+             lock-profile-mode
+             cancel-label="取消"
+@@ -746,7 +765,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+             :initial-member="editingMember"
+             :allow-select-existing="false"
+             save-feedback-as-dialog
+-            :current-store-name="state.storeName || ''"
++            :current-store-name="editingMember?.storeName || state.storeName || ''"
+             :profile-fields="creatorSchema.profileFields || creatorSchema.fields || []"
+             :member-levels="creatorSchema.memberLevels || creatorSchema.levels || []"
+             :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"
+diff --git a/前端代码/cashier-v3/src/views/PlatformMemberListView.vue b/前端代码/cashier-v3/src/views/PlatformMemberListView.vue
+new file mode 100644
+index 00000000..fe33c9ab
+--- /dev/null
++++ b/前端代码/cashier-v3/src/views/PlatformMemberListView.vue
+@@ -0,0 +1,135 @@
++<script setup>
++import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
++import MemberListView from './MemberListView.vue'
++import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
++import QueryEntitySelectorOverlay from '@/components/query/QueryEntitySelectorOverlay.vue'
++import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
++import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
++
++const ready = ref(false), error = ref(''), boot = ref(null), selectedStores = ref([]), scopeLabel = ref('当前权限范围'), targetStore = ref('')
++const state = reactive({ stateContextId: '', memberCenter: {}, storeName: '' })
++const permissions = reactive({ create: false, edit: false, deactivate: false })
++const revisions = new Map()
++const detail = ref(null), detailLoading = ref(false), detailError = ref('')
++const person = ref(null), personPage = reactive({ records: [], total: 0, page: 1, pageSize: 20, error: '', loading: false })
++const referrer = ref(null), referrerPage = reactive({ records: [], total: 0, page: 1, pageSize: 20, loading: false })
++let editingStore = 0, preferenceVersion = 0
++function token() { const match = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/); return match ? decodeURIComponent(match[1]) : '' }
++async function api(path, body = null) {
++  const response = await fetch('/adminapi/user/member-center/' + path, { method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'Authori-zation': `Bearer ${token()}` }, ...(body ? { body: JSON.stringify(body) } : {}) })
++  const json = await response.json()
++  if (!response.ok || Number(json.status) !== 200) throw new Error(json.msg || '会员操作失败')
++  return json.data
++}
++// 独立平台上下文不写入门店桥接全局状态，不接收门店员工 token。
++async function request(action, input = {}) {
++  const payload = { ...input, pageCode: 'platform_member_list', selectedStoreIds: [...selectedStores.value] }
++  if (action === 'create-member') payload.targetStoreId = Number(targetStore.value)
++  if (action === 'query-query-entities') payload.targetStoreId = editingStore || Number(targetStore.value)
++  if (input.memberId && revisions.has(Number(input.memberId))) payload.memberRevision = revisions.get(Number(input.memberId))
++  // 查询设置使用独立平台页面版本；幂等键转成固定格式，重试仍映射同一键。
++  if (Array.isArray(payload.commandContexts)) payload.commandContexts = payload.commandContexts.map(context => context.kind === 'query_preference' ? { ...context, expectedVersion: preferenceVersion } : context)
++  if (!action.startsWith('query-') && !action.startsWith('open-') && action !== 'load-member-detail-tab') {
++    const sourceKey = input.idempotencyKey || crypto.randomUUID()
++    payload.requestId = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sourceKey)))).map(b => b.toString(16).padStart(2, '0')).join('')
++  }
++  const result = await api('action', { action, payload })
++  const version = result?.versions?.find(row => row.kind === 'query_preference' && row.id === 'platform_member_list')
++  if (version) preferenceVersion = Number(version.version)
++  const member = result?.data?.member
++  if (member?.memberRevision) { revisions.set(Number(member.memberId || member.id), member.memberRevision); editingStore = Number(member.storeId) || 0 }
++  return result
++}
++async function init() {
++  error.value = ''; ready.value = false
++  try {
++    const data = await api('bootstrap'); boot.value = data; Object.assign(permissions, data.permissions)
++    adapter.creatorSchema = data.creatorSchema || {}
++    targetStore.value = data.stores.length === 1 ? String(data.stores[0].id) : ''
++    state.stateContextId = data.stateContextId
++    ready.value = true
++  } catch (e) { error.value = e.message }
++}
++function changeScope(ids, label) {
++  selectedStores.value = [...ids]; scopeLabel.value = label || '当前权限范围'
++  state.stateContextId = `${boot.value.stateContextId}:${ids.join(',')}`
++  if (ids.length === 1) targetStore.value = String(ids[0])
++}
++async function openDetail(record) {
++  detailLoading.value = true; detailError.value = ''
++  try { const result = await request('open-member-detail', { memberId: Number(record.memberId || record.id) }); detail.value = result.data.detail }
++  catch (e) { detailError.value = e.message }
++  finally { detailLoading.value = false }
++}
++async function loadDetailTab(query) {
++  if (!detail.value) return
++  detailLoading.value = true; detailError.value = ''
++  try { const r = await request('load-member-detail-tab', { memberId: Number(detail.value.member?.memberId || detail.value.member?.id), ...query, tab: query.tab || query.activeTab }); detail.value = r.data.detail }
++  catch (e) { detailError.value = e.message }
++  finally { detailLoading.value = false }
++}
++// 热更新会把 document.referrer 改为子页自身；宿主显式传递回传地址并限制同源/固定本地开发配对。
++function platformHostOrigin() {
++  const own = window.location.origin
++  const candidate = new URL(window.location.href).searchParams.get('platformHostOrigin') || (document.referrer ? new URL(document.referrer).origin : own)
++  return candidate === own || (own === 'http://127.0.0.1:18091' && candidate === 'http://127.0.0.1:18081') ? candidate : ''
++}
++function transfer(record) {
++  const parentOrigin = platformHostOrigin()
++  if (window.parent === window || !parentOrigin) { error.value = '请从平台用户列表打开调店功能'; return }
++  window.parent.postMessage({ type: 'platform-member:transfer', member: { uid: Number(record.memberId || record.id), nickname: record.name, belong_store_id: Number(record.storeId || 0), belong_store_name: record.storeName || '' } }, parentOrigin)
++}
++function selectPeople(selected) {
++  return new Promise(resolve => { person.value = { selected, resolve }; queryPeople({ page: 1 }).catch(() => {}) })
++}
++async function queryPeople(query = {}) {
++  personPage.loading = true; personPage.error = ''
++  try { const r = await request('query-query-entities', { entityType: 'person', selectorEntry: 'member_exclusive_service_staff', selectorContext: { storeScope: 'current_store', memberCreate: true }, ...query }); Object.assign(personPage, r.data); return r.data }
++  catch (e) { personPage.error = e.message; throw e }
++  finally { personPage.loading = false }
++}
++function choosePeople(records) { person.value.resolve(records); person.value = null; return { success: true } }
++function closePeople() { person.value?.resolve(null); person.value = null }
++function selectReferrer(selected, exclude) { return new Promise(resolve => { referrer.value = { selected, exclude, resolve }; queryReferrers({ page: 1 }).catch(e => { error.value = e.message }) }) }
++async function queryReferrers(query = {}) {
++  referrerPage.loading = true
++  try {
++    const r = await request('query-members', { ...query, page: query.page || 1, limit: query.pageSize || 20 })
++    const page = r.data.memberCenter || r.data
++    Object.assign(referrerPage, { ...page, records: (page.records || []).map(row => ({ ...row, selectable: Number(row.memberId || row.id) !== Number(referrer.value?.exclude) })) })
++    return referrerPage
++  } finally { referrerPage.loading = false }
++}
++function chooseReferrer(record) { referrer.value.resolve(record); referrer.value = null; return { success: true } }
++function closeReferrer() { referrer.value?.resolve(null); referrer.value = null }
++const adapter = reactive({ state, permissions, creatorSchema: {}, request, token, openDetail, transfer, selectPeople, selectReferrer })
++onMounted(init)
++let refreshSequence = 0
++function refreshFromParent(event) {
++  const origin = platformHostOrigin()
++  if (origin && event.source === window.parent && event.origin === origin && event.data?.type === 'platform-member:refresh') state.stateContextId = `${boot.value.stateContextId}:refresh:${++refreshSequence}`
++}
++onMounted(() => window.addEventListener('message', refreshFromParent))
++onBeforeUnmount(() => { window.removeEventListener('message', refreshFromParent); closePeople(); closeReferrer() })
++</script>
++
++<template>
++  <section class="platform-member-list">
++    <p v-if="error" role="alert">{{ error }} <button type="button" @click="init">重新读取</button></p>
++    <template v-if="ready">
++      <div class="platform-member-list__scope">
++        <OrganizationStoreScopePicker v-model="selectedStores" :tree="boot.tree" :allowed-store-ids="boot.stores.map(s => Number(s.id))" :label="scopeLabel" @change="changeScope" />
++        <label v-if="permissions.create">新增归属门店 <select v-model="targetStore" @change="state.storeName = boot.stores.find(s => Number(s.id) === Number(targetStore))?.name || ''"><option value="">请选择门店</option><option v-for="store in boot.stores" :key="store.id" :value="String(store.id)">{{ store.name }}</option></select></label>
++      </div>
++      <MemberListView :platform-adapter="adapter" />
++    </template>
++    <p v-else-if="!error" role="status">正在读取平台会员管理…</p>
++    <MemberDetailOverlay v-if="detail" :detail="detail" :is-loading="detailLoading" :load-error="detailError" @tab-change="loadDetailTab" @close="detail = null" />
++    <QueryEntitySelectorOverlay v-if="person" entity-type="person" title="选择专属服务人" multiple :selected-records="person.selected" :records="personPage.records" :total="personPage.total" :page="personPage.page" :page-size="personPage.pageSize" :load-error="personPage.error" :is-loading="personPage.loading" :on-query="queryPeople" :on-select="choosePeople" @close="closePeople" />
++    <MemberSelectorOverlay v-if="referrer" title="选择推荐人" :records="referrerPage.records" :total="referrerPage.total" :page="referrerPage.page" :page-size="referrerPage.pageSize" :is-loading="referrerPage.loading" :on-query="queryReferrers" :on-select="chooseReferrer" @close="closeReferrer" />
++  </section>
++</template>
++
++<style scoped>
++.platform-member-list{height:100%;min-height:0;display:flex;flex-direction:column;padding:12px 16px;box-sizing:border-box;background:#f5f7fa;color:#334155}.platform-member-list__scope{display:flex;align-items:center;flex-wrap:wrap;gap:20px;padding:12px;background:#fff;border:1px solid #e1e6ed;border-bottom:0;border-radius:6px 6px 0 0}.platform-member-list__scope label{display:flex;align-items:center;gap:10px;font-size:13px}.platform-member-list__scope select{height:34px;min-width:170px;border:1px solid #dce3ed;border-radius:5px;padding:0 8px;color:#334155;background:#fff}.platform-member-list :deep(.member-list-page){flex:1;min-height:0}.platform-member-list>p{padding:16px}
++</style>
+diff --git a/前端代码/cashier-v3/vite.config.js b/前端代码/cashier-v3/vite.config.js
+index 7fea4a50..3f119af2 100644
+--- a/前端代码/cashier-v3/vite.config.js
++++ b/前端代码/cashier-v3/vite.config.js
+@@ -32,6 +32,11 @@ const cashierApiProxy = {
+     target: platformApiTarget,
+     changeOrigin: false
+   },
++  // 平台会员使用平台管理员会话，与门店 cashier token/后端进程隔离。
++  '/adminapi/user/member-center': {
++    target: platformApiTarget,
++    changeOrigin: false
++  },
+   // 库存模块在集团模式下可能访问 adminapi，其他接口继续走收银专用后端。
+   '/adminapi': {
+     target: cashierApiTarget,
+diff --git a/后端代码/app/controller/admin/v1/user/MemberCenter.php b/后端代码/app/controller/admin/v1/user/MemberCenter.php
+new file mode 100644
+index 00000000..93750a7f
+--- /dev/null
++++ b/后端代码/app/controller/admin/v1/user/MemberCenter.php
+@@ -0,0 +1,46 @@
++<?php
++namespace app\controller\admin\v1\user;
++use app\controller\admin\AuthController;
++use app\services\user\PlatformMemberCenterServices;
++use app\services\user\PlatformMemberScopeServices;
++use app\services\user\MemberLoginManagementServices;
++use app\services\query\UnifiedQueryRuntime;
++use app\services\query\provider\MemberUnifiedQueryContextFactory;
++use app\services\query\provider\PlatformMemberUnifiedQueryProvider;
++
++/** 平台会员模块只使用服务端平台身份，会员范围和每项写权限均由服务层重新验证。 */
++class MemberCenter extends AuthController
++{
++    public function bootstrap(PlatformMemberCenterServices $service) { return $this->safe(function () use ($service) { return $service->bootstrap((int)$this->adminId); }); }
++    public function action(PlatformMemberCenterServices $service)
++    {
++        $body = (array)$this->request->post();
++        return $this->safe(function () use ($body, $service) { return $service->action((int)$this->adminId, (string)($body['action'] ?? ''), (array)($body['payload'] ?? [])); });
++    }
++    public function login($id, MemberLoginManagementServices $service)
++    {
++        return $this->safe(function () use ($id, $service) { $s = (new PlatformMemberScopeServices())->build((int)$this->adminId, 'edit'); return $service->read((int)$id, $s['operator'], $s['data']); });
++    }
++    public function password($id, MemberLoginManagementServices $service) { return $this->loginWrite((int)$id, 'change-password', $service); }
++    public function clear($id, MemberLoginManagementServices $service) { return $this->loginWrite((int)$id, 'clear-wechat', $service); }
++    private function loginWrite(int $id, string $action, MemberLoginManagementServices $service)
++    {
++        return $this->safe(function () use ($id, $action, $service) { $s = (new PlatformMemberScopeServices())->build((int)$this->adminId, 'edit'); return $service->mutate($id, $action, (array)$this->request->post(), $s['operator'], $s['data'], 'ADMIN'); });
++    }
++    public function download($taskNo)
++    {
++        $s = (new PlatformMemberScopeServices())->build((int)$this->adminId);
++        $r = UnifiedQueryRuntime::runtime();
++        $c = (new MemberUnifiedQueryContextFactory($r['contextFactory']))->make($s['operator'], $s['data'], ['pageCode' => PlatformMemberUnifiedQueryProvider::PAGE_CODE]);
++        $d = $r['exports']->resolveDownloadDescriptor($c, (string)$taskNo);
++        $path = $r['exportStorage']->absolutePath((string)$d['storageKey']);
++        if (!is_file($path)) return $this->fail('导出文件不存在或已过期');
++        return download($path, (string)$d['fileName'])->mimeType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
++    }
++    /** 登录/编辑失败不回传含会员密码哈希或当前密码输入的 debug 参数堆栈。 */
++    private function safe(callable $operation)
++    {
++        try { return $this->success($operation()); }
++        catch (\Throwable $e) { return $this->fail(($e instanceof \think\exception\ValidateException || $e instanceof \app\services\cashier\v3\CashierV3CommandException || $e instanceof \app\services\query\UnifiedQueryException) ? $e->getMessage() : '会员操作失败，请刷新重试'); }
++    }
++}
+diff --git a/后端代码/app/controller/cashier/v3/MemberLogin.php b/后端代码/app/controller/cashier/v3/MemberLogin.php
+new file mode 100644
+index 00000000..53b1313d
+--- /dev/null
++++ b/后端代码/app/controller/cashier/v3/MemberLogin.php
+@@ -0,0 +1,47 @@
++<?php
++namespace app\controller\cashier\v3;
++
++use app\controller\cashier\AuthController;
++use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
++use app\services\cashier\v3\manifest\CashierV3ActionManifest;
++use app\services\user\MemberLoginManagementServices;
++
++/** 密码不经过通用网关的命令快照/日志；仍执行同一编辑功能权限和会员范围校验。 */
++class MemberLogin extends AuthController
++{
++    public function read($id, MemberLoginManagementServices $service)
++    {
++        return $this->safe(function () use ($id, $service) { [$operator, $scope] = $this->context(false); return $service->read((int)$id, $operator, $scope); });
++    }
++
++    public function password($id, MemberLoginManagementServices $service)
++    {
++        return $this->write((int)$id, 'change-password', $service);
++    }
++
++    public function clear($id, MemberLoginManagementServices $service)
++    {
++        return $this->write((int)$id, 'clear-wechat', $service);
++    }
++
++    private function write(int $id, string $action, MemberLoginManagementServices $service)
++    {
++        return $this->safe(function () use ($id, $action, $service) { [$operator, $scope] = $this->context(true); return $service->mutate($id, $action, (array)$this->request->post(), $operator, $scope, 'STORE'); });
++    }
++
++    private function context(bool $write): array
++    {
++        $dispatcher = CashierV3Bootstrap::dispatcher();
++        $operator = $dispatcher->scopeResolver()->operatorScope((int)$this->storeId, (int)$this->cashierId);
++        $scope = $dispatcher->dataScopeFactory()->build((int)$this->storeId, (int)$this->cashierId, (array)$this->cashierInfo, $operator->tenantId(), $operator->organizationId());
++        $dispatcher->permissionGuard()->assertAllowed(CashierV3ActionManifest::requireAction($write ? 'update-member' : 'open-member-editor'), $scope);
++        return [$operator, $scope];
++    }
++
++    /** 密码请求失败也不走 debug 参数堆栈响应，避免原始输入出现在日志/回包中。 */
++    private function safe(callable $operation)
++    {
++        try { return $this->success($operation()); }
++        catch (\Throwable $e) { return $this->fail(($e instanceof \think\exception\ValidateException || $e instanceof \app\services\cashier\v3\CashierV3CommandException) ? $e->getMessage() : '登录信息操作失败，请刷新重试'); }
++    }
++}
+diff --git a/后端代码/app/services/cashier/v3/member/CashierV3MemberModule.php b/后端代码/app/services/cashier/v3/member/CashierV3MemberModule.php
+index 263e6a05..540b0eef 100644
+--- a/后端代码/app/services/cashier/v3/member/CashierV3MemberModule.php
++++ b/后端代码/app/services/cashier/v3/member/CashierV3MemberModule.php
+@@ -1528,7 +1528,7 @@ final class CashierV3MemberModule
+             try {
+                 app()->make(\app\services\user\CanonicalUserIdentityServices::class)->replacePhoneIdentity(
+                     (int)$member['uid'], $phone,
+-                    ['operator_type' => 'STORE', 'operator_id' => $operatorScope->operatorId(), 'source' => 'CASHIER_V3_MEMBER_EDIT']
++                    ['operator_type' => !empty($dataScope->operatorProfile()['_platform_member']) ? 'ADMIN' : 'STORE', 'operator_id' => $operatorScope->operatorId(), 'source' => !empty($dataScope->operatorProfile()['_platform_member']) ? 'PLATFORM_MEMBER_EDIT' : 'CASHIER_V3_MEMBER_EDIT']
+                 );
+             } catch (\mohe\exceptions\AdminException $exception) {
+                 throw self::validation('phone', $exception->getMessage());
+@@ -1714,7 +1714,8 @@ final class CashierV3MemberModule
+         return $referrerId;
+     }
+ 
+-    private static function findManageableMember(
++    /** 共用会员数据权限边界；调用方必须先完成平台/门店功能授权，不接受客户端构造 scope。 */
++    public static function findManageableMember(
+         string $memberId,
+         CashierV3OperatorScope $operatorScope,
+         CashierV3DataScopeContext $dataScope,
+@@ -1936,6 +1937,9 @@ final class CashierV3MemberModule
+         $payload['referrer_member_id'] = (int)$referrer['member_id'];
+         $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
+         $payload['referrer_locked'] = (bool)$referrer['locked'];
++        // Preserve principal kind when platform and store accounts share a numeric ID.
++        $payload['actor_type'] = !empty($dataScope->operatorProfile()['_platform_member']) ? 'platform_admin' : 'store';
++        $payload['actor_id'] = $operatorScope->operatorId();
+         $eventRecorder->recordInTx($eventExecution, $eventContract, [
+             'event_type' => $eventType,
+             'aggregate_type' => 'member',
+@@ -2629,6 +2633,9 @@ final class CashierV3MemberModule
+         $payload['referrer_member_id'] = (int)$referrer['member_id'];
+         $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
+         $payload['referrer_locked'] = (bool)$referrer['locked'];
++        // Preserve principal kind when platform and store accounts share a numeric ID.
++        $payload['actor_type'] = !empty($dataScope->operatorProfile()['_platform_member']) ? 'platform_admin' : 'store';
++        $payload['actor_id'] = $operatorScope->operatorId();
+         $storeName = (string)Db::name('system_store')->where('id', $operatorScope->storeId())->value('name');
+         $eventRecorder->recordInTx($eventExecution, $eventContract, [
+             'event_type' => 'member.created',
+@@ -2768,7 +2775,8 @@ final class CashierV3MemberModule
+     }
+ 
+     /** @return array{profileFields:array<int,array<string,mixed>>,memberLevels:array<int,array<string,mixed>>,memberTags:array<int,array<string,mixed>>} */
+-    private static function memberCreatorSchema(): array
++    /** 平台与门店复用同一建档字段、等级和标签配置。 */
++    public static function memberCreatorSchema(): array
+     {
+         $profileFields = array_values(array_filter(
+             (array)SystemConfigService::get('user_extend_info', []),
+diff --git a/后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php b/后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php
+index dd91f5ba..b358a93a 100644
+--- a/后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php
++++ b/后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php
+@@ -9,7 +9,13 @@ class MemberUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
+ {
+     public function register(UnifiedQueryPageRegistry $registry): void
+     {
+-        $registry->registerPage(MemberUnifiedQueryProvider::PAGE_CODE, '会员列表', [
++        $this->registerPage($registry, MemberUnifiedQueryProvider::PAGE_CODE);
++    }
++
++    /** Same field/metric contract, separate page identity prevents platform/store account-ID collisions. */
++    protected function registerPage(UnifiedQueryPageRegistry $registry, string $pageCode): void
++    {
++        $registry->registerPage($pageCode, '会员列表', [
+             UnifiedQueryPageRegistry::field('member_name', '会员姓名', 'text', true, true),
+             UnifiedQueryPageRegistry::field('phone', '完整手机号', 'text', true, true),
+             UnifiedQueryPageRegistry::field('member_no', '会员编号', 'text', true, true),
+@@ -31,6 +37,7 @@ class MemberUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
+             UnifiedQueryPageRegistry::field('last_service_staff', '上次服务人员', 'text', true, false),
+             UnifiedQueryPageRegistry::field('latest_visit_date', '最近到店日期', 'date', true, false),
+             UnifiedQueryPageRegistry::field('created_at', '建档时间', 'datetime', true, false),
++            UnifiedQueryPageRegistry::field('wechat_binding', '微信绑定信息', 'text', true, false),
+         ], 'member_id', [
+             'keywordFields' => ['member_name', 'phone', 'member_no'],
+             'requiredFeature' => 'cashier.v3.member',
+diff --git a/后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php b/后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php
+index 6091c369..82dcbac7 100644
+--- a/后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php
++++ b/后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php
+@@ -44,19 +44,19 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+ 
+     public function pageCode(): string
+     {
+-        return self::PAGE_CODE;
++        return static::PAGE_CODE;
+     }
+ 
+     public function query(array $context, array $payload): array
+     {
+-        $payload['pageCode'] = self::PAGE_CODE;
++        $payload['pageCode'] = static::PAGE_CODE;
+         $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
+         $context['data_as_of'] = (int)($context['data_as_of'] ?? time());
+         $definitions = $this->definitionsForQuery($context, $payload);
+         // 先把 UI 输入完整校验成无 SQL 的规范化计划，再允许它影响 SQL 安全下推。
+         // 执行器仍会二次校验并执行同一口径，避免下推与内存计算分叉。
+         $validatedPlan = $this->execution->validatedPlan(
+-            self::PAGE_CODE,
++            static::PAGE_CODE,
+             $definitions,
+             $this->executionPayload($payload),
+             $context
+@@ -66,7 +66,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         if ($result === null) {
+             $sourceRows = $this->authorizedSourceRows($context, $normalizedQuery);
+             $result = $this->execution->execute(
+-                self::PAGE_CODE,
++                static::PAGE_CODE,
+                 $sourceRows,
+                 $definitions,
+                 $this->executionPayload($payload),
+@@ -78,7 +78,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+             );
+         }
+ 
+-        $preference = $this->preferences->load($context, self::PAGE_CODE);
++        $preference = $this->preferences->load($context, static::PAGE_CODE);
+         return [
+             'records' => array_map(function (array $row): array {
+                 return $this->presentRow($row);
+@@ -110,7 +110,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         array $fieldKeys
+     ): array {
+         $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
+-        if ((string)($plan['page_code'] ?? '') !== self::PAGE_CODE) {
++        if ((string)($plan['page_code'] ?? '') !== static::PAGE_CODE) {
+             throw new UnifiedQueryException(
+                 'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
+                 '导出查询计划与页面不匹配。',
+@@ -132,7 +132,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         ];
+         $sourceRows = $this->authorizedSourceRows($context, $query);
+         return $this->execution->execute(
+-            self::PAGE_CODE,
++            static::PAGE_CODE,
+             $sourceRows,
+             (array)($plan['custom_definitions'] ?? []),
+             $query,
+@@ -171,10 +171,10 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         if (!$keys) {
+             return [];
+         }
+-        $preference = $this->preferences->load($context, self::PAGE_CODE);
++        $preference = $this->preferences->load($context, static::PAGE_CODE);
+         $pinned = (array)($preference['customFieldVersions'] ?? []);
+         $visible = [];
+-        foreach ($this->customFields->listVisible($context, self::PAGE_CODE, true) as $field) {
++        foreach ($this->customFields->listVisible($context, static::PAGE_CODE, true) as $field) {
+             $visible[(string)$field['key']] = $field;
+         }
+         $definitions = [];
+@@ -189,11 +189,11 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+             $version = (int)($pinned[$fieldKey] ?? $visible[$fieldKey]['version'] ?? 0);
+             $definition = $this->customFields->versionDefinition(
+                 $context,
+-                self::PAGE_CODE,
++                static::PAGE_CODE,
+                 $fieldKey,
+                 $version
+             );
+-            $definition['page_code'] = self::PAGE_CODE;
++            $definition['page_code'] = static::PAGE_CODE;
+             $definitions[] = $definition;
+         }
+         return $definitions;
+@@ -274,7 +274,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         $pageQuery = $normalizedQuery;
+         $pageQuery['page'] = 1;
+         $result = $this->execution->execute(
+-            self::PAGE_CODE,
++            static::PAGE_CODE,
+             $projected,
+             [],
+             $pageQuery,
+@@ -576,6 +576,8 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+         $stores = $this->storeNames(array_values(array_unique(array_values($displayStoreIds))));
+         $levels = $this->levelNames($rows);
+         $labels = $this->memberLabels($uids);
++        // 一次批量读取当前授权会员的绑定状态，列表和导出共用，不产生逐行查询。
++        $wechatBindings = (new \app\services\user\MemberWechatBindingReadServices())->summaries($uids);
+         $exclusive = $this->exclusiveServicePeople($uids, $visibleStoreIds, $allStores);
+         $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores, $context);
+         $debts = $this->debtSummaries($uids, $visibleStoreIds, $allStores);
+@@ -625,6 +627,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+                 'last_service_staff' => (string)($visits[$uid]['last_staff_name'] ?? ''),
+                 'latest_visit_date' => (string)($visits[$uid]['latest_date'] ?? ''),
+                 'created_at' => $this->dateTime($row['add_time'] ?? 0),
++                'wechat_binding' => $wechatBindings[$uid] ?? '未绑定',
+                 '_member_tags' => $tagList,
+                 '_member_status_code' => $state['code'],
+                 '_scope_store_ids' => $relations[$uid] ?? [],
+@@ -700,6 +703,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
+             'lastServiceStaff' => (string)$row['last_service_staff'],
+             'latestVisitDate' => (string)$row['latest_visit_date'],
+             'createdAt' => (string)$row['created_at'],
++            'wechatBinding' => (string)($row['wechat_binding'] ?? '未绑定'),
+             'queryFieldValues' => $customValues,
+             'queryDisplayValues' => $customValues,
+         ];
+diff --git a/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryProvider.php b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryProvider.php
+new file mode 100644
+index 00000000..5dfd014a
+--- /dev/null
++++ b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryProvider.php
+@@ -0,0 +1,8 @@
++<?php
++namespace app\services\query\provider;
++
++/** 共用会员事实读取/字段/导出；独立页面码隔离同数字的平台与门店账号查询偏好。 */
++class PlatformMemberUnifiedQueryProvider extends MemberUnifiedQueryProvider
++{
++    public const PAGE_CODE = 'platform_member_list';
++}
+diff --git a/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php
+new file mode 100644
+index 00000000..57a42fca
+--- /dev/null
++++ b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php
+@@ -0,0 +1,12 @@
++<?php
++namespace app\services\query\provider;
++use app\services\query\UnifiedQueryPageRegistry;
++
++/** 平台复用同一列契约，不复制会员金额/次数或导出算法。 */
++class PlatformMemberUnifiedQueryRegistrar extends MemberUnifiedQueryPageRegistrar
++{
++    public function register(UnifiedQueryPageRegistry $registry): void
++    {
++        $this->registerPage($registry, PlatformMemberUnifiedQueryProvider::PAGE_CODE);
++    }
++}
+diff --git a/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php
+new file mode 100644
+index 00000000..00151989
+--- /dev/null
++++ b/后端代码/app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php
+@@ -0,0 +1,16 @@
++<?php
++namespace app\services\query\provider;
++use app\services\query\UnifiedQueryWorkerContextResolver;
++use app\services\query\UnifiedQueryRuntime;
++use app\services\user\PlatformMemberScopeServices;
++
++/** 异步导出重新校验平台账号/角色/实时范围，绝不按同数字门店员工 ID 取身份。 */
++class PlatformMemberUnifiedQueryWorkerContextResolver implements UnifiedQueryWorkerContextResolver
++{
++    public function pageCode(): string { return PlatformMemberUnifiedQueryProvider::PAGE_CODE; }
++    public function resolve(array $task): array
++    {
++        $scope = (new PlatformMemberScopeServices())->build((int)$task['operator_id']);
++        return (new MemberUnifiedQueryContextFactory(UnifiedQueryRuntime::service('contextFactory')))->make($scope['operator'], $scope['data'], ['pageCode' => $this->pageCode()]);
++    }
++}
+diff --git a/后端代码/app/services/user/MemberLoginManagementServices.php b/后端代码/app/services/user/MemberLoginManagementServices.php
+new file mode 100644
+index 00000000..ece2d10e
+--- /dev/null
++++ b/后端代码/app/services/user/MemberLoginManagementServices.php
+@@ -0,0 +1,59 @@
++<?php
++declare(strict_types=1);
++namespace app\services\user;
++
++use app\services\cashier\v3\CashierV3OperatorScope;
++use app\services\cashier\v3\CashierV3DataScopeContext;
++use app\services\cashier\v3\member\CashierV3MemberModule;
++use think\facade\Cache;
++use think\facade\Db;
++use think\exception\ValidateException;
++
++/** 平台/门店同一会员登录资料服务。手机号只读；原密码及微信标识从不回显。 */
++class MemberLoginManagementServices
++{
++    public function read(int $uid, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
++    {
++        $member = CashierV3MemberModule::findManageableMember((string)$uid, $operator, $scope, false);
++        return $this->projection($member);
++    }
++
++    public function mutate(int $uid, string $action, array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, string $actorType): array
++    {
++        // 读写与回执重放前均复核当前权限，不能借旧请求凭证绕过调店/撤权。
++        CashierV3MemberModule::findManageableMember((string)$uid, $operator, $scope, false);
++        if (!in_array($action, ['change-password', 'clear-wechat'], true)) throw new ValidateException('不支持的登录管理操作');
++        foreach (array_keys($payload) as $key) if (!in_array($key, ['requestId', 'revision', 'newPassword'], true)) throw new ValidateException('登录账号保持为手机号，不支持修改其他资料');
++        $command = $payload + ['memberId' => $uid];
++        return (new MemberManagementCommandServices())->execute($actorType, $operator->operatorId(), $action, $command, function () use ($uid, $action, $payload, $operator, $scope, $actorType): array {
++            $member = CashierV3MemberModule::findManageableMember((string)$uid, $operator, $scope, true);
++            if (!hash_equals($this->revision($member), (string)($payload['revision'] ?? ''))) throw new ValidateException('登录资料已变化，请刷新后重试');
++            $audit = ['operator_type' => $actorType, 'operator_id' => $operator->operatorId(), 'source' => strtoupper($action)];
++            if ($action === 'change-password') {
++                $password = (string)($payload['newPassword'] ?? '');
++                if (mb_strlen($password) < 6 || mb_strlen($password) > 20 || preg_match('/[\x00-\x1f\x7f]/', $password) || $password === '123456') throw new ValidateException('请设置6至20位密码，不能使用初始密码123456');
++                // 沿用会员端现有密码验证格式；仅在用户当前输入时明文显示，不落库明文。
++                if (!hash_equals((string)$member['pwd'], md5($password))) {
++                    Db::name('user')->where('uid', $uid)->update(['pwd' => md5($password)]);
++                    app()->make(MemberPhoneResetServices::class)->rotateLocked($uid, $audit, false);
++                }
++            } else {
++                app()->make(MemberPhoneResetServices::class)->revokeLocked($uid, $audit);
++            }
++            Cache::delete('user_info_' . $uid);
++            return $this->projection(Db::name('user')->where('uid', $uid)->find());
++        });
++    }
++
++    private function projection(array $member): array
++    {
++        return ['memberId' => (int)$member['uid'], 'account' => (string)$member['phone'], 'bindings' => (new MemberWechatBindingReadServices())->bindings((int)$member['uid']), 'revision' => $this->revision($member)];
++    }
++
++    private function revision(array $member): string
++    {
++        $bindings = Db::name('wechat_user')->where('uid', (int)$member['uid'])->where('is_del', 0)->order('id')->column('id');
++        $state = app()->make(MemberPhoneResetServices::class)->state((int)$member['uid']);
++        return (new MemberManagementCommandServices())->fingerprint([(int)$member['uid'], (string)$member['phone'], (string)$member['pwd'], $bindings, (string)($state['nonce'] ?? '')]);
++    }
++}
+diff --git a/后端代码/app/services/user/MemberManagementCommandServices.php b/后端代码/app/services/user/MemberManagementCommandServices.php
+new file mode 100644
+index 00000000..51d17047
+--- /dev/null
++++ b/后端代码/app/services/user/MemberManagementCommandServices.php
+@@ -0,0 +1,39 @@
++<?php
++declare(strict_types=1);
++namespace app\services\user;
++
++use think\facade\Db;
++use think\facade\Env;
++use think\exception\ValidateException;
++
++/** 两端共用事务/幂等边界；传入的 actor 必须来自服务端已认证会话。 */
++class MemberManagementCommandServices
++{
++    public function execute(string $actorType, int $actorId, string $action, array $payload, callable $write): array
++    {
++        if (!in_array($actorType, ['ADMIN', 'STORE'], true) || $actorId <= 0) throw new ValidateException('操作账号无效');
++        $key = (string)($payload['requestId'] ?? '');
++        if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/D', $key)) throw new ValidateException('操作凭证缺失，请刷新重试');
++        $hmac = $this->fingerprint(['action' => $action, 'payload' => $payload]);
++        return Db::transaction(function () use ($actorType, $actorId, $action, $payload, $write, $key, $hmac): array {
++            $where = ['actor_type' => $actorType, 'actor_id' => $actorId, 'request_key' => $key];
++            $table = Db::name('member_management_receipt')->getTable();
++            // MySQL唯一键等待并发同请求；失败事务会撤掉占位，不能留下假成功回执。
++            Db::execute("INSERT IGNORE INTO {$table} (actor_type,actor_id,request_key,request_hmac,action,member_id,response_json,created_at) VALUES (?,?,?,?,?,?,?,?)", [
++                $actorType, $actorId, $key, $hmac, $action, (int)($payload['memberId'] ?? 0), '', time(),
++            ]);
++            $receipt = Db::name('member_management_receipt')->where($where)->lock(true)->find();
++            if (!$receipt || !hash_equals((string)$receipt['request_hmac'], $hmac)) throw new ValidateException('同一操作凭证不能用于不同内容');
++            if ($receipt['response_json'] !== '') return (array)json_decode($receipt['response_json'], true);
++            $response = $write();
++            Db::name('member_management_receipt')->where('id', (int)$receipt['id'])->update(['response_json' => json_encode($response, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]);
++            return $response;
++        });
++    }
++
++    /** 使用现有服务端认证密钥作HMAC；指纹不泄露可离线猜测的密码哈希。 */
++    public function fingerprint(array $value): string
++    {
++        return hash_hmac('sha256', json_encode($value, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), (string)(Env::get('app.app_key', 'mohe_app_key') ?: 'mohe_app_key'));
++    }
++}
+diff --git a/后端代码/app/services/user/MemberPhoneResetServices.php b/后端代码/app/services/user/MemberPhoneResetServices.php
+index c4ce2d36..a1f2274d 100644
+--- a/后端代码/app/services/user/MemberPhoneResetServices.php
++++ b/后端代码/app/services/user/MemberPhoneResetServices.php
+@@ -14,17 +14,25 @@ class MemberPhoneResetServices
+ {
+     /** 调用方须先锁会员行；与手机号替换共用事务，失败时连同微信解绑一起回滚。 */
+     public function revokeLocked(int $uid, array $audit): void
++    {
++        $this->rotateLocked($uid, $audit, true);
++    }
++
++    /** 密码修改只撤销旧登录，不自动解除微信，也不能解除尚未完成的改号授权门禁。 */
++    public function rotateLocked(int $uid, array $audit, bool $clearWechat): void
+     {
+         $ids = Db::name('wechat_user')->where('uid', $uid)->column('id');
++        $previous = $this->state($uid);
+         Db::name('member_phone_login_reset')->insert([
+-            'uid' => $uid, 'nonce' => bin2hex(random_bytes(16)), 'phone_verified' => 0,
+-            'binding_ids' => json_encode(array_values($ids)),
++            'uid' => $uid, 'nonce' => bin2hex(random_bytes(16)),
++            'phone_verified' => $clearWechat ? 0 : (int)($previous['phone_verified'] ?? 1),
++            'binding_ids' => json_encode($clearWechat ? array_values($ids) : []),
+             'operator_id' => (int)($audit['operator_id'] ?? 0),
+             'source' => (string)($audit['source'] ?? 'PHONE_CHANGE'), 'created_at' => time(),
+         ]);
+         // 留存微信历史行，撤掉 UID，所有旧查询也不能再凭它找到原会员。
+         // 事件保留原 UID -> 微信行 ID 的追溯关系，不保存原始微信会话密钥。
+-        Db::name('wechat_user')->where('uid', $uid)->update(['uid' => 0, 'is_del' => 1]);
++        if ($clearWechat) Db::name('wechat_user')->where('uid', $uid)->update(['uid' => 0, 'is_del' => 1]);
+     }
+ 
+     /** 使用 (uid,id) 索引读取最新事件；不缓存，避免旧 worker/cache 放行已撤销凭证。 */
+diff --git a/后端代码/app/services/user/MemberWechatBindingReadServices.php b/后端代码/app/services/user/MemberWechatBindingReadServices.php
+new file mode 100644
+index 00000000..35dc0de4
+--- /dev/null
++++ b/后端代码/app/services/user/MemberWechatBindingReadServices.php
+@@ -0,0 +1,39 @@
++<?php
++declare(strict_types=1);
++namespace app\services\user;
++
++use think\facade\Db;
++
++/** 已通过会员数据权限的 UID 批量读取器；不返回 openid、unionid 或微信密钥。 */
++class MemberWechatBindingReadServices
++{
++    public function summaries(array $memberIds): array
++    {
++        $ids = array_values(array_unique(array_filter(array_map('intval', $memberIds), static function ($id) { return $id > 0; })));
++        if (!$ids) return [];
++        $channels = [];
++        foreach (Db::name('wechat_user')->whereIn('uid', $ids)->where('is_del', 0)
++            ->where('openid', '<>', '')->field('uid,user_type')->select()->toArray() as $row) {
++            if (in_array($row['user_type'], ['routine', 'wechat'], true)) $channels[(int)$row['uid']][$row['user_type']] = true;
++        }
++        $result = [];
++        foreach ($ids as $id) {
++            $labels = [];
++            if (!empty($channels[$id]['routine'])) $labels[] = '小程序已绑定';
++            if (!empty($channels[$id]['wechat'])) $labels[] = '公众号已绑定';
++            $result[$id] = $labels ? implode('、', $labels) : '未绑定';
++        }
++        return $result;
++    }
++
++    /** 仅登录资料编辑授权通过后调用；历史解绑行不作为当前绑定显示。 */
++    public function bindings(int $memberId): array
++    {
++        $rows = Db::name('wechat_user')->where('uid', $memberId)->where('is_del', 0)->where('openid', '<>', '')
++            ->whereIn('user_type', ['routine', 'wechat'])->field('id,user_type,nickname,add_time')->order('id', 'asc')->select()->toArray();
++        return array_map(static function (array $row): array {
++            return ['channel' => $row['user_type'], 'label' => $row['user_type'] === 'routine' ? '微信小程序' : '微信公众号',
++                'nickname' => (string)$row['nickname'], 'boundAt' => (int)$row['add_time'] > 0 ? date('Y-m-d H:i:s', (int)$row['add_time']) : ''];
++        }, $rows);
++    }
++}
+diff --git a/后端代码/app/services/user/PlatformMemberCenterServices.php b/后端代码/app/services/user/PlatformMemberCenterServices.php
+new file mode 100644
+index 00000000..6d17eab5
+--- /dev/null
++++ b/后端代码/app/services/user/PlatformMemberCenterServices.php
+@@ -0,0 +1,139 @@
++<?php
++declare(strict_types=1);
++namespace app\services\user;
++
++use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
++use app\services\cashier\v3\manifest\CashierV3ActionManifest;
++use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
++use app\services\cashier\v3\member\CashierV3MemberModule;
++use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
++use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
++use app\services\cashier\v3\query\UnifiedQueryModule;
++use app\services\query\provider\MemberUnifiedQueryContextFactory;
++use app\services\query\provider\PlatformMemberUnifiedQueryProvider;
++use app\services\query\UnifiedQueryCommandCoordinator;
++use app\services\query\UnifiedQueryPreferenceServices;
++use app\services\organization\OrganizationScopeService;
++use think\facade\Db;
++use think\exception\ValidateException;
++
++/** 平台只开放会员页白名单。复用门店权威查询/编辑/档案/事件服务，不开放通用收银命令。 */
++class PlatformMemberCenterServices
++{
++    private const WRITES = ['create-member' => 'create', 'update-member' => 'edit', 'deactivate-member' => 'deactivate', 'restore-member' => 'deactivate'];
++    private const READS = ['open-member-editor','open-member-restore','open-member-detail','load-member-detail-tab','query-member-card-history','query-query-entities','query-unified-query-export-task'];
++
++    public function bootstrap(int $adminId): array
++    {
++        $scope = (new PlatformMemberScopeServices())->build($adminId);
++        $ids = array_map('intval', array_column($scope['stores'], 'id'));
++        return ['stores' => $scope['stores'], 'permissions' => $scope['permissions'], 'creatorSchema' => CashierV3MemberModule::memberCreatorSchema(), 'tree' => app()->make(OrganizationScopeService::class)->buildPickerTree($ids),
++            'stateContextId' => 'platform-member:' . $adminId . ':' . $scope['data']->permissionVersion()];
++    }
++
++    public function action(int $adminId, string $action, array $payload): array
++    {
++        $metadata = UnifiedQueryModule::runtime()['commandCoordinator']->supportedActions();
++        $isWrite = isset(self::WRITES[$action]);
++        $isMetadata = in_array($action, $metadata, true);
++        if (!$isWrite && !$isMetadata && !in_array($action, array_merge(self::READS, ['query-members', 'query-unified-query-capabilities']), true)) throw new ValidateException('平台会员页不支持该操作');
++        if (isset($payload['pageCode']) && $payload['pageCode'] !== PlatformMemberUnifiedQueryProvider::PAGE_CODE) throw new ValidateException('查询页面不匹配');
++        $operation = self::WRITES[$action] ?? (in_array($action, ['open-member-editor', 'query-query-entities'], true) ? 'edit' : ($action === 'open-member-restore' ? 'deactivate' : 'read'));
++        $targetStore = in_array($action, ['create-member','query-query-entities'], true) ? (int)($payload['targetStoreId'] ?? 0) : 0;
++        if ($action === 'create-member' && $targetStore <= 0) throw new ValidateException('请先选择新增会员的归属门店');
++        if (($isWrite && $action !== 'create-member') || in_array($action, ['open-member-editor','open-member-restore'], true)) {
++            $targetStore = (int)Db::name('user')->where('uid', (int)($payload['memberId'] ?? 0))->value('belong_store_id');
++            if ($targetStore <= 0 && $isWrite) throw new ValidateException('该会员暂无归属门店，请先调店后操作');
++        }
++        $scope = (new PlatformMemberScopeServices())->build($adminId, $operation, $targetStore);
++        $payload['pageCode'] = PlatformMemberUnifiedQueryProvider::PAGE_CODE;
++        $runtime = UnifiedQueryModule::runtime();
++        $context = (new MemberUnifiedQueryContextFactory($runtime['contextFactory'] instanceof MemberUnifiedQueryContextFactory
++            ? \app\services\query\UnifiedQueryRuntime::service('contextFactory') : $runtime['contextFactory']))->make($scope['operator'], $scope['data'], $payload);
++        // 筛选只缩小平台授权范围；来源为服务端管理范围，不接受客户端覆盖 trusted scope。
++        if (!empty($payload['selectedStoreIds'])) {
++            $allowed = array_map('intval', array_column($scope['stores'], 'id'));
++            $selected = array_values(array_unique(array_map('intval', (array)$payload['selectedStoreIds'])));
++            if (array_diff($selected, $allowed)) throw new ValidateException('查询门店超出当前权限范围');
++            $d = $scope['data']; $o = $scope['operator'];
++            $narrow = new \app\services\cashier\v3\CashierV3DataScopeContext($d->operatorId(), $d->employeeId(), $o->storeId(), $d->tenantId(), $o->organizationId(), $selected,
++                \app\services\cashier\v3\CashierV3DataScopeContext::MODE_STORES, $d->employeeDataScope(), $d->isSuperAdmin(), $d->superAdminBasis(), $d->permissionVersion(), $d->grantedFeatures(), $d->operatorProfile());
++            $context = (new MemberUnifiedQueryContextFactory(\app\services\query\UnifiedQueryRuntime::service('contextFactory')))->make($o, $narrow, $payload);
++        }
++        $dispatcher = CashierV3Bootstrap::dispatcher();
++        // 宿主范围/并发/幂等字段由本桥处理，不能污染统一查询 UI 白名单或被保存成筛选。
++        $corePayload = $payload;
++        unset($corePayload['selectedStoreIds'], $corePayload['targetStoreId'], $corePayload['requestId'], $corePayload['memberRevision'], $corePayload['commandContexts'], $corePayload['idempotencyKey']);
++        if ($action === 'query-query-entities') {
++            if (($corePayload['entityType'] ?? '') !== 'person') throw new ValidateException('仅支持会员专属服务人选择');
++            $corePayload['selectorEntry'] = 'member_exclusive_service_staff';
++        }
++        $callScope = ['operator_scope' => $scope['operator'], 'data_scope' => $scope['data'], 'operator' => $scope['admin'], 'payload' => $corePayload];
++        if ($action === 'query-members') {
++            $data = $runtime['providers']->resolve(PlatformMemberUnifiedQueryProvider::PAGE_CODE)->query($context, $corePayload);
++        } elseif ($action === 'query-unified-query-capabilities') {
++            $version = $this->preferenceVersion($adminId, false);
++            $data = ['unifiedQueryCapability' => $runtime['capabilities']->build($context, PlatformMemberUnifiedQueryProvider::PAGE_CODE, $version, time())];
++        } elseif ($isWrite || $isMetadata) {
++            $result = (new MemberManagementCommandServices())->execute('ADMIN', $adminId, $action, $payload, function () use ($adminId, $action, $payload, $corePayload, $callScope, $dispatcher, $scope, $isMetadata, $runtime, $context): array {
++                if ($isMetadata) {
++                    // 单管理员行锁把首次偏好创建与并发设置写入串行化，避免空行丢失更新。
++                    Db::name('system_admin')->where('id', $adminId)->lock(true)->find();
++                    $version = $this->preferenceVersion($adminId, true);
++                    $expected = (int)($payload['commandContexts'][0]['expectedVersion'] ?? $payload['commandContexts'][0]['expected_version'] ?? 0);
++                    if ($expected !== $version) throw new ValidateException('查询设置已变化，请刷新后重试');
++                    $context['query_preference_version'] = $version;
++                    return $runtime['commandCoordinator']->dispatch($action, $context, $corePayload);
++                }
++                $uid = (int)($payload['memberId'] ?? 0);
++                if ($uid > 0) {
++                    $member = CashierV3MemberModule::findManageableMember((string)$uid, $scope['operator'], $scope['data'], true, $action === 'restore-member');
++                    if (!hash_equals($this->revision($member), (string)($payload['memberRevision'] ?? ''))) throw new ValidateException('会员资料已更新，请重新打开编辑后重试');
++                }
++                $recorder = new CashierV3BusinessEventRecorder();
++                $execution = $recorder->newExecution($action, (string)$payload['requestId'], $scope['operator'], $scope['data'], 'platform-member:' . $adminId);
++                $contract = CashierV3ActionManifest::eventContractFor($action);
++                $handler = $dispatcher->handlers()->requireCommand($action);
++                $result = $handler($callScope + ['idempotency_key' => (string)$payload['requestId'], 'event_recorder' => $recorder, 'event_execution' => $execution, 'event_contract' => $contract]);
++                $recorder->assertRequiredPersistedInTx($execution, $contract);
++                // 同步同一资源提供器，使已打开门店编辑窗也能识别平台的资料变化。
++                $changedId = (int)($result['data']['member']['memberId'] ?? $result['data']['member']['id'] ?? $uid);
++                if ($changedId > 0 && $action !== 'deactivate-member') (new CashierV3EntitlementResourceVersionProvider(new CashierV3CashierReadinessGuard()))->synchronizeProjectionVersion('member', (string)$changedId, $scope['operator'], $scope['data']);
++                return $result;
++            });
++            $data = (array)($result['data'] ?? []);
++        } else {
++            $handler = $dispatcher->handlers()->requireProjection($action);
++            $result = $handler($callScope);
++            $data = (array)($result['data'] ?? []);
++            if (in_array($action, ['open-member-editor', 'open-member-restore'], true)) {
++                $member = Db::name('user')->where('uid', (int)($payload['memberId'] ?? 0))->find();
++                if ($member && isset($data['member'])) {
++                    $data['member']['memberRevision'] = $this->revision($member);
++                    $data['member']['storeId'] = (int)$member['belong_store_id'];
++                    $data['member']['storeName'] = (string)Db::name('system_store')->where('id', (int)$member['belong_store_id'])->value('name');
++                }
++            }
++        }
++        // 平台适配器单独维护查询偏好版本，不借用门店全局桥接状态。
++        return ['result' => ['status' => 'success', 'message' => '操作完成'], 'data' => $data,
++            'versions' => [['kind' => 'query_preference', 'id' => PlatformMemberUnifiedQueryProvider::PAGE_CODE, 'version' => $this->preferenceVersion($adminId, false)]]];
++    }
++
++    /** 平台独立页面码隔离偏好与导出；金额/次数读取仍用同一会员 Provider。 */
++    private function preferenceVersion(int $adminId, bool $lock): int
++    {
++        $query = Db::name(UnifiedQueryPreferenceServices::TABLE)->where(['tenant_id' => \app\services\cashier\v3\CashierV3ScopeResolver::TENANT_SCOPE_ID, 'account_id' => $adminId, 'page_code' => PlatformMemberUnifiedQueryProvider::PAGE_CODE]);
++        if ($lock) $query->lock(true);
++        return max(1, (int)$query->value('current_version'));
++    }
++
++    private function revision(array $member): string
++    {
++        $uid = (int)$member['uid'];
++        return (new MemberManagementCommandServices())->fingerprint([$member,
++            Db::name('user_label_relation')->where('uid', $uid)->order('id')->select()->toArray(),
++            (new \app\services\cashier\v3\member\CashierV3MemberExclusiveSelectionServices())->records($uid)]);
++    }
++
++}
+diff --git a/后端代码/app/services/user/PlatformMemberScopeServices.php b/后端代码/app/services/user/PlatformMemberScopeServices.php
+new file mode 100644
+index 00000000..3de23520
+--- /dev/null
++++ b/后端代码/app/services/user/PlatformMemberScopeServices.php
+@@ -0,0 +1,64 @@
++<?php
++declare(strict_types=1);
++namespace app\services\user;
++
++use app\services\cashier\v3\CashierV3DataScopeContext;
++use app\services\cashier\v3\CashierV3OperatorScope;
++use app\services\cashier\v3\CashierV3ScopeResolver;
++use app\services\organization\EmployeeDataScopeServices;
++use app\services\system\SystemRoleServices;
++use think\facade\Db;
++use think\exception\ValidateException;
++
++/** 平台身份独立授权，不消费 cashier token、不伪造门店员工身份。 */
++class PlatformMemberScopeServices
++{
++    public function build(int $adminId, string $operation = 'read', int $storeId = 0): array
++    {
++        $admin = Db::name('system_admin')->where('id', $adminId)->where('status', 1)->where('is_del', 0)->where('admin_type', 0)->find();
++        if (!$admin) throw new ValidateException('平台登录已失效');
++        $root = (int)$admin['level'] === 0;
++        // 历史角色为逗号串，兼容明确的数组表示；空值不获得任何授权。
++        $roles = is_array($admin['roles']) ? $admin['roles'] : json_decode((string)$admin['roles'], true);
++        if (!is_array($roles)) $roles = explode(',', (string)$admin['roles']);
++        $roles = array_values(array_filter(array_map('intval', $roles)));
++        $rules = $root ? [] : app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 2);
++        $grants = ['read' => false, 'create' => false, 'edit' => false, 'deactivate' => false];
++        foreach ($grants as $key => $_) {
++            $method = ['read' => 'get', 'create' => 'post', 'edit' => 'put', 'deactivate' => 'delete'][$key];
++            foreach ($rules as $rule) {
++                $path = trim(strtolower((string)($rule['api_url'] ?? '')), '/');
++                // 仅资源本身授权生效，不能把 user/user_label 或调店等旁路接口当作会员编辑权。
++                $paths = $key === 'read' ? ['user/user'] : ($key === 'create' ? ['user/user', 'user/user/save'] : ['user/user/:id']);
++                if (in_array($path, $paths, true) && strtolower((string)($rule['methods'] ?? '')) === $method) $grants[$key] = true;
++            }
++            if ($root) $grants[$key] = true;
++        }
++        if (empty($grants[$operation]) || empty($grants['read'])) throw new ValidateException('当前账号没有会员管理操作权限');
++        $authority = app()->make(EmployeeDataScopeServices::class);
++        $employeeId = $authority->resolveEmployeeIdFromOperator($admin, 'admin');
++        $where = []; $authority->applyOrderListScope($where, $employeeId, 'admin', 0, $admin);
++        $scope = (array)($where['employee_data_scope'] ?? ['mode' => 'none']);
++        if (($scope['mode'] ?? '') === 'all') $visible = null;
++        elseif (($scope['mode'] ?? '') === 'stores') $visible = array_values(array_filter(array_map('intval', (array)($scope['store_ids'] ?? []))));
++        else throw new ValidateException('当前账号暂无可管理的门店范围');
++        $stores = Db::name('system_store')->where('is_del', 0)->field('id,name')->order('id');
++        if ($visible !== null) $stores->whereIn('id', $visible ?: [-1]);
++        $storeRows = $stores->select()->toArray();
++        $ids = array_map('intval', array_column($storeRows, 'id'));
++        if (!$ids || ($storeId > 0 && !in_array($storeId, $ids, true))) throw new ValidateException('所选门店不在当前权限范围');
++        $anchor = $storeId > 0 ? $storeId : $ids[0];
++        $org = (string)(Db::name('organization_store')->where('store_id', $anchor)->value('org_id') ?: '');
++        $features = ['cashier.v3.member'];
++        if ($grants['create']) $features[] = 'cashier.v3.member.create';
++        if ($grants['edit']) $features[] = 'cashier.v3.member.edit';
++        $admin['actor_type'] = 'platform_admin'; $admin['staff_name'] = '平台·' . ($admin['real_name'] ?: $admin['account']);
++        $admin['_platform_member'] = true;
++        $version = 'platform-member:' . hash('sha256', json_encode([$adminId, $employeeId, $scope, $grants]));
++        $operator = new CashierV3OperatorScope($anchor, $adminId, $org, CashierV3ScopeResolver::TENANT_SCOPE_ID);
++        $data = new CashierV3DataScopeContext($adminId, $employeeId, $anchor, $operator->tenantId(), $org, $visible,
++            $visible === null ? CashierV3DataScopeContext::MODE_ALL : CashierV3DataScopeContext::MODE_STORES,
++            $scope, $root, 'authenticated platform member authority', $version, $features, $admin);
++        return ['operator' => $operator, 'data' => $data, 'admin' => $admin, 'stores' => $storeRows, 'permissions' => $grants];
++    }
++}
+diff --git a/后端代码/config/unified_query.php b/后端代码/config/unified_query.php
+index 24466ebc..0dcbcfb7 100644
+--- a/后端代码/config/unified_query.php
++++ b/后端代码/config/unified_query.php
+@@ -42,6 +42,7 @@ return [
+         \app\services\report\query\BasicRegistrationQueryRegistrar::class,
+         \app\services\report\query\BasicBusinessQueryRegistrar::class,
+         MemberUnifiedQueryPageRegistrar::class,
++        \app\services\query\provider\PlatformMemberUnifiedQueryRegistrar::class,
+         StaffUnifiedQueryPageRegistrar::class,
+         InventoryBatchStockUnifiedQueryRegistrar::class,
+         InventoryOperationalUnifiedQueryRegistrar::class,
+@@ -73,6 +74,7 @@ return [
+         \app\services\report\query\BasicCustomerEntitlementsQueryProvider::class,
+         \app\services\report\query\BasicUnconsumedAsOfDetailQueryProvider::class,
+         MemberUnifiedQueryProvider::class,
++        \app\services\query\provider\PlatformMemberUnifiedQueryProvider::class,
+         StaffUnifiedQueryProvider::class,
+         InventoryBatchStockUnifiedQueryProvider::class,
+         InventoryInboundUnifiedQueryProvider::class,
+@@ -121,6 +123,7 @@ return [
+         \app\services\report\query\BasicCustomerEntitlementsWorkerContextResolver::class,
+         \app\services\report\query\BasicUnconsumedAsOfDetailWorkerContextResolver::class,
+         MemberUnifiedQueryWorkerContextResolver::class,
++        \app\services\query\provider\PlatformMemberUnifiedQueryWorkerContextResolver::class,
+         StaffUnifiedQueryWorkerContextResolver::class,
+         InventoryBatchStockUnifiedQueryWorkerContextResolver::class,
+         InventoryOperationalUnifiedQueryWorkerContextResolver::class,
+diff --git a/后端代码/database/upgrades/2026-10-28-平台门店会员管理/01-执行前检查.sql b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/01-执行前检查.sql
+new file mode 100644
+index 00000000..65485175
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/01-执行前检查.sql
+@@ -0,0 +1,3 @@
++-- 仅检查当前实例，执行升级前核对独立数据库并备份。
++SELECT DATABASE() AS current_database;
++SELECT TABLE_NAME,ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('eb_user','eb_wechat_user','eb_member_phone_login_reset','eb_member_management_receipt');
+diff --git a/后端代码/database/upgrades/2026-10-28-平台门店会员管理/02-正式升级.sql b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/02-正式升级.sql
+new file mode 100644
+index 00000000..d13e19e9
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/02-正式升级.sql
+@@ -0,0 +1,14 @@
++-- 本轮管理命令的幂等回执。只保留请求HMAC、非敏感结果；不保存明文密码或密码哈希。
++CREATE TABLE IF NOT EXISTS `eb_member_management_receipt` (
++ `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++ `actor_type` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++ `actor_id` bigint unsigned NOT NULL,
++ `request_key` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++ `request_hmac` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++ `action` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++ `member_id` bigint unsigned NOT NULL DEFAULT 0,
++ `response_json` longtext NOT NULL,
++ `created_at` int unsigned NOT NULL,
++ PRIMARY KEY (`id`), UNIQUE KEY `uk_actor_request` (`actor_type`,`actor_id`,`request_key`),
++ KEY `idx_member_time` (`member_id`,`created_at`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='平台门店会员管理命令回执，不存密码';
+diff --git a/后端代码/database/upgrades/2026-10-28-平台门店会员管理/03-执行后校验.sql b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/03-执行后校验.sql
+new file mode 100644
+index 00000000..4b7d72b0
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/03-执行后校验.sql
+@@ -0,0 +1,3 @@
++-- 不输出密码或微信标识，只验证回执结构。
++SHOW INDEX FROM eb_member_management_receipt;
++SELECT actor_type,COUNT(*) AS receipt_count FROM eb_member_management_receipt GROUP BY actor_type;
+diff --git a/后端代码/database/upgrades/2026-10-28-平台门店会员管理/README.md b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/README.md
+new file mode 100644
+index 00000000..d56c6b93
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-平台门店会员管理/README.md
+@@ -0,0 +1,3 @@
++平台/门店会员登录管理共用命令回执。依赖已验收的2026-10-28会员改号撤销登录迁移。
++
++仅本地测试执行，未连接生产。正式执行须逐实例另获授权，备份数据库后按01→02→03执行。02可重入，不改历史会员/资产。回滚先回退应用，保留该追加表以保存审计；不得直接删表丢失回执。请求只保存服务器HMAC和无密码结果，不保存明文密码或密码哈希。
+diff --git a/后端代码/route/admin.php b/后端代码/route/admin.php
+index f0de0db7..2caea941 100644
+--- a/后端代码/route/admin.php
++++ b/后端代码/route/admin.php
+@@ -2951,6 +2951,13 @@ Route::group('adminapi', function () {
+      * 用户模块 相关路由
+      */
+     Route::group('user', function () {
++        // 平台会员模块明确白名单，服务层沿用会员列表/新增/编辑/注销功能授权。
++        Route::get('member-center/bootstrap', 'v1.user.MemberCenter/bootstrap')->option(['real_name' => '平台会员初始化']);
++        Route::post('member-center/action', 'v1.user.MemberCenter/action')->option(['real_name' => '平台会员操作']);
++        Route::get('member-center/login/:id', 'v1.user.MemberCenter/login')->option(['real_name' => '平台会员登录信息']);
++        Route::post('member-center/login/:id/password', 'v1.user.MemberCenter/password')->option(['real_name' => '平台修改会员密码']);
++        Route::post('member-center/login/:id/clear-wechat', 'v1.user.MemberCenter/clear')->option(['real_name' => '平台清除会员微信绑定']);
++        Route::get('member-center/exports/:taskNo/download', 'v1.user.MemberCenter/download')->pattern(['taskNo' => 'uqe_[a-f0-9]{32}'])->option(['real_name' => '平台会员导出下载']);
+         // 顾客资料中的推荐人必须走 V3 受控命令；不得落回旧 user/user 直写链路。
+         Route::get('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/read')->option(['real_name' => '读取顾客推荐人资料']);
+         Route::put('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/update')->option(['real_name' => '修改顾客推荐人资料']);
+diff --git a/后端代码/route/cashier-v3.php b/后端代码/route/cashier-v3.php
+index 135266c8..02d02530 100644
+--- a/后端代码/route/cashier-v3.php
++++ b/后端代码/route/cashier-v3.php
+@@ -87,6 +87,9 @@ Route::group('cashierapi/v3', function () {
+         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
+         Route::post('workbenches/actions', 'Command/dispatchAction')
+             ->option(['real_name' => '收银V3命令网关']);
++        Route::get('member-login/:id', 'MemberLogin/read')->option(['real_name' => '读取会员登录信息']);
++        Route::post('member-login/:id/password', 'MemberLogin/password')->option(['real_name' => '修改会员登录密码']);
++        Route::post('member-login/:id/clear-wechat', 'MemberLogin/clear')->option(['real_name' => '清除会员微信绑定']);
+         Route::post('hang-drafts/delete', 'HangDraft/delete')
+             ->option(['real_name' => '挂单草稿直接删除']);
+         Route::post('hang-drafts/save', 'HangDraft/save')

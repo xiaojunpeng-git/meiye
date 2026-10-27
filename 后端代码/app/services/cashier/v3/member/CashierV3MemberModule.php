@@ -1528,7 +1528,7 @@ final class CashierV3MemberModule
             try {
                 app()->make(\app\services\user\CanonicalUserIdentityServices::class)->replacePhoneIdentity(
                     (int)$member['uid'], $phone,
-                    ['operator_type' => 'STORE', 'operator_id' => $operatorScope->operatorId(), 'source' => 'CASHIER_V3_MEMBER_EDIT']
+                    ['operator_type' => !empty($dataScope->operatorProfile()['_platform_member']) ? 'ADMIN' : 'STORE', 'operator_id' => $operatorScope->operatorId(), 'source' => !empty($dataScope->operatorProfile()['_platform_member']) ? 'PLATFORM_MEMBER_EDIT' : 'CASHIER_V3_MEMBER_EDIT']
                 );
             } catch (\mohe\exceptions\AdminException $exception) {
                 throw self::validation('phone', $exception->getMessage());
@@ -1714,7 +1714,8 @@ final class CashierV3MemberModule
         return $referrerId;
     }
 
-    private static function findManageableMember(
+    /** 共用会员数据权限边界；调用方必须先完成平台/门店功能授权，不接受客户端构造 scope。 */
+    public static function findManageableMember(
         string $memberId,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
@@ -1936,6 +1937,9 @@ final class CashierV3MemberModule
         $payload['referrer_member_id'] = (int)$referrer['member_id'];
         $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
         $payload['referrer_locked'] = (bool)$referrer['locked'];
+        // Preserve principal kind when platform and store accounts share a numeric ID.
+        $payload['actor_type'] = !empty($dataScope->operatorProfile()['_platform_member']) ? 'platform_admin' : 'store';
+        $payload['actor_id'] = $operatorScope->operatorId();
         $eventRecorder->recordInTx($eventExecution, $eventContract, [
             'event_type' => $eventType,
             'aggregate_type' => 'member',
@@ -2629,6 +2633,9 @@ final class CashierV3MemberModule
         $payload['referrer_member_id'] = (int)$referrer['member_id'];
         $payload['referrer_member_name_snapshot'] = (string)$referrer['name'];
         $payload['referrer_locked'] = (bool)$referrer['locked'];
+        // Preserve principal kind when platform and store accounts share a numeric ID.
+        $payload['actor_type'] = !empty($dataScope->operatorProfile()['_platform_member']) ? 'platform_admin' : 'store';
+        $payload['actor_id'] = $operatorScope->operatorId();
         $storeName = (string)Db::name('system_store')->where('id', $operatorScope->storeId())->value('name');
         $eventRecorder->recordInTx($eventExecution, $eventContract, [
             'event_type' => 'member.created',
@@ -2768,7 +2775,8 @@ final class CashierV3MemberModule
     }
 
     /** @return array{profileFields:array<int,array<string,mixed>>,memberLevels:array<int,array<string,mixed>>,memberTags:array<int,array<string,mixed>>} */
-    private static function memberCreatorSchema(): array
+    /** 平台与门店复用同一建档字段、等级和标签配置。 */
+    public static function memberCreatorSchema(): array
     {
         $profileFields = array_values(array_filter(
             (array)SystemConfigService::get('user_extend_info', []),

@@ -2951,6 +2951,13 @@ Route::group('adminapi', function () {
      * 用户模块 相关路由
      */
     Route::group('user', function () {
+        // 平台会员模块明确白名单，服务层沿用会员列表/新增/编辑/注销功能授权。
+        Route::get('member-center/bootstrap', 'v1.user.MemberCenter/bootstrap')->option(['real_name' => '平台会员初始化']);
+        Route::post('member-center/action', 'v1.user.MemberCenter/action')->option(['real_name' => '平台会员操作']);
+        Route::get('member-center/login/:id', 'v1.user.MemberCenter/login')->option(['real_name' => '平台会员登录信息']);
+        Route::post('member-center/login/:id/password', 'v1.user.MemberCenter/password')->option(['real_name' => '平台修改会员密码']);
+        Route::post('member-center/login/:id/clear-wechat', 'v1.user.MemberCenter/clear')->option(['real_name' => '平台清除会员微信绑定']);
+        Route::get('member-center/exports/:taskNo/download', 'v1.user.MemberCenter/download')->pattern(['taskNo' => 'uqe_[a-f0-9]{32}'])->option(['real_name' => '平台会员导出下载']);
         // 顾客资料中的推荐人必须走 V3 受控命令；不得落回旧 user/user 直写链路。
         Route::get('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/read')->option(['real_name' => '读取顾客推荐人资料']);
         Route::put('v3/member/:memberId/referrer', 'v1.user.CustomerReferrerProfile/update')->option(['real_name' => '修改顾客推荐人资料']);

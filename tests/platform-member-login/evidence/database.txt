@@ -1,0 +1,41 @@
+PASS batch status distinguishes mini/official and excludes revoked records
+PASS login tab reads read-only phone and both channels
+PASS login read never returns stored password/hash or WeChat identity secrets
+PASS reset stores only existing-compatible hash and leaves account phone unchanged
+PASS password management preserves assets
+PASS password reset preserves bindings and existing verified phone
+PASS old mini session rejected after password change
+PASS audit receipt contains no plaintext password or password hash
+PASS same actor/request replays without duplicate revocation
+PASS same request key cannot carry another password
+PASS stale editor rejected rather than overwriting concurrent login change
+PASS failed change rolls back receipt placeholder
+PASS login API rejects hidden phone/account edits
+PASS explicit clear removes bindings and requires phone reauthorization
+PASS list read agrees with edit binding state after clear
+PASS password reset cannot undo a pending phone reauthorization gate
+PASS store adapter can read its own member using same service
+PASS another-store UID does not leak login info
+PASS platform uses authoritative 20/20/2 pagination and complete count
+PASS platform pages have stable distinct rows
+PASS platform selected store narrows scope in backend
+PASS platform bridge rejects unrelated payment/checkout commands
+PASS forged store scope rejected before reading
+PASS server capability registers binding field for list and export
+PASS platform editor reuses complete store profile schema and supplies concurrency proof
+PASS platform profile save persists through shared domain handler
+PASS platform profile save replays without duplicate events
+PASS stale platform editor cannot overwrite an already saved member
+PASS platform cancellation preserves original member as soft deleted
+PASS platform restore reuses original member identity
+PASS platform create binds the explicitly selected authorized store
+PASS platform query preferences save with version advancement
+PASS same numeric admin and store IDs do not overwrite store query preferences
+PASS concurrent stale query preference save rejected
+PASS platform asynchronous export resolves current platform identity
+PASS real XLSX contains all 43 filtered members and binding information
+PASS another account cannot read export task
+PASS same numeric store account cannot read platform page export
+PASS platform admin without member list role fails closed
+PASS all synthetic members receipts and bindings rolled back
+PLATFORM_MEMBER_LOGIN_DATABASE_PASS 40 checks

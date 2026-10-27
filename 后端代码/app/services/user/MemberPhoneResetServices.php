@@ -15,16 +15,24 @@ class MemberPhoneResetServices
     /** 调用方须先锁会员行；与手机号替换共用事务，失败时连同微信解绑一起回滚。 */
     public function revokeLocked(int $uid, array $audit): void
     {
+        $this->rotateLocked($uid, $audit, true);
+    }
+
+    /** 密码修改只撤销旧登录，不自动解除微信，也不能解除尚未完成的改号授权门禁。 */
+    public function rotateLocked(int $uid, array $audit, bool $clearWechat): void
+    {
         $ids = Db::name('wechat_user')->where('uid', $uid)->column('id');
+        $previous = $this->state($uid);
         Db::name('member_phone_login_reset')->insert([
-            'uid' => $uid, 'nonce' => bin2hex(random_bytes(16)), 'phone_verified' => 0,
-            'binding_ids' => json_encode(array_values($ids)),
+            'uid' => $uid, 'nonce' => bin2hex(random_bytes(16)),
+            'phone_verified' => $clearWechat ? 0 : (int)($previous['phone_verified'] ?? 1),
+            'binding_ids' => json_encode($clearWechat ? array_values($ids) : []),
             'operator_id' => (int)($audit['operator_id'] ?? 0),
             'source' => (string)($audit['source'] ?? 'PHONE_CHANGE'), 'created_at' => time(),
         ]);
         // 留存微信历史行，撤掉 UID，所有旧查询也不能再凭它找到原会员。
         // 事件保留原 UID -> 微信行 ID 的追溯关系，不保存原始微信会话密钥。
-        Db::name('wechat_user')->where('uid', $uid)->update(['uid' => 0, 'is_del' => 1]);
+        if ($clearWechat) Db::name('wechat_user')->where('uid', $uid)->update(['uid' => 0, 'is_del' => 1]);
     }
 
     /** 使用 (uid,id) 索引读取最新事件；不缓存，避免旧 worker/cache 放行已撤销凭证。 */

@@ -19,10 +19,14 @@ import {
   unifiedQueryActionSucceeded
 } from '@/services/unifiedQueryContract'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
+import { memberLoginAdapter } from '@/services/memberLoginApi'
+// 只允许宿主注入本模块的已认证适配器；门店入口继续使用原会话和命令网关。
+const props = defineProps({ platformAdapter: { type: Object, default: null } })
+const loginAdapter = memberLoginAdapter(Boolean(props.platformAdapter))
 
-const state = useCashierV3State()
-const canCreateMember = computed(() => canUseCashierV3Operation('cashier.v3.member.create'))
-const canEditMember = computed(() => canUseCashierV3Operation('cashier.v3.member.edit'))
+const state = props.platformAdapter?.state || useCashierV3State()
+const canCreateMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.create === true : canUseCashierV3Operation('cashier.v3.member.create'))
+const canEditMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.edit === true : canUseCashierV3Operation('cashier.v3.member.edit'))
 const selectedMemberIds = ref([])
 const isMemberCreatorOpen = ref(false)
 const editingMember = ref(null)
@@ -56,7 +60,7 @@ const memberCenter = computed(() => ({
 }))
 const records = computed(() => Array.isArray(memberCenter.value.records) ? memberCenter.value.records : [])
 const statusOptions = computed(() => Array.isArray(memberCenter.value.statusOptions) ? memberCenter.value.statusOptions : [])
-const creatorSchema = ref({})
+const creatorSchema = ref(props.platformAdapter?.creatorSchema || {})
 const hasSuccessfulQuery = computed(() => Boolean(lastSuccessfulQuery.value) && Boolean(memberQueryProjection.value) && !queryError.value)
 const canBatchOperate = computed(() => hasSuccessfulQuery.value && !isQueryLoading.value && Boolean(memberCenter.value.canBatchOperate))
 const isAllSelected = computed(() => records.value.length > 0 && selectedMemberIds.value.length === records.value.length)
@@ -64,7 +68,7 @@ const total = computed(() => Math.max(Number(memberCenter.value.total) || 0, rec
 const page = computed(() => Math.max(1, Number(memberCenter.value.page) || 1))
 const pageSize = computed(() => Math.max(1, Number(memberCenter.value.pageSize) || 20))
 
-const MEMBER_QUERY_PAGE_CODE = 'member_list'
+const MEMBER_QUERY_PAGE_CODE = props.platformAdapter ? 'platform_member_list' : 'member_list'
 const baseQueryFields = [
   { key: 'member_name', label: '会员姓名', defaultVisible: true, defaultQuick: true, recordKey: 'name', display: 'member-link' },
   { key: 'phone', label: '完整手机号', defaultVisible: true, defaultQuick: true, recordKey: 'phone' },
@@ -84,7 +88,8 @@ const baseQueryFields = [
   { key: 'latest_purchase_date', label: '最近购买日期', defaultVisible: true, type: 'date', recordKey: 'latestPurchaseDate' },
   { key: 'last_service_staff', label: '上次服务人员', defaultVisible: true, type: 'person', recordKey: 'lastServiceStaff' },
   { key: 'latest_visit_date', label: '最近到店日期', defaultVisible: true, type: 'date', recordKey: 'latestVisitDate' },
-  { key: 'created_at', label: '建档时间', defaultVisible: true, type: 'date', recordKey: 'createdAt' }
+  { key: 'created_at', label: '建档时间', defaultVisible: true, type: 'date', recordKey: 'createdAt' },
+  { key: 'wechat_binding', label: '微信绑定信息', defaultVisible: true, recordKey: 'wechatBinding' }
 ]
 
 const unifiedQuery = useUnifiedQueryPage({
@@ -115,6 +120,11 @@ const visibleFields = computed(() => {
   if (keys.includes('member_no') && keys.includes('created_at')) {
     keys.splice(keys.indexOf('member_no'), 1)
     keys.splice(keys.indexOf('created_at'), 0, 'member_no')
+  }
+  // 新增绑定列只呈现服务端授权的字段，固定紧邻建档时间右侧。
+  if (keys.includes('wechat_binding') && keys.includes('created_at')) {
+    keys.splice(keys.indexOf('wechat_binding'), 1)
+    keys.splice(keys.indexOf('created_at') + 1, 0, 'wechat_binding')
   }
   return keys.map((key) => queryFieldMap.value.get(key)).filter(Boolean)
 })
@@ -208,6 +218,7 @@ function groupValueLabel(values) {
 }
 
 async function requestAction(action, payload = {}) {
+  if (props.platformAdapter) return props.platformAdapter.request(action, payload)
   return requestCashierV3Action(action, payload)
 }
 
@@ -267,6 +278,7 @@ async function submitMemberMutation(payload = {}) {
 }
 
 async function selectMemberCreatorServicePerson({ selectedRecords = [] } = {}) {
+  if (props.platformAdapter) return props.platformAdapter.selectPeople(selectedRecords)
   const selection = await openCashierV3QueryEntitySelector({
     entityType: 'person',
     title: '选择专属服务人',
@@ -283,6 +295,7 @@ async function selectMemberCreatorServicePerson({ selectedRecords = [] } = {}) {
 }
 
 function selectMemberReferrer({ selectedRecord = null, excludeMemberId = 0 } = {}) {
+  if (props.platformAdapter) return props.platformAdapter.selectReferrer(selectedRecord, excludeMemberId)
   if (typeof window === 'undefined') return Promise.resolve(null)
   return new Promise((resolve) => {
     const cleanup = () => {
@@ -448,6 +461,7 @@ watch(
 )
 
 function openMemberDetail(record) {
+  if (props.platformAdapter) return props.platformAdapter.openDetail(record)
   const memberId = memberRecordId(record)
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
     detail: { memberId, record }
@@ -620,7 +634,8 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
 
   // 会员列表不增加单独的导出权限：能执行当前查询即可导出该查询的完整命中结果。
   // 下载接口仍需要当前登录令牌；普通链接缺少令牌会把失败 JSON 误存为 xlsx，因此落盘前还要校验 ZIP 文件头。
-  const token = readStoreV3SessionToken()
+  if (props.platformAdapter) endpoint.pathname = endpoint.pathname.replace('/cashierapi/v3/unified-query/exports/', '/adminapi/user/member-center/exports/')
+  const token = props.platformAdapter ? props.platformAdapter.token() : readStoreV3SessionToken()
   const response = await fetch(endpoint.href, {
     credentials: 'same-origin',
     cache: 'no-store',
@@ -720,9 +735,12 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
             <td>
               <div class="member-row-actions">
                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
+                <button v-if="platformAdapter" type="button" class="button button--text" @click="platformAdapter.transfer(record)">调店</button>
                 <button v-if="canEditMember && record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
-                <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
-                <button v-else type="button" class="button button--text" @click="restoringMember = record; memberRestoreError = ''">恢复</button>
+                <template v-if="!platformAdapter || platformAdapter.permissions.deactivate">
+                  <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
+                  <button v-else type="button" class="button button--text" @click="restoringMember = record; memberRestoreError = ''">恢复</button>
+                </template>
               </div>
             </td>
           </tr>
@@ -738,6 +756,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
         <section class="member-mutation-modal__card member-mutation-modal__card--creator">
           <header><h2>{{ editingMember ? '编辑会员' : '新增会员' }}</h2><button type="button" class="button button--text" :disabled="isMemberMutationSaving" @click="closeMemberMutation">关闭</button></header>
           <MemberCreatorPanel
+            :login-adapter="loginAdapter"
             initial-profile-mode="full"
             lock-profile-mode
             cancel-label="取消"
@@ -746,7 +765,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
             :initial-member="editingMember"
             :allow-select-existing="false"
             save-feedback-as-dialog
-            :current-store-name="state.storeName || ''"
+            :current-store-name="editingMember?.storeName || state.storeName || ''"
             :profile-fields="creatorSchema.profileFields || creatorSchema.fields || []"
             :member-levels="creatorSchema.memberLevels || creatorSchema.levels || []"
             :member-tags="creatorSchema.memberTags || creatorSchema.tags || []"

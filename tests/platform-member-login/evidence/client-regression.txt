@@ -1,0 +1,1 @@
+PASS actual MP request 410001 -> actual toLogin -> LOGOUT and authorization page

@@ -1,0 +1,8 @@
+{
+  "acceptedBy": "product manager",
+  "message": "我测试没有问题,本次修复commit,部署瑞昊,push;然后部署渼约008和渼约010,上传渼约008会员端体验版",
+  "patchSHA256": "9f520b496aed4b74f2941062ddf57046cce16e39a37a82ca4b83e89e07e54f71",
+  "sourceTree": "5600ab0d451a0f9e1ba4d9f48f8389bae995607c",
+  "date": "2026-10-28",
+  "scope": "platform/store member management and login; accepted prior phone reset dependency"
+}

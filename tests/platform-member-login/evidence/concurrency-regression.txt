@@ -1,0 +1,4 @@
+PASS concurrent phone change commit: token issuance waits for lock then denied
+PASS owned local concurrent fixture removed
+PASS concurrent phone change rollback: token issuance waits for lock then allowed
+PASS owned local concurrent fixture removed
