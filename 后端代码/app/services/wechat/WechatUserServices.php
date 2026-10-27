@@ -516,6 +516,9 @@ class WechatUserServices extends BaseServices
                 $wechatUser = $this->dao->getOne(['openid' => $openid, 'is_del' => 0]);
             }
             if ($wechatUser) {
+				// 微信在静默授权时可能不返回头像；更新老账号时必须保留原头像，
+				// 不能把缺失值写成 NULL，也不能用空值覆盖会员已有资料。
+				$wechatInfo = $this->normalizeWechatAvatarForPersistence($wechatInfo, true);
 				//更换微信登录情况
 //                if (isset($wechatInfo['phone']) && $wechatInfo['phone'] && $wechatUser['openid'] != $openid) {
 //                    throw new ValidateException('该手机号已被注册');
@@ -524,12 +527,37 @@ class WechatUserServices extends BaseServices
                     throw new ValidateException('更新数据失败');
                 }
             } else {
+				// 新微信账号必须满足数据库非空约束；微信未给头像时保存空字符串，
+				// 后续仍由会员资料完善流程补充真实头像。
+				$wechatInfo = $this->normalizeWechatAvatarForPersistence($wechatInfo, false);
                 if (!$this->dao->save($wechatInfo)) {
                     throw new AuthException('生成微信用户失败!');
                 }
             }
             return $userInfo;
         });
+    }
+
+    /**
+     * 规范化微信头像的持久化边界。
+     *
+     * @param array $wechatInfo 微信授权资料
+     * @param bool $preserveExisting 是否正在更新已有微信账号
+     * @return array 可安全写入 wechat_user 的资料
+     */
+    private function normalizeWechatAvatarForPersistence(array $wechatInfo, bool $preserveExisting): array
+    {
+        $avatar = trim((string)($wechatInfo['headimgurl'] ?? ''));
+        if ($avatar !== '') {
+            $wechatInfo['headimgurl'] = $avatar;
+            return $wechatInfo;
+        }
+        if ($preserveExisting) {
+            unset($wechatInfo['headimgurl']);
+            return $wechatInfo;
+        }
+        $wechatInfo['headimgurl'] = '';
+        return $wechatInfo;
     }
 
     /**

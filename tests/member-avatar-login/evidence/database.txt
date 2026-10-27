@@ -1,0 +1,9 @@
+PASS real headimgurl column is NOT NULL
+PASS new account without avatar persists an empty string through real DAO
+PASS missing update omits avatar
+PASS existing account preserves original avatar through real DAO
+PASS missing update omits avatar
+PASS existing account preserves original avatar through real DAO
+PASS provided avatar still updates normally
+PASS all fabricated rows rolled back
+AVATAR_DATABASE_PASS; no provider calls, no real account authorization
