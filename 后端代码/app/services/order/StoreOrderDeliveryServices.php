@@ -264,6 +264,18 @@ class StoreOrderDeliveryServices extends BaseServices
      */
     public function doDelivery(int $id, $orderInfo, array $data)
     {
+        $groups = new \app\services\activity\combination\CombinationFulfillmentServices();
+        $claimed = $groups->claimDelivery($id);
+        // If the carrier call fails after acceptance, keep delivering to block a conflicting refund until reconciled.
+        $result = $this->executeDelivery($id, $orderInfo, $data);
+        if ($claimed) \think\facade\Db::name('combination_order_fulfillment')->where('order_id', $id)->update(['state' => 'delivered']);
+        return $result;
+    }
+
+    /** Existing carrier/stock behavior; only group orders add the claim above. */
+    private function executeDelivery(int $id, $orderInfo, array $data)
+    {
+
         $type = (int)$data['type'];
         unset($data['type']);
         //获取购物车内的商品标题

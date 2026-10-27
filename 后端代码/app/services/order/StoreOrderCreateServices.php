@@ -234,7 +234,10 @@ class StoreOrderCreateServices extends BaseServices
             $activity_id = array_unique(array_column($cartInfo, 'product_id'))[0] ?? 0;
         }
         //$shipping_type = 1 快递发货 $shipping_type = 2 门店核销 $shipping_type = 3 门店配送
-        if (!sys_config('store_func_status', 1) || !sys_config('store_self_mention', 1)) $shippingType = 1;
+        // 拼团购买门店归属来自服务端报价，不能因旧自提开关关闭被改写为配送单。
+        // 仅保留该业务的无配送类型；其他历史商城订单仍执行原开关约束。
+        $isGroupStorePurchase = $type === 3 && (int)$shippingType === 2 && (int)$storeId > 0;
+        if (!$isGroupStorePurchase && (!sys_config('store_func_status', 1) || !sys_config('store_self_mention', 1))) $shippingType = 1;
 
         $userAddress = $addressInfo['province'] . ' ' . $addressInfo['city'] . ' ' . $addressInfo['district'] . ' ' . $addressInfo['street'] . ' ' . $addressInfo['detail'];
         $userLocation = trim(($addressInfo['longitude'] ?? '') . ' ' . ($addressInfo['latitude'] ?? ''));
@@ -308,6 +311,10 @@ class StoreOrderCreateServices extends BaseServices
         if($orderInfo['type'] == 3){
             //拼团
             $orderInfo['source']=10;
+			// 新拼团订单必须固定购买门店，支付回调及门店收款记录才有一致归属。
+			if ((int)$orderInfo['store_id'] <= 0) {
+				throw new ValidateException('请先选择购买门店');
+			}
         }
         if ($userInfo['user_type'] == 'wechat' || $userInfo['user_type'] == 'routine') {
             /** @var WechatUserServices $wechatServices */
@@ -337,6 +344,10 @@ class StoreOrderCreateServices extends BaseServices
         $order = $this->transaction(function () use ($cartIds, $couponId, $orderInfo, $cartInfo, $key, $userInfo, $useIntegral, $priceData, $type, $activity_id, $uid, $addressId, $promotions_give, $storeId, $reservationInfo,$product_type) {
             //创建订单
             $order = $this->dao->save($orderInfo);
+            // Every newly created group order waits for completion; historical orders are not backfilled.
+            if ((int)$type === 3) {
+                (new \app\services\activity\combination\CombinationFulfillmentServices())->register((int)$order['id']);
+            }
             if ($couponId) {
                 /** @var StoreCouponUserServices $couponServices */
                 $couponServices = app()->make(StoreCouponUserServices::class);
@@ -412,6 +423,7 @@ class StoreOrderCreateServices extends BaseServices
 				if (!$info) {
 					throw new PayException('您支付的订单不存在');
 				}
+				$data['is_group_order'] = (int)$info['type'] === 3;
 				$data['offline_pay_status'] = (int)sys_config('offline_pay_status') ?? (int)2;
 				if ($data['offline_pay_status'] == 1 && sys_config('offline_pay_type', 0)) {//线下支付开启 && 仅核销支持开启
 					//验证订单类型 是核销订单可以支持线下支付
@@ -424,6 +436,11 @@ class StoreOrderCreateServices extends BaseServices
 					$systemStoreServices = app()->make(SystemStoreServices::class);
 					$storeInfo = $systemStoreServices->get((int)$info['store_id'], ['id', 'use_system_money']);
 					$data['yue_pay_status'] = $storeInfo['use_system_money'] ? $data['yue_pay_status'] : 2;
+				}
+				// 拼团只允许第三方支付；前端选项与服务端支付约束使用同一订单类型。
+				if ($data['is_group_order']) {
+					$data['offline_pay_status'] = 2;
+					$data['yue_pay_status'] = 2;
 				}
 				//系统预设取消订单时间段
 				/** @var StoreOrderServices $storeOrderServices */
@@ -541,8 +558,14 @@ class StoreOrderCreateServices extends BaseServices
                     || ((int)($cart['cart_type'] ?? 0) > 0)
                     || bccomp((string)($cart['pay_price'] ?? '0'), '0', 2) === 0
                     || (array_key_exists('price', $cart) && bccomp((string)$cart['price'], '0', 2) === 0);
+                // 卡项和项目不扣根商品实物库存，但拼团仍须在事务内扣独立活动名额。
+                // 否则无实物库存的卡项可反复开团，超过平台配置的拼团限量。
+                if ($skipStock && $type === 3 && $cartItemType === 3) {
+                    $res5 = $res5 && $pinkServices->decCombinationStock($cart_num, $activity_id, $unique, $store_id, false);
+                    continue;
+                }
                 // 库存改造：下单不扣实物库存、不加销量；实物与销量在支付成功处理。
-                // 营销活动仍可在下单时扣活动额度（活动 SKU/主表），不得扣实物。
+                // 其他营销活动沿用既有额度规则，不让卡项的零库存变成实物扣减。
                 if ($skipStock) {
                     continue;
                 }

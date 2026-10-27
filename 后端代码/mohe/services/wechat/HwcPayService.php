@@ -278,6 +278,11 @@ class HwcPayService
             ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'], $tradeNo, $channel)
             : (bool)Event::until('pay.notify', [$notify, $eventChannel]);
         if ($settled) {
+            // The signed callback's settlement date is authoritative for refunds beyond 30 days.
+            if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('activity_id', '>', 0)->count()) {
+                Db::name('combination_payment_origin')->where('channel_order_no', $channelOrderNo)
+                    ->update(['settled_on' => (string)$data['reserved_fy_settle_dt']]);
+            }
             Db::name('fuyou_payment_attempt')
                 ->where('channel_order_no', $channelOrderNo)
                 ->update([
@@ -336,7 +341,17 @@ class HwcPayService
         if (!filter_var($baseUrl, FILTER_VALIDATE_URL)) {
             throw new PayException('富友支付回调域名未配置');
         }
-        return $baseUrl . '/api/pay/fynotify/' . rawurlencode($channel) . '/' . rawurlencode($successAction);
+        // COMMENT_URL may be the platform entry (e.g. /admin), but callbacks
+        // always enter the public API origin. A platform HTML fallback returning
+        // HTTP 200 is not a payment acknowledgement and cannot settle an order.
+        $parts = parse_url($baseUrl);
+        if (!$parts || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true)
+            || empty($parts['host']) || isset($parts['user']) || isset($parts['pass'])) {
+            throw new PayException('富友支付回调域名配置无效');
+        }
+        $origin = $parts['scheme'] . '://' . $parts['host']
+            . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        return $origin . '/api/pay/fynotify/' . rawurlencode($channel) . '/' . rawurlencode($successAction);
     }
 
     private function normalizeAction(string $successAction): string
@@ -392,6 +407,11 @@ class HwcPayService
                     'add_time' => $now,
                     'update_time' => $now,
                 ]);
+                // Persist original merchant identity only for new group payment attempts.
+                if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('type', 3)->count()) {
+                    Db::name('combination_payment_origin')->insert(['channel_order_no' => $channelOrderNo,
+                        'merchant_id' => $this->config['mchntCd'], 'settled_on' => '']);
+                }
                 return $channelOrderNo;
             } catch (\Throwable $e) {
                 // 唯一键碰撞可重试；表未升级或数据库异常最终统一失败，绝不退回不合规业务单号。
