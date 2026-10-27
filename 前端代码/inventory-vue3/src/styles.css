@@ -172,3 +172,9 @@ button { cursor: pointer; }
 .dashboard-warehouse-picker:focus-within{border-color:#5598e6;box-shadow:0 0 0 3px #edf5ff}
 .dashboard-warehouse-picker select:focus{outline:none}
 @media(max-width:600px){.page-heading--dashboard{align-items:flex-start;flex-direction:column}.dashboard-warehouse-picker select{min-width:0;width:180px}}
+
+/* 统计结果独立滚动，完整命中条数与分页常驻卡片底部；不影响其他库存列表。 */
+.inventory-content--statistics { display: flex; flex-direction: column; min-height: 0; height: 100%; box-sizing: border-box; }
+.statistics-board { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+.statistics-board .statistics-table { min-height: 0; flex: 1; overflow: auto; }
+.inventory-statistics-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid #edf1f5; background: #fff; color: #536b83; font-size: 12px; }

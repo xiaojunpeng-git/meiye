@@ -1,0 +1,38 @@
+{
+  "head": "ee9eb76ef36b9aaafd38fec6b65345480c300263",
+  "files": {
+    "前端代码/inventory-vue3/src/App.vue": "5e514e10e8228fbce9c9697b36a64944c3a53a30987fc5030bae246782e367e6",
+    "前端代码/inventory-vue3/src/styles.css": "c032c5016b803505d7a864ca752be3d22e73693a38900fcc8223f0b260871a12",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue": "5bbd5bd5bfc542d7c26ebd2b562e99fb4fa134134ed686fdb5ca380002bc2eff",
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php": "04ddb1560a598170aa8f2fe312d6457a2927e60ec792dd63dd4644b3eb9725c3",
+    "tests/inventory/js/platform-statistics-frontend-contract.mjs": "bd7a65e36f735dc424890d17533d6fd4a85f7da23d4f8ac1702ca7b0fd522202",
+    "tests/inventory/js/r38-statistics-scope-pagination.mjs": "632873ab884e225034037d704c7a7b0b733bbd704861824a1203da2b64917ce8",
+    "tests/inventory/php/r38-statistics-readonly.php": "03c8e80fdfee215c6bb813b3fa50b0dfa2338e25a21f8c9d15987f6e119c2e78"
+  },
+  "status": "本地实现与针对性自测通过；待产品经理验收，未提交部署",
+  "scope": [
+    "首页到统计继承全部/单个授权总部仓",
+    "临期库龄单位字段契约补齐",
+    "返回库存首页",
+    "完整命中分页与异步旧响应隔离"
+  ],
+  "testResults": {
+    "frontendExecution": "PASS scope, pagination, clamp, stale response, store scope isolation",
+    "localReadonlyDatabase": "PASS four statistics pages and six authorized HQ warehouses",
+    "browser": "PASS local 3 overdue batches drilldown and return home",
+    "inventoryBuild": "PASS",
+    "authenticatedStoreUI": "本轮尚未进行门店登录态浏览器回归，不冒充已完成"
+  },
+  "databaseMigrations": [],
+  "engineeringScripts": [],
+  "generatedOutput": "/private/tmp/mohe-r38-followup-inventory-dist",
+  "commentsUpdated": [
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/inventory-vue3/src/styles.css",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue",
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php"
+  ],
+  "noNewBranchOrWorktree": true,
+  "remoteChanges": false,
+  "time": "2026-10-27T19:40:49.824843"
+}

@@ -29,6 +29,8 @@ final class InventoryStatisticsUnifiedQueryContract
             UnifiedQueryPageRegistry::field('product_name', '商品名称', 'text', true, true),
             UnifiedQueryPageRegistry::field('sku_name', '商品规格', 'text', true, true),
             UnifiedQueryPageRegistry::field('batch_no', '批次号', 'text', true, true),
+            // 临期与库龄复用批次事实中的库存单位，两端字段契约必须与实际结果列一致。
+            UnifiedQueryPageRegistry::field('stock_unit', '库存单位', 'text', true),
             UnifiedQueryPageRegistry::field('batch_balance_quantity', '当前剩余库存', 'decimal', true),
             UnifiedQueryPageRegistry::field('received_date', '正式入库日期', 'date', true, true),
             UnifiedQueryPageRegistry::field('expire_date', '到期日', 'date', true, true),

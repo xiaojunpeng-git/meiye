@@ -1,0 +1,32 @@
+{
+  "head": "e72eeded55370f51219bd616efeafc795f551940",
+  "previousRelease": "b1cd302cc27e6914bbfc25dc2fb4fee0b053b730",
+  "files": {
+    "前端代码/inventory-vue3/src/App.vue": {
+      "sha256": "8b391f8da15843e85b0bc6f5c7893b4f3600f12523c800dfab8ed7e55c5e45ec",
+      "blob": "80495e0dcfc269cbbd34aa1f4ac2804c497c57c9"
+    },
+    "前端代码/inventory-vue3/src/styles.css": {
+      "sha256": "e7b3b7e69e9fa13c473a95a596f5f4b68fc920826276152157706389f44c42ef",
+      "blob": "0524efd49ff4074f0909aad6c0edb438360b5347"
+    },
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php": {
+      "sha256": "fefed831670225e3e5c8b710d4ca39fa5d3eb588ee18df29f7aa38bb70798621",
+      "blob": "038523500a770fe29c94f39218c969aaa3e8479c"
+    },
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryProvider.php": {
+      "sha256": "b4e01d56057d6f2960d5e53cee3a7d0b1ebaebb7094aafe073c188c84bbeefb1",
+      "blob": "c8e843cd7dd079507f9cc0378d31a7cfd7f06ec7"
+    },
+    "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php": {
+      "sha256": "fd026bb67eedcfc9079f1c309d69c78a286df28962cfcc37830d6d29cf3496df",
+      "blob": "0f6d11796589bcf3990cba2da4ea6ba8f87e4f45"
+    },
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue": {
+      "sha256": "7dc157f5969c6cc6e6dd57a10b4b837a64e446bd1f9a690063d93c4598fa6564",
+      "blob": "e7a83cb9e588085eb08e035f4811b126ebaccc7a"
+    }
+  },
+  "authorized": "本地修复与瑞昊只读排查，未授权新一轮提交或部署",
+  "time": "2026-10-27T19:33:21.980084"
+}

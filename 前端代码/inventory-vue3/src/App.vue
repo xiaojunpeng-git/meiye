@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  AlertTriangle, ArrowDownToLine, ArrowUpFromLine,
+  AlertTriangle, ArrowDownToLine, ArrowUpFromLine, ArrowLeft,
   Boxes, ChartNoAxesCombined, ChevronRight, ClipboardCheck,
   Clock3, FileClock, FileSpreadsheet, FlaskConical, LayoutDashboard,
   Package2, Plus, QrCode, RotateCcw, Search, Trash2, Truck,
@@ -105,6 +105,9 @@ const businessDateRange = ref(todayRange())
 const countDateRange = ref(todayRange())
 const statisticsDateRange = ref(statisticsMonthRange())
 const statisticsExecutedQuery = ref({})
+// 统计分页沿用已提交条件；总部统计与首页共用同一个仓库选择，不能借用单据默认仓。
+const statisticsPagination = ref({ page: 1, total: 0, limit: 20 })
+let statisticsRequestSequence = 0
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
 const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
 const storeOperationalStatus = ref('')
@@ -699,6 +702,10 @@ const statisticsTabs = [
 ]
 
 function selectPage(key, options = {}) {
+  // 离开或重进统计立即作废旧异步结果；不改变库存事实和宿主会话。
+  statisticsRequestSequence += 1
+  analysisLoading.value = false
+  movementStatisticsLoading.value = false
   if (key === 'movement') key = 'stock'
   if (deferredPageKeys.has(key)) {
     active.value = 'overview'
@@ -770,6 +777,9 @@ watch(() => props.entryPage, (page) => {
 })
 
 function selectStatisticsTab(key) {
+  statisticsRequestSequence += 1
+  analysisLoading.value = false
+  movementStatisticsLoading.value = false
   activeStatisticsTab.value = key
   statisticsInitialQuery.value = {}
   statisticsExecutedQuery.value = {}
@@ -1747,8 +1757,9 @@ function applyStatisticsDateRange(value) {
   queryStatisticsPage(statisticsExecutedQuery.value)
 }
 
-async function queryStatisticsPage(query) {
+async function queryStatisticsPage(query, requestedPage = 1) {
   if (!statisticsQueryPage.value) return
+  const requestSequence = ++statisticsRequestSequence
   const isMovement = ['inbound', 'outbound'].includes(activeStatisticsTab.value)
   statisticsExecutedQuery.value = query && typeof query === 'object' ? { ...query } : {}
   if (isMovement) { movementStatisticsLoading.value = true; movementStatisticsError.value = '' }
@@ -1757,7 +1768,7 @@ async function queryStatisticsPage(query) {
     const platformScope = mode.value === 'platform'
       ? {
           subject: 'HQ',
-          ...(Number(platformHqLocationId.value) > 0 ? { hq_location_id: Number(platformHqLocationId.value) } : {})
+          hq_location_id: Number(dashboardWarehouseId.value) || 0
         }
       : {}
     const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
@@ -1766,6 +1777,8 @@ async function queryStatisticsPage(query) {
       ...statisticsExecutedQuery.value,
       ...platformScope,
       pageCode: statisticsQueryPage.value.pageCode,
+      page: requestedPage,
+      limit: 20,
       // 门店端的业务日期周期已在统一查询 topFilters 中，避免重复日期条件；
       // 平台端仍由本页周期控件收窄同一权威查询。
       topFilterConditions: [
@@ -1775,19 +1788,35 @@ async function queryStatisticsPage(query) {
           : [])
       ]
     })
+    // 切换临期/库龄或重新查询后，晚到的旧请求不能覆盖当前统计页面。
+    if (requestSequence !== statisticsRequestSequence) return
     const records = Array.isArray(response?.records) ? response.records : []
+    const total = Math.max(0, Number(response?.total || 0))
+    const lastPage = Math.max(1, Math.ceil(total / 20))
+    if (requestedPage > lastPage) return await queryStatisticsPage(statisticsExecutedQuery.value, lastPage)
+    statisticsPagination.value = { page: Number(response?.page || requestedPage), total, limit: 20 }
     if (isMovement) {
       movementStatistics.value = { list: records, count: Number(response?.total || 0) }
     } else {
       batchAnalysis.value = { list: records, expiry_buckets: [], age_buckets: [], query_cutoff_date: String(response?.queryCutoffDate || '') }
     }
   } catch (error) {
+    if (requestSequence !== statisticsRequestSequence) return
     if (isMovement) movementStatisticsError.value = error instanceof Error ? error.message : '库存统计查询失败。'
     else analysisError.value = error instanceof Error ? error.message : '库存统计查询失败。'
   } finally {
-    if (isMovement) movementStatisticsLoading.value = false
-    else analysisLoading.value = false
+    if (requestSequence === statisticsRequestSequence) {
+      if (isMovement) movementStatisticsLoading.value = false
+      else analysisLoading.value = false
+    }
   }
+}
+
+/** 翻页只替换页码，保留分档、周期和首页授权仓库；完整条数来自同一后端查询。 */
+function turnStatisticsPage(delta) {
+  const next = statisticsPagination.value.page + delta
+  if (analysisLoading.value || movementStatisticsLoading.value || next < 1 || next > Math.max(1, Math.ceil(statisticsPagination.value.total / 20))) return
+  queryStatisticsPage(statisticsExecutedQuery.value, next)
 }
 
 async function loadDashboard() {
@@ -2064,7 +2093,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="inventory-main">
-      <section class="inventory-content">
+      <section class="inventory-content" :class="{ 'inventory-content--statistics': active === 'statistics' }">
         <section v-if="warehouseChoiceKind" class="transfer-confirmation-layer" role="dialog" aria-modal="true" aria-label="选择盘点仓库">
           <button class="transfer-confirmation-layer__backdrop" aria-label="取消选仓" @click="warehouseChoiceKind = ''"></button>
           <div class="transfer-confirmation-dialog inventory-warehouse-choice"><h2>{{ warehouseChoiceKind === 'request-supply' ? '确认供货仓库' : '选择盘点仓库' }}</h2><label>仓库<select v-model="warehouseChoice" aria-label="盘点仓库"><option value="" disabled>请选择仓库</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="String(location.id)">{{ location.location_name }}</option></select></label><footer><button class="secondary-button" @click="warehouseChoiceKind = ''">取消</button><button class="primary-button" :disabled="!warehouseChoice" @click="enterChosenWarehouse">{{ warehouseChoiceKind === 'request-supply' ? '确认供货仓' : '进入盘点' }}</button></footer></div>
@@ -2169,7 +2198,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="active === 'statistics'">
-          <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
+          <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><button class="secondary-button" @click="selectPage('overview')"><ArrowLeft :size="16" />返回库存首页</button><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <div class="statistics-tabs"><button v-for="tab in statisticsTabs" :key="tab.key" :class="{ active: activeStatisticsTab === tab.key }" @click="selectStatisticsTab(tab.key)">{{ tab.label }}</button></div>
           <div v-if="mode === 'platform' && ['inbound', 'outbound'].includes(activeStatisticsTab)" class="inventory-period-filter inventory-statistics-period"><UnifiedQueryDateRange :model-value="statisticsDateRange" label="业务日期周期" @change="applyStatisticsDateRange" /></div>
           <component
@@ -2180,7 +2209,8 @@ onBeforeUnmount(() => {
             :page-code="statisticsQueryPage.pageCode"
             :page-name="statisticsTabs.find((tab) => tab.key === activeStatisticsTab)?.label || '库存统计'"
             :fields="statisticsQueryFields"
-            :result-count="['inbound', 'outbound'].includes(activeStatisticsTab) ? movementStatistics.count : batchAnalysis.list.length"
+            :result-count="statisticsPagination.total"
+            :current-page="statisticsPagination.page"
             :current-page-count="['inbound', 'outbound'].includes(activeStatisticsTab) ? movementStatisticRows.length : analysisRows.length"
             :is-query-loading="['inbound', 'outbound'].includes(activeStatisticsTab) ? movementStatisticsLoading : analysisLoading"
             :request-action="inventoryUnifiedQueryRequestAction"
@@ -2206,6 +2236,12 @@ onBeforeUnmount(() => {
                 <div class="table-scroll statistics-table"><table><thead><tr><th>业务类型</th><th>商品</th><th>规格</th><th>单位</th><th>单据数</th><th>批次流水数</th><th>数量</th><th>成本金额</th></tr></thead><tbody><tr v-if="!movementStatisticRows.length"><td colspan="8" class="table-empty">统计期间暂无{{ activeStatisticsTab === 'inbound' ? '入库' : '出库' }}流水</td></tr><tr v-for="(row, index) in movementStatisticRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
               </template>
             </template>
+            <!-- 条数来自后端完整授权命中集；两端分页均保留当前已提交的统计条件。 -->
+            <footer class="inventory-statistics-pagination">
+              <span>共 {{ statisticsPagination.total }} 条 · 每页 20 条 · 第 {{ statisticsPagination.page }} / {{ Math.max(1, Math.ceil(statisticsPagination.total / 20)) }} 页</span>
+              <button class="secondary-button" :disabled="analysisLoading || movementStatisticsLoading || statisticsPagination.page <= 1" @click="turnStatisticsPage(-1)">上一页</button>
+              <button class="secondary-button" :disabled="analysisLoading || movementStatisticsLoading || statisticsPagination.page >= Math.max(1, Math.ceil(statisticsPagination.total / 20))" @click="turnStatisticsPage(1)">下一页</button>
+            </footer>
           </section>
         </template>
 

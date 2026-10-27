@@ -8,6 +8,8 @@ const props = defineProps({
   fields: { type: Array, required: true },
   resultCount: { type: Number, default: 0 },
   currentPageCount: { type: Number, default: 0 },
+  // 统计翻页后查询栏展示真实页码，不把当前页假报成第一页。
+  currentPage: { type: Number, default: 1 },
   isQueryLoading: { type: Boolean, default: false },
   requestAction: { type: Function, required: true },
   initialQuery: { type: Object, default: () => ({}) },
@@ -63,7 +65,7 @@ watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQue
       :default-quick-date-ranges="defaultQuickDateRanges"
       :result-count="resultCount"
       :page-size="20"
-      :current-page="1"
+      :current-page="currentPage"
       :current-page-count="currentPageCount"
       :data-as-of="queryCapability.dataAsOf"
       :query-capability="queryCapability"
