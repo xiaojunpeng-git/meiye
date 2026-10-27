@@ -4361,6 +4361,9 @@ class StoreProductServices extends BaseServices
             }
             $data['level_list'] = $level_list;
         }
+        // 商品编辑（含新增、复制）共用的只读元数据；与R37收银显隐读取同一配置。
+        // 仅隐藏卡内项目列，不能据此重算、清空商品配置或历史手工费。
+        if ($type === 0) $data['labor_fee_visible'] = (int)sys_config('cashier_labor_fee_mode', 0) !== 1;
         return $data;
     }
 
