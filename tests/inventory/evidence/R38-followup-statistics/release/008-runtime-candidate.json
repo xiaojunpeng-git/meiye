@@ -1,0 +1,33 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "mode": "candidate",
+  "statistics": {
+    "inventory_statistics_inbound": {
+      "total": 0,
+      "rows": 0,
+      "warehouses": 1
+    },
+    "inventory_statistics_outbound": {
+      "total": 0,
+      "rows": 0,
+      "warehouses": 1
+    },
+    "inventory_statistics_expiry": {
+      "total": 0,
+      "rows": 0,
+      "warehouses": 1,
+      "over90": 0,
+      "unknown": 0
+    },
+    "inventory_statistics_age": {
+      "total": 0,
+      "rows": 0,
+      "warehouses": 1
+    }
+  },
+  "configSHA256": "c473665ccc5866df3e6b2b7b17434aa57f073dfea283204de09cf6cb0b9718bd",
+  "parityWithOriginal": true,
+  "readOnly": true,
+  "businessWrites": 0
+}

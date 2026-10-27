@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "mode": "after",
+  "statistics": {
+    "inventory_statistics_inbound": {
+      "total": 72,
+      "rows": 20,
+      "warehouses": 6
+    },
+    "inventory_statistics_outbound": {
+      "total": 81,
+      "rows": 20,
+      "warehouses": 6
+    },
+    "inventory_statistics_expiry": {
+      "total": 24,
+      "rows": 20,
+      "warehouses": 6,
+      "over90": 7,
+      "unknown": 17,
+      "secondPageRows": 4
+    },
+    "inventory_statistics_age": {
+      "total": 24,
+      "rows": 20,
+      "warehouses": 6,
+      "secondPageRows": 4
+    }
+  },
+  "configSHA256": "4bb99e85738ea9e6373b64eac24d20ae7b52cbdc10f86b717759ffe3af6a380c",
+  "parityWithOriginal": true,
+  "readOnly": true,
+  "businessWrites": 0
+}

@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "mode": "after",
+  "statistics": {
+    "inventory_statistics_inbound": {
+      "authorizedEmptyHeadquarters": true
+    },
+    "inventory_statistics_outbound": {
+      "authorizedEmptyHeadquarters": true
+    },
+    "inventory_statistics_expiry": {
+      "authorizedEmptyHeadquarters": true
+    },
+    "inventory_statistics_age": {
+      "authorizedEmptyHeadquarters": true
+    }
+  },
+  "configSHA256": "bc9aa58a2ec7f9fb811bbd5f93d2c3859209508f741a92b6d971eff350740867",
+  "parityWithOriginal": true,
+  "readOnly": true,
+  "businessWrites": 0
+}

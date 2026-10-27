@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "platform": {
+    "over90": 7,
+    "ageTotal": 24,
+    "page2Rows": 4,
+    "returnHome": true
+  },
+  "authenticatedStore": {
+    "store": "淮南商之都店",
+    "expiryTotal": 80,
+    "ageTotal": 80,
+    "page2Rows": 20,
+    "whitelistErrors": [],
+    "newReturnEntry": true
+  },
+  "businessWrites": 0
+}

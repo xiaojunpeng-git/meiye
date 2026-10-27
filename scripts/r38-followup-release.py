@@ -35,7 +35,7 @@ def restartWithReadableSource(site):
  # 不改源码和工资算法；文件清单备份已完成后，仅修正应用目录的遍历/读取权限。
  manifest=m.read(site+'-manifest.json');directory='/www/wwwroot/'+site+'.cc3798.com/app/services/payroll'
  original=m.ssh(site,"stat -c '%a' "+directory).decode().strip();assert original in ['700','755']
- record={'directory':directory,'beforeMode':original,'afterMode':'755','contentChanges':False}
+ record=m.read(site+'-directory-permissions.json') if (m.R/(site+'-directory-permissions.json')).exists() else {'directory':directory,'beforeMode':original,'afterMode':'755','contentChanges':False}
  m.ssh(site,'install -m 600 /dev/stdin '+manifest['backup']+'/directory-permissions.json',json.dumps(record).encode())
  if original=='700':m.ssh(site,'chmod 755 '+directory)
  m.save(site+'-directory-permissions.json',record)
@@ -58,11 +58,32 @@ def commit():
   m.save('commit.json',{'commit':c,'baselineMergeCommit':base,'branch':p['existingBranch'],'tree':tree,'paths':paths,'sharedIndexUntouched':True,'newBranch':False});print('COMMIT',c,flush=True)
  finally:P(private).unlink(missing_ok=True)
 
+
+def pushExistingBranch():
+ # 远端停留在10月14日旧发布历史；只对齐提交祖先，业务树必须与刚部署验收的树逐字相同。
+ info=m.read('commit.json');assert m.read('rh-verified.json')['result']=='PASS';branch='refs/heads/'+info['branch'];head=m.g('rev-parse',branch).decode().strip()
+ remote=m.g('ls-remote','origin',branch).decode().split()[0]
+ if subprocess.run(['git','merge-base','--is-ancestor',remote,head],stdout=subprocess.DEVNULL).returncode:
+  assert remote=='5ae1e0407e28c79b52e05c4238aa1b58fd8975f6','REMOTE_HISTORY_CHANGED'
+  tree=m.g('rev-parse',head+'^{tree}').decode().strip();tip=m.g('commit-tree',tree,'-p',head,'-p',remote,input='R38-00002 对齐远端既有发布历史，保持已验收业务树不变\n'.encode()).decode().strip()
+  assert m.g('diff','--name-only',head,tip)==b'';m.g('update-ref',branch,tip,head)
+  m.save('history-alignment.json',{'previousHead':head,'remotePreviousTip':remote,'tip':tip,'tree':tree,'businessDiff':[],'forcePush':False,'newBranch':False})
+ else:tip=head
+ m.g('push','origin',branch+':'+branch);assert m.g('ls-remote','origin',branch).decode().split()[0]==tip
+ m.save('push.json',{'result':'PASS','commit':info['commit'],'publicationTip':tip,'branch':info['branch'],'forcePush':False});print('PUSH PASS',tip,flush=True)
+
 if __name__=='__main__':
  mode=sys.argv[1]
  if mode=='preflight':m.preflight(sys.argv[2])
  elif mode=='commit':commit()
- elif mode=='deploy':m.deploy(sys.argv[2])
+ elif mode=='deploy':
+  site=sys.argv[2]
+  try:m.deploy(site)
+  except BaseException:
+   record=m.R/(site+'-directory-permissions.json')
+   if record.exists():
+    v=json.loads(record.read_text());m.ssh(site,'chmod '+v['beforeMode']+' '+v['directory'])
+   raise
  elif mode=='finish':m.finish(sys.argv[2])
- elif mode=='push':m.push()
+ elif mode=='push':pushExistingBranch()
  else:raise RuntimeError('EXPLICIT_MODE_REQUIRED')

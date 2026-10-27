@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "authenticatedPlatform": true,
+  "authorizedHeadquarters": 0,
+  "scopeDenied": "浏览器当前账号：您暂无权限访问；只读服务管理员上下文：无可用总部仓。",
+  "returnHome": true,
+  "stockUnitContract": "production readonly runtime verified all four page definitions",
+  "dataDrilldown": "not applicable because there is no authorized HQ warehouse",
+  "businessWrites": 0
+}

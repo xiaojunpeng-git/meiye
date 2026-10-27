@@ -1,0 +1,23 @@
+{
+  "commit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+  "baselineMergeCommit": "82e20fccbb96128f0da15c6ef029e4d84498218b",
+  "branch": "release/store-cashier-c14-main",
+  "tree": "bac3e534c1a04aae2c31bce22cbe9413b544f110",
+  "paths": [
+    "scripts/r38-followup-build.cjs",
+    "scripts/r38-followup-release.py",
+    "scripts/r38-followup-smoke.php",
+    "tests/inventory/evidence/R38-followup-statistics/fixed-version.json",
+    "tests/inventory/evidence/R38-followup-statistics/initial.json",
+    "tests/inventory/evidence/R38-followup-statistics/local-expiry.png",
+    "tests/inventory/js/platform-statistics-frontend-contract.mjs",
+    "tests/inventory/js/r38-statistics-scope-pagination.mjs",
+    "tests/inventory/php/r38-statistics-readonly.php",
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue",
+    "前端代码/inventory-vue3/src/styles.css",
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php"
+  ],
+  "sharedIndexUntouched": true,
+  "newBranch": false
+}

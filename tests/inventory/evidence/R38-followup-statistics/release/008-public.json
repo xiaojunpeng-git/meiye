@@ -1,0 +1,29 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "path": "/view_cashier_v3/assets/index-adaa367c.js",
+      "sha256": "c163ec918ba8a4747c4d71d8a2a14a2bd8b183148dfb1774d71cde7ae17e1d51"
+    },
+    {
+      "path": "/view_cashier_v3/assets/index-bd1ae8c0.css",
+      "sha256": "bd1ae8c0784a1b06dd80edaee0b42e74bc85e997ee284403f5d3632f3f6e44df"
+    },
+    {
+      "path": "/view_inventory_v3/assets/index-28787f85.js",
+      "sha256": "b8e03a1dd92f18ef3aed20029aa68d47e8910b0d89ed93b27efcbb689327102a"
+    },
+    {
+      "path": "/view_inventory_v3/assets/index-386008fe.css",
+      "sha256": "386008fe6e9ed957916ca79eb4fdbcd81c777d84118b612280f0dd456e896595"
+    },
+    {
+      "path": "/view_cashier_v3/index.html",
+      "sha256": "5c4805698952265225184d05abb38d24a1e131e15b12c978254e5e65db17e5bc"
+    },
+    {
+      "path": "/view_inventory_v3/index.html",
+      "sha256": "0d053ba0e8eed169013855dfd6ded2af8cda49e7fbd0384322a02a35abe5f729"
+    }
+  ]
+}

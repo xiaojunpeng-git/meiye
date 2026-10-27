@@ -1,0 +1,46 @@
+{
+  "round": "38补漏",
+  "result": "PASS",
+  "sourceCommit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "commit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+      "sourceTree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+      "rollback": "/www/backups/rh/r38-inventory-625a0280",
+      "businessWrites": 0,
+      "timeUTC": "2026-10-27T11:53:54.167653+00:00"
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "commit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+      "sourceTree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+      "rollback": "/www/backups/008/r38-inventory-625a0280",
+      "businessWrites": 0,
+      "timeUTC": "2026-10-27T11:57:48.650689+00:00"
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "commit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+      "sourceTree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+      "rollback": "/www/backups/010/r38-inventory-625a0280",
+      "businessWrites": 0,
+      "timeUTC": "2026-10-27T11:59:44.419330+00:00"
+    }
+  },
+  "finishedUTC": "2026-10-27T11:59:56.669630+00:00",
+  "noDatabaseOrConfigurationWrites": true,
+  "scope": [
+    "首页统计仓库继承",
+    "单位白名单",
+    "返回首页",
+    "分页和旧响应隔离"
+  ],
+  "operationalRepair": "仅rh/008现有工资类目录700→755，使运行账号可读；010原755保持。源码、工资算法、业务值不变，权限回滚元数据已独立保存。",
+  "baselinePreservation": "已上线库存、收银与当前补交分成修复在原分支提交链统一保留；与本轮新增项分开记录。",
+  "historyAlignment": "保留远端10月14日提交记录，历史对齐提交业务树零差异，正常push无强推。",
+  "browserLimits": "008总部仓无批次，验证真实空结果；010无授权总部仓，验证既有拒绝保护；瑞昊平台24批与门店80批真实下钻分页回归通过。"
+}
