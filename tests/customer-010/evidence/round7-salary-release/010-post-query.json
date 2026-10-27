@@ -1,0 +1,90 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "authenticated_http_session": false,
+  "actual_service_scope": true,
+  "queries": {
+    "basic_salary_realtime": {
+      "end_date": "2026-10-27",
+      "rows": 9,
+      "total": 9,
+      "columns": [
+        "日期",
+        "门店",
+        "职务",
+        "姓名",
+        "门店现金业绩",
+        "门店现金提成",
+        "门店实际扣卡业绩",
+        "门店实际扣卡提成",
+        "门店耗卡业绩",
+        "门店耗卡提成",
+        "项目业绩",
+        "项目提点",
+        "项目提成",
+        "产品业绩",
+        "产品提点",
+        "产品提成",
+        "劳动业绩",
+        "劳动提点",
+        "劳动提成",
+        "绩效工资",
+        "指定客",
+        "好评数",
+        "餐补",
+        "加班",
+        "岗位补贴",
+        "其他调整",
+        "应发工资",
+        "考勤",
+        "医社保",
+        "公积金",
+        "个税",
+        "其他扣款",
+        "预支工资",
+        "实发工资",
+        "备注"
+      ],
+      "can_edit": true,
+      "can_freeze": true,
+      "result_sha256": "8a3b6a2b1e8b9b111e8376a287883f5b72e39741ca9b7d51d8ab5286d7b25046"
+    },
+    "basic_employee_summary": {
+      "end_date": "2026-10-27",
+      "rows": 7,
+      "total": 7,
+      "columns": [
+        "门店",
+        "员工",
+        "当前职位",
+        "销售业绩",
+        "劳动业绩",
+        "手工费",
+        "分配项目数",
+        "客次",
+        "指定客",
+        "劳动客单价",
+        "劳动提成（预计）",
+        "提成计算状态"
+      ],
+      "can_edit": false,
+      "can_freeze": false,
+      "result_sha256": "da6f99cd6afec175045848adc4ae497af191d27d6fd6479da04b02c511da5af6"
+    },
+    "basic_cross_store_settlement": {
+      "end_date": "2026-10-26",
+      "rows": 1,
+      "total": 1,
+      "columns": [
+        "门店",
+        "储值对账金额",
+        "次卡对账金额",
+        "合计"
+      ],
+      "can_edit": false,
+      "can_freeze": false,
+      "result_sha256": "b88d120a846d6af2eaea04f6015e543f697b7714c92029e712aad6817102fe8f"
+    }
+  },
+  "write_denied": true
+}

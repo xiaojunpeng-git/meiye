@@ -1,0 +1,17 @@
+{
+  "adminapi/report/basic/salary/save": {
+    "http": "200",
+    "status": 410000,
+    "msg": "请登录"
+  },
+  "adminapi/report/basic/salary/freeze": {
+    "http": "200",
+    "status": 410000,
+    "msg": "请登录"
+  },
+  "cashierapi/v3/report/basic/salary/save": {
+    "http": "200",
+    "status": 410000,
+    "msg": "请登录"
+  }
+}

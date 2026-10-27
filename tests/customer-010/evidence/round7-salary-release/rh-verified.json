@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "source_commit": "e888c787e5d921284d18879167015d3431ce1a5c",
+  "files": 10,
+  "mode": 0,
+  "position_model": "legacy",
+  "existing_business_unchanged": true,
+  "manual_counts": {
+    "basic_salary_manual": 0,
+    "basic_salary_month_control": 0,
+    "basic_salary_manual_audit": 0
+  },
+  "backup": "/www/backups/rh/round7-e888c787e5d9-20261027174334",
+  "public_status": "200",
+  "public_assets_verified": [
+    "public/view_cashier_v3/assets/index-b2ee669c.js",
+    "public/view_cashier_v3/assets/index-5763393d.css"
+  ]
+}

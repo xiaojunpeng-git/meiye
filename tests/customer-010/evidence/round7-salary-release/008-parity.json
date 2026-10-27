@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "store_id": 113,
+  "rows": 6,
+  "numeric_fields": 36,
+  "same_snapshot": true,
+  "values_sha256": "db8e835cbe06af2d84ad237f1527ebcbfcc7421158c69bb5e44c137caf8fb539"
+}

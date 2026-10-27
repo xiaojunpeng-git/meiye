@@ -1,0 +1,6 @@
+{
+  "backup": "/www/backups/008/round7-e888c787e5d9-20261027174711/cashier-assets-retained.tar.gz",
+  "sha256": "a51425fdd7bb7b45dd7b62235b7465d1dd1260e5ce482d415f944d3950e9e618",
+  "prior_assets_still_exact": true,
+  "old_index_backup": "/www/backups/008/round7-e888c787e5d9-20261027174711/before/public/view_cashier_v3/index.html"
+}
