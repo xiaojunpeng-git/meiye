@@ -1,0 +1,10 @@
+{
+  "source": "后端代码/app/services/wechat/WechatUserServices.php",
+  "baselineHEAD": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "baselineSHA256": "cebc2908227059a7cffd8f54de88e9d67241d6591d93eedaeb55cc872cb75b55",
+  "candidateSHA256": "c35429f3cd08697c341fe038c98728048ee7b978ade80b1ca215fc78586ce1ff",
+  "provenance": "开工前工作区已有未提交头像规范化候选；本任务只核实、复用和真实MySQL DAO自测，未覆盖或冒称新写此段代码",
+  "result": "LOCAL_DB_PASS",
+  "scope": "单个微信用户服务文件；旧账号缺头像保留原值，新账号缺头像写空字符串，正常头像照常写入；其他登录、手机号绑定、权限逻辑不变",
+  "remoteStatus": "未部署，待产品经理确认固定候选"
+}
