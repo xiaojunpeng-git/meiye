@@ -24,7 +24,7 @@ function fixture(string $table, array $data): void {
     Db::name($table)->insert($data);
 }
 $tables = ['employee','system_store','system_store_staff','position','position_level','staff_job_position','position_yeji',
-    'salary_info','salary_field','salary_agent','cashier_v3_performance_fact','cashier_v3_entitlement_service_fact',
+    'salary_info','salary_field','salary_agent','salary_freeze','cashier_v3_performance_fact','cashier_v3_entitlement_service_fact',
     'cashier_v3_sale_fact','cashier_v3_order_lifecycle_operation','cashier_v3_order_center_void_operation',
     'cashier_v3_service_record_void_operation','cashier_v3_service_customer_group_fact',
     'cashier_v3_payment_sale_allocation_fact','cashier_v3_payment_fact','cashier_v3_recharge_debt_repayment',
@@ -47,6 +47,8 @@ try {
     $dbConfig['connections']['r51_salary_test'] = array_replace($connection,['database'=>$database]);
     $dbConfig['default'] = 'r51_salary_test';
     config($dbConfig, 'database');
+    $manualSql=$GLOBALS['salary_manual_schema_sql'] ?? file_get_contents($root.'/database/upgrades/2026-10-27-工资人工项与编辑冻结/01-结构升级.sql');
+    foreach (array_filter(array_map('trim',explode(';',$manualSql))) as $sql) Db::execute($sql);
     foreach ([901,902] as $store) fixture('system_store',['id'=>$store,'name'=>'R51测试门店'.$store]);
     fixture('position',['id'=>991,'name'=>'R51测试岗位','status'=>1]);
     fixture('position_level',['id'=>992,'name'=>'R51测试职级','status'=>1]);
@@ -263,7 +265,7 @@ try {
     verify($categoryRead()['mendianlaodongyeji'] === 0.0 && $categoryRead()['work_yeji'] === 0.0,
         'Voiding completed service removes store consumption and personal labour categories');
     $labels = array_column($salary->definitions('basic_salary_realtime'),'label','key');
-    verify($labels['mendianlaodongyeji'] === '门店消耗业绩' && $labels['mendianlaodongticheng'] === '门店消耗提成',
+    verify($labels['mendianlaodongyeji'] === '门店耗卡业绩' && $labels['mendianlaodongticheng'] === '门店耗卡提成',
         'Approved user-visible names retain compatible business field keys');
     fixture('employee',['id'=>99104,'phone'=>'13900099104','name'=>'补交新销售人','status'=>1,'is_del'=>0]);
     fixture('system_store_staff',['id'=>88106,'employee_id'=>99104,'store_id'=>903,'position_level'=>992,'status'=>1,'is_del'=>0]);

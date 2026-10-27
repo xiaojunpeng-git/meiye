@@ -11,7 +11,7 @@ import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +34,11 @@ const resultsScroll = ref(null)
 const editor = ref(null)
 const saving = ref(false)
 const saveError = ref('')
+const salaryEditing = ref(false)
+const salaryDraft = ref(null)
+const salarySaving = ref(false)
+const freezeDialog = ref(null)
+const salaryReport = computed(() => active.value?.code === 'basic_salary_realtime')
 const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
 const today = ['year', 'month', 'day'].map(type => todayParts.find(part => part.type === type).value).join('-')
 const dates = ref({ start_date: today.slice(0, 7) + '-01', end_date: today, as_of_date: today })
@@ -84,6 +89,7 @@ async function run(next = query.value) {
     if (id !== requestId) return
     const lastPage = Math.max(1, Math.ceil(result.pagination.total / 20))
     if (result.pagination.page > lastPage) { await run({ ...query.value, page: lastPage }); return }
+    salaryDraft.value = null
     data.value = result
     fields.value = result.queryFields
     executedQuery.value = cloneUnifiedQuerySnapshot(query.value)
@@ -126,6 +132,42 @@ async function refreshScope(code) {
   scope.value = await loadBasicReportScope(code)
   if (!stores.value.length) scopeLabel.value = scope.value.authorization_mode === 'all' ? '全部门店' : '当前权限范围'
 }
+/** 同员工跨店按服务端row_id隔离草稿；保留原始输入，不从格式化金额回填。 */
+function editSalary(row) {
+  error.value = ''
+  const values = Object.fromEntries(fields.value.filter(field => field.editable).map(field => [field.key, String(row.manual_values?.[field.key] ?? '')]))
+  salaryDraft.value = { row_key: row.row_id, month: row.month, store_id: row.store_id, employee_id: row.employee_id,
+    expected_version: row.manual_version, idempotency_key: crypto.randomUUID(), values, original: { ...values } }
+}
+async function saveSalary() {
+  if (!salaryDraft.value || salarySaving.value) return
+  const { original, ...body } = salaryDraft.value
+  body.values = Object.fromEntries(Object.entries(body.values).filter(([key, value]) => value !== original[key]))
+  if (!Object.keys(body.values).length) { salaryDraft.value = null; return }
+  salarySaving.value = true; error.value = ''
+  try {
+    await saveBasicSalary(platform.value, body)
+    salaryDraft.value = null
+    await run({ ...executedQuery.value })
+  } catch (e) { error.value = e.message }
+  finally { salarySaving.value = false }
+}
+/** 冻结使用已执行月份，不能把未查询的月份草稿写成另一月份的全店锁。 */
+function requestSalaryFreeze() {
+  freezeDialog.value = { month: data.value.salary_state.month, frozen: !data.value.salary_state.frozen,
+    expected_version: data.value.salary_state.version, idempotency_key: crypto.randomUUID() }
+}
+async function saveSalaryFreeze() {
+  if (salarySaving.value || !freezeDialog.value) return
+  salarySaving.value = true; error.value = ''
+  try {
+    await freezeBasicSalary({ ...freezeDialog.value })
+    freezeDialog.value = null; salaryEditing.value = false
+    await run({ ...executedQuery.value })
+  } catch (e) { error.value = e.message }
+  finally { salarySaving.value = false }
+}
+
 function edit(row) {
   saveError.value = ''
   const defaultStore = platform.value ? (stores.value.length === 1 ? stores.value[0] : 0)
@@ -174,7 +216,7 @@ function display(row, field) {
   if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
-  if (['project_count','xiangmushu'].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
+  if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
 }
 function summary(field, index) {
@@ -182,7 +224,7 @@ function summary(field, index) {
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu'].includes(field.key) ? String(Number(amount)) : amount
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) ? String(Number(amount)) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
@@ -203,7 +245,7 @@ function trapFocus(event) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-watch(() => Boolean(editor.value || fieldGuide.value || commissionProof.value), async open => {
+watch(() => Boolean(editor.value || fieldGuide.value || commissionProof.value || freezeDialog.value), async open => {
   if (open) {
     returnFocus = document.activeElement
     await nextTick()
@@ -212,7 +254,7 @@ watch(() => Boolean(editor.value || fieldGuide.value || commissionProof.value), 
 })
 watch(() => route.params.report, async () => {
   const routeRequest = ++requestId
-  controller?.abort(); editor.value = null; commissionProof.value = null; executedQuery.value = null
+  controller?.abort(); salaryDraft.value = null; salaryEditing.value = false; freezeDialog.value = null; editor.value = null; commissionProof.value = null; executedQuery.value = null
   // 切换报表立即清掉上一张表的行、合计和编辑资格，不能把旧数据短暂展示在新表名下。
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
   loading.value = false; error.value = ''
@@ -241,7 +283,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </script>
 
 <template>
-  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof ? '' : null">
+  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog ? '' : null">
     <header class="basic-reports__header">
       <div><button v-if="route.params.report" type="button" class="basic-reports__icon" aria-label="返回基础报表" title="返回基础报表" @click="router.push({ name: route.name })"><ArrowLeft :size="18" /></button><h1>{{ active?.name || '基础报表' }}</h1></div>
       <button v-if="active?.available && data.can_edit" type="button" class="button button--primary" @click="edit()">新增登记</button>
@@ -259,23 +301,26 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     </template>
     <template v-else-if="active?.available">
       <UnifiedReportQueryToolbar :fields="fields" :page-code="active.code"
-        :is-query-loading="loading" :executed-query="executedQuery" @query="submitQuery">
+        :is-query-loading="loading || salarySaving" :executed-query="executedQuery" @query="submitQuery">
         <template #leading-controls>
           <OrganizationStoreScopePicker v-if="platform" v-model="stores" :tree="scope.tree" :allowed-store-ids="scope.allowed_store_ids" :label="scopeLabel" @change="selectScope" />
-          <label v-if="active.time_mode === 'realtime_month'" class="basic-reports__date">月份<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" aria-label="工资月份"></label>
+          <label v-if="active.time_mode === 'realtime_month'" class="basic-reports__date">时间选择：<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" aria-label="工资月份"></label>
           <span v-else-if="!['current', 'registration_date'].includes(active.time_mode)" class="basic-reports__period"><UnifiedQueryDateRange :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" /></span>
         </template>
         <template #primary-actions>
+          <button v-if="salaryReport && data.salary_can_edit" type="button" class="button button--secondary" :disabled="loading || salarySaving" @click="salaryEditing = !salaryEditing; salaryDraft = null">{{ salaryEditing ? '取消编辑' : '编辑' }}</button>
+          <button v-if="salaryReport && data.salary_can_freeze" type="button" class="button button--secondary" :disabled="loading || salarySaving || !executedQuery" @click="requestSalaryFreeze">{{ data.salary_state?.frozen ? '取消冻结' : '冻结' }}</button>
           <button type="button" class="basic-reports__icon" title="列名取值来源" aria-label="列名取值来源" @click="fieldGuide = true"><BookOpen :size="17" /></button>
           <button type="button" class="basic-reports__icon" title="刷新" aria-label="刷新" :disabled="loading" @click="run()"><RefreshCw :size="17" /></button>
           <button type="button" class="basic-reports__icon" title="导出" aria-label="导出" :disabled="!executedQuery || exporting || loading" @click="exportRows"><Download :size="17" /></button>
         </template>
       </UnifiedReportQueryToolbar>
+      <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
       <section class="basic-reports__results" :aria-busy="loading">
         <div ref="resultsScroll" class="basic-reports__scroll">
-          <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit">操作</th></tr>
-            <tr class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit">-</th></tr></thead>
-            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><button v-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td></tr></tbody>
+          <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
+            <tr class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
+            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
           <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
         </div>
@@ -283,6 +328,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
       </section>
     </template>
     <Teleport to="body">
+      <div v-if="freezeDialog" class="basic-report-dialog" role="dialog" aria-modal="true" aria-labelledby="salary-freeze-title" @keydown="trapFocus" @keydown.esc="!salarySaving && (freezeDialog = null)"><section><p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p><h2 id="salary-freeze-title">{{ freezeDialog.frozen ? '冻结' : '取消冻结' }} {{ freezeDialog.month }}</h2><p>{{ freezeDialog.frozen ? '冻结后，全部门店不可编辑当月人工项，平台仍可编辑。实时业绩和工资计算继续更新。' : '取消冻结后，已获编辑权限的门店可继续编辑当月人工项。' }}</p><footer><button type="button" class="button button--secondary" :disabled="salarySaving" @click="freezeDialog = null">取消</button><button type="button" class="button button--primary" :disabled="salarySaving" @click="saveSalaryFreeze">确认</button></footer></section></div>
       <div v-if="editor" class="basic-report-dialog" role="dialog" aria-modal="true" aria-labelledby="registration-title" @keydown="trapFocus" @keydown.esc="!saving && (editor = null)">
         <form @submit.prevent="save"><header><h2 id="registration-title">{{ editor.id ? '编辑登记' : '新增登记' }}</h2><button type="button" class="basic-reports__icon" aria-label="关闭" :disabled="saving" @click="editor = null"><X :size="18" /></button></header>
           <p v-if="saveError" class="basic-reports__error" role="alert">{{ saveError }}</p>
@@ -304,6 +350,9 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </template>
 
 <style scoped>
+/* 工资编辑只作用于当前行；右侧保存按钮常驻宽表，避免填写后无法找到保存。 */
+.basic-reports__row-actions{position:sticky;right:0;min-width:110px;background:white;z-index:2;white-space:nowrap}.basic-reports__row-actions button{margin:0 4px;color:#1675ce;background:white;border:1px solid #dce4ec;border-radius:4px;padding:5px 8px}.basic-reports__salary-input{width:100%;min-width:90px;box-sizing:border-box;border:1px solid #abc8e5;border-radius:4px;padding:6px;color:inherit;font:inherit}.basic-reports__salary-summary{display:flex;gap:28px;flex:none;margin:0;padding:0 4px 8px;color:#54647a}
+
 :global(html.basic-reports-document),:global(html.basic-reports-document body),:global(html.basic-reports-document #app){min-width:0}
 /* 21 张基础报表共用同一主筛选行；日期控件固定宽度，窄屏只横向滚动该行。 */
 .basic-reports :deep(.unified-report-query-toolbar__primary){flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;align-items:center}

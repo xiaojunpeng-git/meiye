@@ -64,6 +64,7 @@ Route::group('cashierapi/v3', function () {
         Route::get('report/basic/catalog', 'Report/basicCatalog')->option(['real_name' => '基础报表目录']);
         Route::get('report/basic/query', 'Report/basicQuery')->option(['real_name' => '基础报表统一查询']);
         Route::post('report/basic/save', 'Report/basicSave')->option(['real_name' => '保存刷单登记']);
+        Route::post('report/basic/salary/save', 'Report/basicSalarySave')->option(['real_name' => '保存工资人工项']);
         Route::get('report/unified/scope', 'Report/scope')
             ->option(['real_name' => '收银V3经营报表权限范围']);
         Route::get('report/unified/query', 'Report/query')

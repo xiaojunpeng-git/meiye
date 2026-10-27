@@ -26,6 +26,10 @@ export const loadBasicReportScope = (pageCode, signal) => request(true, 'scope',
 export const loadBasicReport = (platform, query, storeIds, signal) => request(platform, 'query', { query, storeIds, signal })
 export const saveBasicRegistration = (platform, body) => request(platform, 'save', { body })
 
+/** 工资人工补充独立保存，不复用刷单写入口；权限与冻结最终由后端校验。 */
+export const saveBasicSalary = (platform, body) => request(platform, 'salary/save', { body })
+export const freezeBasicSalary = body => request(true, 'salary/freeze', { body })
+
 /** CSV始终取后端统一查询完整导出集；避免券码等人工文本被表格软件当公式执行。 */
 export function registrationCsv(fields, rows, summaries, sources) {
   const cell = (value) => {

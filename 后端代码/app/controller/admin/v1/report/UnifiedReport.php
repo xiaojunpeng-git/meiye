@@ -77,9 +77,31 @@ class UnifiedReport extends AuthController
             \app\services\report\BasicReportCatalogServices::definition($code);
             if (!$this->canReadBasicReport($code)) return app('json')->fail('当前账号未配置该基础报表菜单');
             $context = $this->basicReadContext($request->get(), $code);
+            if ($code === 'basic_salary_realtime') $context = array_merge($context,$this->salaryCapabilities());
             return app('json')->success(\app\services\report\BasicReportHostServices::query($context, $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 工资人工编辑与刷单写入分离，不能用基础报表读菜单代替工资写权限。 */
+    private function salaryCapabilities(): array
+    {
+        $legacy=$this->hasMenuPermission('report-salary-info');
+        return ['salary_edit'=>$legacy || $this->hasMenuPermission('admin-report-basic_salary_realtime-edit'),
+            'salary_freeze'=>$legacy || $this->hasMenuPermission('admin-report-basic_salary_realtime-freeze')];
+    }
+
+    public function basicSalarySave(Request $request) { return $this->writeBasicSalary($request,false); }
+    public function basicSalaryFreeze(Request $request) { return $this->writeBasicSalary($request,true); }
+
+    /** 平台冻结是全月份操作；人工保存仍逐店校验，不接受客户端操作员或权限字段。 */
+    private function writeBasicSalary(Request $request,bool $freeze)
+    {
+        try {
+            if (!$this->canReadBasicReport('basic_salary_realtime')) throw new \InvalidArgumentException('当前账号未授权工资表');
+            $context=array_merge($this->basicReadContext([],'basic_salary_realtime'),$this->salaryCapabilities());
+            return app('json')->success((new \app\services\report\BasicSalaryManualServices())->save($context,$request->post(),$freeze));
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     public function basicSave(Request $request)

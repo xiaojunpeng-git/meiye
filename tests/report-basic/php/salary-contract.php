@@ -1,6 +1,7 @@
 <?php
 /** R51 无框架、无数据库契约：静态元数据、日期权限边界、白名单表达式解析。 */
 require_once __DIR__.'/../../../后端代码/app/services/payroll/PayrollAlgorithmPolicy.php';
+require_once __DIR__.'/../../../后端代码/app/services/report/BasicSalaryManualServices.php';
 require_once __DIR__.'/../../../后端代码/app/services/report/BasicSalaryReportServices.php';
 use app\services\report\BasicSalaryReportServices as Salary;
 $checks = 0;
@@ -17,8 +18,17 @@ verify(count(array_unique(array_column($fields,'key'))) === count($fields), 'Uni
 foreach ($fields as $field) {
     foreach (['key','label','type','defaultVisible','defaultQuick','width','fixed','money','summable'] as $key)
         verify(array_key_exists($key, $field), 'Field contract '.$key);
-    verify(is_bool($field['money']) && is_bool($field['summable']) && $field['editable'] === false, 'Typed metadata and read-only fields');
+    verify(is_bool($field['money']) && is_bool($field['summable']) && $field['editable'] === isset(\app\services\report\BasicSalaryManualServices::FIELDS[$field['key']]), 'Typed metadata and manual-only editable fields');
 }
+// 来自已对照的007工资列；断言顺序而非只断言列集合，避免前端自行重排。
+$visible=array_values(array_filter($fields,static function($field){return $field['defaultVisible'];}));
+verify(array_column($visible,'label')===['日期','门店','职务','职级','姓名','门店现金业绩','门店现金提成','门店实际扣卡业绩','门店实际扣卡提成','门店耗卡业绩','门店耗卡提成','项目业绩','项目提点','项目提成','产品业绩','产品提点','产品提成','劳动业绩','劳动提点','劳动提成','绩效工资','指定客','好评数','餐补','加班','岗位补贴','其他调整','应发工资','考勤','医社保','公积金','个税','其他扣款','预支工资','实发工资','备注'],'007 column names and order');
+verify(count(array_filter($fields,static function($field){return $field['editable'];}))===12,'Exactly twelve manual fields');
+$rates=new ReflectionMethod(Salary::class,'displayRates');
+$rateRow=['xiao_money'=>100,'product_money'=>null,'work_get'=>0,'rule_details'=>[
+    ['field'=>'xiao_money','rate_percent'=>30],['field'=>'xiao_money','rate_percent'=>25],['field'=>'xiao_money','rate_percent'=>30],['field'=>'work_get','rate_percent'=>0]]];
+$rates->invokeArgs($salary,[&$rateRow]);
+verify($rateRow['xiao_commission']==='25% / 30%' && $rateRow['product_commission']===null && $rateRow['work_commission']==='0%','Actual rates are distinct, stable, never averaged, missing remains null');
 denied(function () use ($salary) { $salary->definitions('bad'); }, 'Unknown code fails without DB');
 $input = ['start_date'=>'2026-10-01','end_date'=>'2026-10-31','as_of_date'=>'2026-10-23','_report_scope'=>['mode'=>'stores']];
 foreach ([[],[0],[-1],['1']] as $stores) denied(function () use ($salary,$input,$stores) { $salary->read('basic_salary_realtime',$stores,$input); }, 'Invalid trusted stores');

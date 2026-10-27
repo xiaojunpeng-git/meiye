@@ -37,9 +37,22 @@ class Report extends AuthController
             $code = (string)($payload['pageCode'] ?? '');
             \app\services\report\BasicReportCatalogServices::definition($code);
             $this->assertBasicReportFeature($code);
-            return $this->success('ok', \app\services\report\BasicReportHostServices::query($this->basicContext(false), $payload));
+            $context=$this->basicContext(false);
+            if ($code==='basic_salary_realtime') $context['salary_edit']=!empty($context['basic_registration_write']);
+            return $this->success('ok', \app\services\report\BasicReportHostServices::query($context, $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 门店只可修改当前登录店的工资人工项；冻结由共享服务事务锁强制校验。 */
+    public function basicSalarySave(Request $request)
+    {
+        try {
+            $this->assertBasicReportFeature('basic_salary_realtime');
+            $context=$this->basicContext(true);
+            $context['salary_edit']=!empty($context['basic_registration_write']);
+            return $this->success('ok',(new \app\services\report\BasicSalaryManualServices())->save($context,$request->post()));
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     public function basicSave(Request $request)

@@ -13,27 +13,23 @@ use app\services\payroll\PositionSalaryRuleResolver;
 /**
  * R51 月度实时工资只读投影。Host 注入门店及本人权限，Provider 负责结果筛选、合计和分页。
  * 统一 Reader 是业绩唯一出口；旧工资 JSON 只白名单读取人工值，绝不作为业绩或公式结果。
- * 缺失映射以 null + gaps 交付，不能把未算出的工资当作零工资，也不提供锁薪、发薪或编辑。
+ * 缺失映射以 null + gaps 交付，不能把未算出的工资当作零工资，不提供锁薪或发薪；人工补充独立保存，只影响实时公式输入。
  */
 final class BasicSalaryReportServices
 {
     private const CODE = 'basic_salary_realtime';
     private const FIRST_COURSE_SOURCE_LIMIT = 10000;
-    private const MANUAL = [
-        'haoqingshu'=>'好评数', 'canbu'=>'餐补', 'jiaban'=>'加班', 'jiangweibutie'=>'岗位补贴',
-        'qitatiaozheng'=>'其他调整', 'kaoqin'=>'考勤扣款', 'gongjijin'=>'公积金', 'geshui'=>'个税',
-        'qitakoukuan'=>'其他扣款', 'yuzhigongzi'=>'预支工资', 'yishebaokoukuan'=>'医社保扣款', 'beizhu'=>'备注',
-    ];
+    private const MANUAL = BasicSalaryManualServices::FIELDS;
     private const FORMULAS = ['jixiao'=>'绩效工资', 'jiangjin'=>'新客奖金', 'yingfagongzi'=>'应发工资', 'shifagongzi'=>'实发工资'];
     private const COMMISSIONS = [
         'xiao_money'=>'项目提成', 'product_money'=>'产品提成', 'work_get'=>'劳动提成',
         'mendianxianjinticheng'=>'门店现金提成', 'mendiankoukaticheng'=>'门店余额扣款提成',
-        'mendianlaodongticheng'=>'门店消耗提成', 'mendianshijikoukaticheng'=>'门店排除当日充值扣款提成',
+        'mendianlaodongticheng'=>'门店耗卡提成', 'mendianshijikoukaticheng'=>'门店实际扣卡提成',
     ];
     private const BASES = [
-        'xiao_yeji'=>'项目规则业绩', 'product_yeji'=>'产品规则业绩', 'work_yeji'=>'劳动规则业绩',
-        'mendianxianjinyeji'=>'门店现金规则业绩', 'mendiankoukayeji'=>'门店余额扣款规则业绩',
-        'mendianlaodongyeji'=>'门店消耗业绩', 'mendianshijikoukayeji'=>'门店排除当日充值扣款规则业绩',
+        'xiao_yeji'=>'项目业绩', 'product_yeji'=>'产品业绩', 'work_yeji'=>'劳动业绩',
+        'mendianxianjinyeji'=>'门店现金业绩', 'mendiankoukayeji'=>'门店余额扣款规则业绩',
+        'mendianlaodongyeji'=>'门店耗卡业绩', 'mendianshijikoukayeji'=>'门店实际扣卡业绩',
     ];
     private const PAIRS = [
         'xiao_money'=>'xiao_yeji', 'product_money'=>'product_yeji', 'work_get'=>'work_yeji',
@@ -68,8 +64,6 @@ final class BasicSalaryReportServices
         }
         if (PayrollAlgorithmPolicy::independentPositions()) {
             $out=array_values(array_filter($out,static function($field){return $field['key']!=='position_level_name';}));
-            foreach ($out as &$field) if ($field['key']==='position_name') $field['label']='职位';
-            unset($field);
         }
         foreach (['sales_performance'=>'个人现金分配业绩', 'labor_performance'=>'个人劳动业绩', 'labor_fee'=>'个人手工费']
             + self::BASES + self::COMMISSIONS + self::FORMULAS as $key=>$label) {
@@ -79,7 +73,28 @@ final class BasicSalaryReportServices
             $out[] = $this->field($key, $label, 'number', false, true);
         foreach (self::MANUAL as $key=>$label)
             $out[] = $this->field($key, $label, $key === 'beizhu' ? 'text' : 'number', !in_array($key, ['beizhu','haoqingshu'], true), $key !== 'beizhu');
-        return $out;
+        // 007 的显示名称和顺序沿用到新投影；010 独立职位模型不恢复已取消的职级。
+        $order = ['month'=>'日期','store_name'=>'门店','position_name'=>'职务','position_level_name'=>'职级','employee_name'=>'姓名',
+            'mendianxianjinyeji'=>'门店现金业绩','mendianxianjinticheng'=>'门店现金提成',
+            'mendianshijikoukayeji'=>'门店实际扣卡业绩','mendianshijikoukaticheng'=>'门店实际扣卡提成',
+            'mendianlaodongyeji'=>'门店耗卡业绩','mendianlaodongticheng'=>'门店耗卡提成',
+            'xiao_yeji'=>'项目业绩','xiao_commission'=>'项目提点','xiao_money'=>'项目提成',
+            'product_yeji'=>'产品业绩','product_commission'=>'产品提点','product_money'=>'产品提成',
+            'work_yeji'=>'劳动业绩','work_commission'=>'劳动提点','work_get'=>'劳动提成','jixiao'=>'绩效工资',
+            'zhidingke'=>'指定客','haoqingshu'=>'好评数','canbu'=>'餐补','jiaban'=>'加班','jiangweibutie'=>'岗位补贴',
+            'qitatiaozheng'=>'其他调整','yingfagongzi'=>'应发工资','kaoqin'=>'考勤','yishebaokoukuan'=>'医社保',
+            'gongjijin'=>'公积金','geshui'=>'个税','qitakoukuan'=>'其他扣款','yuzhigongzi'=>'预支工资','shifagongzi'=>'实发工资','beizhu'=>'备注'];
+        foreach (['xiao_commission','product_commission','work_commission'] as $key) $out[]=$this->field($key,$order[$key],'text',false,false);
+        $byKey=array_column($out,null,'key'); $ordered=[];
+        foreach ($order as $key=>$label) if (isset($byKey[$key])) {
+            $field=$byKey[$key]; $field['label']=$label;
+            $field['fixed']=in_array($key,['month','store_name','position_name','position_level_name','employee_name'],true) ? 'left' : '';
+            $field['editable']=isset(self::MANUAL[$key]);
+            $ordered[]=$field; unset($byKey[$key]);
+        }
+        // 仍有公式、筛选和溯源调用的内部指标继续登记，但不挤占007工资表的默认展示。
+        foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
+        return $ordered;
     }
 
     private function field(string $key, string $label, string $type, bool $money, bool $sum, bool $fixed = false): array
@@ -127,9 +142,10 @@ final class BasicSalaryReportServices
             foreach ($rows as $row) foreach ($row['gaps'] as $gap) $gaps[] = ['row_id'=>$row['row_id']] + $gap;
             return ['rows'=>$rows, 'fields'=>$fields, 'field_sources'=>$this->sources($fields), 'sum_fields'=>$sumFields,
                 'complete'=>$gaps === [], 'gaps'=>$gaps, 'editable'=>false,
+                'salary_state'=>BasicSalaryManualServices::state(substr($range['start'],0,7)),
                 'date_range'=>$range, 'data_as_of'=>date('c'), 'metric_version'=>'r51-salary-reader-v1',
                 'coverage'=>'仅统计已进入统一事实层的业务；旧流水未回填部分不冒充已覆盖，不读取旧工资业绩结果',
-                'limitations'=>['只读实时试算，不代表正式锁薪或发薪', '仅覆盖统一事实层；不推定旧流水已回填',
+                'limitations'=>['实时试算，不代表正式锁薪或发薪；冻结仅限制门店编辑人工项', '仅覆盖统一事实层；不推定旧流水已回填',
                     '月份截止是业务日筛选，不是恢复当时的历史数据库状态', '原业务行、冲销链或首次全款成交人员记录缺失时返回具体缺口',
                     '同日充值排除按本店业务范围匹配会员及业务日，区别于旧实现跨所有门店查充值'],
                 'as_of_semantics'=>'业务日截止，按查询时可见的统一事实及当前规则重算；不是历史锁薪快照'];
@@ -145,7 +161,7 @@ final class BasicSalaryReportServices
     private function assertSupplementalReadEngines(): void
     {
         $tables = ['employee','system_store_staff','position','position_level','staff_job_position','position_yeji',
-            'salary_info','salary_field','salary_agent','cashier_v3_service_customer_group_fact',
+            'salary_info','salary_field','salary_agent','salary_freeze','basic_salary_manual','basic_salary_month_control','basic_salary_manual_audit','cashier_v3_service_customer_group_fact',
             'cashier_v3_card_sale_item_allocation_fact','cashier_v3_card_sale_category_allocation_fact',
             'store_product','store_product_category','cashier_v3_refund_adjustment','system_business_product','cashier_v3_report_sale_dimension_fact','cashier_v3_sales_order_line',
             'cashier_v3_order_center_void_operation','cashier_v3_service_record_void_operation',
@@ -246,7 +262,7 @@ final class BasicSalaryReportServices
     {
         $row = array_fill_keys(array_column($this->definitions(self::CODE), 'key'), null);
         $month = substr($range['start'], 0, 7);
-        $row = array_replace($row, ['row_id'=>'salary:'.$month.':'.$person['store_id'].':'.$person['employee_id'],
+        $row = array_replace($row, ['row_id'=>BasicSalaryManualServices::rowKey($month,(int)$person['store_id'],(int)$person['employee_id']),
             'month'=>$month, 'store_id'=>(int)$person['store_id'], 'employee_id'=>(int)$person['employee_id'],
             'employee_name'=>$person['employee_name'], 'store_name'=>$person['store_name'],
             'position_name'=>$person['position_name'], 'position_level_name'=>$person['position_level_name'], 'gaps'=>[], 'rule_details'=>[],
@@ -267,7 +283,9 @@ final class BasicSalaryReportServices
             $count = count($cohort['owners'][(int)$person['employee_id']]['members'] ?? []);
             $values['xinkeshu'] = (string)$count; $row['xinkeshu'] = $count;
         }
-        $manual = $this->manual($person, $month);
+        $supplement=BasicSalaryManualServices::read($month,(int)$person['store_id'],(int)$person['employee_id']);
+        $row['manual_version']=$supplement['version'];
+        $manual = array_replace($this->manual($person, $month),$supplement['values']);
         foreach (self::MANUAL as $key=>$label) {
             $value = $manual[$key] ?? null;
             $row['manual_values'][$key] = $value;
@@ -318,8 +336,22 @@ final class BasicSalaryReportServices
             try { $row[$key] = (float)self::roundDecimal($resolve($key), 2); }
             catch (\DomainException $e) { $this->gap($row, $key, 'FORMULA_UNAVAILABLE', $e->getMessage()); }
         }
+        $this->displayRates($row);
         $row['calculation_status'] = $row['gaps'] ? '存在取数或规则缺口' : '实时试算完成';
         return $row;
+    }
+
+    /** 提点只展示命中规则的真实比例；多项目/多档逐项列出，不倒算平均比例冒充配置。 */
+    private function displayRates(array &$row): void
+    {
+        foreach (['xiao_commission'=>'xiao_money','product_commission'=>'product_money','work_commission'=>'work_get'] as $field=>$target) {
+            $details=$target==='work_get' && PayrollAlgorithmPolicy::calculated() ? ($row['commission_details'] ?? [])
+                : array_filter($row['rule_details'],static function($item)use($target){return $item['field']===$target;});
+            $rates=[];
+            foreach ($details as $item) if (isset($item['rate_percent'])) $rates[]=(float)$item['rate_percent'];
+            $rates=array_unique($rates); sort($rates,SORT_NUMERIC);
+            $row[$field]=$row[$target]===null || !$rates ? null : implode(' / ',array_map(static function($rate){return $rate.'%';},$rates));
+        }
     }
 
     /** 白名单人工字段独立读取；旧 JSON 的其他键（业绩/提成/公式）全部忽略。 */
@@ -936,7 +968,7 @@ final class BasicSalaryReportServices
         foreach ($fields as $field) {
             $key = $field['key'];
             $text = '按员工稳定身份、业务门店和自然月查询；未完成、失败业务不计入，退款和作废沿统一指标冲销口径。';
-            if (isset(self::MANUAL[$key])) $text = '独立读取该员工在该门店、该月原先人工填写的补充数值；未填写的人工数值沿用原工资缺省零参与试算，原空值另行保留，不回写，当前只读；格式异常不当作零。';
+            if (isset(self::MANUAL[$key])) $text = '独立读取该员工在该门店、该月原先人工填写的补充数值；未填写的人工数值沿用原工资缺省零参与试算，原空值另行保留；本表独立保存的人工补充值优先，清空不会恢复旧值；格式异常不当作零。';
             elseif ($key === 'mendianxianjinyeji' || $key === 'mendianxianjinticheng') $text = '统一现金业绩作为门店现金提成基数，不扣合作人员分配款；排除充值时只剔除成功正向充值收款，分类按原销售卡内项目及当前平台分类查询，不减充值本金或净充值。';
             elseif ($key === 'mendianlaodongyeji' || $key === 'mendianlaodongticheng') $text = '门店项目成功完成服务后计入统一消耗业绩，按岗位职级和销售档位计算门店消耗提成；不是余额扣款，也不是个人劳动分配，充值不加入消耗基数。';
             elseif ($key === 'work_yeji' || $key === 'work_get') $text = PayrollAlgorithmPolicy::calculated()
@@ -945,6 +977,7 @@ final class BasicSalaryReportServices
             elseif ($key === 'mendianshijikoukayeji' || $key === 'mendianshijikoukaticheng') $text = '从净余额订单扣款中，整笔排除该会员在本店同一业务日有成功余额充值入账的扣款；零现金赠金或欠款充值也算充值事件，已作废或已冲销充值不算；散客不排除，不减充值额、不追资金批次，分类仍按原销售项目守恒分摊。';
             elseif (isset(self::FORMULAS[$key])) $text = '按已配置工资公式的白名单字段与四则运算实时计算；任一依赖缺失、循环或除零时保持空值并说明原因。';
             elseif (isset(self::COMMISSIONS[$key]) || isset(self::BASES[$key])) $text = '读取月内岗位及职级匹配的提成规则，按规则区间和提点试算；代班只统计已登记日期，个人金额先按权威原业务行及卡内项目守恒分配再筛分类，原行或冲销链缺失时明确报告原因。';
+            elseif (in_array($key,['xiao_commission','product_commission','work_commission'],true)) $text='展示本月实际命中规则的提点；多比例逐项列出，不使用平均值，不参与合计。计算法的劳动提点来自项目提成配置。';
             elseif ($key === 'sales_performance') $text = '统一指标中本人最终分配到的现金业绩；包括有效充值、欠款后续补交及其反向事实，不以整单参与金额代替个人份额。';
             elseif ($key === 'labor_performance') $text = '成功服务后分配给本人的劳动业绩及反向事实；不等同于余额扣款或项目消耗业绩。';
             elseif ($key === 'labor_fee') $text = '成功服务时独立保存、分配给本人的手工费及其反向事实，不按劳动业绩推算。';

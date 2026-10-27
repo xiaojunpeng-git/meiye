@@ -1,0 +1,44 @@
+{
+  "syntax": [
+    {
+      "file": "后端代码/app/services/report/BasicSalaryManualServices.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/app/services/report/BasicSalaryManualServices.php"
+    },
+    {
+      "file": "后端代码/app/services/report/BasicSalaryReportServices.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/app/services/report/BasicSalaryReportServices.php"
+    },
+    {
+      "file": "后端代码/app/services/report/query/BasicBusinessQueryProvider.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/app/services/report/query/BasicBusinessQueryProvider.php"
+    },
+    {
+      "file": "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/app/controller/admin/v1/report/UnifiedReport.php"
+    },
+    {
+      "file": "后端代码/app/controller/cashier/v3/Report.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/app/controller/cashier/v3/Report.php"
+    },
+    {
+      "file": "后端代码/route/admin.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/route/admin.php"
+    },
+    {
+      "file": "后端代码/route/cashier-v3.php",
+      "exit_code": 0,
+      "output": "No syntax errors detected in /Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/后端代码/route/cashier-v3.php"
+    }
+  ],
+  "contract": {
+    "pass": true,
+    "checks": 532,
+    "database_access": false
+  }
+}

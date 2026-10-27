@@ -79,7 +79,10 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
                 $result['summaries'] = array_merge($result['summaries'], $part['summaries']);
             }
             return array_merge($result, ['queryFields' => $fields, 'field_sources' => $source['field_sources'],
-                'can_edit' => false, 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
+                'can_edit' => false, 'salary_state' => $source['salary_state'] ?? null,
+                'salary_can_edit' => static::CODE === 'basic_salary_realtime' && !empty($context['salary_edit'])
+                    && (strpos((string)($context['basic_actor_key'] ?? ''),'platform:')===0 || empty($source['salary_state']['frozen'])),
+                'salary_can_freeze' => static::CODE === 'basic_salary_realtime' && !empty($context['salary_freeze']), 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
                 'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => 'first_row'],
                 'coverage_start' => array_key_exists('coverage_start', $source) ? $source['coverage_start'] : '2026-08-10',
                 'coverage' => $source['coverage'] ?? '',
