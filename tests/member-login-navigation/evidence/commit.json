@@ -1,0 +1,34 @@
+{
+  "commit": "13e60da90e3a28157e6d4c345ebfad8cc14122fb",
+  "tree": "656d547fc9f9e614f89235494c354d7167af0a23",
+  "sourceTree": "16a3b51a6468a3059c1c2ce9525edce7e195a4e9",
+  "branch": "release/008-member-login-nav-20261028",
+  "mergedBaselineCommit": "a4e04cae3fa63f343a1c3032e8e42ca884b5dcb2",
+  "parentsPreserved": [
+    "83963f3a61208361b1954b03453adcf2a7972470",
+    "207c0c77ccfdb51ca1eba6220a5f5d6282cf8789"
+  ],
+  "sourceFiles": [
+    "前端代码/uniapp/pages/users/wechat_login/index.vue",
+    "前端代码/uniapp/components/eidtUserModal/index.vue"
+  ],
+  "files": [
+    "scripts/member-login-navigation-mini-build.cjs",
+    "tests/member-login-navigation/success-flow.cjs",
+    "tests/member-login-navigation/evidence/plan.json",
+    "tests/member-login-navigation/evidence/native-state.json",
+    "tests/member-login-navigation/evidence/after-test.txt",
+    "tests/member-login-navigation/evidence/native-save-event.json",
+    "tests/member-login-navigation/evidence/mini-page.json",
+    "tests/member-login-navigation/evidence/native-result-stable.json",
+    "tests/member-login-navigation/evidence/README.md",
+    "tests/member-login-navigation/evidence/baseline.json",
+    "tests/member-login-navigation/evidence/mini-open.json",
+    "tests/member-login-navigation/evidence/native-build.json",
+    "tests/member-login-navigation/evidence/fixed.patch",
+    "tests/member-login-navigation/evidence/native-result-page.json",
+    "tests/member-login-navigation/evidence/verification.json",
+    "tests/member-login-navigation/evidence/before-test.txt"
+  ],
+  "version": "3.0.69.1"
+}

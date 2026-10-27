@@ -11,7 +11,7 @@
   "version": "3.0.69.1",
   "appid": "wx85d4bfd0b4b6aafb",
   "origin": "https://008.cc3798.com",
-  "status": "LOCAL_TEST_PASS; pending fixed candidate acceptance",
+  "status": "PM_ACCEPTED; COMMITTED; UPLOAD_SUCCESS_3.0.69.1",
   "mpOnlyNavigationChange": true,
   "acceptedByUser": true,
   "authorizedActions": [

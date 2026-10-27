@@ -11,3 +11,7 @@
 当前状态：实现与本地/模拟器自测通过，等待产品经理验收固定补丁后提交、push及上传008修正版；当前已上传体验版仍为3.0.69，不把模拟器候选冒称线上已更新。不部署H5、后端或其他客户小程序。现有隐私协议及授权流程保持。
 
 文件分组：前端源码2个；永久流程测试1个；工程构建适配器scripts/member-login-navigation-mini-build.cjs；后端与迁移无。生成物/private/tmp/member-login-navigation-mini-008-20261028为派生只读构建与程序包，不作为可编辑源码。业务边界注释已补到两处修改文件。固定版本父链来自已验收并仅008发布的头像修复归档207c0c77，未覆盖共享暂存区或其他任务改动。
+
+## Accepted release update 2026-10-28
+
+PM accepted fixed patch 66160ff5 and authorized commit/push/008 member upload. Business commit 13e60da90e3a28157e6d4c345ebfad8cc14122fb. Official upload task confirmation_upload_8d26a730-f96c-4dfc-bcb6-87844c31e6ca returned success for 3.0.69.1. Earlier pending statements above are historical preparation notes. No H5/backend/other customer deployment in this correction. Remote push is verified separately after this receipt archive.
