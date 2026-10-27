@@ -1,0 +1,8 @@
+{
+  "test": "round8-mobile-detail",
+  "exit_code": 0,
+  "output": "{\"result\":\"PASS\",\"checks\":65,\"isolated_fixture_database\":true,\"persistent_business_writes\":false}\n",
+  "error": "",
+  "isolated_database": true,
+  "remote_access": false
+}

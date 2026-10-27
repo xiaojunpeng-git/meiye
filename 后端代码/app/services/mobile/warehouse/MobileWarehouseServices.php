@@ -348,6 +348,9 @@ final class MobileWarehouseServices
                 'commissionDetail' => $calculated && $detailMode==='labor' ? ($commission['details'][$factId] ?? null) : null,
                 'displayCommission' => $calculated && $detailMode==='labor'
                     ? (isset($commission['details'][$factId]['amount_cents']) ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan($commission['details'][$factId]['amount_cents']) : '待核对') : null,
+                // 每条劳动事实的实际分配项目数：支持小数及冲销，独立于手工费算法。
+                'displayProjectCount' => $detailMode === 'labor' && isset($row['project_count_micro_value'])
+                    ? self::displayScaledCount((int)$row['project_count_micro_value'], 6) : null,
                 'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
