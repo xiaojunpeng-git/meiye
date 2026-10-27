@@ -1,0 +1,52 @@
+Please note that in running mode, due to log output, sourcemap, and uncompressed source code, the performance and package size are not as good as release mode.
+Compiling...
+ INFO  Starting development server...
+已忽略静态资源目录：static/app-plus。详见：https://uniapp.dcloud.net.cn/tutorial/platform.html#static
+WARNING: Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-image v-for="item in VipList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-image v-for="value in item._info">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-swiper-item v-for="list in dataList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in 6">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in attrList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in couponList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in dataList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in explosiveMoney">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in integralGood">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in list.cart_info">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in menuList">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in orderInfo.refund_goods_img">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in orderInfo.refund_img">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in orderlist">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in productList[navActive].children">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in reportData">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in salary.detail">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in statistics">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="item in visibleOrderMenu">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="panel in records">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+Module Warning (from ./node_modules/@dcloudio/vue-cli-plugin-uni/packages/vue-loader/lib/loaders/templateLoader.js):
+(Emitted value instead of an instance of Error) <v-uni-view v-for="value in item._info">: component lists rendered with v-for should have explicit keys. See https://vuejs.org/guide/list.html#key for more info.
+
+  App running at:
+  - Local:   http://127.0.0.1:8081/ 
+  - Network: http://127.0.0.1:8081/
+
+

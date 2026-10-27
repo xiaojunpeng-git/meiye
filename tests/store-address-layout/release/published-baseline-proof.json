@@ -1,0 +1,23 @@
+{
+  "sourceCommit": "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+  "sourceFilesCompared": 929,
+  "sourceMismatches": [],
+  "sites": {
+    "rh": {
+      "activeIndexMatch": true,
+      "jsFilesCompared": 264,
+      "mismatches": []
+    },
+    "008": {
+      "activeIndexMatch": true,
+      "jsFilesCompared": 264,
+      "mismatches": []
+    },
+    "010": {
+      "activeIndexMatch": true,
+      "jsFilesCompared": 264,
+      "mismatches": []
+    }
+  },
+  "oldOutputComparisonOnly": true
+}

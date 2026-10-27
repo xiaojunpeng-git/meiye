@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "tree": "bc59cf356ae88233faafb0affcd5fa071f049bcf",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "version": "3.0.69",
+  "twoLayoutsCompiled": true,
+  "simulatorOpenPage": {
+    "success": true,
+    "page": "pages/store/home/index",
+    "query": "id=130",
+    "scene": 1001
+  },
+  "simulatorBusinessPagePassed": false,
+  "limitation": "现有授权登录headimgurl非空错误，单独处理；未伪称模拟器门店页完整验收"
+}

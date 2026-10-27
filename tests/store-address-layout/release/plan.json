@@ -1,0 +1,18 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "baselineTree": "73666878c790886e5b6a686edc648d39e129c2c2",
+  "sharedIndex": "6e9f50ecfd17740bd0140554d441786eb0f392ac19ebbf81d1b3f93100b27bcf",
+  "accepted": "76c81fe12a1d3b40f1a67c73662acdf99a19069cf1b363a7ffe52cb2bf87fc72",
+  "initialHeadBuildTree": "83952189194eb81ae75ddb8459b11c1eeb5388b9",
+  "parentCommit": "f73a83a5bffb67925a8dcaecf7aed7a619a76ce2",
+  "prerequisiteSources": [
+    "eca9c914 \u4e0e\u4e09\u7ad9264\u4e2aJS\u53ca\u5165\u53e3\u9010\u9879\u4e00\u81f4\u7684\u5df2\u9a8c\u6536\u4f1a\u5458\u7aef\u6b63\u672c"
+  ],
+  "unifiedBuildBase": "/private/tmp/store-address-unified-release-20261027",
+  "candidateTree": "bc59cf356ae88233faafb0affcd5fa071f049bcf",
+  "diagnosticBuildTrees": {
+    "baselineWithUnrelatedReservation": "73666878c790886e5b6a686edc648d39e129c2c2",
+    "candidateWithUnrelatedReservation": "bc59cf356ae88233faafb0affcd5fa071f049bcf"
+  },
+  "buildBase": "/private/tmp/store-address-final-release-20261027"
+}

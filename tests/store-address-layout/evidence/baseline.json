@@ -1,0 +1,16 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "files": {
+    "前端代码/uniapp/pages/store/home/store_cate1.vue": {
+      "sha256": "31f219a5fcca7cb02dcd3082298c758abff20dff36195fc4a36875732b986c1b",
+      "priorCommit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "scriptSHA256": "01adb118408a87b73b896912a25faa67219d0e78dfac8e306aa986be4dec6ee0"
+    },
+    "前端代码/uniapp/pages/store/home/store_cate2.vue": {
+      "sha256": "12d05655fc09b299f80dc4e8c8eff57846fe72f85b597f1a173f483ba17edaec",
+      "priorCommit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "scriptSHA256": "a20123c3e899b0be12000da3340c2a5356e14e2d1f799d446bbd8b1584f4655f"
+    }
+  },
+  "remote": "不适用：仅本地样式修改，无远程操作"
+}
