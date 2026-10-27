@@ -418,9 +418,9 @@ class StoreUnifiedReportServices extends BaseServices
             $row['labor_amount_cents'] += (int)$fact['labor_amount_cents'];
             unset($row);
         }
-        // 达标资格按原单主归属品项投影；跨店补交没有原店金额行也不能漏掉人头。
+        // 达标资格按参与现金的主归属品项投影；跨店补交没有原店金额行也不能漏掉人头。
         foreach ($qualifiedDays as $day) {
-            $itemKey = (string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0);
+            $itemKey = (string)($day['category_sales_order_id'] ?? $day['sales_order_id']) . '|' . (int)($day['item_id'] ?? 0);
             if (!isset($partnerItems[$itemKey])) continue;
             $this->applyOrganizationDimensions($day);
             $month = substr((string)$day['business_date'], 0, 7);
@@ -465,7 +465,7 @@ class StoreUnifiedReportServices extends BaseServices
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示，只纳入按现有一级、二级规则开启合作方的分类；同一门店、月份和分类汇总为一行，历史金额和合作方归属不变。',
             'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交及独立服务手工费行不增加体验人次。',
-            'member_count'=>'每张原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时按收款业务日计1；同一会员同日跨单跨店只计1。跨店补交归原销售门店，主品项仍按既有成交人数算法确定；只有主品项当前分类开启合作方才进入本表，不在合作方范围内重新挑选主品项。退款不改变人数资格；游客、旧导入及旧卡录入原单的补交不计人数，范围内金额仍保留。',
+            'member_count'=>'同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到其来源的可配置门槛时按收款业务日计1；同一会员同日跨单跨店只计1。跨店补交归原销售门店，主品项仍按既有成交人数算法确定；只有主品项当前分类开启合作方才进入本表，不在合作方范围内重新挑选主品项。退款不改变人数资格；游客、旧导入及旧卡录入原单的补交不计人数，范围内金额仍保留。',
             'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交和新增的独立服务手工费行不增加此销售消耗指标。',
             'labor_amount'=>'销售明细对应的有效手艺人分配，以及没有同源销售行的独立服务分配，累计其手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
             'sale_amount'=>'查询日期内已开启合作方分类的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实项目及其开启的分类但不能核实原合作方时，名称留空；无法核实分类的记录不进入本表，原始金额事实不变。',
@@ -510,13 +510,13 @@ class StoreUnifiedReportServices extends BaseServices
     /** 只让原单达标主品项在合作方筛选范围内的人数进入汇总；补交日期不限制原销售日。 */
     private function partnerQualifyingItems(array $days, array $stores, array $input): array
     {
-        // 资格、首达标日和主品项由成交人数算法先确定；这里只裁剪报表范围，不在合作方子集内重新选主品项或去重。
+        // 资格、首达标日和主品项由共用算法确定；跨单主品项按其真实原单裁剪合作方范围，不重新选品或去重。
         $categoryIds = $this->partnerReportCategoryIds($stores);
         $days = array_values(array_filter($days, static fn(array $day): bool =>
             isset($categoryIds[(int)($day['category_id'] ?? 0)])));
         $qualifiedItems = [];
-        foreach ($days as $day) $qualifiedItems[(string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0)] = true;
-        $orderIds = array_values(array_unique(array_filter(array_column($days, 'sales_order_id'))));
+        foreach ($days as $day) $qualifiedItems[(string)($day['category_sales_order_id'] ?? $day['sales_order_id']) . '|' . (int)($day['item_id'] ?? 0)] = true;
+        $orderIds = array_values(array_unique(array_filter(array_map(static fn(array $day): string => (string)($day['category_sales_order_id'] ?? $day['sales_order_id']), $days))));
         if ($orderIds === []) return [];
         $allowed = [];
         foreach (array_chunk($orderIds, 500) as $chunk) {
@@ -752,7 +752,7 @@ class StoreUnifiedReportServices extends BaseServices
         $exact = trim((string)($input['category_path_exact'] ?? ''));
         $records = [];
         foreach ($days as $day) {
-            if (!isset($partnerItems[(string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0)])) continue;
+            if (!isset($partnerItems[(string)($day['category_sales_order_id'] ?? $day['sales_order_id']) . '|' . (int)($day['item_id'] ?? 0)])) continue;
             $this->applyOrganizationDimensions($day);
             if ($exact !== '' && (string)($day['category_path'] ?? '') !== $exact) continue;
             if ((string)($input['company_dimension_id'] ?? '') !== ''
@@ -763,7 +763,7 @@ class StoreUnifiedReportServices extends BaseServices
                 'business_date' => (string)$day['business_date'],
                 'store_name' => (string)$day['store_name_snapshot'],
                 'member_name' => (string)$day['member_name_snapshot'],
-                'order_no' => (string)$day['order_no_snapshot'],
+                'order_no' => (string)($day['category_order_no_snapshot'] ?? $day['order_no_snapshot']),
                 'item_name' => (string)($day['item_name'] ?? ''),
                 'category_path' => (string)($day['category_path'] ?? ''),
                 'member_count' => 1,
@@ -772,13 +772,13 @@ class StoreUnifiedReportServices extends BaseServices
         usort($records, static fn(array $a, array $b): int =>
             strcmp($a['business_date'] . '|' . $a['order_no'], $b['business_date'] . '|' . $b['order_no']));
         $columns = $this->fixedColumns([
-            ['key'=>'business_date','label'=>'业务日期','source_explanation'=>'原单累计现金首度达到门槛的收款业务日。'],
+            ['key'=>'business_date','label'=>'业务日期','source_explanation'=>'当天新消费跨单达标或未计过原单补交首次达标的业务日。'],
             ['key'=>'store_name','label'=>'门店','source_explanation'=>'原销售门店，跨店补交不改变人数归属。'],
             ['key'=>'member_name','label'=>'会员','source_explanation'=>'原销售单保存的会员姓名快照。'],
-            ['key'=>'order_no','label'=>'原销售单号','source_explanation'=>'首次达标资格对应的原销售单据号。'],
+            ['key'=>'order_no','label'=>'原销售单号','source_explanation'=>'首次达标资格的主品项所属原销售单据号。'],
             ['key'=>'item_name','label'=>'主品项','source_explanation'=>'达标时累计现金分摊最多分类内的主品项。'],
             ['key'=>'category_path','label'=>'分类','source_explanation'=>'主品项关联的平台当前商品分类。'],
-            ['key'=>'member_count','label'=>'成交人数','source_explanation'=>'同一会员同日跨单跨店只列一次，原单只在首次达标日计1。','value_type'=>'integer'],
+            ['key'=>'member_count','label'=>'成交人数','source_explanation'=>'同一会员同日跨单跨店只列一次，参与过跨单达标或独立达标的原单，其后续补交永不再计。','value_type'=>'integer'],
         ], ['business_date'=>104,'store_name'=>132,'member_name'=>105,'order_no'=>175,'item_name'=>180,'category_path'=>220]);
         return [
             'title'=>'合作方成交人数明细', 'metric_version'=>'partner-item-enabled-category-v9',
