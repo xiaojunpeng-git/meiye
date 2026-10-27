@@ -1,0 +1,38 @@
+[
+  {
+    "site": "rh",
+    "tool": "upload",
+    "project": "/private/tmp/payroll-mini-931edeac/mini-rh",
+    "appid": "wx29d9b63c92555701",
+    "version": "0.66.0",
+    "taskId": "confirmation_upload_da7d87cc-0e20-4310-8d51-4093482686e8",
+    "status": "pending",
+    "polls": 0,
+    "user_action_required": "Confirm upload in WechatIDE",
+    "do_not_resend": true
+  },
+  {
+    "site": "008",
+    "tool": "upload",
+    "project": "/private/tmp/payroll-mini-931edeac/mini-008",
+    "appid": "wx14666197911d052b",
+    "version": "0.66.0",
+    "taskId": "confirmation_upload_41404dbf-6ce1-43bf-97de-bc12a665dc3a",
+    "status": "pending",
+    "polls": 0,
+    "user_action_required": "Confirm upload in WechatIDE",
+    "do_not_resend": true
+  },
+  {
+    "site": "010",
+    "tool": "upload",
+    "project": "/private/tmp/payroll-mini-931edeac/mini-010",
+    "appid": "wxd92c6d010bd6bf01",
+    "version": "0.66.0",
+    "taskId": "confirmation_upload_a1fab3e2-c2c5-4375-9f13-d358dc0decb4",
+    "status": "pending",
+    "polls": 0,
+    "user_action_required": "Confirm upload in WechatIDE",
+    "do_not_resend": true
+  }
+]
