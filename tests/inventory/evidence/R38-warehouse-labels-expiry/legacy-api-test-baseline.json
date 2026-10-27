@@ -1,0 +1,8 @@
+{
+  "result": "PREEXISTING_TEST_FAILURE",
+  "baselineApiBlob": "0e669bf8f5daa8fdd89914f2765dce7fdc0af079",
+  "test": "tests/inventory/js/inventory-api-contract.mjs",
+  "error": "api.cancelCrossTransfer is not a function",
+  "sameBeforeR38": true,
+  "scope": "旧测试调用已不存在的接口方法，不在本轮修改该接口"
+}

@@ -73,7 +73,8 @@ function messageOf(body, fallback) {
     inventory_stock_request_line_invalid: '请货明细不合法，请检查商品和数量。',
     inventory_platform_warehouse_idempotency_conflict: '本次建仓内容与已提交记录不一致，请刷新后重新操作。'
   }
-  return businessMessages[code] || businessMessages[message] || message || fallback
+  // 未收录的内部英文错误只显示本次操作的中文提示；code/data仍保留，不能影响重试和业务分支。
+  return businessMessages[code] || businessMessages[message] || (/[\u3400-\u9fff]/.test(message) ? message : '') || fallback
 }
 
 /** Keeps structured business context on rejected responses without exposing transport details to pages. */

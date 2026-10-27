@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "platformWarehouseSelector": "styled, selected总部仓 then restored全部授权总部仓",
+  "expiryDetail": {
+    "product": "花园SPA水解胶原",
+    "batch": "CB359326",
+    "store": "政和胜利店",
+    "quantity": 24,
+    "inbound": 24,
+    "outbound": 0,
+    "document": "RK2610030007",
+    "closeAndEscape": "PASS"
+  },
+  "narrowViewport": {
+    "actualWidth": 487,
+    "dialogWidth": 471.5,
+    "closeAndPaginationReachable": true
+  },
+  "scope": "本地真实接口与页面；线上仅只读核对原数据，未上线本轮代码",
+  "statistics": {
+    "inbound": "入库统计中文实测通过",
+    "outbound": "出库统计调拨出库中文实测通过",
+    "internalCodesVisible": false
+  }
+}

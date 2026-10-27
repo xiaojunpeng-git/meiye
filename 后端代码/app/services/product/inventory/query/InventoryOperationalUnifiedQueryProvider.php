@@ -421,9 +421,10 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     }
 
     private function bounded(array $rows): array { if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '当前数据量较大，请缩小业务日期范围后再查询。', []); return $rows; }
-    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'presale_claim_outbound' => '预售领用出库', 'presale_claim_void' => '预售领用作废退库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_issue_reversal' => '院装领用作废退库', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
-    private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? $status; }
-    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status; }
+    /** 统一中文投影，防止同一事实在流水和统计页面使用不同名称。 */
+    private function movementName(string $type): string { return \app\services\product\inventory\InventoryMovementDisplayServices::typeName($type); }
+    private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? '未知状态'; }
+    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? '未知状态'; }
 
     private function payloadFromPlan(array $plan): array
     {

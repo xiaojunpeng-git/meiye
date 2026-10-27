@@ -1,0 +1,76 @@
+{
+  "HEAD": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "remote": "本轮仅获开发与瑞昊只读核对授权，无发布授权",
+  "files": {
+    "前端代码/inventory-vue3/src/App.vue": {
+      "sha256": "fe7f108192d8a04767fa4a819ac6ee916de3ee1a1f8d9952e9e0510db5955740",
+      "blob": "c5bcc03d1020d1cd1135310c98ed7430c3636b7f",
+      "status": " M 前端代码/inventory-vue3/src/App.vue\n"
+    },
+    "前端代码/inventory-vue3/src/styles.css": {
+      "sha256": "d7d467f440b35c0cdd5b9240ef106bb5c6d711d34c8b23055599f18bce93564e",
+      "blob": "7263860b34c09cad80003d399627e2a59110ec34",
+      "status": " M 前端代码/inventory-vue3/src/styles.css\n"
+    },
+    "前端代码/cashier-v3/src/views/ProductDashboardView.vue": {
+      "sha256": "c96a00e66e49dc8f0014317107be8fc87a989e26c5a8c19dbb6812720a0befbf",
+      "blob": "dcbcbd83c9cad3b4ea236fafe751fc5701b36d7d",
+      "status": ""
+    },
+    "前端代码/cashier-v3/src/services/productDashboardApi.js": {
+      "sha256": "af2329378f854c7cc66c1c38d5f9dc2029a4f895912874d5b67deca82392262b",
+      "blob": "3717ec3044b3e2924d9501293c4dd928b4937f8a",
+      "status": ""
+    },
+    "后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php": {
+      "sha256": "a380dfedbc6304889c8d1097b8225c71ba6d2d4e81e2d645d0be36954893ee8f",
+      "blob": "5b131e7cbe74d4b174834066cd56ec545ae9aa82",
+      "status": ""
+    },
+    "后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php": {
+      "sha256": "285c7aa1f757f2ed12e3fbc92e26676b06acebe7baa65ee257bd995bd84c38c1",
+      "blob": "76930351a6f42cbd75902eb3b45002d258578ba7",
+      "status": ""
+    },
+    "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php": {
+      "sha256": "eb2ba601dedfbcde38f06bece5ccd63b9f6f7b6247d267ecb82efc26f825ec18",
+      "blob": "8ec99b029181d542845c8a025e9c1c174f89e6c4",
+      "status": ""
+    },
+    "后端代码/app/services/report/ProductManagementDashboardServices.php": {
+      "sha256": "23b6c4ea0e59e0c31b9e7fd098ffc2277d9698ececa17292b16945e8d9b0461c",
+      "blob": "c3b306a01657bd66d1d618b56a62c53ba9a9789c",
+      "status": ""
+    },
+    "后端代码/app/controller/admin/v1/report/UnifiedReport.php": {
+      "sha256": "adf14724730c97265a38128e9a1977d793b7ea9eea40ea942657b5e35ca9a7c2",
+      "blob": "24df0db4b135c4d4d1f9f00e3759f25dbc49c546",
+      "status": " M 后端代码/app/controller/admin/v1/report/UnifiedReport.php\n"
+    },
+    "后端代码/route/admin.php": {
+      "sha256": "fd51afab8d4b72303a0aa214f2167b8848945578299859b62eeb0655685e7d1c",
+      "blob": "b9f369ccb0b73559f30bfebddc8baffbef33dbc6",
+      "status": " M 后端代码/route/admin.php\n"
+    },
+    "前端代码/inventory-vue3/src/statusLabels.js": {
+      "sha256": "d54290cd85c4271f5a1153a22e8b15119b1ab201e2e43837ea26cc3a5b883a26",
+      "blob": "4db114a71974c6c7890e8eff61a695cc0ee82984",
+      "status": ""
+    },
+    "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php": {
+      "sha256": "b6a1e3e341d124a3ccfba6f69af78e3b20777645b89f5daa0946a0ff5fc3fb3c",
+      "blob": "87f7069182939f361a7a6e9c803e3a3355a1a871",
+      "status": ""
+    },
+    "后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php": {
+      "sha256": "55502e652f1d28f005a3a1ec101951c6adfb7818096a29164b1fc1344ce71ce9",
+      "blob": "81ecf377aac6c4eeb5890ecd5275ae49cc62e411",
+      "status": ""
+    },
+    "前端代码/inventory-vue3/src/services/inventoryApi.js": {
+      "sha256": "09642096dd4c2578997c864d1d5b2cc6242553665af64e36b7b6826c7845ca1c",
+      "blob": "0e669bf8f5daa8fdd89914f2765dce7fdc0af079",
+      "status": ""
+    }
+  }
+}

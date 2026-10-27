@@ -164,3 +164,11 @@ button { cursor: pointer; }
 .inventory-list-pagination__current { min-width: 14px; text-align: center; }
 .inventory-warehouse-choice label { display: grid; gap: 7px; margin: 14px 0; font-size: 13px; }
 .inventory-warehouse-choice select { box-sizing: border-box; width: 100%; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid #d8e0ea; border-radius: 6px; background: #fff; color: #26344a; font: inherit; }
+
+/* R38：仓库切换与同排按钮同高，长仓名允许收缩，不改变授权范围和切换行为。 */
+.page-heading--dashboard .heading-actions{align-items:center;flex-wrap:wrap}
+.dashboard-warehouse-picker{display:inline-flex;align-items:center;gap:8px;min-width:0;max-width:100%;min-height:36px;padding:0 11px;border:1px solid #dce4ef;border-radius:7px;background:#fff;color:#60738b;font-size:13px}
+.dashboard-warehouse-picker select{appearance:none;min-width:140px;max-width:230px;border:0;padding:8px 22px 8px 0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%2373869c' stroke-width='1.4'/%3E%3C/svg%3E") right center no-repeat;color:#304760;font:inherit;cursor:pointer;text-overflow:ellipsis}
+.dashboard-warehouse-picker:focus-within{border-color:#5598e6;box-shadow:0 0 0 3px #edf5ff}
+.dashboard-warehouse-picker select:focus{outline:none}
+@media(max-width:600px){.page-heading--dashboard{align-items:flex-start;flex-direction:column}.dashboard-warehouse-picker select{min-width:0;width:180px}}

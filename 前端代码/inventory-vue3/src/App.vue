@@ -2124,7 +2124,7 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'overview'">
           <div class="page-heading page-heading--dashboard">
             <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? '总部仓' : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
-            <div class="heading-actions"><label v-if="mode === 'platform'">仓库<select v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
+            <div class="heading-actions"><label v-if="mode === 'platform'" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
           </div>
 
           <div class="dashboard-cards">
