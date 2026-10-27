@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
+use app\services\report\StoreReportPartnerCategorySnapshotServices;
 use think\facade\Db;
 
 /** Immutable sales-debt tender shares. No wallet writes or cash facts are inferred here. */
@@ -62,8 +64,20 @@ final class CashierV3SalesDebtBalanceServices
             $weights[(int)$item['id']] = $delta;
         }
         $balances = self::allocate($balanceCents, $weights);
-        $issuedComponents = (new \app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices())
-            ->issuedCardComponentsForDebtItems($items);
+        $debtProjection = new CashierV3MemberDebtProjectionServices();
+        $issuedComponents = $debtProjection->issuedCardComponentsForDebtItems($items);
+        // A repayment share may only be frozen when the complete debt resolves to one
+        // verified current platform category. Mixed/ambiguous debts stay unclassified;
+        // the report must never guess a category or apply a mutable ratio later.
+        $categories = array_values(array_filter(
+            (array)($debtProjection->currentCategoriesForDebts([(int)$debt['id']])[(int)$debt['id']] ?? []),
+            static fn(array $category): bool => (int)($category['id'] ?? 0) > 0
+        ));
+        $categoryIds = array_values(array_unique(array_map(
+            static fn(array $category): int => (int)$category['id'], $categories
+        )));
+        $exactCategory = count($categoryIds) === 1 ? $categories[0] : null;
+        $partnerResolver = new StoreReportPartnerCategorySnapshotServices();
         $cashAmounts = [];
         foreach ($items as $item) {
             $id = (int)$item['id'];
@@ -77,14 +91,24 @@ final class CashierV3SalesDebtBalanceServices
                 if (count($orders) !== 1 || (int)$orders[0] <= 0) throw new \RuntimeException('sales_debt_balance_card_origin_unresolved');
                 $legacyOrderId = (int)$orders[0];
             }
-            $inserted = Db::name(self::TABLE)->insert([
+            $cashAmount = $weights[$id] - $balances[$id];
+            $partner = $exactCategory === null ? [
+                'partner_category_id_snapshot' => 0, 'partner_category_name_snapshot' => '',
+                'partner_category_path_snapshot' => '', 'partner_default_ratio_snapshot' => 0,
+                'partner_config_version_snapshot' => 0, 'partner_share_amount_cents' => 0,
+            ] : $partnerResolver->resolveInTx($tenantId, (int)$exactCategory['id'], $cashAmount);
+            $inserted = Db::name(self::TABLE)->insert(array_merge([
                 'tenant_id' => $tenantId, 'repayment_id' => $repaymentId, 'debt_item_id' => $id,
                 'order_line_id' => $lineId,
                 'legacy_order_id' => $legacyOrderId, 'cart_info_id' => (int)($item['cart_info_id'] ?? 0),
                 'amount_cents' => $weights[$id], 'balance_amount_cents' => $balances[$id],
-            ]);
+                'cash_performance_amount_cents' => $cashAmount,
+                'category_id_snapshot' => (int)($exactCategory['id'] ?? 0),
+                'category_path_snapshot' => (string)($exactCategory['path'] ?? ''),
+                'partner_snapshot_frozen_at' => time(),
+            ], $partner));
             if ((int)$inserted !== 1) throw new \RuntimeException('sales_debt_item_settlement_write_failed');
-            $cashAmounts[$id] = $weights[$id] - $balances[$id];
+            $cashAmounts[$id] = $cashAmount;
         }
         return $cashAmounts;
     }
