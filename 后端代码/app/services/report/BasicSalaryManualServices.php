@@ -82,6 +82,10 @@ final class BasicSalaryManualServices
             : ['month','store_id','employee_id','row_key','values','expected_version','idempotency_key'];
         if (array_diff(array_keys($payload),$allowed)) throw new \InvalidArgumentException('工资保存包含未知字段');
         $month=(string)($payload['month'] ?? ''); self::month($month);
+        // 已保存历史工资只读：查询按钮隐藏不能替代接口拒绝，平台也不能越过月份边界。
+        if(\app\services\payroll\SalaryStatisticsSourcePolicy::savedMonth($month))
+            throw new \InvalidArgumentException('历史工资只读，不能编辑或冻结；实时工资启用月份起可操作');
+
         $expected=self::integer($payload['expected_version'] ?? null);
         $token=(string)($payload['idempotency_key'] ?? '');
         if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/D',$token)) throw new \InvalidArgumentException('工资保存请求标识无效');

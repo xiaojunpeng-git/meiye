@@ -291,6 +291,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     <p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p>
     <p v-else-if="data.complete === false" class="basic-reports__error" role="status">部分计算条件缺失，待核对项目显示为“-”，不计入合计。{{ (data.data_gaps || []).map(gap => gap.label).filter(Boolean).join('；') }}</p>
     <p v-if="data.coverage_start && data.range?.start_date < data.coverage_start" class="basic-reports__error" role="status">本表仅包含 {{ data.coverage_start }} 起纳入统一数据底层的业务，更早历史尚未纳入本表。</p>
+    <p v-if="salaryReport && data.realtime_start_date" class="basic-reports__snapshot" role="status">{{ data.source_kind === 'saved_salary_snapshot' ? data.coverage : data.realtime_start_date + ' 起按业务发生日期实时统计；此前月份读取历史保存工资。' }}</p>
     <p v-if="active?.code === 'basic_cross_store_settlement' && data.source_kind === 'sealed_legacy_settlement_snapshot'" class="basic-reports__snapshot" role="status">{{ data.coverage }}</p>
     <template v-if="!route.params.report">
       <section v-for="group in groups" :key="group" class="basic-reports__group">
@@ -309,13 +310,13 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         </template>
         <template #primary-actions>
           <button v-if="salaryReport && data.salary_can_edit" type="button" class="button button--secondary" :disabled="loading || salarySaving" @click="salaryEditing = !salaryEditing; salaryDraft = null">{{ salaryEditing ? '取消编辑' : '编辑' }}</button>
-          <button v-if="salaryReport && data.salary_can_freeze" type="button" class="button button--secondary" :disabled="loading || salarySaving || !executedQuery" @click="requestSalaryFreeze">{{ data.salary_state?.frozen ? '取消冻结' : '冻结' }}</button>
+          <button v-if="salaryReport && data.salary_can_freeze" type="button" class="button button--secondary" :disabled="loading || salarySaving || !executedQuery" @click="requestSalaryFreeze">{{ !data.salary_readonly && data.salary_state?.frozen ? '取消冻结' : '冻结' }}</button>
           <button type="button" class="basic-reports__icon" title="列名取值来源" aria-label="列名取值来源" @click="fieldGuide = true"><BookOpen :size="17" /></button>
           <button type="button" class="basic-reports__icon" title="刷新" aria-label="刷新" :disabled="loading" @click="run()"><RefreshCw :size="17" /></button>
           <button type="button" class="basic-reports__icon" title="导出" aria-label="导出" :disabled="!executedQuery || exporting || loading" @click="exportRows"><Download :size="17" /></button>
         </template>
       </UnifiedReportQueryToolbar>
-      <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
+      <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="!data.salary_readonly && data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
       <section class="basic-reports__results" :aria-busy="loading">
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>

@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-28",
+  "base_HEAD": "961d723fa55e9d86f38204babd1caaa59c872568",
+  "patch_fingerprint": "0d85a6ea218f1a5ccd434472533e5a1ff459c752a207358ea74b6b1dbc7f433b",
+  "files_sha256": {
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "086f5dc0001d0bb32ae3b550d8a21460abe24e4996aa8a4228073610d42afeb1",
+    "后端代码/config/payroll.php": "99e87458bf9b6b058ccbd25f4e2e882ee40fcb3e16606451d929a9b638ced19a",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php": "3f432d71c07b67e9ca194a95abac05ba8256dfe5dd958b233a061d3ef80a9114",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php": "439e0d26813584512a3542bc034983d42ab088e17a262e9cca83d312cd2ded0b",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "c5ebd758c4367b6d649c621d11efc9bb4b069a1cf6bef48b230201fefec712f1",
+    "后端代码/app/services/report/BasicSalaryManualServices.php": "2fabbc4d57a53f8300b14dc1c9d725a9ec0a5e2b6a33b8d8ffc51a67d62e83d8",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "999a85de09d78304bf7e48bee01146e94ecc9d6e24b97c410ae996d3f1a024c6",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "bff28028cb931899fd74f6d5aa55335fd51a92daba0246e907a45b86164d48af",
+    "scripts/payroll/round9_test_runtime.py": "2a8fa4302a739830c2257642cd27e23a7aa75baf214e27e820ea4512eb2a4494",
+    "scripts/payroll/run-round9-cutover-tests.py": "bb35e9d7f29069bfaf3cbf5b0059b12761d8c8c69132e9dfe12b88e450e5cc2f",
+    "tests/customer-010/round9-salary-cutover.php": "4663cb1f579c35e0b01a7f7a34cdec9d30a1790fc0c011362311b0efe98ba8c8",
+    "tests/customer-010/round9-salary-browser.mjs": "79e608713443d3ddcffc2e01a39b85ac8ffe8d5eddd51496e6866a882bc2cbf9"
+  },
+  "prior_source_sha256": {
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "5b9c974d47e59e7e434e009a77f6a713f99256952316a659282f859ec35b49bc",
+    "后端代码/config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php": null,
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php": null,
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "后端代码/app/services/report/BasicSalaryManualServices.php": "5323cf3220e19798a0c5a0ac1c084cea4a8bf2697ce6d49ba0e98d378a8acfba",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "33ae17775d321f6f6ebb774e36a6a79dbe5b4a93ba7897c1fd27f30d560f7f6e",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "fa3bf722148cb0d3f358a58e0a0e8159f304acfa57233d221b73fe212722c294",
+    "scripts/payroll/round9_test_runtime.py": null,
+    "scripts/payroll/run-round9-cutover-tests.py": null,
+    "tests/customer-010/round9-salary-cutover.php": null,
+    "tests/customer-010/round9-salary-browser.mjs": null
+  },
+  "frontend_source": "current worktree cashier-v3; shared BasicReportsView only",
+  "backend_source": "current worktree classes loaded by fixed-source test autoloader",
+  "scope": {
+    "historical": "2026-10及以前读取010已保存月工资；查询、导出；后端拒绝编辑/冻结/取消冻结",
+    "realtime": "2026-11起保留010现有实时算法、编辑与冻结；按business_date归月",
+    "instances": "010配置启用；瑞昊/008空配置继续原行为"
+  },
+  "selftest": {
+    "history": 228,
+    "november": 44,
+    "blank_configuration": 44,
+    "php_lint": [
+      "后端代码/config/payroll.php",
+      "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php",
+      "后端代码/app/services/report/SavedSalaryReportReadServices.php",
+      "后端代码/app/services/query/metric/MetricReadTransaction.php",
+      "后端代码/app/services/report/BasicSalaryManualServices.php",
+      "后端代码/app/services/report/BasicSalaryReportServices.php",
+      "后端代码/app/services/report/query/BasicBusinessQueryProvider.php",
+      "tests/customer-010/round9-salary-cutover.php"
+    ],
+    "browser": "browser-tests.json",
+    "build": "cashier-v3 npm run build PASS; chunk size warning only"
+  },
+  "deployment_configuration": {
+    "target": "010 only",
+    "env_section": "PAYROLL",
+    "env_key": "REALTIME_START_DATE",
+    "value": "2026-11-01",
+    "rollback": "restore previous env key/value and previous affected code/assets; do not rewrite salary rows",
+    "applied": false
+  },
+  "preserved_features": [
+    "010计算法及原算法金额逻辑",
+    "平台菜单及逐表权限、门店范围限制",
+    "工资人工项保存、版本、幂等和审计",
+    "冻结只限制门店编辑、平台例外（实时月份）",
+    "原工资列名顺序和全量导出"
+  ],
+  "database_migration": null,
+  "business_data_write": false,
+  "obsolete_backfill": "取消旧历史事实补齐方案；移除未使用实现和采集脚本，原始只读诊断数据留于private",
+  "comments_updated": [
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue",
+    "后端代码/config/payroll.php",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php",
+    "后端代码/app/services/report/BasicSalaryManualServices.php",
+    "后端代码/app/services/report/BasicSalaryReportServices.php",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php",
+    "tests/customer-010/round9-salary-cutover.php"
+  ],
+  "limitations": [
+    "010原库尚未保存的历史月份不自动实时回退；显示缺失提示",
+    "当前10月工资尚未结算，正式启用前须在独立导入方案中完成007最终保存工资同步",
+    "历史姓名/职务无保存文本时，仅关联档案作为展示标签，不参与金额重算",
+    "浏览器为本机真实Vue组件加匿名化真实后端投影，不是现网登录端到端测试"
+  ],
+  "state": {
+    "selftest_passed": true,
+    "product_accepted": false,
+    "committed": false,
+    "deployed": false,
+    "remote_baseline": "本次为本地候选；部署前须重新核对010现网基线与备份"
+  }
+}

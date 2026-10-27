@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-28",
+  "scope": "010 salary report only",
+  "cutover_business_date": "2026-11-01",
+  "historical_source": "010 existing salary_info saved monthly results",
+  "historical_access": "query/export only; edit/freeze/unfreeze rejected server-side",
+  "realtime_source": "existing unified business facts and existing 010 algorithm from November",
+  "source_selection": "server instance configuration; not client input",
+  "business_date_not_import_time": true,
+  "historical_amounts_recomputed": false,
+  "no_historical_fact_repair_applied": true,
+  "remote_writes": false,
+  "superseded_decisions": {
+    "all_months_realtime": true,
+    "historical_identity_repair": true,
+    "current_grade_reconstruction": true
+  },
+  "final_october_import": "Import 007 final saved October wages separately before formal use; this change does not fetch or modify remote data"
+}

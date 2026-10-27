@@ -1,3 +1,7 @@
 <?php
-/** 职位身份模型独立于手工费算法；实例配置只选择模型，不包含客户或商品编号。 */
-return ['position_model' => env('payroll.position_model', 'legacy')];
+/** 职位模型与工资启用日期均为实例配置，不按客户名称、域名或数据库分支。 */
+return [
+    'position_model' => env('payroll.position_model', 'legacy'),
+    // 空值保留既有实时工资；指定月首后，之前月份仅查询已保存工资。
+    'realtime_start_date' => env('payroll.realtime_start_date', ''),
+];

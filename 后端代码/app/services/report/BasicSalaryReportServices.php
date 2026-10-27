@@ -12,7 +12,7 @@ use app\services\payroll\PositionSalaryRuleResolver;
 
 /**
  * R51 月度实时工资只读投影。Host 注入门店及本人权限，Provider 负责结果筛选、合计和分页。
- * 统一 Reader 是业绩唯一出口；旧工资 JSON 只白名单读取人工值，绝不作为业绩或公式结果。
+ * 启用月份起由统一Reader实时计算；启用前按明确授权读取保存月工资，两个来源不混算。
  * 缺失映射以 null + gaps 交付，不能把未算出的工资当作零工资，不提供锁薪或发薪；人工补充独立保存，只影响实时公式输入。
  */
 final class BasicSalaryReportServices
@@ -112,6 +112,9 @@ final class BasicSalaryReportServices
     {
         $fields = $this->definitions($code);
         [$stores, $range, $employeeId] = $this->scope($stores, $input);
+        if(\app\services\payroll\SalaryStatisticsSourcePolicy::savedMonth(substr($range['start'],0,7)))
+            return (new SavedSalaryReportReadServices($this->transaction))->read($stores,$range,$employeeId,$fields);
+
         $this->cache = [];
         $this->firstCourseSourceCounts = ['candidates'=>0, 'history'=>0];
         return $this->transaction->run(function () use ($stores, $range, $employeeId, $fields): array {
@@ -144,6 +147,8 @@ final class BasicSalaryReportServices
                 'complete'=>$gaps === [], 'gaps'=>$gaps, 'editable'=>false,
                 'salary_state'=>BasicSalaryManualServices::state(substr($range['start'],0,7)),
                 'date_range'=>$range, 'data_as_of'=>date('c'), 'metric_version'=>'r51-salary-reader-v1',
+                'source_kind'=>'unified_business_facts','salary_readonly'=>false,
+                'realtime_start_date'=>\app\services\payroll\SalaryStatisticsSourcePolicy::realtimeStart(),
                 'coverage'=>'仅统计已进入统一事实层的业务；旧流水未回填部分不冒充已覆盖，不读取旧工资业绩结果',
                 'limitations'=>['实时试算，不代表正式锁薪或发薪；冻结仅限制门店编辑人工项', '仅覆盖统一事实层；不推定旧流水已回填',
                     '月份截止是业务日筛选，不是恢复当时的历史数据库状态', '原业务行、冲销链或首次全款成交人员记录缺失时返回具体缺口',

@@ -1,0 +1,8 @@
+{
+  "phase": "product accepted; local commit",
+  "superseded_fact_repair": true,
+  "historical_business_writes": 0,
+  "product_accepted": true,
+  "deployed": false,
+  "push": false
+}

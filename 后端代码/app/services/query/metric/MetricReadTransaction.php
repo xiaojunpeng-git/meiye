@@ -13,7 +13,7 @@ final class MetricReadTransaction
         if ($budgetMs<1 || $budgetMs>20000) throw new MetricQueryContractException('METRIC_READ_BUDGET_INVALID','当前查询预算不可用。');
         $this->budgetMs=$budgetMs; $this->checkpoint=$checkpoint;
     }
-    public function run(callable $callback)
+    public function run(callable $callback, ?array $requiredTables=null)
     {
         $deadline=microtime(true)+$this->budgetMs/1000;
         if ($this->checkpoint) call_user_func($this->checkpoint);
@@ -23,10 +23,13 @@ final class MetricReadTransaction
             throw new MetricQueryContractException('METRIC_READ_TRANSACTION_NESTED', '当前查询无法建立独立的一致读取。');
         }
         // SET TRANSACTION affects only the following transaction, not other requests.
-        $tables = ['cashier_v3_payment_sale_allocation_fact', 'cashier_v3_sale_fact', 'cashier_v3_payment_fact',
+        // 历史保存报表只要求其真实读取的表；不因未迁入的新事实表而阻塞原保存结果。
+        $tables = $requiredTables ?? ['cashier_v3_payment_sale_allocation_fact', 'cashier_v3_sale_fact', 'cashier_v3_payment_fact',
             'cashier_v3_recharge_debt_repayment', 'cashier_v3_balance_fact', 'cashier_v3_performance_fact', 'cashier_v3_entitlement_service_fact',
             'cashier_v3_order_lifecycle_operation', 'cashier_v3_customer_lifecycle_fact',
             'cashier_v3_business_source', 'system_store'];
+        if(!$tables||count($tables)!==count(array_unique($tables)))throw new MetricQueryContractException('METRIC_READ_ENGINE_UNVERIFIED','一致读取表范围无效。');
+        foreach($tables as$table)if(!is_string($table)||!preg_match('/^[a-z0-9_]+$/D',$table))throw new MetricQueryContractException('METRIC_READ_ENGINE_UNVERIFIED','一致读取表范围无效。');
         $prefix = (string)$connection->getConfig('prefix');
         $names = array_map(static function (string $table) use ($prefix): string { return $prefix . $table; }, $tables);
         $prior=$connection->query('SELECT @@SESSION.max_execution_time AS execution_limit',[],true);

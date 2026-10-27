@@ -33,7 +33,9 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
             $fields = BasicBusinessReportServices::fields(static::CODE);
             // 动态完整性只可收紧列的合计资格，不能增加未登记字段或把未知工资合计成0。
             $dynamic = array_column($source['fields'] ?? [], null, 'key');
+            $salaryReadonly=static::CODE==='basic_salary_realtime'&&!empty($source['salary_readonly']);
             foreach ($fields as &$field) {
+                if($salaryReadonly)$field['editable']=false;
                 if (isset($dynamic[$field['key']]['summable'])) $field['summable'] = $field['summable'] && $dynamic[$field['key']]['summable'];
             }
             unset($field);
@@ -80,9 +82,10 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
             }
             return array_merge($result, ['queryFields' => $fields, 'field_sources' => $source['field_sources'],
                 'can_edit' => false, 'salary_state' => $source['salary_state'] ?? null,
-                'salary_can_edit' => static::CODE === 'basic_salary_realtime' && !empty($context['salary_edit'])
+                'salary_can_edit' => static::CODE === 'basic_salary_realtime' && !$salaryReadonly && !empty($context['salary_edit'])
                     && (strpos((string)($context['basic_actor_key'] ?? ''),'platform:')===0 || empty($source['salary_state']['frozen'])),
-                'salary_can_freeze' => static::CODE === 'basic_salary_realtime' && !empty($context['salary_freeze']), 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
+                'salary_can_freeze' => static::CODE === 'basic_salary_realtime' && !$salaryReadonly && !empty($context['salary_freeze']), 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
+                'salary_readonly'=>$salaryReadonly,'realtime_start_date'=>$source['realtime_start_date']??null,'saved_at'=>$source['saved_at']??null,
                 'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => 'first_row'],
                 'coverage_start' => array_key_exists('coverage_start', $source) ? $source['coverage_start'] : '2026-08-10',
                 'coverage' => $source['coverage'] ?? '',

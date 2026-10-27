@@ -1,0 +1,24 @@
+{
+  "source_files": {
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "086f5dc0001d0bb32ae3b550d8a21460abe24e4996aa8a4228073610d42afeb1",
+    "后端代码/config/payroll.php": "99e87458bf9b6b058ccbd25f4e2e882ee40fcb3e16606451d929a9b638ced19a",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php": "3f432d71c07b67e9ca194a95abac05ba8256dfe5dd958b233a061d3ef80a9114",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php": "439e0d26813584512a3542bc034983d42ab088e17a262e9cca83d312cd2ded0b",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "c5ebd758c4367b6d649c621d11efc9bb4b069a1cf6bef48b230201fefec712f1",
+    "后端代码/app/services/report/BasicSalaryManualServices.php": "2fabbc4d57a53f8300b14dc1c9d725a9ec0a5e2b6a33b8d8ffc51a67d62e83d8",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "999a85de09d78304bf7e48bee01146e94ecc9d6e24b97c410ae996d3f1a024c6",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "bff28028cb931899fd74f6d5aa55335fd51a92daba0246e907a45b86164d48af",
+    "scripts/payroll/round9_test_runtime.py": "2a8fa4302a739830c2257642cd27e23a7aa75baf214e27e820ea4512eb2a4494",
+    "scripts/payroll/run-round9-cutover-tests.py": "bb35e9d7f29069bfaf3cbf5b0059b12761d8c8c69132e9dfe12b88e450e5cc2f",
+    "tests/customer-010/round9-salary-cutover.php": "4663cb1f579c35e0b01a7f7a34cdec9d30a1790fc0c011362311b0efe98ba8c8",
+    "tests/customer-010/round9-salary-browser.mjs": "79e608713443d3ddcffc2e01a39b85ac8ffe8d5eddd51496e6866a882bc2cbf9"
+  },
+  "assets": {
+    "前端代码/cashier-v3/dist/index.html": "a76325af2bf949aec5054d726488e5bdee927a46e73f96397bc3ad0ae656e280",
+    "前端代码/cashier-v3/dist/assets/index-5092adca.css": "5092adca8cd84730a85a08e7a2866a73475975b9ff7e78f6ff31ce69a5d6ce34",
+    "前端代码/cashier-v3/dist/assets/index-4048aee4.js": "80a852c9a78920d40f5b87eca1f8ea7130ba66b0a4dc2b177ef5ae8288389c47",
+    "前端代码/cashier-v3/dist/assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+  },
+  "build": "npm run build",
+  "result": "PASS"
+}
