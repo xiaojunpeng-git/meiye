@@ -25,12 +25,13 @@ chdir($root);require 'vendor/autoload.php';(new think\App())->initialize();set_e
 use think\facade\Db;
 if(Db::query('SELECT DATABASE() db')[0]['db']!==$targets[$site][0]||(int)config('database.connections.mysql.hostport')!==$targets[$site][1])throw new RuntimeException('Wrong instance');
 define('BASIC_MENU_PLAN_ONLY',true);require $backup.'/payload/menu-library.php';
-function businessDigest():array{return ['performance'=>Db::query('SELECT COUNT(*) n,COALESCE(SUM(amount_cents),0) amount,COALESCE(SUM(labor_fee_amount_cents),0) fee FROM eb_cashier_v3_performance_fact')[0],'orders'=>Db::name('store_order')->count(),'old_wage_rules'=>hash('sha256',json_encode(Db::name('position_yeji')->order('id')->select()->toArray())),'tiers'=>hash('sha256',json_encode(Db::name('yeji_commission')->order('id')->select()->toArray()))];}
+/** 固定原有事实边界允许营业追加；任何旧记录金额/数量变化仍失败，不写业务表。 */
+function businessDigest(array $bounds):array{return ['performance'=>Db::query('SELECT COUNT(*) n,COALESCE(SUM(amount_cents),0) amount,COALESCE(SUM(labor_fee_amount_cents),0) fee FROM eb_cashier_v3_performance_fact WHERE id<='.(int)$bounds['performance'])[0],'orders'=>Db::name('store_order')->where('id','<=',(int)$bounds['orders'])->count(),'old_wage_rules'=>hash('sha256',json_encode(Db::name('position_yeji')->order('id')->select()->toArray())),'tiers'=>hash('sha256',json_encode(Db::name('yeji_commission')->order('id')->select()->toArray()))];}
 foreach($m['files'] as $p=>$h){if(strpos($p,'..')!==false||!preg_match('#^(app/|route/admin.php$|config/(payroll|basic_report).php$|public/)#',$p)||hash_file('sha256',$backup.'/payload/files/'.$p)!==$h)throw new RuntimeException('Payload mismatch');}
 $tables=['system_menus','system_role','store_v3_permission_catalog','job_position_channel_rule','database_upgrade_log'];
 if($phase==='prepare'){
  if(is_file($backup.'/before.json'))throw new RuntimeException('Backup exists');
- $before=['files'=>[],'business'=>businessDigest(),'mode'=>(int)sys_config('cashier_labor_fee_mode',0),'position_model'=>config('payroll.position_model','legacy'),'tables'=>[]];
+ $before=['files'=>[],'business_bounds'=>$m['before']['business_bounds'],'business'=>businessDigest($m['before']['business_bounds']),'mode'=>(int)sys_config('cashier_labor_fee_mode',0),'position_model'=>config('payroll.position_model','legacy'),'tables'=>[]];
  if($before['business']!==$m['before']['business'])throw new RuntimeException('Business baseline drift');
  foreach($m['files'] as $p=>$h){$actual=is_file($root.'/'.$p)?hash_file('sha256',$root.'/'.$p):null;if($actual!==($m['before']['files'][$p]??null))throw new RuntimeException('Live source drift:'.$p);$before['files'][$p]=$actual;if($actual!==null){$to=$backup.'/before/'.$p;if(!is_dir(dirname($to)))mkdir(dirname($to),0700,true);copy($root.'/'.$p,$to);chmod($to,0600);}}
  foreach($tables as $t)$before['tables'][$t]=Db::name($t)->order('id')->select()->toArray();
@@ -54,7 +55,7 @@ if($phase==='rollback'){
 if($phase==='install'){
  foreach($before['files'] as $p=>$h){$actual=is_file($root.'/'.$p)?hash_file('sha256',$root.'/'.$p):null;if($actual!==$h)throw new RuntimeException('Prepared file drift');}
  foreach($tables as $t)if(Db::name($t)->order('id')->select()->toArray()!==$before['tables'][$t])throw new RuntimeException('Permission baseline drift');
- if(businessDigest()!==$before['business'])throw new RuntimeException('Business changed; repeat preflight');
+ if(businessDigest($before['business_bounds'])!==$before['business'])throw new RuntimeException('Business changed; repeat preflight');
  foreach($m['files'] as $p=>$h)atomicCopy($backup.'/payload/files/'.$p,$root.'/'.$p);
  $result=Db::transaction(function()use($m){
   $root=uniqueMenu('admin-report');$legacy=uniqueMenu('admin-report-basic');$navigation=[];$count=0;
@@ -79,7 +80,7 @@ if($phase==='install'){
  echo json_encode(['result'=>'INSTALLED','site'=>$site]+$result);exit;
 }
 foreach($m['files']+$m['required_assets'] as $p=>$h)if(!is_file($root.'/'.$p)||hash_file('sha256',$root.'/'.$p)!==$h)throw new RuntimeException('Installed drift:'.$p);
-if(businessDigest()!==$before['business']||(int)sys_config('cashier_labor_fee_mode',0)!==$before['mode']||config('payroll.position_model','legacy')!==$before['position_model'])throw new RuntimeException('Business or algorithm changed');
+if(businessDigest($before['business_bounds'])!==$before['business']||(int)sys_config('cashier_labor_fee_mode',0)!==$before['mode']||config('payroll.position_model','legacy')!==$before['position_model'])throw new RuntimeException('Business or algorithm changed');
 if(!(bool)config('basic_report.platform_menu_all_stores',false))throw new RuntimeException('Report menu range inactive');
 $leafIds=array_keys(app\services\organization\StorePermissionCatalogServices::basicReportGrantDefinitions());if(count($leafIds)!==21)throw new RuntimeException('Missing leaf catalog');
 foreach(basicMenuGroups() as $group)foreach($group['reports'] as $report)uniqueMenu($report['auth']);

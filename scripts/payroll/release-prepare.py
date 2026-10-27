@@ -29,7 +29,7 @@ for site,host in [('rh','rh-server'),('008','mohe-server'),('010','mohe-server')
  for p,h in before['files'].items():
   if p in current:assert current[p]==h,'Baseline drift '+site+':'+p
  changed={p:b for p,b in files.items() if current[p]!=sha(b)}
- manifest={'site':site,'tree':tree,'source_commit':committed_source,'business_source_commit':'931edeac5220c1eab53c62d104a1d97f8aebe9e1','files':{p:sha(b)for p,b in changed.items()},'required_assets':{p:sha(b)for p,b in files.items() if p.startswith('public/')},'before':{'files':{p:current[p]for p in changed},'business':before['business']},'preserve_algorithm':before['mode'],'preserve_position_model':before['position_model'],'frontend_source_proofs':frontends}
+ manifest={'site':site,'tree':tree,'source_commit':committed_source,'business_source_commit':'931edeac5220c1eab53c62d104a1d97f8aebe9e1','files':{p:sha(b)for p,b in changed.items()},'required_assets':{p:sha(b)for p,b in files.items() if p.startswith('public/')},'before':{'files':{p:current[p]for p in changed},'business':before['business'],'business_bounds':before['business_bounds']},'preserve_algorithm':before['mode'],'preserve_position_model':before['position_model'],'frontend_source_proofs':frontends}
  (e/(site+'-manifest.json')).write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
  extra={'manifest.json':json.dumps(manifest,ensure_ascii=False,indent=2).encode(),'schema.sql':git('show',tree+':后端代码/database/upgrades/2026-10-27-独立职位工资规则/01-结构升级.sql'),'menu-library.php':git('show',tree+':后端代码/database/upgrades/2026-10-26-基础报表平台菜单分组/01-正式升级.php')}
  with tarfile.open(e/(site+'-payload.tar.gz'),'w:gz') as tar:
