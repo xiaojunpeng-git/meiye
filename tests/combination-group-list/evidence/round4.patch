@@ -1,0 +1,1087 @@
+--- a/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue
++++ b/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue
+@@ -1,79 +1,52 @@
+ <template>
+ <!-- 营销-拼团列表 -->
+-    <div class="article-manager">
+-        <Card :bordered="false" dis-hover class="ivu-mt" :padding= "0">
+-            <div class="new_card_pd">
+-                <!-- 查询条件 -->
+-            <Form ref="formValidate" :model="formValidate"  inline :label-width="labelWidth" :label-position="labelPosition" @submit.native.prevent>
+-                <FormItem label="时间选择：">
+-                    <DatePicker :editable="false" @on-change="onchangeTime" :value="timeVal"  format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="自定义时间" 
+-                    class="input-add"
+-                    :options="options"></DatePicker>
+-                </FormItem>
+-                <FormItem label="拼团状态：">
+-                    <Select v-model="formValidate.status" placeholder="请选择" clearable class="input-add mr14" @on-change="userSearchs">
+-                        <Option :value="1">进行中</Option>
+-                        <Option :value="2">已完成</Option>
+-                        <Option :value="3">未完成</Option>
+-                    </Select>
+-                </FormItem>
+-                <FormItem label="拼团商品ID：">
+-                    <Input v-model.trim="formValidate.cid" class="input-add" clearable placeholder="输入拼团商品ID" @on-enter="userSearchs" />
+-                </FormItem>
+-                <FormItem label="拼团编号：">
+-                    <Input v-model.trim="formValidate.group_id" class="input-add" clearable placeholder="输入具体团编号" @on-enter="userSearchs" />
+-                </FormItem>
+-                <FormItem>
+-                    <Button type="primary" @click="userSearchs()">查询</Button>
+-                </FormItem>
++    <div class="article-manager combination-group-list">
++        <Card :bordered="false" dis-hover :padding="20" class="combination-filters">
++            <Form :model="formValidate" :label-width="76" label-position="right" inline class="combination-query-form" @submit.native.prevent="userSearchs">
++                <FormItem label="选择门店：" class="query-field query-store"><OrganizationStoreScopePicker v-model="formValidate.store_ids" :load-scope="loadScope" /></FormItem>
++                <FormItem label="选择拼团：" class="query-field query-activity"><Select v-model="formValidate.cid" clearable filterable placeholder="全部拼团">
++                    <Option v-for="activity in activities" :key="activity.cid" :value="activity.cid">{{ activity.title || ('拼团' + activity.cid) }}</Option>
++                </Select></FormItem>
++                <FormItem label="拼团状态：" class="query-field query-status"><Select v-model="formValidate.status" clearable placeholder="全部状态">
++                    <Option :value="1">拼团中</Option><Option :value="2">拼团成功</Option><Option :value="3">拼团失败</Option>
++                </Select></FormItem>
++                <FormItem label="会员搜索：" class="query-field query-member"><Input v-model.trim="formValidate.keyword" clearable placeholder="输入会员姓名或手机号" @on-enter="userSearchs" /></FormItem>
++                <div class="combination-search-actions"><Button type="primary" @click="userSearchs">搜索</Button><Button @click="resetSearch">重置</Button><Button :loading="exporting" :disabled="loading || !total" @click="exportList"><Icon type="ios-download-outline" /> 导出</Button></div>
+             </Form>
++        </Card>
++        <Card :bordered="false" dis-hover :padding="20" class="combination-results">
++            <div v-if="listError" class="combination-list-error">{{ listError }} <Button size="small" @click="getList">重试</Button></div>
++            <div ref="results" class="combination-table-scroll">
++                <Table :columns="columns1" :data="tableList" :loading="loading" :max-height="tableFixed ? tableHeight : undefined" highlight-row no-data-text="暂无拼团记录">
++                    <template slot-scope="{ row }" slot="price">{{ money(row.price) }}</template>
++                    <template slot-scope="{ row }" slot="deadline">{{ row.deadline | formatDate }}</template>
++                    <template slot-scope="{ row }" slot="status_name"><span :class="'combination-status-' + row.status">{{ row.status_name }}</span></template>
++                    <template slot-scope="{ row }" slot="action">
++                        <a @click="Info(row)">查看详情</a>
++                        <a v-if="row.status === 1" class="combination-action" @click="completeGroup(row)">立即成团</a>
++                        <a v-if="row.status === 2" class="combination-action" @click="openGroupRefund(row)">整团退款</a>
++                    </template>
++                </Table>
+             </div>
++            <footer class="combination-pagination">
++                <span>共 {{ total }} 条 · 每页 20 条 · 第 {{ formValidate.page }} / {{ totalPages }} 页</span>
++                <Button size="small" :disabled="loading || formValidate.page <= 1" @click="pageChange(formValidate.page - 1)">上一页</Button>
++                <Button size="small" :disabled="loading || formValidate.page >= totalPages" @click="pageChange(formValidate.page + 1)">下一页</Button>
++            </footer>
+         </Card>
+-        <!-- 参与人数组件 -->
+-        <cards-data :cardLists="cardLists" v-if="cardLists.length>=0"></cards-data>
+-        <Card :bordered="false" dis-hover class="ive-mt">
+-            <!-- 拼团列表-表格 -->
+-            <Table :columns="columns1" :data="tableList" :loading="loading" highlight-row
+-                   no-userFrom-text="暂无数据"
+-                   no-filtered-userFrom-text="暂无筛选结果">
+-                <template slot-scope="{ row }" slot="avatar">
+-                    <viewer>
+-                        <div class="tabBox_img">
+-                            <img v-lazy="row.avatar">
+-                        </div>
+-                    </viewer>
+-                </template>
+-                <template slot-scope="{ row }" slot="nickname">
+-                    <span> {{row.nickname + ' / ' + row.uid}}</span>
+-										<span style="color: #ed4014;" v-if="row.delete_time != null"> (已注销)</span>
+-                </template>
+-                <template slot-scope="{ row }" slot="title">
+-                    <Tooltip max-width="200" placement="bottom">
+-                        <span class="line2">{{row.title + ' / ' + row.cid}}</span>
+-                        <p slot="content">{{row.title + ' / ' + row.cid}}</p>
+-                    </Tooltip>
+-                </template>
+-                <template slot-scope="{ row }" slot="add_time">
+-                    <span> {{row.add_time | formatDate}}</span>
+-                </template>
+-                <template slot-scope="{ row }" slot="stop_time">
+-                    <span> {{row.stop_time | formatDate}}</span>
+-                </template>
+-                <template slot-scope="{ row }" slot="status">
+-                    <Tag color="green" size="medium" v-show="row.status === 1">进行中</Tag>
+-                    <Tag color="cyan" size="medium" v-show="row.status === 2">已完成</Tag>
+-                    <Tag color="volcano" size="medium" v-show="row.status === 3">未完成</Tag>
+-                </template>
+-                <template slot-scope="{ row }" slot="action">
+-                    <a @click="Info(row)" >查看详情</a>
+-                    <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
+-                </template>
+-            </Table>
+-            <div class="acea-row row-right page">
+-                <Page :total="total" :current="formValidate.page" show-elevator show-total @on-change="pageChange"
+-                      :page-size="formValidate.limit"/>
++        <Modal v-model="groupRefundVisible" title="成团后整团退款" width="850" footer-hide :mask-closable="false">
++            <p>团编号：{{ refundGroup.id }}。全部真实成员校验通过后，按各自实付金额原路退款；虚拟名额不退款。</p>
++            <p style="margin:10px 0">只要一人不符合条件，就不发起任何新退款。渠道结果可能分批返回，已成功退款不会重复退。</p>
++            <Table :columns="groupMemberColumns" :data="groupRefundMembers" :loading="groupMembersLoading" size="small" :max-height="240" style="margin:12px 0" />
++            <Input v-model="groupRefundReason" type="textarea" :maxlength="300" placeholder="请输入整团退款原因" />
++            <div style="margin:12px 0;display:flex;gap:10px">
++                <Button type="error" :loading="groupRefundBusy" :disabled="groupMembersLoading || !groupRefundMembers.length" @click="confirmGroupRefund">确认整团退款</Button>
++                <Button :disabled="groupRefundBusy" @click="runGroupRefund('query')">查询整团退款结果</Button>
++                <Button v-if="groupRefundResult.failed_count" :disabled="groupRefundBusy" @click="confirmGroupRefund('retry')">重试失败退款</Button>
+             </div>
+-        </Card>
++            <p v-if="groupRefundResult.message">{{ groupRefundResult.message }}：成功 {{ groupRefundResult.success_count }} 笔，失败 {{ groupRefundResult.failed_count }} 笔，待处理 {{ groupRefundResult.pending_count }} 笔</p>
++            <Table :columns="refundResultColumns" :data="groupRefundResult.results || []" size="small" :max-height="350" />
++        </Modal>
+ 
+         <!-- 详情模态框-->
+         <Modal v-model="modals" class="combination-participants-modal" scrollable footer-hide closable title="查看详情" :mask-closable="false" width="1150">
+@@ -94,7 +67,7 @@
+                 <template slot-scope="{ row, index }" slot="action">
+                     <div>{{ row.refund_message || (row.is_refund ? '已退款' : '未退款') }}</div>
+                     <!-- Amount comes from actual paid money. A pending request can only query its original receipt. -->
+-                    <Button v-if="row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
++                    <Button v-if="rows.status !== 2 && row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
+                         @click="refundParticipant(row)">{{ row.refund_action === 'query' ? '查询退款结果' : (row.refund_action === 'retry' ? '重试退款' : '退款') }}</Button>
+                     <Button v-if="rows.status === 1 && row.k_id > 0 && !row.is_virtual && !row.is_refund && row.refund_action === 'refund'"
+                         size="small" style="margin-left:6px" @click="refundParticipant(row, true)">踢出</Button>
+@@ -107,11 +80,11 @@
+ 
+ <script>
+     import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
+-    import cardsData from '@/components/cards/cards';
+-    import { mapState } from 'vuex';
++    import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
++    import exportExcel from '@/utils/newToExcel.js';
+     import { formatDate } from '@/utils/validate';
+-    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi } from '@/api/marketing';
+-    import timeOptions from "@/utils/timeOptions";
++    import { combineListApi, orderPinkListApi, combinationParticipantRefundApi, combinationCompleteApi, combinationWholeRefundApi } from '@/api/marketing';
++
+     export default {
+         name: 'combinalist',
+         filters: {
+@@ -122,80 +95,39 @@
+                 }
+             }
+         },
+-        components: { cardsData },
++        components: { OrganizationStoreScopePicker },
+         data () {
+             return {
+-                cardLists: [],
++                activities: [],
++                appliedFilters: {}, exporting: false, listError: '', tableHeight: 400, tableFixed: false, requestSequence: 0,
++                groupRefundVisible: false, groupRefundBusy: false, groupRefundReason: '', refundGroup: {}, groupRefundResult: {},
++                groupRefundMembers: [], groupMembersLoading: false,
++                groupMemberColumns: [
++                    { title: '成员', key: 'nickname', width: 110 }, { title: '订单号', key: 'order_id', minWidth: 190 },
++                    { title: '原单实付', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.paid_amount)) },
++                    { title: '当前退款情况', minWidth: 230, render: (h, { row }) => h('span', row.refund_block_reason || row.refund_message || '待校验') }
++                ],
++                refundResultColumns: [
++                    { title: '订单ID', key: 'order_id_key', width: 100 },
++                    { title: '退款状态', key: 'message', minWidth: 180 },
++                    { title: '退款金额', key: 'amount', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.amount)) },
++                    { title: '退款单号', key: 'refund_no', minWidth: 220 }
++                ],
+                 refundBusy: 0,
+                 modals: false,
+-                options: timeOptions,
+-                grid: {
+-                    xl: 7,
+-                    lg: 10,
+-                    md: 12,
+-                    sm: 12,
+-                    xs: 24
+-                },
+                 loading: false,
+                 formValidate: {
+                     status: '',
+                     data: '',
+                     cid: '',
+                     group_id: '',
++                    store_ids: [], keyword: '',
+                     page: 1,
+-                    limit: 15
++                    limit: 20
+                 },
+-                columns1: [
+-                    {
+-                        title: '头像',
+-                        slot: 'avatar',
+-                        minWidth: 150
+-                    },
+-                    {
+-                        title: '开团团长',
+-                        slot: 'nickname',
+-                        minWidth: 170
+-                    },
+-                    {
+-                        title: '开团时间',
+-                        slot: 'add_time',
+-                        minWidth: 150
+-                    },
+-                    {
+-                        title: '拼团商品',
+-                        slot: 'title',
+-                        minWidth: 400
+-                    },
+-                    {
+-                        title: '几人团',
+-                        key: 'people',
+-                        minWidth: 120
+-                    },
+-                    {
+-                        title: '几人参加',
+-                        key: 'count_people',
+-                        minWidth: 100
+-                    },
+-                    {
+-                        title: '结束时间',
+-                        slot: 'stop_time',
+-                        minWidth: 150
+-                    },
+-                    {
+-                        title: '状态',
+-                        slot: 'status',
+-                        minWidth: 100
+-                    },
+-                    {
+-                        title: '操作',
+-                        slot: 'action',
+-                        fixed: 'right',
+-                        minWidth: 170
+-                    }
+-                ],
++                columns1: [],
+                 tableList: [],
+                 total: 0,
+-                timeVal: [],
+                 loading2: false,
+                 tabList3: [],
+                 columns2: [
+@@ -241,26 +173,78 @@
+             }
+         },
+         computed: {
+-            ...mapState('admin/layout', [
+-                'isMobile'
+-            ]),
+-            labelWidth () {
+-                return this.isMobile ? undefined : 96;
+-            },
+-            labelPosition () {
+-                return this.isMobile ? 'top' : 'right';
+-            }
++            totalPages() { return Math.max(1, Math.ceil(this.total / 20)); },
++
+         },
+         created () {
++            this.appliedFilters = this.snapshotFilters();
+             this.getList();
+-            this.getStatistics();
++            this.loadScope().catch(error => this.$Message.error(error.msg || '筛选项读取失败'));
++        },
++        mounted() {
++            // Measure only this result box: table body scrolls while filters and pagination stay reachable.
++            this.resizeObserver = new ResizeObserver(() => this.fitTable());
++            this.resizeObserver.observe(this.$el);
++            this.resizeObserver.observe(this.$el.querySelector('.combination-filters'));
++            this.fitTable();
++        },
++        beforeDestroy() {
++            this.requestSequence++;
++            if (this.resizeObserver) this.resizeObserver.disconnect();
+         },
+         methods: {
++            money: formatBusinessMoney,
++            // Cap long lists at the available viewport; short lists keep their natural height like other platform tables.
++            fitTable() {
++                const results = this.$refs.results;
++                if (!results) return;
++                const bottom = Math.min(window.innerHeight, this.$el.getBoundingClientRect().bottom);
++                this.tableHeight = Math.max(180, Math.floor(bottom - results.getBoundingClientRect().top - 82));
++            },
++            snapshotFilters() { return { ...this.formValidate, store_ids: [...this.formValidate.store_ids] }; },
++            loadScope() {
++                return combineListApi({ view: 'options' }).then(res => { this.activities = res.data.activities; return res.data; });
++            },
++            resetSearch() {
++                this.formValidate = { status: '', data: '', cid: '', group_id: '', store_ids: [], keyword: '', page: 1, limit: 20 };
++                this.userSearchs();
++            },
++            // Export uses submitted conditions, never an unsent filter draft or only the current page.
++            exportList() {
++                this.exporting = true;
++                return combineListApi({ ...this.appliedFilters, view: 'export' }).then(({ data }) => {
++                    exportExcel(data.header, data.filekey, data.filename, data.export);
++                }).catch(error => this.$Message.error(error.msg || '导出失败')).finally(() => { this.exporting = false; });
++            },
++            openGroupRefund(row) {
++                if (this.groupRefundBusy) return this.$Message.warning('当前整团退款正在处理，请等待结果后再切换');
++                this.refundGroup = row; this.groupRefundReason = ''; this.groupRefundResult = {}; this.groupRefundVisible = true;
++                this.groupRefundMembers = []; this.groupMembersLoading = true;
++                // Preview exact original orders before the confirmation; final authority remains the group transaction.
++                return orderPinkListApi(row.id).then(({ data }) => {
++                    if (this.refundGroup.id === row.id) this.groupRefundMembers = data.list.filter(member => !member.is_virtual && member.uid > 0);
++                }).catch(error => this.$Message.error(error.msg || '团成员读取失败'))
++                    .finally(() => { if (this.refundGroup.id === row.id) this.groupMembersLoading = false; });
++            },
++            confirmGroupRefund(action = 'start') {
++                if (action !== 'retry') action = 'start';
++                if (!this.groupRefundReason.trim()) return this.$Message.warning('请填写整团退款原因');
++                this.$Modal.confirm({ title: action === 'retry' ? '重试失败退款' : '确认整团退款',
++                    content: '将校验并退款给本团全部真实付款成员。确认继续？', onOk: () => this.runGroupRefund(action) });
++            },
++            runGroupRefund(action) {
++                if (this.groupRefundBusy) return;
++                this.groupRefundBusy = true;
++                return combinationWholeRefundApi(this.refundGroup.id, { action, reason: this.groupRefundReason.trim() || '查询整团退款' })
++                    .then(({ data }) => { this.groupRefundResult = data; this.getList(); })
++                    .catch(error => this.$Message.error(error.msg || '整团退款处理失败'))
++                    .finally(() => { this.groupRefundBusy = false; });
++            },
+             // Completion fills only missing seats and leaves real participants' paid orders untouched.
+             completeGroup(row) {
+                 this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
+                     onOk: () => combinationCompleteApi(row.id).then(res => {
+-                        this.$Message.success(res.data.message); this.getList(); this.getStatistics();
++                        this.$Message.success(res.data.message); this.getList();
+                     }).catch(error => this.$Message.error(error.msg || '成团失败')) });
+             },
+             // Query/retry states are server-derived; the browser never supplies a refund amount or provider identity.
+@@ -272,7 +256,7 @@
+                         retry: row.refund_action !== 'query', action: kick ? 'kick' : 'refund'
+                     }).then(res => {
+                         this.$Message.info(res.data.message);
+-                        this.getList(); this.getStatistics();
++                        this.getList();
+                         this.Info({ ...this.rows, id: res.data.group_id || this.rows.id });
+                     }).catch(error => this.$Message.error(error.msg || '退款处理失败'))
+                       .finally(() => { this.refundBusy = 0; });
+@@ -287,87 +271,73 @@
+                     onOk: () => { if (!reason.trim()) this.$Message.warning('请填写退款原因'); else return run(reason.trim()); }
+                 });
+             },
+-            // 拼团统计
+-            getStatistics () {
+-                statisticsApi().then(async res => {
+-                    let data = res.data
+-                    this.cardLists = data.res;
+-                }).catch(res => {
+-                    this.$Message.error(res.msg);
+-                })
+-            },
+             // 查看详情
+             Info (row) {
+                 this.modals = true;
+-                this.rows = row;
++                this.rows = row; this.tabList3 = []; this.loading2 = true;
+                 orderPinkListApi(row.id).then(async res => {
+                     let data = res.data
+                     this.tabList3 = data.list;
+-                    this.loading = false;
++                    this.loading2 = false;
+                 }).catch(res => {
+-                    this.loading = false;
++                    this.loading2 = false;
+                     this.$Message.error(res.msg);
+                 })
+             },
+-            // 具体日期
+-            onchangeTime (e) {
+-                this.timeVal = e
+-                if(this.timeVal[0]===''){
+-                    this.formValidate.data = '';
+-                }else {
+-                    this.formValidate.data = this.timeVal.join('-');
+-                }
+-                this.formValidate.page = 1;
+-				this.getList();
+-            },
+-            // 选择时间
+-            selectChange (tab) {
+-                this.formValidate.page = 1;
+-                this.formValidate.data = tab;
+-                this.timeVal = [];
+-                this.getList();
+-            },
+-            // 列表
+-            getList () {
+-                this.loading = true;
+-                this.formValidate.status = this.formValidate.status || '';
+-                combineListApi(this.formValidate).then(async res => {
+-                    let data = res.data
+-                    this.tableList = data.list;
+-                    this.total = res.data.count;
+-                    this.loading = false;
+-                }).catch(res => {
+-                    this.loading = false;
+-                    this.$Message.error(res.msg);
+-                })
+-            },
+-            pageChange (index) {
+-                this.formValidate.page = index;
+-                this.getList();
+-            },
+-            // 表格搜索
+-            userSearchs () {
+-                this.formValidate.page = 1;
+-                this.getList();
+-            }
++            getList() {
++                const sequence = ++this.requestSequence;
++                this.loading = true; this.listError = '';
++                return combineListApi(this.appliedFilters).then(({ data }) => {
++                    if (sequence !== this.requestSequence) return;
++                    this.tableList = data.list; this.total = data.count; this.formValidate.page = data.page;
++                    this.appliedFilters.page = data.page;
++                    this.tableFixed = !!(data.table_layout && data.table_layout.fixed);
++                    this.columns1 = data.columns.map(column => ({ ...column,
++                        fixed: this.tableFixed ? column.fixed : undefined,
++                        ...( ['price', 'deadline', 'status_name'].includes(column.key) ? { slot: column.key } : {}),
++                        tooltip: true
++                    })).concat([{ title: '操作', slot: 'action', fixed: this.tableFixed ? 'right' : undefined, width: 156 }]);
++                }).catch(error => {
++                    if (sequence !== this.requestSequence) return;
++                    this.tableList = []; this.total = 0; this.listError = error.msg || '拼团列表加载失败';
++                }).finally(() => { if (sequence === this.requestSequence) this.loading = false; });
++            },
++            pageChange(index) { this.formValidate.page = index; this.appliedFilters.page = index; this.getList(); },
++            userSearchs() { this.formValidate.page = 1; this.appliedFilters = this.snapshotFilters(); this.getList(); }
++
+         }
+     }
+ </script>
+ 
+-<style scoped lang="stylus">
+-	  .line2{
+-			max-height 36px;
+-		}
+-    .tabBox_img{
+-			width 36px
+-			height 36px
+-			border-radius:4px
+-			cursor pointer
+-			img{
+-				width 100%
+-				height 100%
+-			}
+-		}    
++<style scoped>
++.combination-group-list { height: calc(100vh - 150px); min-height: 420px; display: flex; flex-direction: column; gap: 16px; }
++.combination-filters { flex: none; }
++.combination-query-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 16px; }
++.combination-query-form .ivu-form-item { margin: 0; }
++.query-store { width: 218px; }
++.query-activity { width: 264px; }
++.query-status { width: 208px; }
++.query-member { width: 294px; }
++.combination-filters >>> .ivu-form-item-label { line-height: 32px; padding: 0 8px 0 0; }
++.combination-filters >>> .ivu-form-item-content { line-height: 32px; }
++.combination-filters >>> .ivu-select, .combination-filters >>> .ivu-date-picker { width: 100%; }
++.query-store >>> .organization-store-scope-picker, .query-store >>> .organization-store-scope-picker__trigger { width: 100%; }
++.combination-search-actions { display: flex; align-items: center; gap: 10px; }
++.combination-results { flex: 0 1 auto; min-height: 0; }
++.combination-results >>> .ivu-card-body { display: flex; flex-direction: column; min-height: 0; }
++.combination-table-scroll { min-height: 0; overflow: hidden; }
++.combination-table-scroll >>> .ivu-table-header th { height: 48px; background: #f8f8f9; }
++.combination-table-scroll >>> .ivu-table-cell { padding: 0 12px; }
++.combination-table-scroll >>> .ivu-table-row td { height: 48px; }
++.combination-action { margin-left: 12px; }
++.combination-pagination { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding-top: 18px; color: #808695; }
++.combination-list-error { padding: 8px 0 12px; color: #c53b37; }
++.combination-status-2 { color: #299548; }
++.combination-status-3 { color: #c53b37; }
++.tabBox_img { width: 36px; height: 36px; border-radius: 4px; cursor: pointer; }
++.tabBox_img img { width: 100%; height: 100%; }
++@media (max-width: 1100px) { .query-store, .query-activity, .query-status, .query-member { width: calc(50% - 8px); } }
++@media (max-width: 650px) { .query-store, .query-activity, .query-status, .query-member { width: 100%; } .combination-pagination { flex-wrap: wrap; } }
+ </style>
+ 
+ <style lang="stylus">
+--- a/前端代码/admin/src/api/marketing.js
++++ b/前端代码/admin/src/api/marketing.js
+@@ -406,6 +406,11 @@
+   });
+ }
+ 
++/** Completed-group refunds are reserved as a whole; amounts and member orders are never browser input. */
++export function combinationWholeRefundApi(id, data) {
++  return request({ url: `marketing/combination/order_pink/${id}/refund_group`, method: 'POST', data });
++}
++
+ /**
+  * 秒杀统计
+  * @param {*} id
+--- a/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php
++++ b/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php
+@@ -223,24 +223,30 @@
+     {
+         $where = $this->request->getMore([
+             ['status', ''],
+-            ['data', '', '', 'time'],
++            ['data', ''],
+             ['cid', ''],
+             ['group_id', ''],
++            ['store_ids', []],
++            ['keyword', ''],
++            ['page', 1],
+         ]);
+         // Both identifiers must narrow the authenticated list; malformed values never become broad searches.
+         foreach (['cid', 'group_id'] as $key) {
+             if ($where[$key] !== '' && (!ctype_digit((string)$where[$key]) || (int)$where[$key] <= 0))
+                 throw new \think\exception\ValidateException('请输入有效的拼团编号');
+         }
+-        /** @var StorePinkServices $storePinkServices */
+-        $storePinkServices = app()->make(StorePinkServices::class);
+-        $list = $storePinkServices->systemPage($where);
++        // This platform list is group-grain; participant statistics retain their existing reader.
++        $reader = new \app\services\activity\combination\CombinationGroupListServices();
++        $view = (string)$this->request->get('view', 'list');
++        $list = $view === 'options' ? $reader->options($this->adminInfo)
++            : $reader->page($where, $this->adminInfo, $view === 'export');
+         return $this->success($list);
+     }
+ 
+     /** Same group identity and participant authority as the visible detail; no page-sized truncation. */
+     public function exportGroup($id)
+     {
++        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+         return $this->success((new \app\services\activity\combination\CombinationRecordServices())->export((int)$id));
+     }
+ 
+@@ -253,6 +259,7 @@
+     /** Virtual seats are management evidence, never paid participants. */
+     public function completeGroup($id)
+     {
++        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+         return $this->success((new \app\services\activity\combination\CombinationGroupManagementServices())->complete(
+             (int)$id, (int)$this->request->adminId()));
+     }
+@@ -260,6 +267,9 @@
+     /** Authenticated admin action; order membership and amounts are reloaded server-side. */
+     public function refundParticipant($id)
+     {
++        $root = (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
++        // A completed group is managed as a whole; the earlier per-member entry cannot bypass that policy.
++        if ((int)$root['status'] === 2) throw new \think\exception\ValidateException('拼团成功后请使用整团退款');
+         $orderId = (int)$this->request->post('order_id', 0);
+         $pink = \think\facade\Db::name('store_pink')->where('order_id_key', $orderId)->find();
+         if (!$pink || ((int)$pink['id'] !== (int)$id && (int)$pink['k_id'] !== (int)$id))
+@@ -277,6 +287,7 @@
+      */
+     public function order_pink($id)
+     {
++        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+         /** @var StorePinkServices $storePinkServices */
+         $storePinkServices = app()->make(StorePinkServices::class);
+         $list = $storePinkServices->getPinkMember($id);
+@@ -292,4 +303,13 @@
+         return $this->success(compact('list'));
+     }
+ 
++    /** Authenticated whole-group command: no client amounts, members or channel identities are trusted. */
++    public function refundWholeGroup($id)
++    {
++        $result = (new \app\services\activity\combination\CombinationRefundServices())->refundGroup(
++            (int)$id, (string)$this->request->post('reason', ''), $this->adminInfo,
++            (string)$this->request->post('action', 'start'));
++        return $this->success($result);
++    }
++
+ }
+--- a/后端代码/app/services/activity/combination/CombinationRefundServices.php
++++ b/后端代码/app/services/activity/combination/CombinationRefundServices.php
+@@ -65,9 +65,94 @@
+     {
+         $reason = trim($reason);
+         if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
++        $claim = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId) {
++            return $this->claimRefund($orderId, $reason, $operatorId, $retry, $kickGroupId);
++        });
++        return $this->settleClaim($claim, $operatorId);
++    }
++
++    /**
++     * A completed group refunds all real orders. Preflight/receipt reservation is atomic;
++     * channel settlement is deliberately per order and may remain partial/unknown.
++     * Query never starts a missing refund, and explicit retry alone replaces a failed receipt.
++     */
++    public function refundGroup(int $groupId, string $reason, array $admin, string $action = 'start'): array
++    {
++        $reason = trim($reason);
++        if (!in_array($action, ['start', 'query', 'retry'], true)) throw new ValidateException('整团退款操作无效');
++        if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
++        (new CombinationGroupListServices())->assertManagement($admin);
++        $claims = Db::transaction(function () use ($groupId, $reason, $admin, $action) {
++            (new CombinationGroupListServices())->assertGroup($groupId, $admin, true);
++            $root = Db::name('store_pink')->where('id', $groupId)->lock(true)->find();
++            if (!$root || (int)$root['k_id'] !== 0 || (int)$root['status'] !== 2)
++                throw new ValidateException('仅拼团成功后可整团退款');
++            $members = Db::name('store_pink')->where('id|k_id', $groupId)->where('is_virtual', 0)
++                ->where('uid', '>', 0)->order('order_id_key')->lock(true)->select()->toArray();
++            if (!$members || count($members) > 1000) throw new ValidateException('整团成员数量异常');
++            $claims = []; $seen = [];
++            foreach ($members as $member) {
++                $id = (int)$member['order_id_key'];
++                if ($id <= 0 || isset($seen[$id])) throw new ValidateException('团内订单凭据异常，整团未发起退款');
++                $seen[$id] = true;
++                $order = Db::name('store_order')->where('id', $id)->lock(true)->find();
++                if (!$order || (int)$order['uid'] !== (int)$member['uid']) throw new ValidateException('团内订单身份异常');
++                $receipt = Db::name('combination_order_refund')->where('order_id', $id)->lock(true)->find();
++                if ((int)$order['refund_status'] === 2 && (!$receipt || $receipt['state'] === 'success')) {
++                    if (!$receipt && bccomp((string)$order['refund_price'], (string)$order['pay_price'], 2) !== 0)
++                        throw new ValidateException('团内有历史部分退款，请先核实，整团未发起新退款');
++                    $claims[] = ['receipt' => $receipt ?: ['order_id' => $id, 'state' => 'success',
++                        'amount_cents' => (int)bcmul((string)$order['refund_price'], '100', 0)], 'send' => false, 'claimed' => false];
++                    continue;
++                }
++                if ($receipt && $receipt['state'] === 'success') throw new ValidateException('团内退款账务结果待核对，整团未发起新退款');
++                if ($action === 'query' && !$receipt) {
++                    $claims[] = ['receipt' => ['order_id' => $id, 'state' => 'not_started'], 'send' => false, 'claimed' => false];
++                    continue;
++                }
++                try {
++                    // claimRefund locks rights and validates original payment proof before preparing its receipt.
++                    // Any later member failure rolls back ALL earlier reservations, before any network call.
++                    $claims[] = $this->claimRefund($id, $reason, (int)$admin['id'], $action === 'retry', 0);
++                } catch (ValidateException $error) {
++                    throw new ValidateException('订单' . $order['order_id'] . '：' . $error->getMessage() . '；整团未发起新退款');
++                }
++            }
++            // Later members wait while earlier external calls finish. Keep their reservations alive
++            // for the bounded batch; settled receipts release their own leases in settleClaim's finally.
++            foreach ($claims as $claim) if ($claim['claimed']) {
++                Db::name('combination_order_refund')->where('order_id', $claim['receipt']['order_id'])
++                    ->where('refund_no', $claim['receipt']['refund_no'])
++                    ->update(['lease_until' => time() + 90 + count($claims) * 120]);
++            }
++            return $claims;
++        });
++        $results = [];
++        foreach ($claims as $claim) {
++            try { $result = $this->settleClaim($claim, (int)$admin['id']); }
++            catch (\Throwable $error) {
++                // A single closing failure must not abandon the remaining already-reserved orders.
++                \think\facade\Log::warning('整团退款待查询 gid=' . $groupId . ' oid=' . $claim['receipt']['order_id']);
++                $result = ['state' => 'pending', 'message' => '该笔结果待查询', 'refund_no' => $claim['receipt']['refund_no'] ?? ''];
++            }
++            $result['order_id_key'] = (int)$claim['receipt']['order_id'];
++            $results[] = $result;
++        }
++        $states = array_column($results, 'state');
++        $success = count(array_filter($states, static function ($state) { return $state === 'success'; }));
++        $failed = count(array_filter($states, static function ($state) { return $state === 'failed'; }));
++        return ['group_id' => $groupId, 'results' => $results, 'success_count' => $success, 'failed_count' => $failed,
++            'pending_count' => count($states) - $success - $failed,
++            'state' => $success === count($states) ? 'success' : 'partial',
++            'message' => $success === count($states) ? '整团退款成功' : '整团退款尚未全部完成，请查看逐笔结果'];
++    }
++
++    /** Caller owns the transaction. Group requests claim every order before ANY channel call is possible. */
++    private function claimRefund(int $orderId, string $reason, int $operatorId, bool $retry, int $kickGroupId): array
++    {
+         $send = false;
+         $claimed = false;
+-        $receipt = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
++        $claim = function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
+             $memberIdentity = Db::name('store_pink')->where('order_id_key', $orderId)->find();
+             if (!$memberIdentity) throw new ValidateException('拼团订单不存在');
+             $rootId = (int)$memberIdentity['k_id'] ?: (int)$memberIdentity['id'];
+@@ -110,7 +195,16 @@
+             }
+             $claimed = true;
+             return $row;
+-        });
++        };
++        $receipt = $claim();
++        return compact('receipt', 'send', 'claimed');
++    }
++
++    /** External calls only run after the caller's entire reservation transaction has committed. */
++    private function settleClaim(array $claim, int $operatorId): array
++    {
++        $receipt = $claim['receipt']; $send = $claim['send']; $claimed = $claim['claimed'];
++        $orderId = (int)$receipt['order_id'];
+         if (!$claimed) return $this->present($receipt);
+         try {
+             if ($send) {
+--- a/后端代码/route/admin.php
++++ b/后端代码/route/admin.php
+@@ -941,6 +941,8 @@
+         Route::post('combination/order_pink/:id/complete', 'v1.marketing.combination.StoreCombination/completeGroup')->option(['real_name' => '拼团补齐虚拟名额成团']);
+         // Uses the existing authenticated group-record access, without a separate refund capability.
+         Route::post('combination/order_pink/:id/refund', 'v1.marketing.combination.StoreCombination/refundParticipant')->option(['real_name' => '拼团参与订单退款']);
++        // Same authenticated group-management surface; all members are reloaded and permission-checked server-side.
++        Route::post('combination/order_pink/:id/refund_group', 'v1.marketing.combination.StoreCombination/refundWholeGroup')->option(['real_name' => '成团后整团退款']);
+         //拼团人列表
+         Route::get('combination/order_pink/:id', 'v1.marketing.combination.StoreCombination/order_pink')->option(['real_name' => '拼团人列表']);
+         //拼团统计
+--- a/后端代码/app/services/activity/combination/CombinationGroupListServices.php
++++ b/后端代码/app/services/activity/combination/CombinationGroupListServices.php
+@@ -0,0 +1,176 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\activity\combination;
++
++use app\services\organization\EmployeeDataScopeServices;
++use app\services\organization\OrganizationScopeService;
++use think\exception\ValidateException;
++use think\facade\Db;
++
++/** One row is one group, owned by its leader's transaction store. Reads never change group/payment facts. */
++class CombinationGroupListServices
++{
++    /** The new write route must not inherit the legacy middleware's unregistered-route default allow. */
++    public function assertManagement(array $admin): void
++    {
++        if (empty($admin['id'])) throw new ValidateException('请重新登录');
++        if (app()->make(EmployeeDataScopeServices::class)->isSuperAdmin($admin)) return;
++        $grants = app()->make(\app\services\system\SystemRoleServices::class)
++            ->getRolesByAuth((array)($admin['roles'] ?? []), 1);
++        foreach ((array)$grants as $grant) {
++            if (($grant['unique_auth'] ?? '') === 'marketing-store_combination-combina_list') return;
++        }
++        throw new ValidateException('无拼团记录管理权限');
++    }
++
++    /** Resolve server-side grants once; [] is deny-all and null is unrestricted, never interchangeable. */
++    public function allowedStores(array $admin): ?array
++    {
++        if (empty($admin['id'])) throw new ValidateException('请重新登录');
++        $employee = (int)($admin['employee_id'] ?? 0);
++        $scope = app()->make(EmployeeDataScopeServices::class);
++        $ids = $scope->resolveEffectiveStoreIds($employee, 0, $admin);
++        if ((int)($admin['admin_type'] ?? 0) === 3) {
++            $agent = app()->make(OrganizationScopeService::class)
++                ->getResolvedStoreIdsByLegacyAgentId((int)($admin['relation_id'] ?? 0));
++            $ids = $ids === null ? $agent : array_intersect($ids, $agent);
++        }
++        return $ids === null ? null : array_values(array_unique(array_map('intval', $ids)));
++    }
++
++    /** Picker options come from the same grant boundary as rows and exports. */
++    public function options(array $admin): array
++    {
++        $ids = $this->allowedStores($admin);
++        $stores = Db::name('system_store')->where('is_del', 0);
++        if ($ids !== null) $stores->whereIn('id', $ids ?: [0]);
++        $ids = array_map('intval', $stores->column('id'));
++        $activities = $this->query([], $ids)->field('g.cid,a.title')->distinct(true)->order('g.cid desc')->select()->toArray();
++        return ['tree' => app()->make(OrganizationScopeService::class)->buildPickerTree($ids),
++            'activities' => $activities, 'allowed_store_ids' => $ids];
++    }
++
++    /** Scope applies to leader AND all participant orders before detail or a whole-group financial command. */
++    public function assertGroup(int $id, array $admin, bool $allMembers = false): array
++    {
++        $ids = $this->allowedStores($admin);
++        $root = $this->query(['group_id' => $id], $ids)->field('g.*')->find();
++        if (!$root) throw new ValidateException('拼团不存在或无权访问');
++        if ($ids !== null && $allMembers) {
++            $orders = Db::name('store_pink')->alias('p')->leftJoin('store_order o', 'o.id=p.order_id_key')
++                ->where('p.id|p.k_id', $id)->where('p.is_virtual', 0)->field('o.store_id')->select()->toArray();
++            foreach ($orders as $order) if (!in_array((int)($order['store_id'] ?? 0), $ids, true))
++                throw new ValidateException('团内有不在当前权限范围的订单');
++        }
++        return $root;
++    }
++
++    /** Page/count/export all execute this same SQL boundary; no browser-side filtering or count arithmetic. */
++    protected function query(array $filters, ?array $allowed)
++    {
++        $query = Db::name('store_pink')->alias('g')->leftJoin('store_order o', 'o.id=g.order_id_key')
++            ->leftJoin('user u', 'u.uid=g.uid')->leftJoin('system_store s', 's.id=o.store_id')
++            ->leftJoin('store_combination a', 'a.id=g.cid')
++            ->leftJoin('combination_group_origin og', 'og.group_id=g.id')->where('g.k_id', 0)->where('g.is_virtual', 0);
++        if ($allowed !== null) $query->whereIn('o.store_id', $allowed ?: [0])->where('o.store_id', '>', 0);
++        $selected = $filters['store_ids'] ?? [];
++        if (is_string($selected)) $selected = $selected === '' ? [] : explode(',', $selected);
++        if (!is_array($selected)) throw new ValidateException('门店筛选无效');
++        foreach ($selected as $id) if (!ctype_digit((string)$id) || (int)$id <= 0) throw new ValidateException('门店筛选无效');
++        if ($selected) $query->whereIn('o.store_id', array_map('intval', $selected));
++        foreach (['cid' => 'g.cid', 'group_id' => 'g.id'] as $key => $field) {
++            if (($filters[$key] ?? '') !== '') {
++                if (!ctype_digit((string)$filters[$key]) || (int)$filters[$key] <= 0) throw new ValidateException('拼团编号无效');
++                $query->where($field, (int)$filters[$key]);
++            }
++        }
++        if (($filters['status'] ?? '') !== '') {
++            if (!in_array((string)$filters['status'], ['1', '2', '3'], true)) throw new ValidateException('拼团状态无效');
++            $query->where('g.status', (int)$filters['status']);
++        }
++        $keyword = trim((string)($filters['keyword'] ?? ''));
++        if (mb_strlen($keyword) > 80) throw new ValidateException('搜索内容过长');
++        if ($keyword !== '') $query->where(function ($q) use ($keyword) {
++            // Parameter binding protects SQL; escaping wildcards makes names and phones literal search text.
++            $like = '%' . addcslashes($keyword, '\\%_') . '%';
++            $q->whereLike('u.real_name|u.nickname|o.real_name|u.phone|o.user_phone', $like);
++        });
++        $range = (string)($filters['data'] ?? '');
++        if ($range !== '') {
++            if (!preg_match('~^(\d{4}/\d{2}/\d{2})-(\d{4}/\d{2}/\d{2})$~', $range, $match)) throw new ValidateException('时间范围无效');
++            $start = strtotime($match[1] . ' 00:00:00'); $end = strtotime($match[2] . ' 23:59:59');
++            if (!$start || !$end || $start > $end) throw new ValidateException('时间范围无效');
++            $query->whereBetween('g.add_time', [$start, $end]);
++        }
++        return $query;
++    }
++
++    /** Original order snapshots own item names/prices; editable activity names are only a legacy fallback. */
++    public function page(array $filters, array $admin, bool $export = false): array
++    {
++        $allowed = $this->allowedStores($admin);
++        $query = $this->query($filters, $allowed);
++        $count = (clone $query)->count('g.id');
++        $limit = 20; $page = min(max(1, (int)($filters['page'] ?? 1)), max(1, (int)ceil($count / $limit)));
++        if ($export && $count > 10000) throw new ValidateException('导出超过10000条，请缩小筛选范围');
++        $rows = $query->field('g.*,s.name as store_name,u.real_name as user_name,u.phone as member_phone,u.user_type,u.adminid,o.real_name,o.user_phone,a.title,og.activity_name,og.expires_at')
++            ->order('g.id desc')->page($export ? 1 : $page, $export ? max(1, $count) : $limit)->select()->toArray();
++        $groupIds = array_column($rows, 'id'); $orderIds = array_column($rows, 'order_id_key');
++        $counts = $groupIds ? Db::name('store_pink')->alias('p')->join('store_order paid_order', 'paid_order.id=p.order_id_key')
++            ->where(function ($q) use ($groupIds) {
++                $q->whereIn('p.id', $groupIds)->whereOr('p.k_id', 'in', $groupIds);
++            })->where('p.is_virtual', 0)->where('p.is_refund', 0)->where('paid_order.paid', 1)->field('p.id,p.k_id')->select()->toArray() : [];
++        $joined = [];
++        foreach ($counts as $seat) { $id = (int)$seat['k_id'] ?: (int)$seat['id']; $joined[$id] = ($joined[$id] ?? 0) + 1; }
++        $items = $orderIds ? Db::name('store_order_cart_info')->whereIn('oid', $orderIds)->field('oid,cart_info')->select()->toArray() : [];
++        $names = [];
++        foreach ($items as $item) {
++            $snapshot = json_decode((string)$item['cart_info'], true) ?: [];
++            $name = (string)($snapshot['productInfo']['store_name'] ?? $snapshot['productInfo']['title'] ?? '');
++            if ($name !== '') $names[(int)$item['oid']][] = $name;
++        }
++        // The origin evidence distinguishes self-registration from admin-created H5 accounts;
++        // it is existing immutable provenance, not the current spend/newcomer flag.
++        $origins = $rows ? Db::name('cashier_v3_report_member_origin_evidence')->where('tenant_id', '0')
++            ->where('evidence_status', 'PROVEN')
++            ->whereIn('member_id', array_column($rows, 'uid'))->column('evidence_source_type', 'member_id') : [];
++        foreach ($rows as &$row) {
++            $row['leader_name'] = (string)($row['real_name'] ?: ($row['user_name'] ?: $row['nickname']));
++            $row['phone'] = (string)($row['user_phone'] ?: $row['member_phone']);
++            // Channel alone cannot distinguish admin-created H5 users from self-registration: leave ambiguous history explicit.
++            $row['member_type'] = in_array($row['user_type'], ['cashier', 'import'], true) || (int)$row['adminid'] > 0
++                ? '会员' : (($origins[(int)$row['uid']] ?? '') === 'USER_SET_INFO'
++                    || in_array($row['user_type'], ['routine', 'wechat', 'app', 'pc'], true) ? '新客' : '待核实');
++            $row['group_name'] = (string)($row['activity_name'] ?? $row['title'] ?? '');
++            $row['product_name'] = implode('、', array_unique($names[(int)$row['order_id_key']] ?? []));
++            $row['joined_people'] = $joined[(int)$row['id']] ?? 0;
++            $row['deadline'] = $row['expires_at'] !== null ? (int)$row['expires_at'] : ((int)$row['status'] === 2 ? 0 : (int)$row['stop_time']);
++            $row['status_name'] = [1 => '拼团中', 2 => '拼团成功', 3 => '拼团失败'][(int)$row['status']] ?? '未知';
++        }
++        unset($row);
++        $columns = $this->columns();
++        if ($export) return ['header' => array_column($columns, 'title'), 'filekey' => array_column($columns, 'key'),
++            'filename' => '拼团列表', 'export' => array_map(static function ($row) use ($columns) {
++                $row['deadline'] = $row['deadline'] ? date('Y-m-d H:i', $row['deadline']) : '';
++                return array_intersect_key($row, array_fill_keys(array_column($columns, 'key'), true));
++            }, $rows)];
++        return ['list' => $rows, 'count' => $count, 'page' => $page, 'limit' => $limit, 'columns' => $columns,
++            'table_layout' => ['fixed' => true], 'data_as_of' => date('c')];
++    }
++
++    /** Business meanings travel with columns so exports and the visible explanation cannot drift. */
++    public function columns(): array
++    {
++        $specs = [
++            ['门店名称','store_name',125,'团长开团订单的交易门店。'],
++            ['团长','leader_name',80,'开团订单姓名，缺失时显示会员姓名或昵称。'], ['类型','member_type',70,'注册进入的新客户为新客；系统建档或导入为会员；历史来源不明显示待核实。'],
++            ['手机号码','phone',120,'开团订单预留手机，缺失时读取团长档案。'], ['拼团名称','group_name',190,'开团时保存的活动名称，旧记录缺失时读取当前活动名称。'],
++            ['品项名称','product_name',180,'团长原订单保存的品项名称；无快照不按现商品猜测。'], ['拼团单价','price',85,'开团记录保存的单价；展示整元，导出保留原精度。'],
++            ['拼团总数','people',75,'该团成团所需人数。'], ['参加人数','joined_people',80,'当前团内未退款的真实成员数，不含虚拟名额。'],
++            ['到期时间','deadline',140,'开团时保存的到期时间，旧已成团记录缺失时留空。'], ['状态','status_name',90,'拼团业务保存的当前状态。'],
++        ];
++        return array_map(static function ($s) { return ['title'=>$s[0], 'key'=>$s[1], 'minWidth'=>$s[2], 'source'=>$s[3],
++            'fixed' => $s[1] === 'store_name' ? 'left' : '']; }, $specs);
++    }
++}
+--- a/tests/combination-r61/local-acceptance.php
++++ b/tests/combination-r61/local-acceptance.php
+@@ -90,6 +90,8 @@
+         'product_id'=>$root['pid'],'sku_unique'=>$root['cart']['productInfo']['attrInfo']['unique'],
+         'cart_info'=>json_encode($member['cart'])]);
+ }
++// Shared fabricated fixtures are reusable by later regressions without running this file's scenario suite.
++if (getenv('R61_MODE') === 'library') return;
+ if (getenv('R61_MODE') === 'seed-race') {
+     Db::startTrans();try{$refundRace=fixture(6);$completeRace=fixture(5,3,'yue');Db::commit();echo json_encode(compact('refundRace','completeRace'));}
+     catch(\Throwable $e){Db::rollback();throw $e;}exit;
+--- a/tests/combination-group-list/backend.php
++++ b/tests/combination-group-list/backend.php
+@@ -0,0 +1,122 @@
++<?php
++declare(strict_types=1);
++/** Real local MySQL/domain tests; all fixtures roll back and all provider traffic stays in the fake adapter. */
++putenv('R61_MODE=library');
++require dirname(__DIR__) . '/combination-r61/local-acceptance.php';
++use think\facade\Db;
++use app\services\activity\combination\CombinationGroupListServices;
++use app\services\activity\combination\CombinationRefundServices;
++use app\services\activity\combination\CombinationGroupManagementServices;
++
++$admin = ['id'=>1, 'level'=>0, 'admin_type'=>1];
++class WholeGroupGateway extends R61Gateway
++{
++    public static function groupLocal(): self { return new self(['mchntCd'=>'LOCAL_ONLY_R61','mchnt_key'=>'fabricated-local-key']); }
++    public $orders = [];
++    public $failOrder = 0;
++    public $failureState = 'USERPAYING';
++    public function apply(array $receipt): void {
++        if (!$this->requests) check((int)Db::name('store_order')->whereIn('id', $this->orders)->where('refund_status', 1)->count() === count($this->orders),
++            'all real orders frozen before first channel application');
++        $this->original = $receipt['channel_order_no']; parent::apply($receipt);
++    }
++    public function query(array $receipt): array {
++        $this->original = $receipt['channel_order_no'];
++        $this->status = (int)$receipt['order_id'] === $this->failOrder ? $this->failureState : 'SUCCESS';
++        return parent::query($receipt);
++    }
++}
++Db::startTrans();
++try {
++    $reader = new CombinationGroupListServices();
++    $first = fixture(6,3,'yue');
++    Db::name('user')->where('uid',$first['uid'])->update(['bar_code'=>'000023','user_type'=>'import']);
++    $ids = [$first['pinkId']];
++    for ($i=0;$i<24;$i++) {
++        $f=fixture(6,3,'yue'); $ids[]=$f['pinkId'];
++        Db::name('store_pink')->where('id',$f['pinkId'])->update(['cid'=>$first['cid']]);
++    }
++    $filters=['cid'=>$first['cid']];
++    $page=$reader->page($filters,$admin);
++    check($page['count']===25 && count($page['list'])===20 && $page['limit']===20,'group grain page one has 20 of 25');
++    $second=$reader->page($filters+['page'=>2],$admin);
++    check(count($second['list'])===5 && $second['count']===25,'page two keeps complete filtered count');
++    check(!array_intersect(array_column($page['list'],'id'),array_column($second['list'],'id')),'stable group IDs do not overlap pages');
++    $single=$reader->page($filters+['group_id'=>$first['pinkId']],$admin)['list'][0];
++    check(!array_key_exists('member_no',$single) && $single['member_type']==='会员','removed member number is absent while imported identity is retained');
++    check($single['product_name']!=='' && $single['group_name']!=='' && $single['deadline']>0,'original item, group name and expiry snapshots visible');
++    Db::name('user')->where('uid',$first['uid'])->update(['user_type'=>'h5']);
++    seed('cashier_v3_report_member_origin_evidence',['tenant_id'=>'0','member_id'=>$first['uid'],
++        'origin_type'=>'SYSTEM_CREATED','evidence_status'=>'PROVEN','evidence_source_type'=>'USER_SET_INFO',
++        'evidence_source_id'=>(string)$first['uid'],'idempotency_key'=>'LOCAL-GROUP-ORIGIN-'.$first['uid']]);
++    check($reader->page($filters+['group_id'=>$first['pinkId']],$admin)['list'][0]['member_type']==='新客',
++        'self-registered H5 source is proven from creation evidence, not current spending status');
++    $export=$reader->page($filters,$admin,true);
++    check(count($export['export'])===25 && count($export['header'])===11 && !in_array('member_no',$export['filekey'],true),'export covers all matching groups with member-number column removed');
++    $denied=$reader->page($filters,['id'=>2,'level'=>1,'admin_type'=>1]);
++    check($denied['count']===0,'no employee scope cannot expand to all stores');
++    $narrow=$reader->page($filters+['store_ids'=>[Db::name('store_order')->where('id',$first['oid'])->value('store_id')]],$admin);
++    check($narrow['count']===1,'store filtering is authoritative and narrows count with rows');
++    $empty=$reader->page($filters+['keyword'=>'NO_SUCH_LOCAL_MEMBER'], $admin);
++    check($empty['count']===0 && $empty['list']===[],'keyword empty result is an explicit zero');
++    $invalid=false; try {$reader->page(['store_ids'=>'1 OR 1=1'],$admin);} catch (think\exception\ValidateException $e) {$invalid=true;}
++    check($invalid,'malformed narrowing is rejected, never broadened');
++    $range='2000/01/01-2000/01/02';
++    check($reader->page($filters+['data'=>$range],$admin)['count']===0,'opening-time filter executes in SQL');
++    $reflection=new ReflectionMethod($reader,'query');$reflection->setAccessible(true);
++    $sql=$reflection->invoke($reader,$filters,null)->field('g.id')->order('g.id desc')->limit(20)->fetchSql()->select();
++    $plan=Db::query('EXPLAIN '.$sql);
++    check(count($plan)>0,'actual filtered MySQL query has an executable plan');
++
++    $leader=fixture(6,3); $member=fixture(6,3); joinFixture($leader,$member);
++    (new CombinationGroupManagementServices())->complete($leader['pinkId'],1);
++    Db::name('store_order_cart_info')->where('oid',$member['oid'])->update(['write_surplus_times'=>0]);
++    // R61's factory returns its own class; construct the group-aware adapter with fabricated credentials explicitly.
++    $gateway=WholeGroupGateway::groupLocal();
++    $service=new CombinationRefundServices($gateway);
++    $blocked=false; try {$service->refundGroup($leader['pinkId'],'本地整团拦截验收',$admin);} catch (think\exception\ValidateException $e) {$blocked=true;}
++    check($blocked && count($gateway->requests)===0,'one used member prevents EVERY channel request');
++    check((int)Db::name('combination_order_refund')->whereIn('order_id',[$leader['oid'],$member['oid']])->count()===0,'failed whole preflight rolls back earlier member receipts');
++    check((int)Db::name('store_order')->whereIn('id',[$leader['oid'],$member['oid']])->where('refund_status',0)->count()===2,'failed whole preflight restores both order eligibility states');
++    Db::name('store_order_cart_info')->where('oid',$member['oid'])->update(['write_surplus_times'=>1]);
++    $scopeClass=app\services\organization\EmployeeDataScopeServices::class;
++    $originalScope=app()->make($scopeClass);
++    $restricted=new class extends app\services\organization\EmployeeDataScopeServices {
++        public $stores=[];
++        public function resolveEffectiveStoreIds(int $employeeId,int $contextStoreId=0,array $adminInfo=[]) { return $this->stores; }
++    };
++    $restricted->stores=[(int)Db::name('store_order')->where('id',$leader['oid'])->value('store_id')];
++    app()->instance($scopeClass,$restricted);
++    try {
++        $blocked=false;try {$service->refundGroup($leader['pinkId'],'越权整团退款拦截',$admin);} catch(think\exception\ValidateException $e) {$blocked=true;}
++        check($blocked && !$gateway->requests,'leader-store access cannot refund an unauthorized member store');
++    } finally { app()->instance($scopeClass,$originalScope); }
++    $gateway->orders=[$leader['oid'],$member['oid']]; $gateway->failOrder=$member['oid'];
++    $result=$service->refundGroup($leader['pinkId'],'本地整团退款验收',$admin);
++    check($result['state']==='partial' && $result['success_count']===1 && $result['pending_count']===1,'mixed success and pending are never reported as whole success');
++    check(count($result['results'])===2,'virtual seats are excluded from refund money');
++    $applications=count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}));
++    $gateway->failOrder=0;
++    $result=$service->refundGroup($leader['pinkId'],'查询整团退款',$admin,'query');
++    check($result['state']==='success' && $result['success_count']===2,'query closes the remaining original receipt');
++    check(count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}))===$applications,'query and replay never apply a second channel refund');
++    $before=count($gateway->requests);$again=$service->refundGroup($leader['pinkId'],'重复整团退款',$admin);
++    check($again['state']==='success' && count($gateway->requests)===$before,'whole success replay is idempotent');
++    check((int)Db::name('store_order_cart_info')->whereIn('oid',[$leader['oid'],$member['oid']])->sum('write_surplus_times')===0,'all real original rights revoked through terminal refund');
++    $fresh=fixture(6,2,'yue'); (new CombinationGroupManagementServices())->complete($fresh['pinkId'],1);
++    $query=$service->refundGroup($fresh['pinkId'],'只查询不发起',$admin,'query');
++    check($query['results'][0]['state']==='not_started' && !Db::name('combination_order_refund')->where('order_id',$fresh['oid'])->count(),'query cannot start an unrequested refund');
++    $retryLeader=fixture(6,2);$retryMember=fixture(6,2);joinFixture($retryLeader,$retryMember);
++    (new CombinationGroupManagementServices())->complete($retryLeader['pinkId'],1);
++    $retryGateway=WholeGroupGateway::groupLocal();$retryGateway->orders=[$retryLeader['oid'],$retryMember['oid']];
++    $retryGateway->failOrder=$retryMember['oid'];$retryGateway->failureState='PAYERROR';
++    $retryService=new CombinationRefundServices($retryGateway);
++    $partial=$retryService->refundGroup($retryLeader['pinkId'],'本地失败重试',$admin);
++    check($partial['success_count']===1 && $partial['failed_count']===1,'signed definitive failure remains separate from succeeded member');
++    $successfulNo=$partial['results'][0]['refund_no'];$failedNo=$partial['results'][1]['refund_no'];
++    $retryGateway->failOrder=0;$retryGateway->orders=[$retryMember['oid']];$retryGateway->requests=[];
++    $retried=$retryService->refundGroup($retryLeader['pinkId'],'仅重试失败成员',$admin,'retry');
++    check($retried['state']==='success' && $retried['results'][0]['refund_no']===$successfulNo
++        && $retried['results'][1]['refund_no']!==$failedNo,'explicit retry only replaces definitively failed receipt, preserving prior success');
++    echo "COMBINATION_GROUP_LIST_BACKEND_PASS\n";
++} finally { Db::rollback(); }
+--- a/tests/combination-group-list/frontend.cjs
++++ b/tests/combination-group-list/frontend.cjs
+@@ -0,0 +1,61 @@
++/* Run in the existing admin container. Exercise the real SFC methods with controlled API promises. */
++const fs = require('fs');
++const vm = require('vm');
++const assert = require('assert');
++const compiler = require('/app/node_modules/vue-template-compiler');
++const source = fs.readFileSync('/app/src/pages/marketing/storeCombination/combinaList.vue', 'utf8');
++const sfc = compiler.parseComponent(source);
++assert.deepStrictEqual(compiler.compile(sfc.template.content).errors, []);
++const calls = [], refunds = [], exportCalls = [], warnings = [];
++let response = { data: { list: [{ id: 1, status: 2 }], count: 25, page: 1, table_layout: { fixed: true },
++  columns: [{ title: '门店名称', key: 'store_name', minWidth: 120, fixed: 'left' }] } };
++let deferred;
++const context = { module: { exports: {} }, OrganizationStoreScopePicker: {},
++  mapState: () => ({}), formatBusinessMoney: String, formatDate: String,
++  combineListApi: (payload) => { calls.push(JSON.parse(JSON.stringify(payload))); return deferred || Promise.resolve(response); },
++  orderPinkListApi: () => Promise.resolve({ data: { list: [] } }),
++  combinationParticipantRefundApi: () => { throw Error('unexpected single-member refund'); },
++  combinationCompleteApi: () => { throw Error('unexpected force-completion'); },
++  combinationWholeRefundApi: (id, payload) => { refunds.push({ id, payload }); return Promise.resolve({ data: { state: 'partial', results: [] } }); },
++  exportExcel: (...args) => exportCalls.push(args),
++};
++vm.runInNewContext(sfc.script.content.replace(/^\s*import .*?;\s*$/gm, '').replace('export default', 'module.exports ='), context);
++const component = context.module.exports;
++const state = component.data();
++for (const [key, method] of Object.entries(component.methods)) state[key] = method.bind(state);
++state.$Message = { warning: msg => warnings.push(msg), error: msg => warnings.push(msg) };
++state.$Modal = { confirm: ({ onOk }) => onOk() };
++state.appliedFilters = state.snapshotFilters();
++(async () => {
++  await state.getList();
++  assert.equal(state.total, 25);
++  assert.equal(state.columns1[0].fixed, 'left');
++  state.formValidate.keyword = 'UNSUBMITTED';
++  response = { data: { header: ['门店名称'], filekey: ['store_name'], filename: '拼团列表', export: [{ store_name: 'LOCAL' }] } };
++  await state.exportList();
++  assert.equal(calls[calls.length - 1].keyword, '');
++  assert.equal(exportCalls[0][3].length, 1);
++  let resolveOld;
++  deferred = new Promise(resolve => { resolveOld = resolve; });
++  const old = state.getList();
++  deferred = null;
++  response = { data: { list: [], count: 0, page: 1, columns: [] } };
++  state.userSearchs();
++  await Promise.resolve(); await Promise.resolve();
++  resolveOld({ data: { list: [{ id: 99 }], count: 99, page: 1, columns: [] } });
++  await old;
++  assert.equal(state.total, 0, 'late previous request cannot replace new search');
++  assert.equal(calls[calls.length - 1].keyword, 'UNSUBMITTED');
++  state.openGroupRefund({ id: 42, status: 2 });
++  state.confirmGroupRefund();
++  assert.equal(refunds.length, 0, 'reason is required before a financial command');
++  state.groupRefundReason = ' 本地测试原因 ';
++  state.confirmGroupRefund();
++  await Promise.resolve(); await Promise.resolve();
++  assert.equal(refunds[0].id, 42);
++  assert.deepStrictEqual(Object.keys(refunds[0].payload).sort(), ['action', 'reason']);
++  assert.equal(refunds[0].payload.reason, '本地测试原因');
++  assert(source.includes('rows.status !== 2 && row.refund_action'), 'completed groups do not expose single-member refund');
++  assert(source.includes('combination-pagination') && source.includes('min-height: 0'), 'bounded scrolling and footer retained');
++  console.log('COMBINATION_GROUP_LIST_FRONTEND_PASS');
++})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -65,9 +65,94 @@ class CombinationRefundServices
     {
         $reason = trim($reason);
         if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
+        $claim = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId) {
+            return $this->claimRefund($orderId, $reason, $operatorId, $retry, $kickGroupId);
+        });
+        return $this->settleClaim($claim, $operatorId);
+    }
+
+    /**
+     * A completed group refunds all real orders. Preflight/receipt reservation is atomic;
+     * channel settlement is deliberately per order and may remain partial/unknown.
+     * Query never starts a missing refund, and explicit retry alone replaces a failed receipt.
+     */
+    public function refundGroup(int $groupId, string $reason, array $admin, string $action = 'start'): array
+    {
+        $reason = trim($reason);
+        if (!in_array($action, ['start', 'query', 'retry'], true)) throw new ValidateException('整团退款操作无效');
+        if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
+        (new CombinationGroupListServices())->assertManagement($admin);
+        $claims = Db::transaction(function () use ($groupId, $reason, $admin, $action) {
+            (new CombinationGroupListServices())->assertGroup($groupId, $admin, true);
+            $root = Db::name('store_pink')->where('id', $groupId)->lock(true)->find();
+            if (!$root || (int)$root['k_id'] !== 0 || (int)$root['status'] !== 2)
+                throw new ValidateException('仅拼团成功后可整团退款');
+            $members = Db::name('store_pink')->where('id|k_id', $groupId)->where('is_virtual', 0)
+                ->where('uid', '>', 0)->order('order_id_key')->lock(true)->select()->toArray();
+            if (!$members || count($members) > 1000) throw new ValidateException('整团成员数量异常');
+            $claims = []; $seen = [];
+            foreach ($members as $member) {
+                $id = (int)$member['order_id_key'];
+                if ($id <= 0 || isset($seen[$id])) throw new ValidateException('团内订单凭据异常，整团未发起退款');
+                $seen[$id] = true;
+                $order = Db::name('store_order')->where('id', $id)->lock(true)->find();
+                if (!$order || (int)$order['uid'] !== (int)$member['uid']) throw new ValidateException('团内订单身份异常');
+                $receipt = Db::name('combination_order_refund')->where('order_id', $id)->lock(true)->find();
+                if ((int)$order['refund_status'] === 2 && (!$receipt || $receipt['state'] === 'success')) {
+                    if (!$receipt && bccomp((string)$order['refund_price'], (string)$order['pay_price'], 2) !== 0)
+                        throw new ValidateException('团内有历史部分退款，请先核实，整团未发起新退款');
+                    $claims[] = ['receipt' => $receipt ?: ['order_id' => $id, 'state' => 'success',
+                        'amount_cents' => (int)bcmul((string)$order['refund_price'], '100', 0)], 'send' => false, 'claimed' => false];
+                    continue;
+                }
+                if ($receipt && $receipt['state'] === 'success') throw new ValidateException('团内退款账务结果待核对，整团未发起新退款');
+                if ($action === 'query' && !$receipt) {
+                    $claims[] = ['receipt' => ['order_id' => $id, 'state' => 'not_started'], 'send' => false, 'claimed' => false];
+                    continue;
+                }
+                try {
+                    // claimRefund locks rights and validates original payment proof before preparing its receipt.
+                    // Any later member failure rolls back ALL earlier reservations, before any network call.
+                    $claims[] = $this->claimRefund($id, $reason, (int)$admin['id'], $action === 'retry', 0);
+                } catch (ValidateException $error) {
+                    throw new ValidateException('订单' . $order['order_id'] . '：' . $error->getMessage() . '；整团未发起新退款');
+                }
+            }
+            // Later members wait while earlier external calls finish. Keep their reservations alive
+            // for the bounded batch; settled receipts release their own leases in settleClaim's finally.
+            foreach ($claims as $claim) if ($claim['claimed']) {
+                Db::name('combination_order_refund')->where('order_id', $claim['receipt']['order_id'])
+                    ->where('refund_no', $claim['receipt']['refund_no'])
+                    ->update(['lease_until' => time() + 90 + count($claims) * 120]);
+            }
+            return $claims;
+        });
+        $results = [];
+        foreach ($claims as $claim) {
+            try { $result = $this->settleClaim($claim, (int)$admin['id']); }
+            catch (\Throwable $error) {
+                // A single closing failure must not abandon the remaining already-reserved orders.
+                \think\facade\Log::warning('整团退款待查询 gid=' . $groupId . ' oid=' . $claim['receipt']['order_id']);
+                $result = ['state' => 'pending', 'message' => '该笔结果待查询', 'refund_no' => $claim['receipt']['refund_no'] ?? ''];
+            }
+            $result['order_id_key'] = (int)$claim['receipt']['order_id'];
+            $results[] = $result;
+        }
+        $states = array_column($results, 'state');
+        $success = count(array_filter($states, static function ($state) { return $state === 'success'; }));
+        $failed = count(array_filter($states, static function ($state) { return $state === 'failed'; }));
+        return ['group_id' => $groupId, 'results' => $results, 'success_count' => $success, 'failed_count' => $failed,
+            'pending_count' => count($states) - $success - $failed,
+            'state' => $success === count($states) ? 'success' : 'partial',
+            'message' => $success === count($states) ? '整团退款成功' : '整团退款尚未全部完成，请查看逐笔结果'];
+    }
+
+    /** Caller owns the transaction. Group requests claim every order before ANY channel call is possible. */
+    private function claimRefund(int $orderId, string $reason, int $operatorId, bool $retry, int $kickGroupId): array
+    {
         $send = false;
         $claimed = false;
-        $receipt = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
+        $claim = function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
             $memberIdentity = Db::name('store_pink')->where('order_id_key', $orderId)->find();
             if (!$memberIdentity) throw new ValidateException('拼团订单不存在');
             $rootId = (int)$memberIdentity['k_id'] ?: (int)$memberIdentity['id'];
@@ -110,7 +195,16 @@ class CombinationRefundServices
             }
             $claimed = true;
             return $row;
-        });
+        };
+        $receipt = $claim();
+        return compact('receipt', 'send', 'claimed');
+    }
+
+    /** External calls only run after the caller's entire reservation transaction has committed. */
+    private function settleClaim(array $claim, int $operatorId): array
+    {
+        $receipt = $claim['receipt']; $send = $claim['send']; $claimed = $claim['claimed'];
+        $orderId = (int)$receipt['order_id'];
         if (!$claimed) return $this->present($receipt);
         try {
             if ($send) {

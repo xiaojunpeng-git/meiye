@@ -941,6 +941,8 @@ Route::group('adminapi', function () {
         Route::post('combination/order_pink/:id/complete', 'v1.marketing.combination.StoreCombination/completeGroup')->option(['real_name' => '拼团补齐虚拟名额成团']);
         // Uses the existing authenticated group-record access, without a separate refund capability.
         Route::post('combination/order_pink/:id/refund', 'v1.marketing.combination.StoreCombination/refundParticipant')->option(['real_name' => '拼团参与订单退款']);
+        // Same authenticated group-management surface; all members are reloaded and permission-checked server-side.
+        Route::post('combination/order_pink/:id/refund_group', 'v1.marketing.combination.StoreCombination/refundWholeGroup')->option(['real_name' => '成团后整团退款']);
         //拼团人列表
         Route::get('combination/order_pink/:id', 'v1.marketing.combination.StoreCombination/order_pink')->option(['real_name' => '拼团人列表']);
         //拼团统计

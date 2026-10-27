@@ -1,79 +1,52 @@
 <template>
 <!-- 营销-拼团列表 -->
-    <div class="article-manager">
-        <Card :bordered="false" dis-hover class="ivu-mt" :padding= "0">
-            <div class="new_card_pd">
-                <!-- 查询条件 -->
-            <Form ref="formValidate" :model="formValidate"  inline :label-width="labelWidth" :label-position="labelPosition" @submit.native.prevent>
-                <FormItem label="时间选择：">
-                    <DatePicker :editable="false" @on-change="onchangeTime" :value="timeVal"  format="yyyy/MM/dd" type="daterange" placement="bottom-start" placeholder="自定义时间" 
-                    class="input-add"
-                    :options="options"></DatePicker>
-                </FormItem>
-                <FormItem label="拼团状态：">
-                    <Select v-model="formValidate.status" placeholder="请选择" clearable class="input-add mr14" @on-change="userSearchs">
-                        <Option :value="1">进行中</Option>
-                        <Option :value="2">已完成</Option>
-                        <Option :value="3">未完成</Option>
-                    </Select>
-                </FormItem>
-                <FormItem label="拼团商品ID：">
-                    <Input v-model.trim="formValidate.cid" class="input-add" clearable placeholder="输入拼团商品ID" @on-enter="userSearchs" />
-                </FormItem>
-                <FormItem label="拼团编号：">
-                    <Input v-model.trim="formValidate.group_id" class="input-add" clearable placeholder="输入具体团编号" @on-enter="userSearchs" />
-                </FormItem>
-                <FormItem>
-                    <Button type="primary" @click="userSearchs()">查询</Button>
-                </FormItem>
+    <div class="article-manager combination-group-list">
+        <Card :bordered="false" dis-hover :padding="20" class="combination-filters">
+            <Form :model="formValidate" :label-width="76" label-position="right" inline class="combination-query-form" @submit.native.prevent="userSearchs">
+                <FormItem label="选择门店：" class="query-field query-store"><OrganizationStoreScopePicker v-model="formValidate.store_ids" :load-scope="loadScope" /></FormItem>
+                <FormItem label="选择拼团：" class="query-field query-activity"><Select v-model="formValidate.cid" clearable filterable placeholder="全部拼团">
+                    <Option v-for="activity in activities" :key="activity.cid" :value="activity.cid">{{ activity.title || ('拼团' + activity.cid) }}</Option>
+                </Select></FormItem>
+                <FormItem label="拼团状态：" class="query-field query-status"><Select v-model="formValidate.status" clearable placeholder="全部状态">
+                    <Option :value="1">拼团中</Option><Option :value="2">拼团成功</Option><Option :value="3">拼团失败</Option>
+                </Select></FormItem>
+                <FormItem label="会员搜索：" class="query-field query-member"><Input v-model.trim="formValidate.keyword" clearable placeholder="输入会员姓名或手机号" @on-enter="userSearchs" /></FormItem>
+                <div class="combination-search-actions"><Button type="primary" @click="userSearchs">搜索</Button><Button @click="resetSearch">重置</Button><Button :loading="exporting" :disabled="loading || !total" @click="exportList"><Icon type="ios-download-outline" /> 导出</Button></div>
             </Form>
-            </div>
         </Card>
-        <!-- 参与人数组件 -->
-        <cards-data :cardLists="cardLists" v-if="cardLists.length>=0"></cards-data>
-        <Card :bordered="false" dis-hover class="ive-mt">
-            <!-- 拼团列表-表格 -->
-            <Table :columns="columns1" :data="tableList" :loading="loading" highlight-row
-                   no-userFrom-text="暂无数据"
-                   no-filtered-userFrom-text="暂无筛选结果">
-                <template slot-scope="{ row }" slot="avatar">
-                    <viewer>
-                        <div class="tabBox_img">
-                            <img v-lazy="row.avatar">
-                        </div>
-                    </viewer>
-                </template>
-                <template slot-scope="{ row }" slot="nickname">
-                    <span> {{row.nickname + ' / ' + row.uid}}</span>
-										<span style="color: #ed4014;" v-if="row.delete_time != null"> (已注销)</span>
-                </template>
-                <template slot-scope="{ row }" slot="title">
-                    <Tooltip max-width="200" placement="bottom">
-                        <span class="line2">{{row.title + ' / ' + row.cid}}</span>
-                        <p slot="content">{{row.title + ' / ' + row.cid}}</p>
-                    </Tooltip>
-                </template>
-                <template slot-scope="{ row }" slot="add_time">
-                    <span> {{row.add_time | formatDate}}</span>
-                </template>
-                <template slot-scope="{ row }" slot="stop_time">
-                    <span> {{row.stop_time | formatDate}}</span>
-                </template>
-                <template slot-scope="{ row }" slot="status">
-                    <Tag color="green" size="medium" v-show="row.status === 1">进行中</Tag>
-                    <Tag color="cyan" size="medium" v-show="row.status === 2">已完成</Tag>
-                    <Tag color="volcano" size="medium" v-show="row.status === 3">未完成</Tag>
-                </template>
-                <template slot-scope="{ row }" slot="action">
-                    <a @click="Info(row)" >查看详情</a>
-                    <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
-                </template>
-            </Table>
-            <div class="acea-row row-right page">
-                <Page :total="total" :current="formValidate.page" show-elevator show-total @on-change="pageChange"
-                      :page-size="formValidate.limit"/>
+        <Card :bordered="false" dis-hover :padding="20" class="combination-results">
+            <div v-if="listError" class="combination-list-error">{{ listError }} <Button size="small" @click="getList">重试</Button></div>
+            <div ref="results" class="combination-table-scroll">
+                <Table :columns="columns1" :data="tableList" :loading="loading" :max-height="tableFixed ? tableHeight : undefined" highlight-row no-data-text="暂无拼团记录">
+                    <template slot-scope="{ row }" slot="price">{{ money(row.price) }}</template>
+                    <template slot-scope="{ row }" slot="deadline">{{ row.deadline | formatDate }}</template>
+                    <template slot-scope="{ row }" slot="status_name"><span :class="'combination-status-' + row.status">{{ row.status_name }}</span></template>
+                    <template slot-scope="{ row }" slot="action">
+                        <a @click="Info(row)">查看详情</a>
+                        <a v-if="row.status === 1" class="combination-action" @click="completeGroup(row)">立即成团</a>
+                        <a v-if="row.status === 2" class="combination-action" @click="openGroupRefund(row)">整团退款</a>
+                    </template>
+                </Table>
             </div>
+            <footer class="combination-pagination">
+                <span>共 {{ total }} 条 · 每页 20 条 · 第 {{ formValidate.page }} / {{ totalPages }} 页</span>
+                <Button size="small" :disabled="loading || formValidate.page <= 1" @click="pageChange(formValidate.page - 1)">上一页</Button>
+                <Button size="small" :disabled="loading || formValidate.page >= totalPages" @click="pageChange(formValidate.page + 1)">下一页</Button>
+            </footer>
         </Card>
+        <Modal v-model="groupRefundVisible" title="成团后整团退款" width="850" footer-hide :mask-closable="false">
+            <p>团编号：{{ refundGroup.id }}。全部真实成员校验通过后，按各自实付金额原路退款；虚拟名额不退款。</p>
+            <p style="margin:10px 0">只要一人不符合条件，就不发起任何新退款。渠道结果可能分批返回，已成功退款不会重复退。</p>
+            <Table :columns="groupMemberColumns" :data="groupRefundMembers" :loading="groupMembersLoading" size="small" :max-height="240" style="margin:12px 0" />
+            <Input v-model="groupRefundReason" type="textarea" :maxlength="300" placeholder="请输入整团退款原因" />
+            <div style="margin:12px 0;display:flex;gap:10px">
+                <Button type="error" :loading="groupRefundBusy" :disabled="groupMembersLoading || !groupRefundMembers.length" @click="confirmGroupRefund">确认整团退款</Button>
+                <Button :disabled="groupRefundBusy" @click="runGroupRefund('query')">查询整团退款结果</Button>
+                <Button v-if="groupRefundResult.failed_count" :disabled="groupRefundBusy" @click="confirmGroupRefund('retry')">重试失败退款</Button>
+            </div>
+            <p v-if="groupRefundResult.message">{{ groupRefundResult.message }}：成功 {{ groupRefundResult.success_count }} 笔，失败 {{ groupRefundResult.failed_count }} 笔，待处理 {{ groupRefundResult.pending_count }} 笔</p>
+            <Table :columns="refundResultColumns" :data="groupRefundResult.results || []" size="small" :max-height="350" />
+        </Modal>
 
         <!-- 详情模态框-->
         <Modal v-model="modals" class="combination-participants-modal" scrollable footer-hide closable title="查看详情" :mask-closable="false" width="1150">
@@ -94,7 +67,7 @@
                 <template slot-scope="{ row, index }" slot="action">
                     <div>{{ row.refund_message || (row.is_refund ? '已退款' : '未退款') }}</div>
                     <!-- Amount comes from actual paid money. A pending request can only query its original receipt. -->
-                    <Button v-if="row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
+                    <Button v-if="rows.status !== 2 && row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
                         @click="refundParticipant(row)">{{ row.refund_action === 'query' ? '查询退款结果' : (row.refund_action === 'retry' ? '重试退款' : '退款') }}</Button>
                     <Button v-if="rows.status === 1 && row.k_id > 0 && !row.is_virtual && !row.is_refund && row.refund_action === 'refund'"
                         size="small" style="margin-left:6px" @click="refundParticipant(row, true)">踢出</Button>
@@ -107,11 +80,11 @@
 
 <script>
     import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
-    import cardsData from '@/components/cards/cards';
-    import { mapState } from 'vuex';
+    import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
+    import exportExcel from '@/utils/newToExcel.js';
     import { formatDate } from '@/utils/validate';
-    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi } from '@/api/marketing';
-    import timeOptions from "@/utils/timeOptions";
+    import { combineListApi, orderPinkListApi, combinationParticipantRefundApi, combinationCompleteApi, combinationWholeRefundApi } from '@/api/marketing';
+
     export default {
         name: 'combinalist',
         filters: {
@@ -122,80 +95,39 @@
                 }
             }
         },
-        components: { cardsData },
+        components: { OrganizationStoreScopePicker },
         data () {
             return {
-                cardLists: [],
+                activities: [],
+                appliedFilters: {}, exporting: false, listError: '', tableHeight: 400, tableFixed: false, requestSequence: 0,
+                groupRefundVisible: false, groupRefundBusy: false, groupRefundReason: '', refundGroup: {}, groupRefundResult: {},
+                groupRefundMembers: [], groupMembersLoading: false,
+                groupMemberColumns: [
+                    { title: '成员', key: 'nickname', width: 110 }, { title: '订单号', key: 'order_id', minWidth: 190 },
+                    { title: '原单实付', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.paid_amount)) },
+                    { title: '当前退款情况', minWidth: 230, render: (h, { row }) => h('span', row.refund_block_reason || row.refund_message || '待校验') }
+                ],
+                refundResultColumns: [
+                    { title: '订单ID', key: 'order_id_key', width: 100 },
+                    { title: '退款状态', key: 'message', minWidth: 180 },
+                    { title: '退款金额', key: 'amount', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.amount)) },
+                    { title: '退款单号', key: 'refund_no', minWidth: 220 }
+                ],
                 refundBusy: 0,
                 modals: false,
-                options: timeOptions,
-                grid: {
-                    xl: 7,
-                    lg: 10,
-                    md: 12,
-                    sm: 12,
-                    xs: 24
-                },
                 loading: false,
                 formValidate: {
                     status: '',
                     data: '',
                     cid: '',
                     group_id: '',
+                    store_ids: [], keyword: '',
                     page: 1,
-                    limit: 15
+                    limit: 20
                 },
-                columns1: [
-                    {
-                        title: '头像',
-                        slot: 'avatar',
-                        minWidth: 150
-                    },
-                    {
-                        title: '开团团长',
-                        slot: 'nickname',
-                        minWidth: 170
-                    },
-                    {
-                        title: '开团时间',
-                        slot: 'add_time',
-                        minWidth: 150
-                    },
-                    {
-                        title: '拼团商品',
-                        slot: 'title',
-                        minWidth: 400
-                    },
-                    {
-                        title: '几人团',
-                        key: 'people',
-                        minWidth: 120
-                    },
-                    {
-                        title: '几人参加',
-                        key: 'count_people',
-                        minWidth: 100
-                    },
-                    {
-                        title: '结束时间',
-                        slot: 'stop_time',
-                        minWidth: 150
-                    },
-                    {
-                        title: '状态',
-                        slot: 'status',
-                        minWidth: 100
-                    },
-                    {
-                        title: '操作',
-                        slot: 'action',
-                        fixed: 'right',
-                        minWidth: 170
-                    }
-                ],
+                columns1: [],
                 tableList: [],
                 total: 0,
-                timeVal: [],
                 loading2: false,
                 tabList3: [],
                 columns2: [
@@ -241,26 +173,78 @@
             }
         },
         computed: {
-            ...mapState('admin/layout', [
-                'isMobile'
-            ]),
-            labelWidth () {
-                return this.isMobile ? undefined : 96;
-            },
-            labelPosition () {
-                return this.isMobile ? 'top' : 'right';
-            }
+            totalPages() { return Math.max(1, Math.ceil(this.total / 20)); },
+
         },
         created () {
+            this.appliedFilters = this.snapshotFilters();
             this.getList();
-            this.getStatistics();
+            this.loadScope().catch(error => this.$Message.error(error.msg || '筛选项读取失败'));
+        },
+        mounted() {
+            // Measure only this result box: table body scrolls while filters and pagination stay reachable.
+            this.resizeObserver = new ResizeObserver(() => this.fitTable());
+            this.resizeObserver.observe(this.$el);
+            this.resizeObserver.observe(this.$el.querySelector('.combination-filters'));
+            this.fitTable();
+        },
+        beforeDestroy() {
+            this.requestSequence++;
+            if (this.resizeObserver) this.resizeObserver.disconnect();
         },
         methods: {
+            money: formatBusinessMoney,
+            // Cap long lists at the available viewport; short lists keep their natural height like other platform tables.
+            fitTable() {
+                const results = this.$refs.results;
+                if (!results) return;
+                const bottom = Math.min(window.innerHeight, this.$el.getBoundingClientRect().bottom);
+                this.tableHeight = Math.max(180, Math.floor(bottom - results.getBoundingClientRect().top - 82));
+            },
+            snapshotFilters() { return { ...this.formValidate, store_ids: [...this.formValidate.store_ids] }; },
+            loadScope() {
+                return combineListApi({ view: 'options' }).then(res => { this.activities = res.data.activities; return res.data; });
+            },
+            resetSearch() {
+                this.formValidate = { status: '', data: '', cid: '', group_id: '', store_ids: [], keyword: '', page: 1, limit: 20 };
+                this.userSearchs();
+            },
+            // Export uses submitted conditions, never an unsent filter draft or only the current page.
+            exportList() {
+                this.exporting = true;
+                return combineListApi({ ...this.appliedFilters, view: 'export' }).then(({ data }) => {
+                    exportExcel(data.header, data.filekey, data.filename, data.export);
+                }).catch(error => this.$Message.error(error.msg || '导出失败')).finally(() => { this.exporting = false; });
+            },
+            openGroupRefund(row) {
+                if (this.groupRefundBusy) return this.$Message.warning('当前整团退款正在处理，请等待结果后再切换');
+                this.refundGroup = row; this.groupRefundReason = ''; this.groupRefundResult = {}; this.groupRefundVisible = true;
+                this.groupRefundMembers = []; this.groupMembersLoading = true;
+                // Preview exact original orders before the confirmation; final authority remains the group transaction.
+                return orderPinkListApi(row.id).then(({ data }) => {
+                    if (this.refundGroup.id === row.id) this.groupRefundMembers = data.list.filter(member => !member.is_virtual && member.uid > 0);
+                }).catch(error => this.$Message.error(error.msg || '团成员读取失败'))
+                    .finally(() => { if (this.refundGroup.id === row.id) this.groupMembersLoading = false; });
+            },
+            confirmGroupRefund(action = 'start') {
+                if (action !== 'retry') action = 'start';
+                if (!this.groupRefundReason.trim()) return this.$Message.warning('请填写整团退款原因');
+                this.$Modal.confirm({ title: action === 'retry' ? '重试失败退款' : '确认整团退款',
+                    content: '将校验并退款给本团全部真实付款成员。确认继续？', onOk: () => this.runGroupRefund(action) });
+            },
+            runGroupRefund(action) {
+                if (this.groupRefundBusy) return;
+                this.groupRefundBusy = true;
+                return combinationWholeRefundApi(this.refundGroup.id, { action, reason: this.groupRefundReason.trim() || '查询整团退款' })
+                    .then(({ data }) => { this.groupRefundResult = data; this.getList(); })
+                    .catch(error => this.$Message.error(error.msg || '整团退款处理失败'))
+                    .finally(() => { this.groupRefundBusy = false; });
+            },
             // Completion fills only missing seats and leaves real participants' paid orders untouched.
             completeGroup(row) {
                 this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
                     onOk: () => combinationCompleteApi(row.id).then(res => {
-                        this.$Message.success(res.data.message); this.getList(); this.getStatistics();
+                        this.$Message.success(res.data.message); this.getList();
                     }).catch(error => this.$Message.error(error.msg || '成团失败')) });
             },
             // Query/retry states are server-derived; the browser never supplies a refund amount or provider identity.
@@ -272,7 +256,7 @@
                         retry: row.refund_action !== 'query', action: kick ? 'kick' : 'refund'
                     }).then(res => {
                         this.$Message.info(res.data.message);
-                        this.getList(); this.getStatistics();
+                        this.getList();
                         this.Info({ ...this.rows, id: res.data.group_id || this.rows.id });
                     }).catch(error => this.$Message.error(error.msg || '退款处理失败'))
                       .finally(() => { this.refundBusy = 0; });
@@ -287,87 +271,73 @@
                     onOk: () => { if (!reason.trim()) this.$Message.warning('请填写退款原因'); else return run(reason.trim()); }
                 });
             },
-            // 拼团统计
-            getStatistics () {
-                statisticsApi().then(async res => {
-                    let data = res.data
-                    this.cardLists = data.res;
-                }).catch(res => {
-                    this.$Message.error(res.msg);
-                })
-            },
             // 查看详情
             Info (row) {
                 this.modals = true;
-                this.rows = row;
+                this.rows = row; this.tabList3 = []; this.loading2 = true;
                 orderPinkListApi(row.id).then(async res => {
                     let data = res.data
                     this.tabList3 = data.list;
-                    this.loading = false;
+                    this.loading2 = false;
                 }).catch(res => {
-                    this.loading = false;
+                    this.loading2 = false;
                     this.$Message.error(res.msg);
                 })
             },
-            // 具体日期
-            onchangeTime (e) {
-                this.timeVal = e
-                if(this.timeVal[0]===''){
-                    this.formValidate.data = '';
-                }else {
-                    this.formValidate.data = this.timeVal.join('-');
-                }
-                this.formValidate.page = 1;
-				this.getList();
+            getList() {
+                const sequence = ++this.requestSequence;
+                this.loading = true; this.listError = '';
+                return combineListApi(this.appliedFilters).then(({ data }) => {
+                    if (sequence !== this.requestSequence) return;
+                    this.tableList = data.list; this.total = data.count; this.formValidate.page = data.page;
+                    this.appliedFilters.page = data.page;
+                    this.tableFixed = !!(data.table_layout && data.table_layout.fixed);
+                    this.columns1 = data.columns.map(column => ({ ...column,
+                        fixed: this.tableFixed ? column.fixed : undefined,
+                        ...( ['price', 'deadline', 'status_name'].includes(column.key) ? { slot: column.key } : {}),
+                        tooltip: true
+                    })).concat([{ title: '操作', slot: 'action', fixed: this.tableFixed ? 'right' : undefined, width: 156 }]);
+                }).catch(error => {
+                    if (sequence !== this.requestSequence) return;
+                    this.tableList = []; this.total = 0; this.listError = error.msg || '拼团列表加载失败';
+                }).finally(() => { if (sequence === this.requestSequence) this.loading = false; });
             },
-            // 选择时间
-            selectChange (tab) {
-                this.formValidate.page = 1;
-                this.formValidate.data = tab;
-                this.timeVal = [];
-                this.getList();
-            },
-            // 列表
-            getList () {
-                this.loading = true;
-                this.formValidate.status = this.formValidate.status || '';
-                combineListApi(this.formValidate).then(async res => {
-                    let data = res.data
-                    this.tableList = data.list;
-                    this.total = res.data.count;
-                    this.loading = false;
-                }).catch(res => {
-                    this.loading = false;
-                    this.$Message.error(res.msg);
-                })
-            },
-            pageChange (index) {
-                this.formValidate.page = index;
-                this.getList();
-            },
-            // 表格搜索
-            userSearchs () {
-                this.formValidate.page = 1;
-                this.getList();
-            }
+            pageChange(index) { this.formValidate.page = index; this.appliedFilters.page = index; this.getList(); },
+            userSearchs() { this.formValidate.page = 1; this.appliedFilters = this.snapshotFilters(); this.getList(); }
+
         }
     }
 </script>
 
-<style scoped lang="stylus">
-	  .line2{
-			max-height 36px;
-		}
-    .tabBox_img{
-			width 36px
-			height 36px
-			border-radius:4px
-			cursor pointer
-			img{
-				width 100%
-				height 100%
-			}
-		}    
+<style scoped>
+.combination-group-list { height: calc(100vh - 150px); min-height: 420px; display: flex; flex-direction: column; gap: 16px; }
+.combination-filters { flex: none; }
+.combination-query-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 16px; }
+.combination-query-form .ivu-form-item { margin: 0; }
+.query-store { width: 218px; }
+.query-activity { width: 264px; }
+.query-status { width: 208px; }
+.query-member { width: 294px; }
+.combination-filters >>> .ivu-form-item-label { line-height: 32px; padding: 0 8px 0 0; }
+.combination-filters >>> .ivu-form-item-content { line-height: 32px; }
+.combination-filters >>> .ivu-select, .combination-filters >>> .ivu-date-picker { width: 100%; }
+.query-store >>> .organization-store-scope-picker, .query-store >>> .organization-store-scope-picker__trigger { width: 100%; }
+.combination-search-actions { display: flex; align-items: center; gap: 10px; }
+.combination-results { flex: 0 1 auto; min-height: 0; }
+.combination-results >>> .ivu-card-body { display: flex; flex-direction: column; min-height: 0; }
+.combination-table-scroll { min-height: 0; overflow: hidden; }
+.combination-table-scroll >>> .ivu-table-header th { height: 48px; background: #f8f8f9; }
+.combination-table-scroll >>> .ivu-table-cell { padding: 0 12px; }
+.combination-table-scroll >>> .ivu-table-row td { height: 48px; }
+.combination-action { margin-left: 12px; }
+.combination-pagination { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding-top: 18px; color: #808695; }
+.combination-list-error { padding: 8px 0 12px; color: #c53b37; }
+.combination-status-2 { color: #299548; }
+.combination-status-3 { color: #c53b37; }
+.tabBox_img { width: 36px; height: 36px; border-radius: 4px; cursor: pointer; }
+.tabBox_img img { width: 100%; height: 100%; }
+@media (max-width: 1100px) { .query-store, .query-activity, .query-status, .query-member { width: calc(50% - 8px); } }
+@media (max-width: 650px) { .query-store, .query-activity, .query-status, .query-member { width: 100%; } .combination-pagination { flex-wrap: wrap; } }
 </style>
 
 <style lang="stylus">

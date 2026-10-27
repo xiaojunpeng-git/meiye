@@ -1,0 +1,26 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "remote": "不适用，本轮仅本地开发",
+  "files": {
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue": {
+      "sha256": "ee10ac7c1c1e95221ffc9e3db5c5f4a40842eadb8c5f8e843c354dbc683598e5",
+      "status": "MM 前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue"
+    },
+    "前端代码/admin/src/api/marketing.js": {
+      "sha256": "468588267b76e8da9cd234e1e197770f76ca88264aa7ea278a38a7821e5c608c",
+      "status": "MM 前端代码/admin/src/api/marketing.js"
+    },
+    "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php": {
+      "sha256": "544130aac7f62a70173aee7d22e0eaba3f8288bfd7cdbbbf2b439234ea835468",
+      "status": "M 后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php"
+    },
+    "后端代码/app/services/activity/combination/CombinationRefundServices.php": {
+      "sha256": "902db241193f7e9865dfad2f59f78e466199f21e1421c9de143365c0ecf3951c",
+      "status": "?? 后端代码/app/services/activity/combination/CombinationRefundServices.php"
+    },
+    "后端代码/route/admin.php": {
+      "sha256": "fd51afab8d4b72303a0aa214f2167b8848945578299859b62eeb0655685e7d1c",
+      "status": "MM 后端代码/route/admin.php"
+    }
+  }
+}

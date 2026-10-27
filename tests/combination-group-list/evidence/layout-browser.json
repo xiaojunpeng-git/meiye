@@ -1,0 +1,18 @@
+{
+  "viewport": {
+    "width": 1820,
+    "height": 996
+  },
+  "primary_label_tops": [
+    138.984375,
+    138.984375,
+    138.984375,
+    138.984375
+  ],
+  "table_client_width": 1673,
+  "table_scroll_width": 1673,
+  "footer_bottom": 789.072265625,
+  "expanded_footer_bottom": 855.95703125,
+  "records": 8,
+  "layout_only_revision": true
+}

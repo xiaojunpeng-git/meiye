@@ -1,0 +1,32 @@
+{
+  "site": "rh",
+  "domain": "rh.cc3798.com",
+  "database": "ruihao",
+  "version": "5.7.44-log",
+  "environment": "0fad7a4df68a0690150d43c19df732d7426cfc372ab940077f2a8913126e58e2",
+  "migration": {
+    "upgrade_key": "20261027-basic-salary-manual-freeze",
+    "code_version": "e888c787e5d921284d18879167015d3431ce1a5c",
+    "executed_at": "2026-10-27 17:43:58"
+  },
+  "result": "PASS",
+  "list_count": 0,
+  "page_rows": 0,
+  "export_rows": 0,
+  "columns": [
+    "门店名称",
+    "团长",
+    "类型",
+    "手机号码",
+    "拼团名称",
+    "品项名称",
+    "拼团单价",
+    "拼团总数",
+    "参加人数",
+    "到期时间",
+    "状态"
+  ],
+  "deny_all_valid": true,
+  "financial_commands": 0,
+  "authenticated_http_tested": false
+}
