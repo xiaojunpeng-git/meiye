@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "refs": [
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.6ad2b1b8.js",
+    "/static/js/index.5ec55a37.js"
+  ],
+  "storeAPI": true,
+  "businessWrites": 0
+}

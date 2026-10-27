@@ -1,0 +1,57 @@
+{
+  "result": "PASS",
+  "businessCommit": "3f5e2bd89124ee4feb82989662d8b2d5d15dbdc6",
+  "prerequisiteCommit": "48f04bc6b60c373e792a3c97f7d4ba1a2bd59b0b",
+  "branch": "release/008-round5-store-address-20261027",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backup": "/www/backups/rh/store-address-3f5e2bd8",
+      "browser": {
+        "addressHeight": 36,
+        "addressText": "距您0km 安徽省马鞍山市花山区湖东中路976号二楼",
+        "buttonsAligned": true,
+        "panelHeight": 127,
+        "result": "PASS",
+        "viewport": 375
+      }
+    },
+    "008": {
+      "result": "PASS",
+      "backup": "/www/backups/008/store-address-3f5e2bd8",
+      "browser": {
+        "addressHeight": 36,
+        "addressText": "距您0km 浙江杭州市富阳区胥口镇鹿山街道依江路492号山水国际中心广场三层",
+        "buttonsAligned": true,
+        "panelHeight": 127,
+        "result": "PASS",
+        "viewport": 375
+      }
+    },
+    "010": {
+      "result": "PASS",
+      "backup": "/www/backups/010/store-address-3f5e2bd8-retry1",
+      "browser": {
+        "addressHeight": 54,
+        "addressText": "距您0km 福建省厦门市思明区梧村街道湖滨南路310号之8B厦门市思明区邻邻柒の头部SPA(万象城店)",
+        "buttonsAligned": true,
+        "panelHeight": 145,
+        "result": "PASS",
+        "viewport": 375
+      }
+    }
+  },
+  "mini": {
+    "result": "SUCCESS",
+    "version": "3.0.69",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "customer": "008",
+    "terminal": "member",
+    "taskId": "confirmation_upload_15c25442-61d2-4027-a377-621a42fc2cae",
+    "experienceOverwriteConfirmed": true,
+    "persistentPermissionGranted": false
+  },
+  "databaseWrites": 0,
+  "completedAt": "2026-10-27T16:23:20.051326+00:00",
+  "additionalLoginRepair": "Separate approved 008-only backend repair, recorded under tests/member-avatar-login/evidence"
+}

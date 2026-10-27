@@ -2,7 +2,7 @@
 /** Guarded static member installation. No backend, customer config, database or other frontend write. */
 $site=$argv[1]??'';$dir=$argv[2]??'';$mode=$argv[3]??'';$digest=$argv[4]??'';
 $sites=['rh'=>['rh.cc3798.com','ruihao',3306],'008'=>['008.cc3798.com','mohe_008',3307],'010'=>['010.cc3798.com','mohe_010_app',3307]];
-if(!isset($sites[$site])||!preg_match('~^/www/backups/(rh|008|010)/store-address-[a-f0-9]{8}$~D',$dir,$m)||$m[1]!==$site||!in_array($mode,['backup','install','verify','rollback'],true)||!preg_match('/^[a-f0-9]{64}$/D',$digest))throw new RuntimeException('Explicit release required');
+if(!isset($sites[$site])||!preg_match('~^/www/backups/(rh|008|010)/store-address-[a-f0-9]{8}(?:-retry1)?$~D',$dir,$m)||$m[1]!==$site||!in_array($mode,['backup','install','verify','rollback'],true)||!preg_match('/^[a-f0-9]{64}$/D',$digest))throw new RuntimeException('Explicit release required');
 [$domain,$db,$port]=$sites[$site];$root='/www/wwwroot/'.$domain;
 if(hash_file('sha256',$dir.'/payload/manifest.json')!==$digest)throw new RuntimeException('Manifest drift');
 $manifest=json_decode(file_get_contents($dir.'/payload/manifest.json'),true);
