@@ -42,11 +42,14 @@ class YejiCommissionServices extends BaseServices
         return create_form('编辑提成', $this->createServiceForm($serviceInfo, $type), $this->url('/order/saveCommission/' . $id), 'POST');
     }
 
+    /** 只保存项目与提成档位；旧耗卡金额仅供追溯，不能被新表单或旧客户端改写。 */
     public function saveCommission($allData,$id){
-         $filed=['yeji','product_id','id'];
+         $filed=['product_id','id'];
          $commissionJson=[];
          $data=[];
          foreach ($allData as $k=>$v){
+              // 耗卡业绩输入已退役：旧值留作历史兼容，表单和旧客户端都不能再覆盖它或塞进档位 JSON。
+              if ($k === 'yeji') continue;
               if(!in_array($k,$filed)){
                   $commissionJson[$k]=$v;
               }else{
@@ -66,7 +69,7 @@ class YejiCommissionServices extends BaseServices
         return $res->id;
     }
     /**
-     * 创建配送员表单
+     * 创建项目提成档位表单；项目及卡项的手艺人业绩默认值在各自资料中维护。
      * @param array $formData
      * @param int $type
      * @return array
@@ -87,7 +90,6 @@ class YejiCommissionServices extends BaseServices
         $field[] = Form::select('product_id', '选择商品',$formData['product_id'] ?? '')
             ->setOptions(Form::setOptions($setOptionUserGroup))
             ->filterable(true);
-        $field[] = Form::number('yeji', '耗卡业绩', $formData['yeji'] ?? '')->style(['width' => '100%'])->required('耗卡业绩')->col(24);
         $json=$formData['commission_json'] ?? [];
         if(!empty($json)){
             $json=json_decode($json,true);

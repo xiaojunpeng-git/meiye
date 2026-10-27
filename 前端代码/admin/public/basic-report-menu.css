@@ -1,0 +1,8 @@
+/* 基础报表的三级功能名称较长；只把含基础报表链接的三个侧栏分组改为单列，保留其他菜单既有布局。 */
+.i-layout-menu-side.ivu-menu-vertical .ivu-menu-submenu:has(> .ivu-menu > .menu-item > a[href^="/admin/report/basic-reports/basic_"]) > .ivu-menu {
+  display: block !important;
+}
+
+.i-layout-menu-side.ivu-menu-vertical .ivu-menu-submenu:has(> .ivu-menu > .menu-item > a[href^="/admin/report/basic-reports/basic_"]) > .ivu-menu > .menu-item {
+  width: 100% !important;
+}

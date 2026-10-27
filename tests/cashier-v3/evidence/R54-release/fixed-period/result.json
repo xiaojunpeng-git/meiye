@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "checks": 88,
+  "views": [
+    {
+      "viewport": {
+        "width": 2016,
+        "height": 1076
+      },
+      "result": "PASS"
+    },
+    {
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "result": "PASS"
+    }
+  ],
+  "backendRequests": 0
+}

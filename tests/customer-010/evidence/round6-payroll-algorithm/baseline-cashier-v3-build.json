@@ -1,0 +1,13 @@
+{
+  "tree": "1135e5cb4689ec9e5996f8cf7169fc6eb5124b2b",
+  "input": "/private/tmp/mohe010-payroll-1135e5cb4689-cashier-v3/前端代码/cashier-v3",
+  "output": "/private/tmp/mohe010-payroll-1135e5cb4689-cashier-v3/output",
+  "assets": {
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/index-602ce90e.js": "8a3ae13ad2573de15d4cab59ddadf80faa12267aea23684600e7b6a23810649f",
+    "assets/index-f4d74b18.css": "f4d74b18b8830929742e6b6a96f5754e2e44cfc15a9a80545a0174ff0a1ab7de",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "index.html": "426a2505e9095a53e9fabf71ab2b8fffee3a701d21c97845d84daf44c286e3d3"
+  },
+  "result": "PASS"
+}

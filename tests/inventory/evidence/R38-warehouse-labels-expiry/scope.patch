@@ -1,0 +1,551 @@
+diff --git a/scripts/r38-inventory-readonly-audit.php b/scripts/r38-inventory-readonly-audit.php
+new file mode 100644
+index 00000000..d396160d
+--- /dev/null
++++ b/scripts/r38-inventory-readonly-audit.php
+@@ -0,0 +1,11 @@
++<?php
++/** R38核对仅允许只读事务：数量取已结算正反库存事实，到期日与成本取原批次，不改写任何历史记录。 */
++$root=$argv[1]??'/www/wwwroot/rh.cc3798.com';require $root.'/vendor/autoload.php';(new think\App($root.'/'))->initialize();set_exception_handler(function(Throwable $e){file_put_contents('php://stderr',$e->getMessage().PHP_EOL);exit(1);});
++use think\facade\Db;
++if(config('database.connections.mysql.database')!=='ruihao')throw new RuntimeException('WRONG_DATABASE');
++Db::execute('SET TRANSACTION READ ONLY');Db::startTrans();try{
++ $types=Db::name('inventory_batch_movement_fact')->where('tenant_id','0')->where('fact_status','SETTLED')->group('source_type')->column('source_type');
++ $rows=Db::name('inventory_batch_movement_fact')->alias('f')->join('inventory_batch b','b.id=f.batch_id')->join('inventory_location l','l.id=f.location_id')->join('inventory_stock s','s.id=f.stock_id')->where('f.tenant_id','0')->where('f.fact_status','SETTLED')->where('f.business_date','<=',date('Y-m-d'))->where('l.location_status','ACTIVE')->where('b.batch_no','CB359326')->fieldRaw('l.store_id,l.id location_id,l.location_name,b.id batch_id,b.batch_no,b.product_name_snapshot,b.expire_date,b.unit_cost_cents,s.quantity_scale,SUM(IF(f.direction=1,f.quantity_units,-CAST(f.quantity_units AS SIGNED))) quantity_units')->group('l.store_id,l.id,l.location_name,b.id,b.batch_no,b.product_name_snapshot,b.expire_date,b.unit_cost_cents,s.quantity_scale')->select()->toArray();
++ $files=[];foreach(['app/services/report/ProductManagementDashboardServices.php','app/services/product/inventory/InventoryMovementAnalyticsServices.php','app/services/product/inventory/InventoryMovementDisplayServices.php','app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php','public/view_inventory_v3/index.html','public/view_cashier_v3/index.html']as$p)$files[$p]=is_file($root.'/'.$p)?hash_file('sha256',$root.'/'.$p):null;
++ echo json_encode(['result'=>'PASS','cutoff'=>date('Y-m-d'),'source_types'=>$types,'sample_batch'=>$rows,'fileSHA256'=>$files,'readOnly'=>true],JSON_UNESCAPED_UNICODE),PHP_EOL;
++}finally{Db::rollback();}
+diff --git a/tests/inventory/js/r38-error-labels.mjs b/tests/inventory/js/r38-error-labels.mjs
+new file mode 100644
+index 00000000..b6963636
+--- /dev/null
++++ b/tests/inventory/js/r38-error-labels.mjs
+@@ -0,0 +1,8 @@
++/** 中文错误投影不能改变结构化code/data，避免影响原有业务分支。 */
++import assert from 'node:assert/strict'
++import { createInventoryApi } from '../../../前端代码/inventory-vue3/src/services/inventoryApi.js'
++for (const [message, expected] of [['inventory_new_internal_error','库存服务拒绝了本次请求。'],['请先选择仓库','请先选择仓库'],['inventory_manual_inbound_dates_required','请为每个入库商品填写生产日期和到期日。']]) {
++ const api = createInventoryApi({windowRef:{localStorage:{getItem:()=>''}},fetchImpl:async()=>({ok:true,status:200,text:async()=>JSON.stringify({status:400,msg:message,data:{code:'stable_error_code',unchanged:7}})})})
++ await assert.rejects(api.dashboard(), e => e.message === expected && e.code === 'stable_error_code' && e.data.unchanged === 7)
++}
++console.log('PASS 中文已知错误/未知错误兜底/原code及data保留')
+diff --git a/tests/inventory/js/status-label-contract.mjs b/tests/inventory/js/status-label-contract.mjs
+index ec72ee0a..84e1a679 100644
+--- a/tests/inventory/js/status-label-contract.mjs
++++ b/tests/inventory/js/status-label-contract.mjs
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs'
++import { inventoryStatusLabel } from '../../../前端代码/inventory-vue3/src/statusLabels.js'
+ import path from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ 
+@@ -9,7 +10,7 @@ const app = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/App
+ const modal = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue'), 'utf8')
+ const checks = [
+   ['SETTLED is projected to Chinese text', labels.includes("SETTLED: '已结算'")],
+-  ['status projection preserves unknown non-empty values', labels.includes('return inventoryStatusLabels[raw.toUpperCase()] || raw')],
++  ['known and unknown statuses remain Chinese while historical Chinese text stays intact', inventoryStatusLabel('SETTLED') === '已结算' && inventoryStatusLabel('NEW_INTERNAL_ENUM') === '未知状态' && inventoryStatusLabel('历史状态') === '历史状态' && inventoryStatusLabel(null) === '-'],
+   ['inventory list rows use the status projection', app.includes('inventoryStatusLabel(row.status_name') && app.includes('inventoryStatusLabel(row.document_status')],
+   ['inventory detail uses the same status projection', modal.includes('function detailStatus(detail') && modal.includes('detailStatus(detail.document)')]
+ ]
+diff --git a/tests/inventory/php/inventory-movement-source-name-contract.php b/tests/inventory/php/inventory-movement-source-name-contract.php
+index 15b0c1c8..d465d9eb 100644
+--- a/tests/inventory/php/inventory-movement-source-name-contract.php
++++ b/tests/inventory/php/inventory-movement-source-name-contract.php
+@@ -6,15 +6,17 @@ require dirname(__DIR__, 3) . '/后端代码/vendor/autoload.php';
+ use app\services\product\inventory\InventoryMovementAnalyticsServices;
+ use app\services\product\inventory\InventoryMovementDisplayServices;
+ 
+-// 来源代码供事实关联与过滤使用；中文名称只作为出入库统计的展示值，未知代码仍原样显示以便排查。
++// 来源代码供事实关联与过滤使用；中文名称只作为出入库统计的展示值，未知代码在接口保留但展示中文兜底。
+ $service = (new ReflectionClass(InventoryMovementAnalyticsServices::class))->newInstanceWithoutConstructor();
+ $sourceTypeName = new ReflectionMethod(InventoryMovementAnalyticsServices::class, 'sourceTypeName');
+ $sourceTypeName->setAccessible(true);
+ $cases = [
+-    'cashier_sale' => '收银销售出库',
++    'cashier_sale' => '收银结账',
+     'manual_outbound' => '手工出库',
+     'cross_transfer_withdraw' => '调拨撤回入库',
+-    'unknown_source' => 'unknown_source',
++    'unknown_source' => '其他库存业务',
++    'cross_transfer_in' => '调拨入库', 'cross_transfer_out' => '调拨出库',
++    'manual_inbound_reversal' => '手工入库作废', 'salon_usage_issue_reversal' => '院装领用作废退库',
+ ];
+ $failed = 0;
+ foreach ($cases as $sourceType => $expected) {
+diff --git a/tests/inventory/php/r38-dashboard-parity-readonly.php b/tests/inventory/php/r38-dashboard-parity-readonly.php
+new file mode 100644
+index 00000000..0299c1b9
+--- /dev/null
++++ b/tests/inventory/php/r38-dashboard-parity-readonly.php
+@@ -0,0 +1,12 @@
++<?php
++/** 对比开工固定Git对象与本轮真实库投影，防止显隐/下钻改变已有库存余额、成本和临期排行。 */
++$root=getenv('BACKEND_ROOT')?:'/var/www/html';require $root.'/vendor/autoload.php';(new think\App($root.'/'))->initialize();set_exception_handler(function(Throwable $e){file_put_contents('php://stderr',$e->getMessage().PHP_EOL);exit(1);});
++use think\facade\Db;use app\services\report\ProductManagementDashboardServices;
++if(config('database.connections.mysql.hostname')!=='mysql'||config('database.connections.mysql.database')!=='ruihao')throw new RuntimeException('LOCAL_ONLY');
++$source=base64_decode(getenv('R38_ORIGINAL_SERVICE')?:'',true);if(!$source||hash('sha256',$source)!=='23b6c4ea0e59e0c31b9e7fd098ffc2277d9698ececa17292b16945e8d9b0461c')throw new RuntimeException('FIXED_BASE_REQUIRED');eval(substr(str_replace('final class ProductManagementDashboardServices','final class R38OriginalProductDashboard',$source),5));
++function call($service,$name,$args){$m=new ReflectionMethod($service,$name);$m->setAccessible(true);return $m->invokeArgs($service,$args);}
++Db::execute('SET TRANSACTION READ ONLY');Db::startTrans();try{
++ $scope=['tenant_id'=>'0','store_ids'=>array_map('intval',Db::name('system_store')->column('id')),'cost_visible'=>true];$old=new app\services\report\R38OriginalProductDashboard();$new=new ProductManagementDashboardServices();$a=call($old,'inventoryRows',[$scope]);$b=call($new,'inventoryRows',[$scope]);foreach($b as&$row)unset($row['quantity_scale']);unset($row);if($a!==$b)throw new RuntimeException('INVENTORY_CHANGED');
++ $cats=call($new,'categories',[]);$map=call($new,'productCategoryMap',[$cats,$b]);$x=call($old,'expiry',[$a,$map,$scope,$cats,0]);$y=call($new,'expiry',[$b,$map,$scope,$cats,0]);unset($y['cutoff_date'],$y['ranking_limit']);foreach($y['rankings']as&$rows)foreach($rows as&$row)unset($row['drilldown']);unset($rows,$row);if($x!==$y)throw new RuntimeException('EXPIRY_CHANGED');
++ echo json_encode(['result'=>'PASS','batchRows'=>count($a),'buckets'=>count($x['buckets']),'inventoryAndCostUnchanged'=>true,'expiryTotalsAndRankingsUnchanged'=>true,'readOnly'=>true]),PHP_EOL;
++}finally{Db::rollback();}
+diff --git a/tests/inventory/php/r38-expiry-detail-readonly.php b/tests/inventory/php/r38-expiry-detail-readonly.php
+new file mode 100644
+index 00000000..736dfbc2
+--- /dev/null
++++ b/tests/inventory/php/r38-expiry-detail-readonly.php
+@@ -0,0 +1,19 @@
++<?php
++/** 本地真实库只读验证：汇总/下钻同批次守恒、20条分页、越权拒绝、成本屏蔽。 */
++$root=getenv('BACKEND_ROOT')?:dirname(__DIR__,3).'/后端代码';require $root.'/vendor/autoload.php';(new think\App($root.'/'))->initialize();set_exception_handler(function(Throwable $e){file_put_contents('php://stderr',$e->getMessage().PHP_EOL);exit(1);});
++use think\facade\Db;use app\services\report\ProductManagementDashboardServices;
++if(config('database.connections.mysql.hostname')!=='mysql'||config('database.connections.mysql.database')!=='ruihao')throw new RuntimeException('LOCAL_ONLY');
++function check($ok,$message){if(!$ok)throw new RuntimeException($message);}
++Db::execute('SET TRANSACTION READ ONLY');Db::startTrans();try{
++ $service=new ProductManagementDashboardServices();$stores=array_map('intval',Db::name('system_store')->column('id'));$context=['tenant_id'=>'0','store_ids'=>$stores,'cost_visible'=>true];$m=new ReflectionMethod($service,'inventoryRows');$m->setAccessible(true);$all=$m->invoke($service,$context);check(count($all)>0,'batch fixture required');
++ $counts=array_column(Db::name('inventory_batch_movement_fact')->where('fact_status','SETTLED')->fieldRaw('batch_id,COUNT(*) n')->group('batch_id')->order('n desc')->select()->toArray(),'n','batch_id');usort($all,function($a,$b)use($counts){return ($counts[$b['batch_id']]??0)<=>($counts[$a['batch_id']]??0);});$batch=$all[0];$input=['detail'=>'expiry','batch_id'=>$batch['batch_id'],'batch_store_id'=>$batch['store_id'],'cutoff_date'=>date('Y-m-d')];
++ $one=$service->dashboard($context,$input);check($one['batch']['quantity']===$batch['quantity'],'balance same authoritative row');check(abs($one['inbound_quantity']-$one['outbound_quantity']-$batch['quantity'])<0.00001,'all movements reconcile');check(count($one['rows'])===min(20,$one['total']),'page size exact');
++ $pages=[];for($i=1;$i<=min(2,(int)ceil($one['total']/20));$i++){$x=$service->dashboard($context,array_merge($input,['page'=>$i]));$pages[$i]=array_column($x['rows'],'id');check($x['page']===$i&&$x['total']===$one['total'],'page count stable');}
++ if(count($pages)>1)check(!array_intersect($pages[1],$pages[2]),'pages do not overlap');
++ $hidden=$service->dashboard(array_merge($context,['cost_visible'=>false]),$input);check($hidden['batch']['inventory_cost_cents']===null,'cost permission respected');
++ $otherStores=array_values(array_filter($stores,function($id)use($batch){return $id!==$batch['store_id'];}));
++ foreach([array_merge($input,['batch_store_id'=>$otherStores[0]]),array_merge($input,['batch_store_id'=>2147483647]),array_merge($input,['batch_id'=>2147483647]),array_merge($input,['cutoff_date'=>'2999-01-01'])]as$bad){try{$service->dashboard($context,$bad);throw new RuntimeException('unauthorized accepted');}catch(InvalidArgumentException $e){}}
++ $last=$service->dashboard($context,array_merge($input,['page'=>2147483647]));check($last['page']===max(1,(int)ceil($one['total']/20)),'out of range corrected');
++ $q=new ReflectionMethod($service,'inventoryFactQuery');$q->setAccessible(true);$sql=$q->invoke($service,['tenant_id'=>'0','store_ids'=>[$batch['store_id']]],date('Y-m-d'),$batch['batch_id'])->field('f.id')->order('f.business_date desc,f.id desc')->limit(20)->fetchSql(true)->select();$plan=Db::query('EXPLAIN '.$sql);$plan=array_map(function($x){return array_intersect_key($x,array_flip(['table','type','key','rows','Extra']));},$plan);
++ echo json_encode(['result'=>'PASS','explain'=>$plan,'batch_id'=>$batch['batch_id'],'store_id'=>$batch['store_id'],'quantity'=>$batch['quantity'],'total'=>$one['total'],'pageRows'=>array_map('count',$pages),'costHidden'=>true,'invalidScopeRejected'=>true,'readOnly'=>true],JSON_UNESCAPED_UNICODE),PHP_EOL;
++}finally{Db::rollback();}
+diff --git a/tests/inventory/php/r38-movement-labels.php b/tests/inventory/php/r38-movement-labels.php
+new file mode 100644
+index 00000000..a2cea394
+--- /dev/null
++++ b/tests/inventory/php/r38-movement-labels.php
+@@ -0,0 +1,9 @@
++<?php
++/** 实际线上19种业务枚举+未知值，统计/流水/明细必须同一中文投影。 */
++require dirname(__DIR__,3).'/后端代码/vendor/autoload.php';
++use app\services\product\inventory\InventoryMovementDisplayServices;
++$types=['cashier_presale_stock_repair','cashier_sale','cashier_sale_void','cross_transfer_in','cross_transfer_out','cross_transfer_withdraw','gift_product_claim_outbound','gift_product_claim_void','manual_inbound','manual_inbound_reversal','manual_outbound','manual_outbound_reversal','presale_claim_outbound','presale_claim_void','salon_usage_issue','salon_usage_issue_reversal','salon_usage_return','stock_count_gain','stock_count_loss'];
++$readers=[['app\\services\\product\\inventory\\InventoryMovementAnalyticsServices','sourceTypeName'],['app\\services\\product\\inventory\\InventoryMovementQueryServices','movementLabel'],['app\\services\\product\\inventory\\query\\InventoryMovementUnifiedQueryProvider','movementName']];
++foreach($types as$type){$label=InventoryMovementDisplayServices::typeName($type);if(!preg_match('/[\x{4e00}-\x{9fff}]/u',$label)||$label==='其他库存业务')throw new RuntimeException('missing source:'.$type);foreach($readers as[$class,$method]){$obj=(new ReflectionClass($class))->newInstanceWithoutConstructor();$m=new ReflectionMethod($obj,$method);$m->setAccessible(true);if($m->invoke($obj,$type)!==$label)throw new RuntimeException('inconsistent label:'.$type);}}
++if(InventoryMovementDisplayServices::typeName('new_internal_source')!=='其他库存业务')throw new RuntimeException('unknown code leaked');
++echo json_encode(['result'=>'PASS','observedSourceTypes'=>count($types),'readers'=>count($readers),'unknownCodeChinese'=>true]),PHP_EOL;
+diff --git a/前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue b/前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue
+new file mode 100644
+index 00000000..4bb55912
+--- /dev/null
++++ b/前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue
+@@ -0,0 +1,50 @@
++<script setup>
++import { onBeforeUnmount, onMounted, ref } from 'vue'
++import { formatMoney } from '@/services/cashierV3Bridge'
++import { queryProductDashboard } from '@/services/productDashboardApi'
++const props = defineProps({ params: { type: Object, required: true }, storeIds: { type: Array, default: () => [] } })
++const emit = defineEmits(['close'])
++const data = ref(null), loading = ref(false), error = ref(''), closeButton = ref(null)
++let requestId = 0, previousFocus = null
++// 只提交服务端下钻身份与已提交范围；每次翻页仍由后端重新强制权限并返回完整合计。
++async function load(page = 1) {
++  const id = ++requestId
++  loading.value = true; error.value = ''
++  try {
++    const result = await queryProductDashboard({ ...props.params, store_ids: props.storeIds.join(','), page })
++    if (id === requestId) data.value = result
++  } catch (e) { if (id === requestId) { data.value = null; error.value = e.message || '批次明细读取失败' } }
++  finally { if (id === requestId) loading.value = false }
++}
++function money(cents) { return cents === null || cents === undefined ? '-' : formatMoney(Math.round(Number(cents) / 100)) }
++function onKey(event) {
++  if (event.key === 'Escape') emit('close')
++  // 弹窗键盘循环，关闭后恢复触发按钮，避免焦点落到遮罩后的看板。
++  if (event.key === 'Tab') {
++    const elements = [...event.currentTarget.querySelectorAll('button:not(:disabled)')]
++    const first = elements[0], last = elements[elements.length - 1]
++    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
++    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
++  }
++}
++onMounted(() => { previousFocus = document.activeElement; closeButton.value?.focus(); load() })
++onBeforeUnmount(() => { ++requestId; previousFocus?.focus() })
++</script>
++<template>
++  <div class="expiry-detail-backdrop" @click.self="emit('close')">
++    <section class="expiry-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="expiry-detail-title" @keydown="onKey">
++      <header><h2 id="expiry-detail-title">批次库存明细</h2><button ref="closeButton" type="button" aria-label="关闭批次明细" @click="emit('close')">关闭</button></header>
++      <p v-if="error" class="expiry-detail-error" role="alert">{{ error }}<button @click="load()">重试</button></p>
++      <p v-if="loading" role="status">正在读取批次明细...</p>
++      <template v-if="data">
++        <div class="expiry-detail-summary"><strong>{{ data.batch.product_name }}</strong><span>门店：{{ data.store_name || '未记录门店名称' }}</span><span>批次：{{ data.batch.batch_no }}</span><span>到期日：{{ data.batch.expire_date || '未知' }}</span><span>当前库存：{{ data.batch.quantity }}</span><span>库存成本：{{ money(data.batch.inventory_cost_cents) }}</span><span>累计入库 {{ data.inbound_quantity }} − 累计出库 {{ data.outbound_quantity }} = {{ data.batch.quantity }}</span></div>
++        <p class="expiry-detail-note">截至 {{ data.cutoff_date }} 的已结算流水；包含作废与冲销。查询时间：{{ data.data_as_of }}</p>
++        <div class="expiry-detail-scroll" :aria-busy="loading"><table><thead><tr><th v-for="column in data.columns" :key="column.key">{{ column.label }}</th></tr></thead><tbody><tr v-for="row in data.rows" :key="row.id"><td v-for="column in data.columns" :key="column.key">{{ row[column.key] }}</td></tr><tr v-if="!data.rows.length"><td :colspan="data.columns.length">暂无库存流水</td></tr></tbody></table></div>
++        <footer><span>共 {{ data.total }} 条 · 每页20条 · 第 {{ data.page }} / {{ Math.max(1, Math.ceil(data.total / 20)) }} 页</span><button :disabled="loading || data.page <= 1" @click="load(data.page - 1)">上一页</button><button :disabled="loading || data.page * 20 >= data.total" @click="load(data.page + 1)">下一页</button></footer>
++      </template>
++    </section>
++  </div>
++</template>
++<style scoped>
++.expiry-detail-backdrop{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;background:#15243966}.expiry-detail-dialog{display:flex;flex-direction:column;width:min(1080px,100%);max-height:90vh;min-height:240px;border-radius:10px;background:#fff;box-shadow:0 18px 60px #12263c33;overflow:hidden;color:#304760}.expiry-detail-dialog header,.expiry-detail-dialog footer{display:flex;align-items:center;gap:10px;padding:14px 18px;flex-shrink:0}.expiry-detail-dialog header{justify-content:space-between;border-bottom:1px solid #e2e9f1}.expiry-detail-dialog h2{font-size:18px}.expiry-detail-dialog button{border:1px solid #dbe3ee;border-radius:5px;background:#fff;color:#426078;padding:6px 10px;cursor:pointer}.expiry-detail-dialog button:disabled{opacity:.5;cursor:default}.expiry-detail-summary{display:flex;flex-wrap:wrap;gap:10px 22px;padding:16px 18px;font-size:13px}.expiry-detail-summary strong{width:100%;font-size:16px}.expiry-detail-note{padding:0 18px 12px;color:#718398;font-size:12px}.expiry-detail-scroll{overflow:auto;min-height:0;flex:1;margin:0 18px}.expiry-detail-scroll table{width:100%;border-collapse:collapse;white-space:nowrap;font-size:13px}.expiry-detail-scroll th{position:sticky;top:0;background:#f1f6fc;z-index:1}.expiry-detail-scroll th,.expiry-detail-scroll td{padding:11px 12px;text-align:left;border-bottom:1px solid #e9eef5}.expiry-detail-dialog footer{justify-content:flex-end;border-top:1px solid #e2e9f1;font-size:12px}.expiry-detail-error{padding:15px;color:#b33d36}.expiry-detail-error button{margin-left:12px}@media(max-width:600px){.expiry-detail-backdrop{padding:8px}.expiry-detail-dialog footer{flex-wrap:wrap}}
++</style>
+diff --git a/前端代码/cashier-v3/src/views/ProductDashboardView.vue b/前端代码/cashier-v3/src/views/ProductDashboardView.vue
+index dcbcbd83..3338fca0 100644
+--- a/前端代码/cashier-v3/src/views/ProductDashboardView.vue
++++ b/前端代码/cashier-v3/src/views/ProductDashboardView.vue
+@@ -8,6 +8,7 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
+ import Search from '@lucide/vue/dist/esm/icons/search.mjs'
+ import TriangleAlert from '@lucide/vue/dist/esm/icons/triangle-alert.mjs'
+ import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
++import ExpiryBatchDetail from '@/components/ExpiryBatchDetail.vue'
+ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
+ import { queryProductDashboard, queryProductDashboardScope } from '@/services/productDashboardApi'
+ 
+@@ -106,6 +107,8 @@ const profitCategories = ref([])
+ const inventoryCategories = ref([])
+ const expiryCards = ref([])
+ const expiryRankings = ref({})
++const expiryDetail = ref(null)
++const committedStoreIds = ref([])
+ const selectedExpiryBucket = ref('OVERDUE')
+ let queuedQuery = false
+ let refreshTimer = null
+@@ -164,7 +167,7 @@ function applyDashboard(data) {
+   inventoryCategories.value = (data?.product_inventory_categories || []).map((item) => ({ id: String(item.category_id), name: item.name, amount: money(item.inventory_cost_cents), rows: (item.rows || []).map((row) => [row.product_name, row.available_quantity, money(row.inventory_cost_cents)]) }))
+   expiryCards.value = (data?.expiry_alerts?.buckets || []).map((item) => ({ key: item.key, label: item.label, value: Number(item.quantity ?? item.count ?? 0).toLocaleString('zh-CN'), tone: item.key === 'OVERDUE' ? 'expired' : item.key === 'WITHIN_30' ? 'urgent' : item.key === 'DAYS_31_60' ? 'warm' : item.key === 'DAYS_61_90' ? 'watch' : item.key === 'SAFE_OVER_90' ? 'normal' : 'unknown' }))
+   // The server owns bucket membership and each top-ten ranking; switching tabs is display-only.
+-  expiryRankings.value = Object.fromEntries(Object.entries(data?.expiry_alerts?.rankings || {}).map(([key, rows]) => [key, rows.map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents)])]))
++  expiryRankings.value = Object.fromEntries(Object.entries(data?.expiry_alerts?.rankings || {}).map(([key, rows]) => [key, rows.map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents), row.drilldown])]))
+   selectedExpiryBucket.value = data?.expiry_alerts?.default_bucket || 'OVERDUE'
+   // A report timestamp must come from the backend snapshot, never from a demo date or browser clock.
+   refreshedAt.value = String(data?.data_as_of || '')
+@@ -189,7 +192,10 @@ async function loadDashboard(action = '查询') {
+   queryMessage.value = `${action}中，正在读取商品看板...`
+   try {
+     // 看板始终请求权限范围内的全部商品；分类和类型仅用于结果分组，不再缩小整张看板。
+-    const data = await queryProductDashboard({ ...rangeForPeriod(), store_ids: scopePicker.value.selectedStoreIds.join(',') })
++    const storeIds = [...scopePicker.value.selectedStoreIds]
++    const data = await queryProductDashboard({ ...rangeForPeriod(), store_ids: storeIds.join(',') })
++    committedStoreIds.value = storeIds
++    expiryDetail.value = null
+     applyDashboard(data)
+     queryMessage.value = action === '刷新' ? '已刷新商品看板。' : '已按当前筛选更新商品看板。'
+   } catch (error) {
+@@ -321,6 +327,7 @@ function runQuery(action = '查询') {
+       </div>
+     </section>
+ 
++    <ExpiryBatchDetail v-if="expiryDetail" :params="expiryDetail" :store-ids="committedStoreIds" @close="expiryDetail = null" />
+     <section class="product-dashboard__section product-dashboard__section--expiry" aria-labelledby="expiry-title">
+       <header class="product-dashboard__section-header"><div><span class="product-dashboard__section-kicker"><TriangleAlert :size="16" aria-hidden="true" />库存预警</span><h2 id="expiry-title">临期产品预警</h2></div><button type="button" class="product-dashboard__guide"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></header>
+       <div v-if="loading" class="product-dashboard__loading">正在加载临期产品预警数据...</div>
+@@ -332,10 +339,11 @@ function runQuery(action = '查询') {
+             <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>当前库存数量</small>
+           </button>
+         </div>
++        <p class="product-dashboard__expiry-hint">卡片为当前范围全部库存数量；下表仅展示该档最早到期的前10条批次，点击查看明细可核对门店、仓库和出入库流水。</p>
+         <p v-if="!expiryRows.length" class="product-dashboard__empty">当前筛选范围没有该档的产品批次。</p>
+         <div v-else class="product-dashboard__table-wrap" role="tabpanel">
+-          <table><thead><tr><th>品名</th><th>商品分类</th><th>批次号</th><th>当前库存数量</th><th>到期日</th><th>剩余天数</th><th>状态</th><th>库存成本</th></tr></thead>
+-            <tbody><tr v-for="(row, index) in expiryRows" :key="`${selectedExpiryBucket}-${index}-${row[2]}`"><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[3] }}</td><td>{{ row[4] }}</td><td>{{ row[5] }}</td><td><span class="expiry-status" :class="{ 'expiry-status--expired': row[6] === '已过期', 'expiry-status--urgent': row[6] === '30天内临期' }">{{ row[6] }}</span></td><td>{{ row[7] }}</td></tr></tbody>
++          <table><thead><tr><th>品名</th><th>商品分类</th><th>批次号</th><th>当前库存数量</th><th>到期日</th><th>剩余天数</th><th>状态</th><th>库存成本</th><th>操作</th></tr></thead>
++            <tbody><tr v-for="(row, index) in expiryRows" :key="`${selectedExpiryBucket}-${index}-${row[2]}`"><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[3] }}</td><td>{{ row[4] }}</td><td>{{ row[5] }}</td><td><span class="expiry-status" :class="{ 'expiry-status--expired': row[6] === '已过期', 'expiry-status--urgent': row[6] === '30天内临期' }">{{ row[6] }}</span></td><td>{{ row[7] }}</td><td><button v-if="row[8]" class="product-dashboard__guide" type="button" :aria-label="`查看${row[0]}批次${row[2]}明细`" @click="expiryDetail = row[8]">查看明细</button></td></tr></tbody>
+           </table>
+         </div>
+       </template>
+@@ -345,7 +353,8 @@ function runQuery(action = '查询') {
+ 
+ <style scoped>
+ :global(html.product-dashboard-document),:global(html.product-dashboard-document body),:global(html.product-dashboard-document #app){min-width:0;width:100%;max-width:100%;overflow-x:hidden}
+-.product-dashboard{height:100vh;min-height:100vh;overflow:auto;padding:12px;background:#f4f6f8;color:#26364a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.product-dashboard *{box-sizing:border-box}.product-dashboard h1,.product-dashboard h2,.product-dashboard h3,.product-dashboard p,.product-dashboard dl,.product-dashboard dt,.product-dashboard dd{margin:0}.product-dashboard__header,.product-dashboard__filters,.product-dashboard__summary,.product-dashboard__section,.product-dashboard__feedback{width:100%;max-width:1600px;margin-right:auto;margin-left:auto}.product-dashboard__header{display:flex;align-items:center;min-height:40px;margin-bottom:8px}.product-dashboard h1{color:#1f2d3d;font-size:23px;line-height:1.3}.product-dashboard__filters{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid #dde4ed;border-radius:7px;padding:12px 14px;background:#fff;box-shadow:0 3px 9px rgba(26,47,71,.04)}.product-dashboard__filter-main{display:flex;flex-wrap:wrap;align-items:center;gap:9px 20px}.product-dashboard__filter-row{display:flex;align-items:center;gap:8px;min-height:34px}.product-dashboard__filter-label{color:#4c6076;font-size:13px;font-weight:600}.product-dashboard__periods{display:flex;overflow:hidden;border:1px solid #d8e0ea;border-radius:5px}.product-dashboard__periods button{min-width:48px;min-height:32px;border:0;border-right:1px solid #e4e9ef;background:#fff;color:#66778b;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__periods button:last-child{border-right:0}.product-dashboard__periods button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.product-dashboard__date,.product-dashboard__select-label{display:flex;align-items:center;gap:6px;color:#66778b;font-size:12px}.product-dashboard__date input,.product-dashboard__select-label select{min-height:32px;border:1px solid #d8e0ea;border-radius:5px;padding:4px 8px;background:#fff;color:#405166;font:inherit;font-size:13px}.product-dashboard__actions{display:flex;flex:none;gap:8px}.product-dashboard__button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;border:1px solid #d6e0eb;border-radius:5px;padding:6px 11px;background:#fff;color:#426078;font:inherit;font-size:13px;cursor:pointer}.product-dashboard__button--primary{border-color:#1769aa;background:#1769aa;color:#fff}.product-dashboard__button:disabled{cursor:wait;opacity:.65}.is-spinning{animation:product-dashboard-spin .75s linear infinite}@keyframes product-dashboard-spin{to{transform:rotate(360deg)}}.product-dashboard__feedback{display:flex;justify-content:space-between;gap:12px;padding:8px 2px 12px;color:#718096;font-size:12px}.product-dashboard__feedback span{white-space:nowrap}.product-dashboard__summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}.product-dashboard__summary-card{min-height:145px;border:1px solid #dde5ed;border-top:3px solid #1f5f8b;border-radius:7px;padding:15px 16px;background:#fff}.product-dashboard__summary-card--consumption{border-top-color:#b7791f}.product-dashboard__summary-card--profit{border-top-color:#357a72}.product-dashboard__summary-card>span{color:#53667b;font-size:14px;font-weight:700}.product-dashboard__summary-card>strong{display:block;margin:9px 0 13px;color:#1f5f8b;font-size:24px;line-height:1}.product-dashboard__summary-card--consumption>strong{color:#b7791f}.product-dashboard__summary-card--profit>strong{color:#357a72}.product-dashboard__summary-card dl{display:grid;grid-template-columns:1fr 1fr;gap:10px}.product-dashboard__summary-card dt{color:#7d8c9d;font-size:11px}.product-dashboard__summary-card dd{margin-top:3px;color:#526b80;font-size:13px;font-weight:600}.product-dashboard__section{margin-bottom:26px}.product-dashboard__section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}.product-dashboard__section-kicker{display:inline-flex;align-items:center;gap:5px;color:#718398;font-size:12px}.product-dashboard__section-kicker svg{color:#1f5f8b}.product-dashboard__section--inventory .product-dashboard__section-kicker svg{color:#357a72}.product-dashboard__section--expiry .product-dashboard__section-kicker svg{color:#b7791f}.product-dashboard h2{margin-top:2px;color:#26394d;font-size:18px;line-height:1.3}.product-dashboard__guide{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#1769aa;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__loading,.product-dashboard__empty{min-height:96px;border:1px solid #dfe7ee;border-radius:7px;padding:32px 18px;background:#fff;color:#7d8d9e;font-size:13px;text-align:center}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.profit-category-card,.inventory-category-card{overflow:hidden;border:1px solid #dce5ed;border-radius:7px;background:#fff}.profit-category-card{border-top:3px solid #1f5f8b}.profit-category-card>header,.inventory-category-card>header{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:15px 15px 12px}.profit-category-card>header span,.inventory-category-card>header span{color:#7b8b9d;font-size:11px}.profit-category-card h3,.inventory-category-card h3{margin-top:3px;color:#2d4258;font-size:16px}.profit-category-card__rate{border-radius:4px;padding:4px 6px;background:#edf7f5;color:#357a72!important;font-size:11px!important;font-weight:700}.profit-category-card__metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 15px 13px}.profit-category-card__metrics div{min-width:0}.profit-category-card__metrics dt{color:#8090a1;font-size:11px}.profit-category-card__metrics dd{overflow:hidden;margin-top:4px;color:#1f5f8b;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700}.profit-category-card__metrics div:nth-child(2) dd{color:#6f7f8f}.profit-category-card__metrics div:nth-child(3) dd{color:#357a72}.profit-category-card__rank-header{display:flex;align-items:center;justify-content:space-between;gap:7px;border-top:1px solid #edf1f5;padding:9px 12px}.profit-category-card__rank-header strong{color:#40576b;font-size:12px}.profit-category-card__tabs{display:flex;border:1px solid #dde6ee;border-radius:4px;padding:2px}.profit-category-card__tabs button{border:0;border-radius:3px;padding:3px 7px;background:transparent;color:#718198;font:inherit;font-size:11px;cursor:pointer}.profit-category-card__tabs button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.profit-category-card__table{border-top:1px solid #edf1f5}.profit-category-card__table-head,.profit-category-card__rank-row{display:grid;grid-template-columns:minmax(88px,1.8fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(40px,.65fr);align-items:center;gap:5px;padding:8px 10px 8px 35px}.profit-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.profit-category-card__rank-row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.profit-category-card__rank-row>em{position:absolute;left:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:50%;background:#edf4fa;color:#4d7699;font-size:10px;font-style:normal}.profit-category-card__rank-row>span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.profit-category-card__rank-row>b{overflow:hidden;color:#1f5f8b;text-align:right;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.profit-category-card__rank-row>b:nth-last-child(2){color:#357a72}.profit-category-card__rank-row>b:last-child{color:#63778d}.profit-category-card__rank-row.rank-row--1{background:#fff7df}.profit-category-card__rank-row.rank-row--1>em{background:#d49b2c;color:#fff}.profit-category-card__rank-row.rank-row--2>em{background:#b68162;color:#fff}.profit-category-card__rank-row.rank-row--3>em{background:#d6c978;color:#5f562d}.profit-category-card__rank-row.rank-row--4>em,.profit-category-card__rank-row.rank-row--5>em{background:#a9bbc5;color:#fff}.inventory-category-card{border-top:3px solid #357a72}.inventory-category-card>header{border-bottom:1px solid #edf1f5}.inventory-category-card>header>strong{color:#1f5f8b;font-size:18px;white-space:nowrap}.inventory-category-card__rank-title{display:flex;align-items:center;gap:5px;padding:10px 14px;color:#40576b;font-size:12px;font-weight:700}.inventory-category-card__rank-title svg{color:#357a72}.inventory-category-card__table{border-top:1px solid #edf1f5}.inventory-category-card__table-head,.inventory-category-card__row{display:grid;grid-template-columns:minmax(0,1fr) 68px 78px;align-items:center;gap:8px;padding:8px 12px 8px 37px}.inventory-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.inventory-category-card__row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.inventory-category-card__row em{position:absolute;left:12px;color:#8a9bad;font-size:10px;font-style:normal}.inventory-category-card__row span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.inventory-category-card__row b{color:#2b4358;text-align:right;font-size:10px}.inventory-category-card__row b:last-child{color:#1f5f8b}.product-dashboard__expiry-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px}.expiry-summary-card{min-height:89px;border:1px solid #dce5ed;border-top:3px solid #8a9bab;border-radius:6px;padding:11px 12px;background:#fff}.expiry-summary-card span{color:#61758a;font-size:12px}.expiry-summary-card strong{display:block;margin:5px 0 2px;color:#2b4358;font-size:21px}.expiry-summary-card small{color:#8a99a8;font-size:10px}.expiry-summary-card--expired{border-top-color:#b95a4c}.expiry-summary-card--expired strong{color:#b95a4c}.expiry-summary-card--urgent{border-top-color:#c88727}.expiry-summary-card--urgent strong{color:#b7791f}.expiry-summary-card--warm{border-top-color:#d4a34b}.expiry-summary-card--watch{border-top-color:#5c8fba}.expiry-summary-card--normal{border-top-color:#357a72}.product-dashboard__table-wrap{overflow:auto;border:1px solid #dce5ed;border-radius:7px;background:#fff}.product-dashboard table{width:100%;min-width:900px;border-collapse:collapse}.product-dashboard th{padding:11px 14px;background:#f7f9fb;color:#718397;text-align:left;font-size:11px;font-weight:700}.product-dashboard td{border-top:1px solid #edf1f5;padding:11px 14px;color:#50667a;font-size:12px;white-space:nowrap}.product-dashboard td:first-child{color:#2e475e;font-weight:600}.product-dashboard td:last-child{color:#1f5f8b;font-weight:700}.expiry-status{display:inline-flex;border-radius:4px;padding:3px 6px;background:#edf4fa;color:#527591;font-size:11px}.expiry-status--expired{background:#fff0ed;color:#b45431}.expiry-status--urgent{background:#fff8e6;color:#a66c12}@media(max-width:1180px){.product-dashboard__filters{align-items:flex-start;flex-direction:column}.product-dashboard__actions{align-self:flex-end}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.product-dashboard__expiry-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.product-dashboard{padding:12px}.product-dashboard__filter-main{display:grid;width:100%;gap:10px}.product-dashboard__filter-row{flex-wrap:wrap}.product-dashboard__actions{align-self:stretch}.product-dashboard__button{flex:1}.product-dashboard__feedback{align-items:flex-start;flex-direction:column}.product-dashboard__summary,.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:1fr}.product-dashboard__expiry-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.profit-category-card__table-head,.profit-category-card__rank-row{grid-template-columns:minmax(84px,1.7fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(36px,.6fr);gap:3px;padding-right:7px;padding-left:32px}.profit-category-card__metrics{gap:5px;padding-right:11px;padding-left:11px}.profit-category-card__metrics dd{font-size:12px}.product-dashboard__section-header{align-items:flex-end}.product-dashboard__guide{font-size:11px}}
++.product-dashboard{height:100vh;min-height:100vh;overflow:auto;padding:12px;background:#f4f6f8;color:#26364a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.product-dashboard *{box-sizing:border-box}.product-dashboard h1,.product-dashboard h2,.product-dashboard h3,.product-dashboard p,.product-dashboard dl,.product-dashboard dt,.product-dashboard dd{margin:0}.product-dashboard__header,.product-dashboard__filters,.product-dashboard__summary,.product-dashboard__section,.product-dashboard__feedback{width:100%;max-width:1600px;margin-right:auto;margin-left:auto}.product-dashboard__header{display:flex;align-items:center;min-height:40px;margin-bottom:8px}.product-dashboard h1{color:#1f2d3d;font-size:23px;line-height:1.3}.product-dashboard__filters{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid #dde4ed;border-radius:7px;padding:12px 14px;background:#fff;box-shadow:0 3px 9px rgba(26,47,71,.04)}.product-dashboard__filter-main{display:flex;flex-wrap:wrap;align-items:center;gap:9px 20px}.product-dashboard__filter-row{display:flex;align-items:center;gap:8px;min-height:34px}.product-dashboard__filter-label{color:#4c6076;font-size:13px;font-weight:600}.product-dashboard__periods{display:flex;overflow:hidden;border:1px solid #d8e0ea;border-radius:5px}.product-dashboard__periods button{min-width:48px;min-height:32px;border:0;border-right:1px solid #e4e9ef;background:#fff;color:#66778b;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__periods button:last-child{border-right:0}.product-dashboard__periods button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.product-dashboard__date,.product-dashboard__select-label{display:flex;align-items:center;gap:6px;color:#66778b;font-size:12px}.product-dashboard__date input,.product-dashboard__select-label select{min-height:32px;border:1px solid #d8e0ea;border-radius:5px;padding:4px 8px;background:#fff;color:#405166;font:inherit;font-size:13px}.product-dashboard__actions{display:flex;flex:none;gap:8px}.product-dashboard__button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;border:1px solid #d6e0eb;border-radius:5px;padding:6px 11px;background:#fff;color:#426078;font:inherit;font-size:13px;cursor:pointer}.product-dashboard__button--primary{border-color:#1769aa;background:#1769aa;color:#fff}.product-dashboard__button:disabled{cursor:wait;opacity:.65}.is-spinning{animation:product-dashboard-spin .75s linear infinite}@keyframes product-dashboard-spin{to{transform:rotate(360deg)}}.product-dashboard__feedback{display:flex;justify-content:space-between;gap:12px;padding:8px 2px 12px;color:#718096;font-size:12px}.product-dashboard__feedback span{white-space:nowrap}.product-dashboard__summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}.product-dashboard__summary-card{min-height:145px;border:1px solid #dde5ed;border-top:3px solid #1f5f8b;border-radius:7px;padding:15px 16px;background:#fff}.product-dashboard__summary-card--consumption{border-top-color:#b7791f}.product-dashboard__summary-card--profit{border-top-color:#357a72}.product-dashboard__summary-card>span{color:#53667b;font-size:14px;font-weight:700}.product-dashboard__summary-card>strong{display:block;margin:9px 0 13px;color:#1f5f8b;font-size:24px;line-height:1}.product-dashboard__summary-card--consumption>strong{color:#b7791f}.product-dashboard__summary-card--profit>strong{color:#357a72}.product-dashboard__summary-card dl{display:grid;grid-template-columns:1fr 1fr;gap:10px}.product-dashboard__summary-card dt{color:#7d8c9d;font-size:11px}.product-dashboard__summary-card dd{margin-top:3px;color:#526b80;font-size:13px;font-weight:600}.product-dashboard__section{margin-bottom:26px}.product-dashboard__section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}.product-dashboard__section-kicker{display:inline-flex;align-items:center;gap:5px;color:#718398;font-size:12px}.product-dashboard__section-kicker svg{color:#1f5f8b}.product-dashboard__section--inventory .product-dashboard__section-kicker svg{color:#357a72}.product-dashboard__section--expiry .product-dashboard__section-kicker svg{color:#b7791f}.product-dashboard h2{margin-top:2px;color:#26394d;font-size:18px;line-height:1.3}.product-dashboard__guide{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#1769aa;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__loading,.product-dashboard__empty{min-height:96px;border:1px solid #dfe7ee;border-radius:7px;padding:32px 18px;background:#fff;color:#7d8d9e;font-size:13px;text-align:center}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.profit-category-card,.inventory-category-card{overflow:hidden;border:1px solid #dce5ed;border-radius:7px;background:#fff}.profit-category-card{border-top:3px solid #1f5f8b}.profit-category-card>header,.inventory-category-card>header{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:15px 15px 12px}.profit-category-card>header span,.inventory-category-card>header span{color:#7b8b9d;font-size:11px}.profit-category-card h3,.inventory-category-card h3{margin-top:3px;color:#2d4258;font-size:16px}.profit-category-card__rate{border-radius:4px;padding:4px 6px;background:#edf7f5;color:#357a72!important;font-size:11px!important;font-weight:700}.profit-category-card__metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 15px 13px}.profit-category-card__metrics div{min-width:0}.profit-category-card__metrics dt{color:#8090a1;font-size:11px}.profit-category-card__metrics dd{overflow:hidden;margin-top:4px;color:#1f5f8b;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700}.profit-category-card__metrics div:nth-child(2) dd{color:#6f7f8f}.profit-category-card__metrics div:nth-child(3) dd{color:#357a72}.profit-category-card__rank-header{display:flex;align-items:center;justify-content:space-between;gap:7px;border-top:1px solid #edf1f5;padding:9px 12px}.profit-category-card__rank-header strong{color:#40576b;font-size:12px}.profit-category-card__tabs{display:flex;border:1px solid #dde6ee;border-radius:4px;padding:2px}.profit-category-card__tabs button{border:0;border-radius:3px;padding:3px 7px;background:transparent;color:#718198;font:inherit;font-size:11px;cursor:pointer}.profit-category-card__tabs button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.profit-category-card__table{border-top:1px solid #edf1f5}.profit-category-card__table-head,.profit-category-card__rank-row{display:grid;grid-template-columns:minmax(88px,1.8fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(40px,.65fr);align-items:center;gap:5px;padding:8px 10px 8px 35px}.profit-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.profit-category-card__rank-row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.profit-category-card__rank-row>em{position:absolute;left:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:50%;background:#edf4fa;color:#4d7699;font-size:10px;font-style:normal}.profit-category-card__rank-row>span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.profit-category-card__rank-row>b{overflow:hidden;color:#1f5f8b;text-align:right;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.profit-category-card__rank-row>b:nth-last-child(2){color:#357a72}.profit-category-card__rank-row>b:last-child{color:#63778d}.profit-category-card__rank-row.rank-row--1{background:#fff7df}.profit-category-card__rank-row.rank-row--1>em{background:#d49b2c;color:#fff}.profit-category-card__rank-row.rank-row--2>em{background:#b68162;color:#fff}.profit-category-card__rank-row.rank-row--3>em{background:#d6c978;color:#5f562d}.profit-category-card__rank-row.rank-row--4>em,.profit-category-card__rank-row.rank-row--5>em{background:#a9bbc5;color:#fff}.inventory-category-card{border-top:3px solid #357a72}.inventory-category-card>header{border-bottom:1px solid #edf1f5}.inventory-category-card>header>strong{color:#1f5f8b;font-size:18px;white-space:nowrap}.inventory-category-card__rank-title{display:flex;align-items:center;gap:5px;padding:10px 14px;color:#40576b;font-size:12px;font-weight:700}.inventory-category-card__rank-title svg{color:#357a72}.inventory-category-card__table{border-top:1px solid #edf1f5}.inventory-category-card__table-head,.inventory-category-card__row{display:grid;grid-template-columns:minmax(0,1fr) 68px 78px;align-items:center;gap:8px;padding:8px 12px 8px 37px}.inventory-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.inventory-category-card__row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.inventory-category-card__row em{position:absolute;left:12px;color:#8a9bad;font-size:10px;font-style:normal}.inventory-category-card__row span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.inventory-category-card__row b{color:#2b4358;text-align:right;font-size:10px}.inventory-category-card__row b:last-child{color:#1f5f8b}.product-dashboard__expiry-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px}.product-dashboard__expiry-hint{margin:8px 0 10px!important;color:#718398;font-size:12px}
++.expiry-summary-card{min-height:89px;border:1px solid #dce5ed;border-top:3px solid #8a9bab;border-radius:6px;padding:11px 12px;background:#fff}.expiry-summary-card span{color:#61758a;font-size:12px}.expiry-summary-card strong{display:block;margin:5px 0 2px;color:#2b4358;font-size:21px}.expiry-summary-card small{color:#8a99a8;font-size:10px}.expiry-summary-card--expired{border-top-color:#b95a4c}.expiry-summary-card--expired strong{color:#b95a4c}.expiry-summary-card--urgent{border-top-color:#c88727}.expiry-summary-card--urgent strong{color:#b7791f}.expiry-summary-card--warm{border-top-color:#d4a34b}.expiry-summary-card--watch{border-top-color:#5c8fba}.expiry-summary-card--normal{border-top-color:#357a72}.product-dashboard__table-wrap{overflow:auto;border:1px solid #dce5ed;border-radius:7px;background:#fff}.product-dashboard table{width:100%;min-width:900px;border-collapse:collapse}.product-dashboard th{padding:11px 14px;background:#f7f9fb;color:#718397;text-align:left;font-size:11px;font-weight:700}.product-dashboard td{border-top:1px solid #edf1f5;padding:11px 14px;color:#50667a;font-size:12px;white-space:nowrap}.product-dashboard td:first-child{color:#2e475e;font-weight:600}.product-dashboard td:last-child{color:#1f5f8b;font-weight:700}.expiry-status{display:inline-flex;border-radius:4px;padding:3px 6px;background:#edf4fa;color:#527591;font-size:11px}.expiry-status--expired{background:#fff0ed;color:#b45431}.expiry-status--urgent{background:#fff8e6;color:#a66c12}@media(max-width:1180px){.product-dashboard__filters{align-items:flex-start;flex-direction:column}.product-dashboard__actions{align-self:flex-end}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.product-dashboard__expiry-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.product-dashboard{padding:12px}.product-dashboard__filter-main{display:grid;width:100%;gap:10px}.product-dashboard__filter-row{flex-wrap:wrap}.product-dashboard__actions{align-self:stretch}.product-dashboard__button{flex:1}.product-dashboard__feedback{align-items:flex-start;flex-direction:column}.product-dashboard__summary,.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:1fr}.product-dashboard__expiry-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.profit-category-card__table-head,.profit-category-card__rank-row{grid-template-columns:minmax(84px,1.7fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(36px,.6fr);gap:3px;padding-right:7px;padding-left:32px}.profit-category-card__metrics{gap:5px;padding-right:11px;padding-left:11px}.profit-category-card__metrics dd{font-size:12px}.product-dashboard__section-header{align-items:flex-end}.product-dashboard__guide{font-size:11px}}
+ /* Product-dashboard prototype additions: trend sparklines and consistent rank colors. */
+ .product-dashboard__summary-card-content{display:grid;grid-template-rows:auto 1fr;gap:14px;height:100%}
+ .product-dashboard__summary-metric{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-width:0}
+diff --git a/前端代码/inventory-vue3/src/App.vue b/前端代码/inventory-vue3/src/App.vue
+index c5bcc03d..80495e0d 100644
+--- a/前端代码/inventory-vue3/src/App.vue
++++ b/前端代码/inventory-vue3/src/App.vue
+@@ -2124,7 +2124,7 @@ onBeforeUnmount(() => {
+         <template v-else-if="active === 'overview'">
+           <div class="page-heading page-heading--dashboard">
+             <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? '总部仓' : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
+-            <div class="heading-actions"><label v-if="mode === 'platform'">仓库<select v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
++            <div class="heading-actions"><label v-if="mode === 'platform'" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
+           </div>
+ 
+           <div class="dashboard-cards">
+diff --git a/前端代码/inventory-vue3/src/services/inventoryApi.js b/前端代码/inventory-vue3/src/services/inventoryApi.js
+index 0e669bf8..40e1ba1a 100644
+--- a/前端代码/inventory-vue3/src/services/inventoryApi.js
++++ b/前端代码/inventory-vue3/src/services/inventoryApi.js
+@@ -73,7 +73,8 @@ function messageOf(body, fallback) {
+     inventory_stock_request_line_invalid: '请货明细不合法，请检查商品和数量。',
+     inventory_platform_warehouse_idempotency_conflict: '本次建仓内容与已提交记录不一致，请刷新后重新操作。'
+   }
+-  return businessMessages[code] || businessMessages[message] || message || fallback
++  // 未收录的内部英文错误只显示本次操作的中文提示；code/data仍保留，不能影响重试和业务分支。
++  return businessMessages[code] || businessMessages[message] || (/[\u3400-\u9fff]/.test(message) ? message : '') || fallback
+ }
+ 
+ /** Keeps structured business context on rejected responses without exposing transport details to pages. */
+diff --git a/前端代码/inventory-vue3/src/statusLabels.js b/前端代码/inventory-vue3/src/statusLabels.js
+index 4db114a7..60f80083 100644
+--- a/前端代码/inventory-vue3/src/statusLabels.js
++++ b/前端代码/inventory-vue3/src/statusLabels.js
+@@ -24,7 +24,8 @@ const inventoryStatusLabels = {
+ export function inventoryStatusLabel(value, fallback = '-') {
+   if (value === null || value === undefined || value === '') return fallback
+   const raw = String(value).trim()
+-  return inventoryStatusLabels[raw.toUpperCase()] || raw
++  // 内部枚举未知时给中文提示，原状态值仍留在接口及动作判断中供追溯。
++  return inventoryStatusLabels[raw.toUpperCase()] || (/^[A-Za-z_][A-Za-z0-9_:-]*$/.test(raw) ? '未知状态' : raw)
+ }
+ 
+ export { inventoryStatusLabels }
+diff --git a/前端代码/inventory-vue3/src/styles.css b/前端代码/inventory-vue3/src/styles.css
+index 7263860b..0524efd4 100644
+--- a/前端代码/inventory-vue3/src/styles.css
++++ b/前端代码/inventory-vue3/src/styles.css
+@@ -164,3 +164,11 @@ button { cursor: pointer; }
+ .inventory-list-pagination__current { min-width: 14px; text-align: center; }
+ .inventory-warehouse-choice label { display: grid; gap: 7px; margin: 14px 0; font-size: 13px; }
+ .inventory-warehouse-choice select { box-sizing: border-box; width: 100%; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid #d8e0ea; border-radius: 6px; background: #fff; color: #26344a; font: inherit; }
++
++/* R38：仓库切换与同排按钮同高，长仓名允许收缩，不改变授权范围和切换行为。 */
++.page-heading--dashboard .heading-actions{align-items:center;flex-wrap:wrap}
++.dashboard-warehouse-picker{display:inline-flex;align-items:center;gap:8px;min-width:0;max-width:100%;min-height:36px;padding:0 11px;border:1px solid #dce4ef;border-radius:7px;background:#fff;color:#60738b;font-size:13px}
++.dashboard-warehouse-picker select{appearance:none;min-width:140px;max-width:230px;border:0;padding:8px 22px 8px 0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%2373869c' stroke-width='1.4'/%3E%3C/svg%3E") right center no-repeat;color:#304760;font:inherit;cursor:pointer;text-overflow:ellipsis}
++.dashboard-warehouse-picker:focus-within{border-color:#5598e6;box-shadow:0 0 0 3px #edf5ff}
++.dashboard-warehouse-picker select:focus{outline:none}
++@media(max-width:600px){.page-heading--dashboard{align-items:flex-start;flex-direction:column}.dashboard-warehouse-picker select{min-width:0;width:180px}}
+diff --git a/后端代码/app/controller/admin/v1/report/UnifiedReport.php b/后端代码/app/controller/admin/v1/report/UnifiedReport.php
+index 24df0db4..2d283f47 100644
+--- a/后端代码/app/controller/admin/v1/report/UnifiedReport.php
++++ b/后端代码/app/controller/admin/v1/report/UnifiedReport.php
+@@ -300,6 +300,8 @@ class UnifiedReport extends AuthController
+             $input = $request->getMore([
+                 ['period', 'month'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
+                 ['org_id', 0], ['store_id', 0], ['category_id', 0], ['product_type', 'all'],
++                // 下钻仍走本菜单的后端范围与成本权限，客户端仅提交批次身份及页码。
++                ['detail', ''], ['batch_id', 0], ['batch_store_id', 0], ['cutoff_date', ''], ['page', 1],
+             ]);
+             $stores = $this->scopedStoreIds([
+                 'org_id' => (int)$input['org_id'], 'store_id' => (int)$input['store_id'],
+diff --git a/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php b/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php
+index 5b131e7c..92d3048e 100644
+--- a/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php
++++ b/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php
+@@ -95,15 +95,7 @@ final class InventoryMovementAnalyticsServices
+ 
+     private function sourceTypeName(string $type): string
+     {
+-        // 业务类型代码是库存事实的稳定来源标识；仅在查询展示层翻译，不改写事实、筛选键或汇总口径。
+-        return [
+-            'manual_inbound' => '手工入库', 'manual_outbound' => '手工出库',
+-            'cashier_sale' => '收银销售出库',
+-            'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
+-            'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
+-            'cross_transfer_withdraw' => '调拨撤回入库',
+-            'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
+-            'completion_batch' => '项目耗材核销', 'presale_claim_outbound' => '预售领用出库',
+-        ][$type] ?? $type;
++        // 显示字典与流水、明细复用；来源代码和统计分组保持原样。
++        return InventoryMovementDisplayServices::typeName($type);
+     }
+ }
+diff --git a/后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php b/后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php
+index 76930351..9c155b54 100644
+--- a/后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php
++++ b/后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php
+@@ -23,11 +23,18 @@ final class InventoryMovementDisplayServices
+         'batch_transfer_in' => '仓库调拨入库', 'batch_transfer_out' => '仓库调拨出库',
+         'stock_count_gain' => '盘盈入库', 'stock_count_loss' => '盘亏出库',
+         'salon_usage_issue' => '院装领用', 'salon_usage_out' => '院装领用',
++        'salon_usage_issue_reversal' => '院装领用作废退库',
+         'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销',
+         'presale_claim_outbound' => '预售领用', 'presale_claim_void' => '预售领用作废',
+         'gift_product_claim_outbound' => '赠送领用', 'gift_product_claim_void' => '赠送领用作废',
+     ];
+ 
++    /** 所有库存页面共用中文业务名称；未知代码保留在来源字段追溯，不直接作为用户文案。 */
++    public static function typeName(string $type): string
++    {
++        return self::TYPE_NAMES[$type] ?? '其他库存业务';
++    }
++
+     /** Batch lookups stay within each fact's tenant/store and exact source IDs; no per-row SQL. */
+     public function decorate(array $facts): array
+     {
+@@ -83,7 +90,7 @@ final class InventoryMovementDisplayServices
+     {
+         $type = (string)$fact['source_type'];
+         $source = (string)$fact['source_id'];
+-        $fact['source_type_name'] = self::TYPE_NAMES[$type] ?? '其他库存业务';
++        $fact['source_type_name'] = self::typeName($type);
+         $fact['source_detail_name'] = trim((string)($fact['source_product_name'] ?? '')) ?: '历史业务明细';
+         $fact['order_sn'] = trim((string)($fact['document_no_snapshot'] ?? ''));
+         if (in_array($type, ['cashier_sale', 'cashier_sale_void', 'cashier_presale_stock_repair'], true)) {
+diff --git a/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php b/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
+index 87f70691..72c1defa 100644
+--- a/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
++++ b/后端代码/app/services/product/inventory/InventoryMovementQueryServices.php
+@@ -234,15 +234,10 @@ final class InventoryMovementQueryServices
+         return ['count' => $count, 'list' => $rows];
+     }
+ 
++    /** 与统计、批次明细共用同一中文名称；原来源键继续负责筛选和追溯。 */
+     private function movementLabel(string $sourceType): string
+     {
+-        return [
+-            'manual_inbound' => '手工入库', 'manual_outbound' => '手工出库',
+-            'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
+-            'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
+-            'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
+-            'completion_batch' => '项目耗材核销', 'presale_claim_outbound' => '预售领用出库',
+-        ][$sourceType] ?? $sourceType;
++        return InventoryMovementDisplayServices::typeName($sourceType);
+     }
+ 
+     private function outboundTypeName(string $sourceType): string
+diff --git a/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php b/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php
+index 81ecf377..d4cc0169 100644
+--- a/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php
++++ b/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php
+@@ -306,8 +306,9 @@ final class InventoryStockRequestQueryServices
+         return $sign . substr($digits, 0, -$scale) . ($fraction === '' ? '' : '.' . $fraction);
+     }
+ 
++    /** 状态值用于业务判断，展示层未知枚举不能直接漏出内部代码。 */
+     private function statusName(string $status): string
+     {
+-        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status;
++        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? '未知状态';
+     }
+ }
+diff --git a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
+index 8ec99b02..0f6d1179 100644
+--- a/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
++++ b/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php
+@@ -421,9 +421,10 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
+     }
+ 
+     private function bounded(array $rows): array { if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '当前数据量较大，请缩小业务日期范围后再查询。', []); return $rows; }
+-    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'presale_claim_outbound' => '预售领用出库', 'presale_claim_void' => '预售领用作废退库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_issue_reversal' => '院装领用作废退库', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
+-    private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? $status; }
+-    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status; }
++    /** 统一中文投影，防止同一事实在流水和统计页面使用不同名称。 */
++    private function movementName(string $type): string { return \app\services\product\inventory\InventoryMovementDisplayServices::typeName($type); }
++    private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? '未知状态'; }
++    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? '未知状态'; }
+ 
+     private function payloadFromPlan(array $plan): array
+     {
+diff --git a/后端代码/app/services/report/ProductManagementDashboardServices.php b/后端代码/app/services/report/ProductManagementDashboardServices.php
+index c3b306a0..bcc9a5b8 100644
+--- a/后端代码/app/services/report/ProductManagementDashboardServices.php
++++ b/后端代码/app/services/report/ProductManagementDashboardServices.php
+@@ -21,6 +21,8 @@ final class ProductManagementDashboardServices
+     public function dashboard(array $context, array $input): array
+     {
+         $scope = $this->scope($context, $input);
++        // 批次下钻沿用同一个菜单、门店范围和成本权限；不经过经营金额聚合。
++        if (($input['detail'] ?? '') === 'expiry') return $this->expiryDetail($scope, $input);
+         $range = $this->range($input);
+         $categories = $this->categories();
+         $categoryId = max(0, (int)($input['category_id'] ?? 0));
+@@ -272,6 +274,8 @@ final class ProductManagementDashboardServices
+                 'product_name' => $row['product_name'], 'category_name' => $categoryNames[(int)$row['category_id']] ?? '未分类',
+                 'batch_no' => $row['batch_no'], 'current_quantity' => $row['quantity'], 'expire_date' => $row['expire_date'],
+                 'days' => $days, 'status' => $labels[$key],
++                // 同名/同批号可属于不同门店，浏览器只能使用服务端声明的真实身份下钻。
++                'drilldown' => isset($row['batch_id']) ? ['detail' => 'expiry', 'batch_id' => (int)$row['batch_id'], 'batch_store_id' => (int)$row['store_id'], 'cutoff_date' => $cutoff] : null,
+                 'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
+             ];
+         }
+@@ -282,7 +286,7 @@ final class ProductManagementDashboardServices
+             // independently bounded to ten rows and does not change totals.
+             $rankings[$key] = $this->topExpiryRows($rankings[$key]);
+         }
+-        return ['buckets' => $buckets, 'default_bucket' => 'OVERDUE', 'rankings' => $rankings];
++        return ['buckets' => $buckets, 'default_bucket' => 'OVERDUE', 'rankings' => $rankings, 'cutoff_date' => $cutoff, 'ranking_limit' => 10];
+     }
+ 
+     /** Display the ten most urgent batches; bucket totals still count every authorized batch. */
+@@ -299,12 +303,73 @@ final class ProductManagementDashboardServices
+         return array_slice($rows, 0, 10);
+     }
+ 
+-    private function inventoryRows(array $scope): array
++    /** 汇总与下钻共用同一已结算事实、活动仓及截止日范围；冲销按符号抵消，不能排除负向记录。 */
++    private function inventoryFactQuery(array $scope, string $cutoff, int $batchId = 0)
+     {
+-        $locations = Db::name('inventory_location')->where('tenant_id', $scope['tenant_id'])->whereIn('store_id', $scope['store_ids'])->where('location_status', 'ACTIVE')->column('id'); if (!$locations) return [];
++        $query = Db::name('inventory_batch_movement_fact')->alias('f')
++            ->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')
++            ->join('inventory_location l', 'l.id=f.location_id')
++            ->where('f.tenant_id', $scope['tenant_id'])->where('l.tenant_id', $scope['tenant_id'])
++            ->whereIn('l.store_id', $scope['store_ids'])->where('l.location_status', 'ACTIVE')
++            ->where('f.business_date', '<=', $cutoff)->where('f.fact_status', 'SETTLED');
++        if ($batchId > 0) $query->where('b.id', $batchId);
++        return $query;
++    }
++
++    /** 只读批次流水：精确门店+批次身份，不使用名称模糊匹配；全量合计先于20条分页。 */
++    private function expiryDetail(array $scope, array $input): array
++    {
++        // 同一次只读事务内取得余额、完整合计及当前页，避免并发出入库使三者漂移。
++        return Db::transaction(function () use ($scope, $input): array { return $this->expiryDetailSnapshot($scope, $input); });
++    }
++
++    private function expiryDetailSnapshot(array $scope, array $input): array
++    {
++        $storeId = (int)($input['batch_store_id'] ?? 0);
++        $batchId = (int)($input['batch_id'] ?? 0);
++        $cutoff = (string)($input['cutoff_date'] ?? '');
++        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $cutoff);
++        if ($batchId <= 0 || !in_array($storeId, $scope['store_ids'], true) || !$date || $date->format('Y-m-d') !== $cutoff || $cutoff > date('Y-m-d')) {
++            throw new \InvalidArgumentException('批次不存在或不在当前权限范围内');
++        }
++        $scope['store_ids'] = [$storeId];
++        $batch = $this->inventoryRows($scope, $cutoff, $batchId)[0] ?? null;
++        if (!$batch) throw new \InvalidArgumentException('当前批次已无可用库存，请刷新看板');
++        $query = $this->inventoryFactQuery($scope, $cutoff, $batchId);
++        $total = (int)(clone $query)->count('f.id');
++        $page = min(max(1, (int)($input['page'] ?? 1)), max(1, (int)ceil($total / 20)));
++        $totals = (clone $query)->fieldRaw('SUM(IF(f.direction=1,f.quantity_units,0)) inbound_units,SUM(IF(f.direction=-1,f.quantity_units,0)) outbound_units')->find();
++        $rows = (clone $query)->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
++            ->field('f.id,f.business_date,f.source_type,f.source_id,n.document_no order_sn,f.direction,f.quantity_units,l.location_name,s.quantity_scale')
++            ->order('f.business_date desc,f.id desc')->page($page, 20)->select()->toArray();
++        foreach ($rows as &$row) {
++            $row['source_type_name'] = \app\services\product\inventory\InventoryMovementDisplayServices::typeName((string)$row['source_type']);
++            $row['direction_name'] = (int)$row['direction'] === 1 ? '入库' : '出库';
++            $row['quantity'] = (int)$row['quantity_units'] / (10 ** (int)$row['quantity_scale']);
++            // 原单据号缺失时不拿内部ID冒充单号。
++            $row['order_sn'] = trim((string)($row['order_sn'] ?? '')) ?: '未记录单号';
++        }
++        unset($row);
++        $divisor = 10 ** (int)$batch['quantity_scale'];
++        return ['batch' => $batch, 'store_name' => (string)(Db::name('system_store')->where('id', $storeId)->value('name') ?? ''),
++            // 明细列定义由后端声明，前端只渲染，不按列名猜值或计算业务合计。
++            'columns' => [
++                ['key' => 'business_date', 'label' => '日期'], ['key' => 'location_name', 'label' => '仓库'],
++                ['key' => 'source_type_name', 'label' => '业务类型'], ['key' => 'order_sn', 'label' => '单据号'],
++                ['key' => 'direction_name', 'label' => '方向'], ['key' => 'quantity', 'label' => '数量'],
++            ], 'table_layout' => ['fixed' => true, 'fixed_header' => true],
++            'cutoff_date' => $cutoff, 'rows' => $rows, 'total' => $total, 'page' => $page, 'page_size' => 20,
++            'inbound_quantity' => (int)($totals['inbound_units'] ?? 0) / $divisor,
++            'outbound_quantity' => (int)($totals['outbound_units'] ?? 0) / $divisor,
++            'data_as_of' => date('Y-m-d H:i:s'), 'read_only' => true];
++    }
++
++    private function inventoryRows(array $scope, ?string $cutoff = null, int $batchId = 0): array
++    {
++        $cutoff = $cutoff ?? date('Y-m-d');
+         $signed = 'SUM(IF(f.direction=1,f.quantity_units,-CAST(f.quantity_units AS SIGNED)))';
+-        $rows = Db::name('inventory_batch_movement_fact')->alias('f')->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')->join('inventory_location l', 'l.id=f.location_id')->where('f.tenant_id', $scope['tenant_id'])->whereIn('f.location_id', $locations)->where('f.business_date', '<=', date('Y-m-d'))->where('f.fact_status', 'SETTLED')->fieldRaw("l.store_id,b.id batch_id,s.consumable_product_id product_id,b.product_name_snapshot product_name,b.category_name_snapshot category_name,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale,{$signed} quantity_units")->group('l.store_id,b.id,s.consumable_product_id,b.product_name_snapshot,b.category_name_snapshot,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale')->having($signed . '>0')->select()->toArray();
+-        return array_map(function (array $row) use ($scope): array { $scale = max(0, (int)$row['quantity_scale']); $units = (int)$row['quantity_units']; return ['batch_id' => (int)$row['batch_id'], 'store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id'], 'category_id' => 0, 'product_name' => (string)$row['product_name'], 'category_name' => (string)$row['category_name'], 'batch_no' => (string)$row['batch_no'], 'expire_date' => $row['expire_date'] ?: null, 'quantity' => $units / (10 ** $scale), 'inventory_cost_cents' => $this->costVisible($scope) ? (int)floor($units * (int)$row['unit_cost_cents'] / (10 ** $scale)) : null]; }, $rows);
++        $rows = $this->inventoryFactQuery($scope, $cutoff, $batchId)->fieldRaw("l.store_id,b.id batch_id,s.consumable_product_id product_id,b.product_name_snapshot product_name,b.category_name_snapshot category_name,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale,{$signed} quantity_units")->group('l.store_id,b.id,s.consumable_product_id,b.product_name_snapshot,b.category_name_snapshot,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale')->having($signed . '>0')->select()->toArray();
++        return array_map(function (array $row) use ($scope): array { $scale = max(0, (int)$row['quantity_scale']); $units = (int)$row['quantity_units']; return ['batch_id' => (int)$row['batch_id'], 'store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id'], 'quantity_scale' => $scale, 'category_id' => 0, 'product_name' => (string)$row['product_name'], 'category_name' => (string)$row['category_name'], 'batch_no' => (string)$row['batch_no'], 'expire_date' => $row['expire_date'] ?: null, 'quantity' => $units / (10 ** $scale), 'inventory_cost_cents' => $this->costVisible($scope) ? (int)floor($units * (int)$row['unit_cost_cents'] / (10 ** $scale)) : null]; }, $rows);
+     }
+ 
+     private function costVisible(array $scope): bool { return (bool)($scope['cost_visible'] ?? false); }

@@ -302,6 +302,9 @@ final class MobileMerchantSessionServices
             || !hash_equals((string)$projection['state_context_id'], (string)$meta['stateContextId'])) {
             throw MobileApiException::business('ACTIVE_CONTEXT_MISMATCH', '商家上下文已变化，请重新进入。');
         }
+        // 成长新增的组织上下文在bootstrap也重新核对，旧STORE路径保持原有会话规则。
+        $business=Db::name('mobile_merchant_business_context')->where('context_id',$projection['business_context_id'])->where('state','ACTIVE')->find();
+        if(($business['context_type']??'')==='ORGANIZATION')$this->assertContextStillAllowed((int)$session['employee_id'],$business);
         return [$session, $projection];
     }
 
@@ -377,7 +380,20 @@ final class MobileMerchantSessionServices
         }
         $visibleStoreIds = $this->managerVisibleStoreIds($employeeId);
         if ($visibleStoreIds === []) {
-            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可操作的门店。');
+            // 无店员工仅在明确成长授权及有效组织任职下进入组织上下文；不借用任意门店。
+            $rules=$this->positiveIds(explode(',',(string)($auth['rules']??'')));
+            if(in_array(MobileMerchantCapabilityCatalog::RULE_GROWTH,$rules,true)) {
+                $org=Db::name('organization_employee')->alias('oe')->join('organization o','o.id=oe.org_id')
+                    ->where('oe.employee_id',$employeeId)->where('oe.status',1)->where('oe.is_del',0)->where('o.status',1)->where('o.is_del',0)->order('oe.id')->field('o.id,o.name')->select()->toArray();
+                $choices=$org;$org=null;foreach($choices as $candidate)if(app()->make(OrganizationOpsStatusServices::class)->isOrganizationEffectivelyEnabled((int)$candidate['id'])){$org=$candidate;break;}
+                if($org) {
+                    $existing=Db::name('mobile_merchant_business_context')->where('employee_id',$employeeId)->where('context_type','ORGANIZATION')->where('organization_id',$org['id'])->where('state','ACTIVE')->find();
+                    if($existing)return $existing;
+                    $id=$this->uuid();Db::name('mobile_merchant_business_context')->insert(['context_id'=>$id,'employee_id'=>$employeeId,'context_type'=>'ORGANIZATION','organization_id'=>$org['id'],'label'=>$org['name'],'state'=>'ACTIVE','created_at'=>$now,'updated_at'=>$now]);
+                    return Db::name('mobile_merchant_business_context')->where('context_id',$id)->find()?:[];
+                }
+            }
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可操作的门店或成长组织。');
         }
 
         // Last valid selection wins. First entry uses deterministic store-id order.
@@ -446,14 +462,17 @@ final class MobileMerchantSessionServices
         $employee = Db::name('employee')->where('id', (int)$session['employee_id'])->find() ?: [];
         $context = Db::name('mobile_merchant_business_context')->where('context_id', (string)$projection['business_context_id'])->find() ?: [];
         $contexts = Db::name('mobile_merchant_business_context')->where('employee_id', (int)$session['employee_id'])->where('state', 'ACTIVE')
-            ->field('context_id,label,staff_id,store_id')->order('created_at', 'asc')->select()->toArray();
+            ->field('context_id,label,staff_id,store_id,context_type,organization_id')->order('created_at', 'asc')->select()->toArray();
         $auth = Db::name('employee_mobile_auth')->where('employee_id', (int)$session['employee_id'])->where('status', 1)->where('is_del', 0)->find() ?: [];
         $managerStoreIds = $this->managerVisibleStoreIds((int)$session['employee_id']);
-        $contexts = array_values(array_filter($contexts, static function (array $row) use ($managerStoreIds): bool {
+        $contexts = array_values(array_filter($contexts, function (array $row) use ($managerStoreIds,$session,$auth): bool {
+            if((string)($row['context_type']??'')==='ORGANIZATION'){if(!in_array(MobileMerchantCapabilityCatalog::RULE_GROWTH,$this->positiveIds(explode(',',(string)($auth['rules']??''))),true))return false;$binding=Db::name('organization_employee')->where('employee_id',(int)$session['employee_id'])->where('org_id',(int)$row['organization_id'])->where('status',1)->where('is_del',0)->find();return (bool)$binding&&app()->make(OrganizationOpsStatusServices::class)->isOrganizationEffectivelyEnabled((int)$row['organization_id']);}
             return (int)($row['staff_id'] ?? 0) > 0 || in_array((int)($row['store_id'] ?? 0), $managerStoreIds, true);
         }));
         $contextSummary = array_map(static fn(array $row): array => ['contextId' => (string)$row['context_id'], 'label' => (string)$row['label']], $contexts);
         $actions = $this->availableActions((int)$session['employee_id']);
+        // 组织上下文只有成长入口；不得把已有门店岗位动作带到无店会话。
+        if(($context['context_type']??'')==='ORGANIZATION')$actions=array_values(array_intersect($actions,['mobile.merchant.growth','mobile.merchant.workbench']));
         $scopeDigest = hash('sha256', (string)$projection['business_context_id'] . ':' . (string)$session['auth_version']);
         return [
             'contractVersion' => MobileApiResponse::MERCHANT_CONTRACT, 'merchantToken' => $token, 'expiresAt' => (string)$session['expires_at'],
@@ -473,6 +492,8 @@ final class MobileMerchantSessionServices
         $catalog = app()->make(MobileMerchantCapabilityCatalog::class);
         $personal = $this->isPersonalScope($employeeId);
         $actions = $catalog->availableActions($ruleIds, $personal ? 'PERSONAL_SELF' : 'STORES');
+        // 只有明确授予成长菜单的账号才读取成长开关；缺表或关闭时不显示入口。
+        if(in_array('mobile.merchant.growth',$actions,true)&&!app()->make(\app\services\growth\GrowthAccessServices::class)->isEnabled())$actions=array_values(array_diff($actions,['mobile.merchant.growth']));
         // 经营首页汇总整店事实；总部“个人”只能进入本人业绩，不能靠岗位功能看到整店概览。
         return $personal ? array_values(array_diff($actions, ['MERCHANT_HOME_VIEW'])) : $actions;
     }
@@ -481,6 +502,14 @@ final class MobileMerchantSessionServices
     private function assertContextStillAllowed(int $employeeId, array $context): void
     {
         $storeId = (int)($context['store_id'] ?? 0);
+        // 切换/恢复时重新验证组织任职和成长菜单；旧门店上下文继续执行原校验。
+        if(($context['context_type']??'')==='ORGANIZATION') {
+            $auth=Db::name('employee_mobile_auth')->where('employee_id',$employeeId)->where('status',1)->where('is_del',0)->find();
+            $binding=Db::name('organization_employee')->where('employee_id',$employeeId)->where('org_id',(int)$context['organization_id'])->where('status',1)->where('is_del',0)->find();
+            $org=Db::name('organization')->where('id',(int)$context['organization_id'])->where('status',1)->where('is_del',0)->find();
+            if(!$auth||!$binding||!$org||!app()->make(OrganizationOpsStatusServices::class)->isOrganizationEffectivelyEnabled((int)$context['organization_id'])||!Db::name('employee')->where('id',$employeeId)->where('status',1)->where('is_del',0)->find()||!Db::name('employee_internal_account')->where('employee_id',$employeeId)->where('status',1)->where('is_del',0)->find()||!in_array(MobileMerchantCapabilityCatalog::RULE_GROWTH,$this->positiveIds(explode(',',(string)($auth['rules']??''))),true))throw MobileApiException::business('NO_VALID_ASSIGNMENT','组织成长任职已失效。');
+            return;
+        }
         if ($storeId <= 0 || (string)($context['context_type'] ?? '') !== 'STORE') {
             throw MobileApiException::business('NO_VALID_ASSIGNMENT', '目标商家上下文不可用。');
         }

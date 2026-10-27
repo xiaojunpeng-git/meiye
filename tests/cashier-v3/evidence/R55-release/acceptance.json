@@ -1,0 +1,9 @@
+{
+  "candidateTree": "df92b91f52e940a245cfd44b7448067a40bbd427",
+  "productManagerConfirmed": true,
+  "authorization": "确认独立候选，按原顺序发布（推荐）",
+  "order": ["commit", "rh-formal", "verify", "push", "008", "010"],
+  "rhFormalOnly": true,
+  "databaseMigrations": false,
+  "platformStaticUnchanged": true
+}

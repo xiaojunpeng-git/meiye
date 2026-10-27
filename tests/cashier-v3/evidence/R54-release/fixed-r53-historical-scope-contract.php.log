@@ -1,0 +1,10 @@
+PASS owner organization descendant store allowed
+PASS unrelated organization rejected
+PASS unregistered holder rejected
+PASS other tenant rejected
+PASS inactive store rejected
+PASS immutable paid amount restored from zero carrier source
+PASS migration choice_count paid1000 remaining7of10 projects700 without duplicate options
+PASS conversion caller preserves technical carrier zero
+PASS migration shared value still excludes cancelled100
+R53_HISTORICAL_SCOPE_SQLITE_OK checks=10

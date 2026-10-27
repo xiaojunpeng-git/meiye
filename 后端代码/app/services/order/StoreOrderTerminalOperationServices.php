@@ -119,11 +119,25 @@ class StoreOrderTerminalOperationServices extends BaseServices
             OrderTerminalError::throw(OrderTerminalError::ACTION_CONFLICT, 'bad action_type');
         }
 
+        // Lock the debt-bearing origin before a repayment document, matching
+        // conversion's origin -> holder order and guarding before channel work.
+        $originId = \app\services\cashier\v3\card\CashierV3CardConversionGuard::legacyOriginOrderId($storeOrderId);
+        if ($originId > 0 && $originId !== $storeOrderId) {
+            Db::name('store_order')->where('id', $originId)->lock(true)->find();
+        }
         $order = Db::name('store_order')->where('id', $storeOrderId)->lock(true)->find();
         if (!$order) {
             OrderTerminalError::throw(OrderTerminalError::ORDER_NOT_FOUND);
         }
         $order = is_array($order) ? $order : $order->toArray();
+        $lockedOriginId = \app\services\cashier\v3\card\CashierV3CardConversionGuard::legacyOriginOrderId($storeOrderId, true);
+        if ($lockedOriginId !== $originId) {
+            throw new \think\exception\ValidateException('补交订单关联已变化，请重新办理。');
+        }
+
+        // Run before claiming any refund execution lease or calling a payment
+        // channel. A converted card cannot also refund its original sale value.
+        \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted($storeOrderId);
 
         if ((int)($order['is_del'] ?? 0) === 1 || (int)($order['is_system_del'] ?? 0) === 1) {
             OrderTerminalError::throw(OrderTerminalError::ORDER_DELETED);

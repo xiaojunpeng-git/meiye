@@ -1,0 +1,14 @@
+[
+  {
+    "test": "store-group-grant-local.php",
+    "exit_code": 0,
+    "output": "PASS local temporary-table basic report grant install\n",
+    "error": ""
+  },
+  {
+    "test": "navigation-local.php",
+    "exit_code": 0,
+    "output": "{\"pass\":true,\"checks\":260,\"source\":\"real_local_mysql_temporary_configuration_tables\",\"persistent_writes\":false,\"catalog_sha256\":\"f84ffa3450bcc16a758a88e04f19b171f1042fccc0ecd4195f7243d8b7d7dc3b\"}\n",
+    "error": ""
+  }
+]

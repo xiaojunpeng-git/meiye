@@ -25,7 +25,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
     ];
 
     /** @return array<string,mixed> */
-    public static function definition(string $pageCode): array
+    public static function definition(string $pageCode, bool $businessSourceEnabled = true, bool $debtPaymentEnabled = true): array
     {
         $type = self::typeForPage($pageCode);
         $definitions = [
@@ -33,7 +33,8 @@ final class CashierV3OrderCenterUnifiedQueryContract
             'sales' => ['销售订单', [
                 ['sales_order_no', '销售订单号', 'text', true, true], ['business_date', '销售日期', 'date', true, true],
                 ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['store', '下单门店'], ['item_summary', '商品摘要'],
-                ['item_name', '商品'], ['unit_price', '单价', 'amount'], ['quantity', '数量', 'integer'],
+                // 分类与商品逐明细对齐，查询和导出不得折成整单或取卡项外壳分类。
+                ['item_name', '商品'], ['product_category', '分类'], ['unit_price', '单价', 'amount'], ['quantity', '数量', 'integer'],
                 ['craftsman', '手艺人（类型，业绩，手工、项目数）'], ['sales_manager', '销售经理'], ['guide', '导购'],
                 ['line_amount', '金额', 'amount'], ['occurred_at', '实际下单时间', 'datetime'],
                 ['item_count', '商品数量', 'integer'], ['receivable_amount', '应收金额', 'amount'], ['discount_amount', '优惠金额', 'amount'],
@@ -69,7 +70,9 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['member_name', '会员姓名'], ['service_project', '服务项目'], ['entitlement_source', '权益来源'], ['source_card', '来源卡名称'],
                 ['source_card_no', '完整卡号'], ['used_times', '本次使用次数', 'integer'], ['store', '服务门店'], ['craftsman', '手艺人'],
                 ['labor_fee_amount', '手工费', 'amount'], ['labor_performance_type', '服务业绩类型'], ['labor_performance_ratio', '业绩比例'],
-                ['labor_performance_amount', '劳动业绩', 'amount'], ['project_count', '工资项目数', 'integer'], ['operator', '操作人'], ['service_status', '状态'], ['service_completed_at', '服务完成时间', 'datetime'],
+                // 消耗业绩是门店项目事实，劳动业绩是可调整的员工分配事实；导出与页面使用相同字段。
+                ['consumption_performance_amount', '消耗业绩', 'amount'], ['labor_performance_amount', '劳动业绩', 'amount'],
+                ['project_count', '工资项目数', 'integer'], ['operator', '操作人'], ['service_status', '状态'], ['service_completed_at', '服务完成时间', 'datetime'],
                 ['voided_at', '作废时间', 'datetime'], ['void_reason', '作废原因'], ['void_operator', '作废操作人'], ['detail_remark', '明细备注'],
             ], ['service_record_no', 'source', 'sales_order_no', 'member_name', 'service_project', 'entitlement_source', 'source_card_no', 'craftsman']],
             'supplement' => ['补交记录', [
@@ -103,11 +106,31 @@ final class CashierV3OrderCenterUnifiedQueryContract
                     if (!isset($mixedFields[$field[0]])) $mixedFields[$field[0]] = $field;
                 }
             }
+            // Reuse the mixed page's existing product category filter for each actual sale line.
+            unset($mixedFields['product_category']);
+            $orderedFields = [];
+            foreach ($mixedFields as $key => $field) {
+                $orderedFields[$key] = $field;
+                if ($key === 'item_name') $orderedFields['product_category'] = ['product_category', '分类'];
+            }
+            $mixedFields = $orderedFields;
             $mixedFields['business_date'][1] = '业务日期';
+            // 仅全部订单开放来源顶栏筛选；四类单据自身的查询字段契约不变。
+            $mixedFields['source'][4] = true;
             $definitions['all'] = ['全部订单', array_values($mixedFields), ['order_no', 'source_order_no', 'member_name', 'phone', 'item_summary', 'product_name']];
         }
         if (!isset($definitions[$type])) throw new \InvalidArgumentException('订单中心统一查询页面不合法');
         [$label, $fields, $keywordFields] = $definitions[$type];
+        // 仅 source 表示客户业务来源。gift_source/source_type/source_card 等为技术追溯，不能按中文列名批量撤下。
+        if (!$businessSourceEnabled) {
+            $fields = array_values(array_filter($fields, static function (array $field): bool { return $field[0] !== 'source'; }));
+            $keywordFields = array_values(array_filter($keywordFields, static function (string $key): bool { return $key !== 'source'; }));
+        }
+        // The instance debt switch removes the stable display/query/export key,
+        // never historical amounts or unrelated order records.
+        if (!$debtPaymentEnabled && in_array($type, ['all', 'sales', 'recharge'], true)) {
+            $fields = array_values(array_filter($fields, static function (array $field): bool { return $field[0] !== 'debt_amount'; }));
+        }
         $registered = [];
         foreach ($fields as $field) {
             [$key, $fieldLabel] = $field;
@@ -115,7 +138,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
             $visible = $field[3] ?? true;
             $quick = $field[4] ?? false;
             // 一单多值字段只支持展示/筛选/导出，不能隐式取第一项排序或将明细金额当整单合计。
-            $operations = in_array($type, ['sales', 'all'], true) && in_array($key, ['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'], true)
+            $operations = in_array($type, ['sales', 'all'], true) && in_array($key, ['item_name','product_category','unit_price','quantity','line_amount','craftsman','sales_manager','guide'], true)
                 ? ['display','filter','quick','export'] : [];
             $registered[] = UnifiedQueryPageRegistry::field($key, $fieldLabel, $fieldType, $visible, $quick, $operations);
         }

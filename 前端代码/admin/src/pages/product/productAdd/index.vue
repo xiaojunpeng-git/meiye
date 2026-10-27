@@ -874,7 +874,7 @@
 				@on-change='changePrice'
               ></InputNumber>
             </FormItem>
-			<FormItem label="调价区间：" v-if="formData.product_type == 0 && merchantType !=1">
+			<FormItem label="可售价区间：" v-if="formData.product_type == 0 && merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -1108,7 +1108,7 @@
 				@on-change='changePrice'
               ></InputNumber>
             </FormItem>
-			<FormItem label="调价区间：" v-if="merchantType !=1">
+			<FormItem label="可售价区间：" v-if="merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -1301,7 +1301,7 @@
 				@on-change='changePrice'
 			  ></InputNumber>
 			</FormItem>
-			<FormItem label="调价区间：" v-if="merchantType !=1">
+			<FormItem label="可售价区间：" v-if="merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -1768,6 +1768,8 @@ export default {
   name: 'productAdd',
   data() {
     return {
+      // 来自后端实例显示配置；独立于商品表单，隐藏列时不清空或删除卡内手工费。
+      cardLaborFeeVisible: true,
 	  priceSetType:0,//区间改价类型
 	  priceSetNum:0,//区间改价输入的价格
       ruleValidate: {
@@ -2317,7 +2319,8 @@ export default {
         columns.push({ title: '单次核销金额', slot: 'writeoff_amount', minWidth: 160 });
       }
       columns.push({ title: '操作', slot: 'action', minWidth: 80 });
-      return columns;
+      // 普通卡与组合卡共用列定义，仅省略显示，不参与卡内项目数据组装或保存。
+      return columns.filter(column => this.cardLaborFeeVisible || column.slot !== 'labor_fee');
     },
   },
   destroyed() {
@@ -2369,21 +2372,21 @@ export default {
         this.$set(item, 'pm', 1);
       });
     },
-	// 单规格-调价区间
+	// 单规格-可售价区间
 	changePrice(e) {
 		if(!this.$route.params.id){
 			this.formData.attr.price_range_min = e
 			this.formData.attr.price_range_max = e
 		}
 	},
-	// 多规格-调价区间
+	// 多规格-可售价区间
 	changeManyPrice(index,e){
 		if(!this.$route.params.id){
 			this.manyFormValidate[index].price_range_min = e;
 			this.manyFormValidate[index].price_range_max = e;
 		}
 	},
-	// 多规格-调价区间-关闭弹窗
+	// 多规格-可售价区间-关闭弹窗
 	closePriceSet(i) {
 	  document.body.click()
 	  this.$refs['popoverRef_' + i][0].doClose(); //关闭的
@@ -2411,11 +2414,11 @@ export default {
 		});
 		this.closePriceSet(i);
 	},
-	// 多规格-调价区间-获取输入的调价价格
+	// 多规格-可售价区间-获取输入的调价价格
 	priceReplace(event) {
 	  this.priceSetNum = this.cleanPrice(event.target.value);
 	},
-	// 多规格-调价区间-价格处理
+	// 多规格-可售价区间-价格处理
 	cleanPrice(value) {
 	  // 移除非数字和非小数点的字符
 	  let cleanedValue = value.replace(/[^\d.]/g, '');
@@ -3566,13 +3569,13 @@ export default {
         );
 		if(this.merchantType != 1){
 			headerList.splice(priceIndex + 1, 0, {
-			  title: '调价-最低价',
+			  title: '可售价区间-最低价',
 			  slot: 'price_range_min',
 			  align: 'center',
 			  minWidth: '150px',
 			});
 			headerList.splice(priceIndex + 2, 0, {
-			  title: '调价-最高价',
+			  title: '可售价区间-最高价',
 			  slot: 'price_range_max',
 			  align: 'center',
 			  minWidth: '150px',
@@ -3600,14 +3603,14 @@ export default {
 		);
 		if(this.merchantType != 1){
 			headerList.splice(priceIndex + 1, 0, {
-			  title: '调价-最低价',
+			  title: '可售价区间-最低价',
 			  tips: '（最小值）',
 			  slot: 'price_range_min',
 			  align: 'center',
 			  minWidth: '150px',
 			});
 			headerList.splice(priceIndex + 2, 0, {
-			  title: '调价-最高价',
+			  title: '可售价区间-最高价',
 			  tips: '（最大值）',
 			  slot: 'price_range_max',
 			  align: 'center',
@@ -3637,7 +3640,7 @@ export default {
 		}
 		if(min>0 && max>0){
 			if(price<min || price>max){
-				this.$Message.warning('售价需在调价区间内');
+				this.$Message.warning('售价需在可售价区间内');
 				return false
 			}
 			return true
@@ -4334,9 +4337,14 @@ export default {
         }
         // 新增项目才继承项目手工费，后续在卡内可独立调整。
         this.$set(item, 'labor_fee', Number(item.labor_fee || 0));
-        // New card rows preserve the existing unit-price default until explicitly changed.
-        this.$set(item, 'craftsman_default_mode', 'default_unit_price');
-        this.$set(item, 'craftsman_default_unit_amount', 0);
+        // 新卡项目只在选入时复制项目的明确业绩值；无来源继续按默认单价，
+        // 之后的卡内手改独立保存，不被项目设置变化覆盖。
+        const rawCraftsmanAmount = item.craftsman_default_unit_amount;
+        const hasCraftsmanAmount = rawCraftsmanAmount !== null && rawCraftsmanAmount !== undefined
+          && rawCraftsmanAmount !== '' && Number.isInteger(Number(rawCraftsmanAmount))
+          && Number(rawCraftsmanAmount) >= 0;
+        this.$set(item, 'craftsman_default_mode', hasCraftsmanAmount ? 'manual_amount' : 'default_unit_price');
+        this.$set(item, 'craftsman_default_unit_amount', hasCraftsmanAmount ? Number(rawCraftsmanAmount) : 0);
       });
       this.cardData = [...this.cardData, ...newCardData];
       this.combinationPickerGroupNo = 0;
@@ -4450,6 +4458,7 @@ export default {
     getProductBrokerage() {
       productBrokerage((this.$route.params.id || this.$route.query.copy || 0), 0).then((res) => {
         const { storeInfo, attrValue, level_list, store_brokerage_ratio, store_brokerage_two } = res.data;
+        this.cardLaborFeeVisible = res.data.labor_fee_visible !== false;
         const { is_vip, level_type, is_brokerage, is_sub } = storeInfo;
         this.isVip = is_vip;
         this.levelType = level_type;

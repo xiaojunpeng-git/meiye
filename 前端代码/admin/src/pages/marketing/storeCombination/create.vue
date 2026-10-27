@@ -294,7 +294,10 @@
         <!-- 选择商品-->
         <Modal v-model="modals" title="商品列表" footerHide class="paymentFooter" scrollable width="900"
             @on-cancel="cancel">
-            <goods-list ref="goodslist"  :chooseType="3" v-if="modals" @getProductId="getProductId"></goods-list>
+            <RadioGroup v-model="combinationCatalogType" type="button" style="margin-bottom: 16px">
+              <Radio :label="-1">全部</Radio><Radio :label="0">产品</Radio><Radio :label="5">卡项</Radio><Radio :label="6">项目</Radio>
+            </RadioGroup>
+            <goods-list :key="combinationCatalogType" :catalogTypes="combinationCatalogType === -1 ? [0,5,6] : [combinationCatalogType]" ref="goodslist" :chooseType="3" v-if="modals" @getProductId="getProductId"></goods-list>
         </Modal>
         <!-- 上传图片-->
         <Modal v-model="modalPic" width="960px" scrollable footer-hide closable title='上传商品图' :mask-closable="false"
@@ -320,6 +323,8 @@ export default {
     components: { goodsList, uploadPictures, WangEditor, freightTemplate },
     data() {
         return {
+                // Only narrows this picker; product/SKU identity is still verified by the server.
+                combinationCatalogType: -1,
           roterPre: Setting.roterPre,
             template: false,
             submitOpen: false,

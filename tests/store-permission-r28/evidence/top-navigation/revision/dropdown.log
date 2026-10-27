@@ -1,0 +1,3 @@
+PASS all five dropdowns left-aligned with their own trigger at 1515px
+PASS wide report dropdown clamps to viewport and repositions on live resize
+R28 DROPDOWN PASS

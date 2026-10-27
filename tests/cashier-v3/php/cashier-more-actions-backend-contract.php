@@ -54,7 +54,7 @@ $checks = [
         && strpos($manifest, "'update-cashier-line-price'") !== false
         && strpos($manifest, "'update-cashier-supplement'") !== false,
     'eventless workspace edits' => strpos($event, "'update-cashier-line-price' => \$eventless(\$workspaceDraft)") !== false,
-    'current sku locked cost' => strpos($service, "->field('id,product_id,cost,price,ot_price')") !== false
+    'current sku locked cost' => strpos($service, "->field('id,product_id,cost,price,ot_price,price_range_min,price_range_max')") !== false
         && strpos($service, "'price_change_below_configured_cost'") !== false
         && strpos($service, '$minimumLineAmountCents') !== false,
     'exact zero price bypasses cost floor but positive prices do not' => strpos(

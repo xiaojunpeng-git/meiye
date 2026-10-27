@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
+use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 
 final class CashierV3CheckoutBusinessConfigProjectionServices
 {
@@ -22,6 +23,8 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
 
     public function apply(array $projection, string $kind, array $request): array
     {
+        $policy = new CashierV3BusinessSourcePolicyServices();
+        $settings = $policy->read();
         $selection = $this->businessSources->read(
             $kind,
             (string)($request['request_id'] ?? ''),
@@ -30,14 +33,24 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
         );
         if ($kind === CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE
             && (int)($selection['primarySourceId'] ?? 0) <= 0) {
-            $selection = $this->businessSources->latestNormalMemberSource(
-                (string)($request['tenant_id'] ?? ''),
-                (int)($request['store_id'] ?? 0),
-                (int)($request['member_id'] ?? 0)
-            );
+            // Only a new choice uses policy defaults; a captured checkout keeps
+            // its own selection across projection refreshes and failed retries.
+            try {
+                $selection = $policy->initialChoice(
+                    'purchase',
+                    (string)($request['tenant_id'] ?? ''),
+                    (int)($request['store_id'] ?? 0),
+                    (int)($request['member_id'] ?? 0)
+                );
+            } catch (\think\exception\ValidateException $error) {
+                // Bad fixed settings must block a new checkout, not login or
+                // historical viewing. Surface the same configuration failure.
+                $projection['sourceInvalidMessage'] = $error->getMessage();
+            }
         }
-        $projection['sourceEnabled'] = true;
-        $projection['sourceSelectable'] = (string)($projection['businessType'] ?? '') !== 'debt_repayment';
+        $projection['sourceEnabled'] = $settings['enabled'];
+        $projection['sourceSelectable'] = $settings['enabled'] && (string)($projection['businessType'] ?? '') !== 'debt_repayment';
+        $projection['businessSourcePolicy'] = $settings;
         $projection['sourceLabel'] = (string)($selection['displayNameSnapshot'] ?? '');
         if ($kind !== CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE) {
             $projection['sourceSelectionVersion'] = (int)($selection['selectionVersion'] ?? 0);

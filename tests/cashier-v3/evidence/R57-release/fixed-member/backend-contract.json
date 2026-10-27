@@ -1,0 +1,595 @@
+{
+  "result": "PASS",
+  "checks": 24,
+  "fields": [
+    {
+      "key": "member_name",
+      "label": "会员姓名",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": true,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "phone",
+      "label": "完整手机号",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": true,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "member_no",
+      "label": "会员编号",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": true,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "birthday",
+      "label": "生日",
+      "type": "date",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "birthday_month_day",
+      "label": "生日（月日）",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": false,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "member_status",
+      "label": "会员状态",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "member_level",
+      "label": "会员等级",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "member_tag",
+      "label": "会员标签",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "store",
+      "label": "归属门店",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "exclusive_service_staff",
+      "label": "专属服务人",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "account_balance",
+      "label": "账户余额",
+      "type": "amount",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "active_card_count",
+      "label": "有效卡项数量",
+      "type": "integer",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "remaining_project_times",
+      "label": "剩余项目次数",
+      "type": "integer",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "remaining_project_amount",
+      "label": "剩余项目金额",
+      "type": "amount",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "debt_amount",
+      "label": "欠款金额",
+      "type": "amount",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "total_consumption_amount",
+      "label": "总消费金额",
+      "type": "amount",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "visit_count",
+      "label": "到店次数",
+      "type": "integer",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "summary"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": false,
+        "summary": true,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "latest_purchase_date",
+      "label": "最近购买日期",
+      "type": "date",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "last_service_staff",
+      "label": "上次服务人员",
+      "type": "text",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "latest_visit_date",
+      "label": "最近到店日期",
+      "type": "date",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    },
+    {
+      "key": "created_at",
+      "label": "建档时间",
+      "type": "datetime",
+      "allowedOperations": [
+        "display",
+        "filter",
+        "sort",
+        "export",
+        "quick",
+        "group"
+      ],
+      "capabilities": {
+        "list": true,
+        "quickFilter": true,
+        "filter": true,
+        "sort": true,
+        "group": true,
+        "summary": false,
+        "export": true,
+        "customInput": true
+      },
+      "defaultVisible": true,
+      "defaultQuick": false,
+      "customFieldId": null,
+      "version": 1,
+      "status": "active"
+    }
+  ],
+  "databaseWrites": 0
+}

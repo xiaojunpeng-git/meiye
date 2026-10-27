@@ -1,0 +1,10 @@
+{
+  "originalHead": "0b9596c809538a538578aaf95c22da2d745aafaa",
+  "head": "a5f83a5fa3c5196114d72f066e57bd0987e0fadc",
+  "unrelatedCommittedFiles": [
+    "tests/010-organization-repair/employee-login.php",
+    "后端代码/database/upgrades/2026-10-23-渼约010测试导入/11-员工统一登录初始化.php"
+  ],
+  "indexSHA256": "1ae97c6b61c6f8f3339b959853b1187125d2f0fe3666bf3504c431ee8a9879dc",
+  "candidateUnchanged": true
+}

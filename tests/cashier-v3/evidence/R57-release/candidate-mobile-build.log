@@ -1,0 +1,348 @@
+Compiler version: 5.26（uni-app x）VDOM模式
+Style isolation version: 2.0
+Compiling...
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/warehouse/index.uvue:58:26​
+  56 | 	// host here and pass it through the platform renderer instead of resolving
+  57 | 	// canvases globally like H5 does.
+> 58 | 	const canvasHost : any = getCurrentInstance().proxy
+     | 	                         ^^^^^^^^^^^^^^^^^^^^
+  59 | 	const rankingReversed = ref(false)
+  60 | 	// 服务项目默认按现金业绩排序，切换后仍展示数量和业绩两个指标。
+  61 | 	// 服务项目默认按现金业绩排；服务数来自已完成服务事实，两列均由服务端返回。
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:53:312​
+  51 |   busy.value = true
+  52 |   if (pending == null) pending = { task_id: id.value, chapter_key: chapter.value.key, position: Math.floor(position.value), session_key: session, foreground: foreground.value, playing: playing.value || ended, playback_rate:playbackRate.value, responsive:chapter.value==null||!chapter.value.idle_prompt||Date.now()-lastInteraction<=Number(chapter.value.idle_seconds)*1000, sequence_no:++sequenceNo,client_time:Date.now(), session_open: open, confirm: confirm, idempotency_key: growthKey() }
+> 53 |   growthRequest('learn', pending, (r : any) => { busy.value = false; if (!r.ok) { message.value = r.message; if (r.rejected) pending = null; return }; pending = null; message.value=''; if(chapter.value.type=='video'&&chapter.value.seek_policy=='watched_only'&&position.value>Number(r.data.confirmed_position)+2){uni.createVideoContext('growth-course-video').seek(Number(r.data.confirmed_position));position.value=Number(r.data.confirmed_position)} if (confirm || r.data.chapter_complete) load(false); if (endedQueued && !r.data.chapter_complete) {endedQueued=false;report(false,true)} })
+     |                                                                                                                                                                                                                                                                                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  54 | }
+  55 | function load(select : boolean = true) : void { growthRequest('task', { id: id.value }, (r : any) => { loading.value = false; if (!r.ok) { message.value = r.message;task.value=null; return }; task.value = r.data; if (select) selectChapter(chapterIndex.value) }) }
+  56 | function selectChapter(index : number) : void { if (busy.value || pending != null) return; chapterIndex.value = index;playbackRate.value=1;lastInteraction=Date.now();quizAnswers.value={};quizResults.value={};showQuizPrompt.value=false; releaseResource();resourceRequest++;if(downloadTask!=null){downloadTask.abort();downloadTask=null};readerScrollTop.value=0; resourceUrl.value = ''; message.value = ''; position.value = 0; resumePosition.value = 0; if (chapter.value == null) return; let rows : Array<any> = task.value.learning || []; rows.forEach((row : any) => { if (row.chapter_key == chapter.value.key) { position.value = Number(row.position); resumePosition.value = position.value } }); if(chapter.value.type=='text')nextTick(()=>restoreReadPosition());if (Number(chapter.value.asset_id) > 0) { let request=resourceRequest;resourceLoading.value = true; downloadTask=growthDownload(Number(chapter.value.asset_id), id.value, (r : any) => { if(request!=resourceRequest){
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:71:170​
+  69 | onUnload(()=>{resourceRequest++;if(downloadTask!=null)downloadTask.abort();releaseResource()})
+  70 | function confirmChapter() : void {let missing=(chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied);if(missing){showQuizPrompt.value=true;message.value='先完成本章随堂题，再确认学习。';return};report(true)}
+> 71 | function videoTime(event : any) : void { if(chapter.value.idle_prompt&&Date.now()-lastInteraction>Number(chapter.value.idle_seconds)*1000&&!idleShowing){idleShowing=true;uni.createVideoContext('growth-course-video').pause();uni.showModal({title:'还在认真学习吗？',content:'休息一下也没关系，准备好了再继续。',confirmText:'继续学习',success:(r:any)=>{idleShowing=false;if(r.confirm){lastInteraction=Date.now();uni.createVideoContext('growth-course-video').play()}}});return}; position.value = Number(event.detail.currentTime || 0); if((chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied&&position.value>=Number(q.position)))uni.createVideoContext('growth-course-video').pause(); if (Date.now() - lastReport >= 5000) { lastReport = Date.now(); report(false) } }
+     |                                                                                                                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  72 | // 原生播放器可能先发pause再发ended；结束帧仍属于刚刚发生的实际播放区间。
+  73 | function videoEnded() : void { report(false,true); playing.value = false }
+  74 | function retryReport():void{report(false)}
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:71:380​
+  69 | onUnload(()=>{resourceRequest++;if(downloadTask!=null)downloadTask.abort();releaseResource()})
+  70 | function confirmChapter() : void {let missing=(chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied);if(missing){showQuizPrompt.value=true;message.value='先完成本章随堂题，再确认学习。';return};report(true)}
+> 71 | function videoTime(event : any) : void { if(chapter.value.idle_prompt&&Date.now()-lastInteraction>Number(chapter.value.idle_seconds)*1000&&!idleShowing){idleShowing=true;uni.createVideoContext('growth-course-video').pause();uni.showModal({title:'还在认真学习吗？',content:'休息一下也没关系，准备好了再继续。',confirmText:'继续学习',success:(r:any)=>{idleShowing=false;if(r.confirm){lastInteraction=Date.now();uni.createVideoContext('growth-course-video').play()}}});return}; position.value = Number(event.detail.currentTime || 0); if((chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied&&position.value>=Number(q.position)))uni.createVideoContext('growth-course-video').pause(); if (Date.now() - lastReport >= 5000) { lastReport = Date.now(); report(false) } }
+     |                                                                                                                                                                                                                                                                                                                                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  72 | // 原生播放器可能先发pause再发ended；结束帧仍属于刚刚发生的实际播放区间。
+  73 | function videoEnded() : void { report(false,true); playing.value = false }
+  74 | function retryReport():void{report(false)}
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:71:617​
+  69 | onUnload(()=>{resourceRequest++;if(downloadTask!=null)downloadTask.abort();releaseResource()})
+  70 | function confirmChapter() : void {let missing=(chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied);if(missing){showQuizPrompt.value=true;message.value='先完成本章随堂题，再确认学习。';return};report(true)}
+> 71 | function videoTime(event : any) : void { if(chapter.value.idle_prompt&&Date.now()-lastInteraction>Number(chapter.value.idle_seconds)*1000&&!idleShowing){idleShowing=true;uni.createVideoContext('growth-course-video').pause();uni.showModal({title:'还在认真学习吗？',content:'休息一下也没关系，准备好了再继续。',confirmText:'继续学习',success:(r:any)=>{idleShowing=false;if(r.confirm){lastInteraction=Date.now();uni.createVideoContext('growth-course-video').play()}}});return}; position.value = Number(event.detail.currentTime || 0); if((chapter.value.quizzes||[]).some((q:any):boolean=>q.required&&!q.satisfied&&position.value>=Number(q.position)))uni.createVideoContext('growth-course-video').pause(); if (Date.now() - lastReport >= 5000) { lastReport = Date.now(); report(false) } }
+     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  72 | // 原生播放器可能先发pause再发ended；结束帧仍属于刚刚发生的实际播放区间。
+  73 | function videoEnded() : void { report(false,true); playing.value = false }
+  74 | function retryReport():void{report(false)}
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:81:64​
+  79 | function chooseQuiz(q:any,i:number):void{if(quizBusy.value||quizPending!=null)return;let key=String(q.key);let choices:Array<number>=Array.isArray(quizAnswers.value[key])?[...quizAnswers.value[key]]:[];if(q.question.type=='multiple'||q.question.type=='order'){let at=choices.indexOf(i);if(at>=0)choices.splice(at,1);else choices.push(i)}else choices=[i];quizAnswers.value={...quizAnswers.value,[key]:choices}}
+  80 | function submitQuiz(q:any):void{if(quizBusy.value||busy.value)return;quizBusy.value=true;if(quizPending==null)quizPending={task_id:id.value,chapter_key:chapter.value.key,quiz_key:q.key,answers:quizAnswers.value[String(q.key)]||[],idempotency_key:growthKey()};growthRequest('inlineAnswer',quizPending,(r:any)=>{quizBusy.value=false;if(!r.ok){message.value=r.message;if(r.rejected)quizPending=null;return};quizPending=null;quizResults.value[String(q.key)]=r.data;load(false)})}
+> 81 | function reviewQuiz(r:any):void{if(chapter.value.type=='video'){uni.createVideoContext('growth-course-video').seek(Number(r.review_position));position.value=Number(r.review_position)}else message.value='请回看本章第'+String(r.review_position)+'页 / 段，再作答。'}
+     |                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  82 | function openDependency(d:any):void{if(!task.value.learning_complete){message.value='请先完成课程必学章节。';return};uni.navigateTo({url:'/src/merchant/pages/growth/'+(['exam','practice'].indexOf(String(d.kind))>=0?'exam':'work')+'?id='+String(d.id)})}
+  83 | function reference(c:any):void{uni.showModal({title:'引用已有有效结果',content:'同一发布内容与规则校验后，使用原正式结果完成本任务，不重复生成奖励。',success:(r:any)=>{if(r.confirm){busy.value=true;growthRequest('referenceResult',{task_id:id.value,source_task_id:c.id,idempotency_key:growthKey()},(v:any)=>{busy.value=false;if(!v.ok){message.value=v.message;return};message.value=v.data.message;load(false)})}}})}
+  84 | function touchLearning():void{lastInteraction=Date.now()}
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:85:112​
+  83 | function reference(c:any):void{uni.showModal({title:'引用已有有效结果',content:'同一发布内容与规则校验后，使用原正式结果完成本任务，不重复生成奖励。',success:(r:any)=>{if(r.confirm){busy.value=true;growthRequest('referenceResult',{task_id:id.value,source_task_id:c.id,idempotency_key:growthKey()},(v:any)=>{busy.value=false;if(!v.ok){message.value=v.message;return};message.value=v.data.message;load(false)})}}})}
+  84 | function touchLearning():void{lastInteraction=Date.now()}
+> 85 | function changeSpeed(e:any):void{playbackRate.value=Number(chapter.value.allowed_rates[Number(e.detail.value)]);uni.createVideoContext('growth-course-video').playbackRate(playbackRate.value)}
+     |                                                                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  86 | function changeDocumentPage(e:any):void{position.value=Number(e.detail.value)+1;report(false)}
+  87 | // H5切换浏览器标签仍须暂停有效覆盖；原生应用继续使用页面前后台生命周期。
+  88 |
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/growth/learn.uvue:89:108​
+  87 | // H5切换浏览器标签仍须暂停有效覆盖；原生应用继续使用页面前后台生命周期。
+  88 |
+> 89 | function visibilityChanged():void{foreground.value=!document.hidden;if(document.hidden){playing.value=false;uni.createVideoContext('growth-course-video').pause()}}
+     |                                                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  90 | onMounted(()=>document.addEventListener('visibilitychange',visibilityChanged))
+  91 | onUnload(()=>document.removeEventListener('visibilitychange',visibilityChanged))
+  92 |
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/learn.uvue:262:60​
+  260 |                           key: ch.key,
+  261 |                           class: _normalizeClass(['learn-chip', i == _unref(chapterIndex) ? 'learn-chip-active' : '']),
+> 262 |                           onClick: $event => (selectChapter(i))
+      |                                                             ^
+  263 |                         }, {
+  264 |                           default: _withCtx(() => [
+  265 |                             _createVNode(_component_v_uni_text, null, {
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/learn.uvue:458:132​
+  456 |                                                         return (_openBlock(), _createBlock(_component_v_uni_view, {
+  457 |                                                           key: oi,
+> 458 |                                                           class: _normalizeClass(['learn-quiz-option',quizSelected(String(quiz.key),oi)?'learn-quiz-selected':'']),
+      |                                                                                                                                     ^^
+  459 |                                                           onClick: $event => (chooseQuiz(quiz,oi))
+  460 |                                                         }, {
+  461 |                                                           default: _withCtx(() => [
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/learn.uvue:459:94​
+  457 |                                                           key: oi,
+  458 |                                                           class: _normalizeClass(['learn-quiz-option',quizSelected(String(quiz.key),oi)?'learn-quiz-selected':'']),
+> 459 |                                                           onClick: $event => (chooseQuiz(quiz,oi))
+      |                                                                                               ^^
+  460 |                                                         }, {
+  461 |                                                           default: _withCtx(() => [
+  462 |                                                             _createVNode(_component_v_uni_text, null, {
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/learn.uvue:464:159​
+  462 |                                                             _createVNode(_component_v_uni_text, null, {
+  463 |                                                               default: _withCtx(() => [
+> 464 |                                                                 _createTextVNode(_toDisplayString(quiz.question.type=='order' && quizSelected(String(quiz.key),oi)?String(_unref(quizAnswers)[String(quiz.key)].indexOf(oi)+1):(quizSelected(String(quiz.key),oi)?'✓':String.fromCharCode(65+oi))) + " · " + _toDisplayString(option), 1)
+      |                                                                                                                                                                ^^
+  465 |                                                               ]),
+  466 |                                                               _: 2
+  467 |                                                             }, 1024)
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/learn.uvue:464:254​
+  462 |                                                             _createVNode(_component_v_uni_text, null, {
+  463 |                                                               default: _withCtx(() => [
+> 464 |                                                                 _createTextVNode(_toDisplayString(quiz.question.type=='order' && quizSelected(String(quiz.key),oi)?String(_unref(quizAnswers)[String(quiz.key)].indexOf(oi)+1):(quizSelected(String(quiz.key),oi)?'✓':String.fromCharCode(65+oi))) + " · " + _toDisplayString(option), 1)
+      |                                                                                                                                                                                                                                                               ^^
+  465 |                                                               ]),
+  466 |                                                               _: 2
+  467 |                                                             }, 1024)
+​warning: Operator '+' cannot be applied to types 'number' and 'K'.​
+​at src/merchant/pages/growth/learn.uvue:464:282​
+  462 |                                                             _createVNode(_component_v_uni_text, null, {
+  463 |                                                               default: _withCtx(() => [
+> 464 |                                                                 _createTextVNode(_toDisplayString(quiz.question.type=='order' && quizSelected(String(quiz.key),oi)?String(_unref(quizAnswers)[String(quiz.key)].indexOf(oi)+1):(quizSelected(String(quiz.key),oi)?'✓':String.fromCharCode(65+oi))) + " · " + _toDisplayString(option), 1)
+      |                                                                                                                                                                                                                                                                                           ^^^^^
+  465 |                                                               ]),
+  466 |                                                               _: 2
+  467 |                                                             }, 1024)
+​warning: The '+' operator cannot be applied to type 'symbol'.​
+​at src/merchant/pages/customer-care/index.uvue:885:76​
+  883 |                                                 (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(record.serviceBeforePhotos, (photo, index) => {
+  884 |                                                   return (_openBlock(), _createBlock(_component_v_uni_image, {
+> 885 |                                                     key: 'record-before-' + index,
+      |                                                                             ^^^^^
+  886 |                                                     class: "care-page__record-photo",
+  887 |                                                     src: photo,
+  888 |                                                     mode: "aspectFill"
+​warning: The '+' operator cannot be applied to type 'symbol'.​
+​at src/merchant/pages/customer-care/index.uvue:909:75​
+  907 |                                                 (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(record.serviceAfterPhotos, (photo, index) => {
+  908 |                                                   return (_openBlock(), _createBlock(_component_v_uni_image, {
+> 909 |                                                     key: 'record-after-' + index,
+      |                                                                            ^^^^^
+  910 |                                                     class: "care-page__record-photo",
+  911 |                                                     src: photo,
+  912 |                                                     mode: "aspectFill"
+​warning: Object is possibly 'null'.​
+​at src/merchant/pages/home/index.uvue:31:26​
+  29 | 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+  30 | 	const nativeTrendImage = ref('')
+> 31 | 	const canvasHost : any = getCurrentInstance().proxy
+     | 	                         ^^^^^^^^^^^^^^^^^^^^
+  32 | 	const overviewMetrics = ref<Array<any>>([])
+  33 | 	const saleTypeCards = ref<Array<any>>([])
+  34 | 	const categoryCards = ref<Array<any>>([])
+​warning: Operator '+' cannot be applied to types 'K' and 'number'.​
+​at src/merchant/pages/growth/exam.uvue:338:68​
+  336 |                               _createVNode(_component_v_uni_text, { class: "exam-question-no" }, {
+  337 |                                 default: _withCtx(() => [
+> 338 |                                   _createTextVNode(_toDisplayString(index + 1), 1)
+      |                                                                     ^^^^^^^^^
+  339 |                                 ]),
+  340 |                                 _: 2
+  341 |                               }, 1024),
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/exam.uvue:403:99​
+  401 |                                     return (_openBlock(), _createBlock(_component_v_uni_view, {
+  402 |                                       key: i,
+> 403 |                                       class: _normalizeClass(['exam-option', selected(String(q.id),i) ? 'exam-option-selected' : '']),
+      |                                                                                                    ^
+  404 |                                       onClick: $event => (choose(q,i))
+  405 |                                     }, {
+  406 |                                       default: _withCtx(() => [
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/exam.uvue:404:67​
+  402 |                                       key: i,
+  403 |                                       class: _normalizeClass(['exam-option', selected(String(q.id),i) ? 'exam-option-selected' : '']),
+> 404 |                                       onClick: $event => (choose(q,i))
+      |                                                                    ^
+  405 |                                     }, {
+  406 |                                       default: _withCtx(() => [
+  407 |                                         _createVNode(_component_v_uni_text, { class: "exam-option-mark" }, {
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/exam.uvue:409:121​
+  407 |                                         _createVNode(_component_v_uni_text, { class: "exam-option-mark" }, {
+  408 |                                           default: _withCtx(() => [
+> 409 |                                             _createTextVNode(_toDisplayString(q.type == 'order' && selected(String(q.id),i) ? String(_unref(answers)[String(q.id)].indexOf(i)+1) : (selected(String(q.id),i) ? '✓' : String.fromCharCode(65+i))), 1)
+      |                                                                                                                          ^
+  410 |                                           ]),
+  411 |                                           _: 2
+  412 |                                         }, 1024),
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/merchant/pages/growth/exam.uvue:409:202​
+  407 |                                         _createVNode(_component_v_uni_text, { class: "exam-option-mark" }, {
+  408 |                                           default: _withCtx(() => [
+> 409 |                                             _createTextVNode(_toDisplayString(q.type == 'order' && selected(String(q.id),i) ? String(_unref(answers)[String(q.id)].indexOf(i)+1) : (selected(String(q.id),i) ? '✓' : String.fromCharCode(65+i))), 1)
+      |                                                                                                                                                                                                           ^
+  410 |                                           ]),
+  411 |                                           _: 2
+  412 |                                         }, 1024),
+​warning: Operator '+' cannot be applied to types 'number' and 'K'.​
+​at src/merchant/pages/growth/exam.uvue:409:233​
+  407 |                                         _createVNode(_component_v_uni_text, { class: "exam-option-mark" }, {
+  408 |                                           default: _withCtx(() => [
+> 409 |                                             _createTextVNode(_toDisplayString(q.type == 'order' && selected(String(q.id),i) ? String(_unref(answers)[String(q.id)].indexOf(i)+1) : (selected(String(q.id),i) ? '✓' : String.fromCharCode(65+i))), 1)
+      |                                                                                                                                                                                                                                          ^^^^
+  410 |                                           ]),
+  411 |                                           _: 2
+  412 |                                         }, 1024),
+​warning: Object is possibly 'null'.​
+​at src/merchant/api/mobile-growth-client.uts:88:2​
+  86 |   // #ifdef WEB
+  87 |   let controller = new AbortController()
+> 88 |   fetch(mobileApiOrigin() + '/api' + plan.path + '?id=' + assetId.toString() + '&task_id=' + taskId.toString(), { headers: plan.headers, credentials: 'omit', signal: controller.signal })
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  89 |     .then(async (r:any) => { if(r.status!=200){done({ok:false,message:'资源读取失败，请检查任务状态。'});return};let blob=await r.blob();done({ok:true,url:URL.createObjectURL(blob),message:''}) })
+  90 |     .catch(() => done({ok:false,message:'资源加载失败，请重试。'}))
+  91 |   return { abort: () => controller.abort() }
+​warning: Object is possibly 'null'.​
+​at src/merchant/api/mobile-growth-client.uts:107:2​
+  105 |   // WEB选择器给出的临时blob只在浏览器读取；上传正文交给FormData自动设置边界。
+  106 |   // #ifdef WEB
+> 107 |   fetch(filePath, {credentials:'omit'}).then(async (local:any) => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  108 |     if(!local.ok)throw new Error('无法读取所选文件')
+  109 |     let blob=await local.blob();let form=new FormData();let name=String((blob as any).name||'growth-evidence')
+  110 |     if(name=='growth-evidence'){let ext:any={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','video/mp4':'mp4','video/webm':'webm','application/pdf':'pdf'};name+='.'+String(ext[blob.type]||'bin')}
+​warning: 'response' is possibly 'null'.​
+​at src/merchant/api/mobile-growth-client.uts:113:19​
+  111 |     form.append('file',blob,name)
+  112 |     let response=await fetch(mobileApiOrigin()+'/api'+plan.path,{method:'POST',headers:plan.headers,credentials:'omit',body:form})
+> 113 |     let body=await response.json();let ok=body.growth!=null&&body.growth.state=='READY'
+      |                    ^^^^^^^^
+  114 |     done({ok:ok,data:body.growth,message:ok?'':String(body.msg||(body.growth!=null?body.growth.error_message:'')||'证据上传失败')})
+  115 |   }).catch(()=>done({ok:false,message:'上传失败，请检查网络。'}))
+  116 |   return
+​warning: Expected 2 arguments, but got 1.​
+​at src/shared/platform/mobile-platform.uts:138:5​
+  136 | function exportNativeCanvasImage(canvas : any, imageReady : any) : void {
+  137 | 	if (imageReady == null) return
+> 138 | 	uni.canvasToTempFilePath({
+      | 	    ^^^^^^^^^^^^^^^^^^^^^^
+> 139 | 		canvas: canvas,
+      | ^^^^^^^^^^^^^^^^^
+> 140 | 		fileType: 'png',
+      | ^^^^^^^^^^^^^^^^^
+> 141 | 		success: (result : any) => imageReady(String(result != null ? result.tempFilePath || '' : '')),
+      | ^^^^^^^^^^^^^^^^^
+> 142 | 		fail: () => imageReady('')
+      | ^^^^^^^^^^^^^^^^^
+> 143 | 	})
+      | ^^^^
+  144 | }
+  145 |
+  146 | function drawNativePieCanvas(context : any, segments : Array<any>, colors : Array<string>) : void {
+​warning: Object is possibly 'null'.​
+​at src/shared/api/mobile-http.uts:44:1​
+  42 | 	let controller = new AbortController()
+  43 | 	let timeout = setTimeout(() => controller.abort(), 60000)
+> 44 | 	fetch(requestUrl.toString(), { method: plan.method, headers: headers, credentials: 'omit', signal: controller.signal,
+     | 	^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 45 | 		body: plan.method == 'GET' ? undefined : JSON.stringify(body == null ? {} : body)
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 46 | 	}).then(async (response : any) => {
+     | ^^^^
+  47 | 		let payload : any = await response.json()
+  48 | 		clearTimeout(timeout)
+  49 | 		let ok = response.status >= 200 && response.status < 300 && payload != null && payload.protocolCode == null && payload.errorCode == null
+​warning: Cannot find name 'mobileApiOrigin'.​
+​at src/shared/api/mobile-customer-care-client.uts:53:14​
+  51 | export function uploadMobileCustomerCarePhoto(filePath : string, idempotencyKey : string, done : (value : any) => void) : void {
+  52 | 	let plan = merchantPlan('servicePhotoUpload')
+> 53 | 	let origin = mobileApiOrigin()
+     | 	             ^^^^^^^^^^^^^^^
+  54 | 	if (plan == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+  55 | 	if (origin.length == 0 || filePath.length == 0) { done({ ok: false, message: '未选择服务照片。', body: null }); return }
+  56 | 	uni.uploadFile({
+​warning: Property 'getMenuButtonBoundingClientRect' does not exist on type 'Uni'.​
+​at src/shared/components/mohe-ai-entry.uvue:77:22​
+  75 | function measureNativePanelTop() : void {
+  76 |   if (!platformUsesNativeCanvas) return
+> 77 |   const capsule = uni.getMenuButtonBoundingClientRect()
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  78 |   const windowInfo = uni.getWindowInfo()
+  79 |   const statusBarHeight = Number(windowInfo.statusBarHeight || 0)
+  80 |   const top = Number(capsule.top), height = Number(capsule.height), left = Number(capsule.left)
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/shared/components/mohe-ai-entry.uvue:1180:84​
+  1178 |                                   class: "ai-card-detail-toggle",
+  1179 |                                   role: "button",
+> 1180 |                                   onClick: $event => (toggleCardDetail(cardKey(item,ci)))
+       |                                                                                     ^^
+  1181 |                                 }, {
+  1182 |                                   default: _withCtx(() => [
+  1183 |                                     _createVNode(_component_v_uni_text, { class: "ai-card-detail-chevron" }, {
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/shared/components/mohe-ai-entry.uvue:1191:105​
+  1189 |                                     _createVNode(_component_v_uni_text, null, {
+  1190 |                                       default: _withCtx(() => [
+> 1191 |                                         _createTextVNode(_toDisplayString(cardDetailVisible(cardKey(item,ci)) ? '收起统计口径' : '统计口径'), 1)
+       |                                                                                                          ^^
+  1192 |                                       ]),
+  1193 |                                       _: 2
+  1194 |                                     }, 1024)
+​​warning: Argument of type 'string | number | symbol' is not assignable to parameter of type 'number'.​
+​  Type 'string' is not assignable to type 'number'.​​
+​at src/shared/components/mohe-ai-entry.uvue:1199:60​
+  1197 |                                 }, 1032, ["onClick"]))
+  1198 |                               : _createCommentVNode("", true),
+> 1199 |                             (cardDetailVisible(cardKey(item,ci)))
+       |                                                             ^^
+  1200 |                               ? (_openBlock(), _createBlock(_component_v_uni_text, {
+  1201 |                                   key: 2,
+  1202 |                                   class: "ai-card-detail"
+​warning: Operator '+' cannot be applied to types 'K' and 'number'.​
+​at src/shared/components/mohe-ai-entry.uvue:1363:74​
+  1361 |                                     _createVNode(_component_v_uni_text, { class: "ai-guidance-number" }, {
+  1362 |                                       default: _withCtx(() => [
+> 1363 |                                         _createTextVNode(_toDisplayString(oi + 1), 1)
+       |                                                                           ^^^^^^
+  1364 |                                       ]),
+  1365 |                                       _: 2
+  1366 |                                     }, 1024),
+​warning: Operator '+' cannot be applied to types 'K' and 'number'.​
+​at src/shared/components/mohe-ai-entry.uvue:1658:86​
+  1656 |                                                 _createVNode(_component_v_uni_text, { class: "ai-guidance-number" }, {
+  1657 |                                                   default: _withCtx(() => [
+> 1658 |                                                     _createTextVNode(_toDisplayString(oi + 1), 1)
+       |                                                                                       ^^^^^^
+  1659 |                                                   ]),
+  1660 |                                                   _: 2
+  1661 |                                                 }, 1024),
+
+欢迎将web站点部署到uniCloud前端网页托管平台，高速、免费、安全、省心，详见：https://uniapp.dcloud.io/uniCloud/hosting
+DONE  Build complete.
+R57_MOBILE_BUILD_PASS c3a85bf3f85ff40cb94362268260153f41bf5d4a 87

@@ -1,0 +1,21 @@
+{
+  "files": {
+    "scripts/r57-source-policy-install.php": "598c5263b37706fe6369d86bbc20bf087b416f1156ef00646399d47243815086",
+    "scripts/r57-source-policy-migrate.php": "92dc1bbc34057df8efb05b0255ce8d20468315ae1e7d84b6e9ad2e5322e7fec3",
+    "scripts/r57-source-policy-mobile-build.cjs": "aa3fba867721e323138f547d38471e6871d496a8b9244c73d5b0943b4f54df92",
+    "scripts/r57-source-policy-preserved-test.cjs": "34496ea388739656985267e8679833a5967f6ca4b9fcd57ba117e588073cdb5d",
+    "scripts/r57-source-policy-publish.cjs": "8b5476920413a7d9850804a6e570b47ab8e52ff1080550a731ba84ebf834f9a3",
+    "scripts/r57-source-policy-release-build.cjs": "f01b3ad93b2a103a8a6db288f89b6ac3f5b78ad4c22eba29e6bab2cddfca904d",
+    "scripts/r57-source-policy-release-prepare.cjs": "ae10efcda30b0d9fc7d9433ae385fe4029dff3ed102e8d2eb4f26059c2349731",
+    "scripts/r57-source-policy-release-probe.php": "5e14e3f75a0286c6750449c3c05dc162ce3424c3d9ef7969424504696060b6c0",
+    "scripts/r57-source-policy-release-test.cjs": "5d1a6d2f25316bfd4c2961b085a65574d63b285244835899a4866f95a4c5ccbb",
+    "scripts/r57-source-policy-release-010-migrate.php": "53ec37039ec12fb6bf20b1cbc5fb1459ca6d2671600ea102d4e818cfc8872c61",
+    "scripts/r57-source-policy-runtime.php": "741d2653454db426f5f4b389ae84bd50c7f4a3d6166fea005240de0609e91d6b",
+    "scripts/r57-source-policy-archive.cjs": "a0ee3554d30a6be5d972d7b6366bed09fb4af818118172095036b98879c77f18",
+    "scripts/r57-source-policy-release-010-initialize.php": "bb37a92b0c80e4f4ba645cf7cbf5af18c668b407980bb34a99699294ae58edb8"
+  },
+  "installerTests": 26,
+  "htmlParserFix": "Inert DOMParser supports quoted and unquoted production attributes; original RH rollback retained.",
+  "renderWaitFix": "Wait for actual visible login fields after async route mounting; baseline verified with seven inputs and zero page errors.",
+  "recovery010": "Reuse existing independent backups and verified additive migration; no app GRANT, no cross-schema query."
+}

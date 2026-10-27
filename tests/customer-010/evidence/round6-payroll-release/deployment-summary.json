@@ -1,0 +1,97 @@
+{
+  "business_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "source_commit": "315efb5447fa5bd5d0da29719cba6a5451d23cde",
+  "instances": [
+    {
+      "result": "PASS",
+      "site": "rh",
+      "files": 102,
+      "mode": 0,
+      "position_model": "legacy",
+      "business_digest_unchanged": true,
+      "leaf_grants": 21,
+      "reports": 21,
+      "source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "backup": "/www/backups/rh/20261027-payroll-release-fc13caced13b",
+      "public_assets_checked": 5,
+      "public_h5_before": "200",
+      "public_h5_after": "200",
+      "business_import": false
+    },
+    {
+      "result": "PASS",
+      "site": "008",
+      "files": 102,
+      "mode": 0,
+      "position_model": "legacy",
+      "business_digest_unchanged": true,
+      "leaf_grants": 21,
+      "reports": 21,
+      "source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "backup": "/www/backups/008/20261027-payroll-release-fc13caced13b",
+      "public_assets_checked": 5,
+      "public_h5_before": "200",
+      "public_h5_after": "200",
+      "business_import": false
+    },
+    {
+      "result": "PASS",
+      "site": "010",
+      "files": 2,
+      "mode": 1,
+      "position_model": "independent",
+      "business_digest_unchanged": true,
+      "leaf_grants": 21,
+      "reports": 21,
+      "source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "backup": "/www/backups/010/20261027-payroll-release-fc13caced13b",
+      "public_assets_checked": 5,
+      "public_h5_before": "200",
+      "public_h5_after": "200",
+      "business_import": false
+    }
+  ],
+  "first_push": {
+    "result": "PASS",
+    "commit": "6669bde837aed4906be14e1e04051fd907891fb2",
+    "branch": "010/basic-report-menu",
+    "remote": "origin"
+  },
+  "business_import": false,
+  "upload_status": "All three merchant 0.66.0 uploads confirmed successful by original WechatIDE task receipts",
+  "merchant_uploads": [
+    {
+      "site": "rh",
+      "appid": "wx29d9b63c92555701",
+      "origin": "https://rh.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_da7d87cc-0e20-4310-8d51-4093482686e8",
+      "package_size": 1752793,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    },
+    {
+      "site": "008",
+      "appid": "wx14666197911d052b",
+      "origin": "https://008.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_41404dbf-6ce1-43bf-97de-bc12a665dc3a",
+      "package_size": 1752794,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    },
+    {
+      "site": "010",
+      "appid": "wxd92c6d010bd6bf01",
+      "origin": "https://010.cc3798.com",
+      "version": "0.66.0",
+      "uploaded": true,
+      "taskId": "confirmation_upload_a1fab3e2-c2c5-4375-9f13-d358dc0decb4",
+      "package_size": 1752794,
+      "experience_binding": "not separately verified; registered upload tool returned upload success",
+      "review_or_formal_release": false
+    }
+  ]
+}

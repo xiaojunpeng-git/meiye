@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "actual_saved_switch": 1,
+  "existing_algorithm_forced_only_in_process": true,
+  "salary_rows": 11,
+  "salary_rows_sha256": "076ab0aa02ea742e5bb8b0fdbb67ad20ac37122a7f168977c939e2dcff013d4a",
+  "employee_rows": 9,
+  "employee_rows_sha256": "7154e8377ccdcac0c5026ee538c6854ace64e132cc6e9d92eeb4cb0f43ee13d2",
+  "source_business_writes": 0
+}

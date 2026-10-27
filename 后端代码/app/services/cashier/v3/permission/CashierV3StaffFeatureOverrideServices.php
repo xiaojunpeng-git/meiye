@@ -29,6 +29,9 @@ class CashierV3StaffFeatureOverrideServices
             'cashier.v3.cashier.card.upgrade', 'cashier.v3.cashier.card.extend',
             'cashier.v3.cashier.card.transfer', 'cashier.v3.cashier.card.disable',
             'cashier.v3.cashier.card.enable', 'cashier.v3.cashier.card.project_replace',
+            // Root operation projection consumes this catalog, despite legacy
+            // individual overrides being disabled. Position grants still decide access.
+            'cashier.v3.cashier.card.to_balance',
             'cashier.v3.cashier.card.project_upgrade', 'cashier.v3.member.create', 'cashier.v3.member.edit',
             'cashier.v3.order.staff_adjust', 'cashier.v3.order.refund', 'cashier.v3.order.void',
             'cashier.v3.order.reopen', 'cashier.v3.order.receipt_print', 'cashier.v3.order.debt_view',
@@ -178,7 +181,7 @@ class CashierV3StaffFeatureOverrideServices
                 elseif (in_array($code, self::operationFeatureCodes(), true)) $names[$code] = ['code' => $code, 'label' => $title, 'module' => $module];
             }
         };
-        $walk(JobPositionPolicyServices::STORE_V3_MENU_TREE);
+        $walk((new \app\services\organization\StorePermissionCatalogServices())->menuTree());
         return array_values($names);
     }
 }

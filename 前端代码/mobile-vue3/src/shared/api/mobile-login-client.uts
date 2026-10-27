@@ -1,3 +1,4 @@
+import { sendMobileRequest } from './mobile-http.uts'
 import { mobileApiOrigin, setMobileApiOrigin } from '../platform/mobile-runtime-config.uts'
 import { saveMerchantRoot } from '../platform/mobile-merchant-session.uts'
 import { currentMobilePlatform } from '../platform/mobile-platform.uts'
@@ -33,6 +34,14 @@ function request(method : string, path : string, headers : any, payload : any, d
 	let requestHeaders : any = { 'Content-Type': 'application/json' }
 	let names = Object.keys(headers)
 	for (let index = 0; index < names.length; index++) requestHeaders[names[index]] = headers[names[index]]
+	// 同站H5登录也不能继承平台Cookie；与登录后的请求共用显式凭据传输。
+	// #ifdef WEB
+	sendMobileRequest({method:method,path:path,headers:headers},payload,(r:any)=>{
+		done({ok:r.ok,message:r.ok?'':String(r.body!=null?r.body.message||'请求未完成。':'无法连接服务地址。'),body:r.body})
+	})
+	return
+	// #endif
+	// #ifndef WEB
 	uni.request({
 		url: origin + '/api' + path,
 		method: method,
@@ -45,6 +54,7 @@ function request(method : string, path : string, headers : any, payload : any, d
 		},
 		fail: () => done({ ok: false, message: '无法连接服务地址。', body: null })
 	})
+	// #endif
 }
 
 export function currentMobileApiOrigin() : string {

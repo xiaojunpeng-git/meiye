@@ -1,17 +1,17 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import BookOpen from '@lucide/vue/dist/esm/icons/book-open.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
-import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
 import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
 import ArrowLeft from '@lucide/vue/dist/esm/icons/arrow-left.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
+import { REPORT_TABS, STORE_REPORT_TABS } from '@/constants/storeBusinessReports'
 import { formatMoney } from '@/services/cashierV3Bridge'
 import ReportDetailDialog from '@/components/reports/ReportDetailDialog.vue'
 import {
@@ -36,37 +36,6 @@ const LEGACY_COVERAGE_START = '2026-08-10'
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
-const REPORT_TABS = Object.freeze([
-  { code: 'partner_item_summary', name: '合作方品项汇总' },
-  { code: 'partner_item_detail', name: '合作方品项明细' },
-  { code: 'member_consumption_detail', name: '会员消费明细' },
-  { code: 'store_item_analysis', name: '门店品项分析' },
-  { code: 'store_craftsman_consumption', name: '门店手艺人消耗' },
-  // 仅由汇总单元格的服务端下钻声明进入，不能作为独立导航页签。
-  { code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true },
-  { code: 'store_salesperson_performance', name: '门店销售人业绩' },
-  // 汇总单元格的后端下钻目标；沿用同一报表壳，不增加独立导航入口。
-  { code: 'store_salesperson_performance_detail', name: '销售人业绩明细', hidden: true },
-  { code: 'market_performance', name: '市场业绩表' },
-  { code: 'market_detail', name: '市场明细表' },
-  { code: 'member_visit_analysis', name: '会员进店分析表' },
-  { code: 'member_visit_annual_summary', name: '会员进店年度汇总表' },
-  { code: 'field_acquisition_detail', name: '地推拓客明细表' },
-  { code: 'field_acquisition_summary', name: '地推拓客汇总表' },
-  // 年度会员汇总与逐笔收款明细按真实内容命名；保留原路由、顺序和下钻目标。
-  { code: 'cross_industry_customer_summary', name: '异业收客汇总表' },
-  { code: 'cross_industry_customer_detail', name: '异业收客明细表' },
-  { code: 'new_customer_analysis_summary', name: '新客汇总表' },
-  { code: 'new_customer_analysis', name: '新客明细表' },
-  { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
-  { code: 'store_refund_ledger', name: '院店退款台账' },
-  { code: 'phase_six_other_multi_payment', name: '其他多收款业绩表' },
-  { code: 'phase_six_salary_summary', name: '员工薪资汇总月报表' },
-  { code: 'phase_six_salary_detail', name: '员工薪资明细月报表' },
-  // The confirmed cross-end report is the only fourth-stage report exposed
-  // through the store Data menu; the remaining 26 stay platform-only.
-  { code: 'six_dimension_analysis', name: '六维数据分析表' }
-])
 const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_item_deal_analysis', name: '品项成交分析表' },
   { code: 'six_dimension_cash_consumption_analysis', name: '现金消费分析表' },
@@ -78,11 +47,6 @@ const SIX_DIMENSION_REPORT_TABS = Object.freeze([
 const PHASE_SIX_REPORT_TABS = PHASE_SIX_REPORTS
 // 门店端的报表导航是一个统一工作区。跨端报表切换时继续保留原有门店报表，
 // 仅追加已确认可在门店端访问的阶段四/阶段六页签。
-const STORE_REPORT_TABS = Object.freeze([
-  ...REPORT_TABS,
-  ...PHASE_FOUR_CROSS_END_REPORT_TABS,
-  ...PHASE_SIX_CROSS_END_REPORT_TABS
-].filter((tab, index, all) => all.findIndex((item) => item.code === tab.code) === index))
 const route = useRoute()
 const router = useRouter()
 const catalog = ref([])
@@ -119,19 +83,6 @@ const isAdvancedFiltersOpen = ref(false)
 const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
 const expandedScopeKeys = ref(new Set())
 const page = ref(1)
-const tabsElement = ref(null)
-const TABS_EXPANDED_STORAGE_KEY = 'cashier-v3.store-business-report.tabs-expanded'
-
-function readTabsExpandedPreference() {
-  try {
-    return window.sessionStorage.getItem(TABS_EXPANDED_STORAGE_KEY) === '1'
-  } catch (_) {
-    return false
-  }
-}
-
-const tabsExpanded = ref(readTabsExpandedPreference())
-const tabsOverflow = ref(false)
 const editingRow = ref(null)
 const editDraft = ref({})
 const savingEdit = ref(false)
@@ -389,11 +340,6 @@ const allowedReportTabs = computed(() => {
   const authorized = tabs.filter((tab) => serverCatalogByCode.value.has(tab.code))
   return authorized.length ? authorized : tabs
 })
-const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.hidden).map((tab) => ({
-  // 两端统一使用已确认名称，避免旧目录名称覆盖正确的汇总/明细标题。
-  ...(serverCatalogByCode.value.get(tab.code) || {}),
-  ...tab
-})))
 const isFirstPhaseReport = computed(() => [
   'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
   'store_item_analysis', 'store_craftsman_consumption',
@@ -402,7 +348,8 @@ const isFirstPhaseReport = computed(() => [
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
-const usesNaturalMonthFilter = computed(() => ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
+const isLargeOrderReport = computed(() => activeReport.value === 'salesperson_large_order_statistics')
+const usesNaturalMonthFilter = computed(() => isLargeOrderReport.value || ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
 // 两端共有报表只展示后端声明的静态固定维度；平台组织范围仍由原权限控件控制。
 const isSharedStoreReport = computed(() => STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value))
@@ -441,7 +388,8 @@ const isHeadquartersAcquisition = computed(() => activeReport.value === 'phase_s
 const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
 // 总部拓客、会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
-const reportPeriodMode = computed(() => (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 大单两端按应计自然月查询；其余报表维持原周期。
+const reportPeriodMode = computed(() => isLargeOrderReport.value ? 'month' : (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -876,7 +824,8 @@ function reportParams(overrides = {}) {
     start_date: dates.start,
     end_date: dates.end,
     ...(reportPeriodMode.value === 'year' ? { year: selectedYear.value } : {}),
-    ...(reportPeriodMode.value === 'month' ? { month: selectedMonth.value } : {}),
+    // 月份和日期使用同一次归一化，避免无效输入造成参数相互矛盾。
+    ...(reportPeriodMode.value === 'month' ? { month: dates.start.slice(0, 7) } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
     product_type: productType.value,
@@ -910,34 +859,10 @@ async function loadReport() {
   }
 }
 
-function selectReport(code) {
-  if (code === activeReport.value) return
-  if (code === 'phase_six_salary_summary' && salarySummaryReturnLocation.value) return returnToSalarySummary()
-  page.value = 1
-  router.push({ name: reportRouteName.value, params: { report: code } })
-}
-
 function returnToSalarySummary() {
   if (!salarySummaryReturnLocation.value) return
   // Route navigation runs the existing report watcher once with the original summary filters.
   return router.push(salarySummaryReturnLocation.value)
-}
-
-function updateTabsLayout() {
-  const element = tabsElement.value
-  if (!element) return
-  const buttons = [...element.querySelectorAll('.store-business-report__tab')]
-  const firstTop = buttons[0]?.offsetTop
-  tabsOverflow.value = buttons.some((button) => button.offsetTop > firstTop)
-}
-
-function toggleTabs() {
-  tabsExpanded.value = !tabsExpanded.value
-  try {
-    window.sessionStorage.setItem(TABS_EXPANDED_STORAGE_KEY, tabsExpanded.value ? '1' : '0')
-  } catch (_) {
-    // Storage can be unavailable in privacy-restricted embedded contexts.
-  }
 }
 
 function query() {
@@ -1008,8 +933,16 @@ async function exportReport() {
   exporting.value = true
   errorMessage.value = ''
   try {
+    // 大单月份输入是待查询条件；导出使用当前可见结果的已查询月份。
+    const visibleMonth = isLargeOrderReport.value
+      ? String(result.value?.range?.start || route.query?.month || route.query?.start_date || selectedMonth.value).slice(0, 7)
+      : ''
+    const visibleMonthDates = visibleMonth ? monthBounds(visibleMonth) : null
     // 导出仍由服务端使用同一权限和固定字段白名单，浏览器只负责下载结果。
-    const exported = await exportStoreBusinessReport(reportParams({ page: 1, limit: 100 }), reportRuntime.value)
+    const exported = await exportStoreBusinessReport(reportParams({
+      page: 1, limit: 100,
+      ...(visibleMonthDates ? { month: visibleMonth, start_date: visibleMonthDates.start, end_date: visibleMonthDates.end } : {})
+    }), reportRuntime.value)
     const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
     const exportRecords = Array.isArray(exported.records) ? exported.records : []
     const summaryRow = exported.summary_row || exported.summaryRow
@@ -1072,6 +1005,8 @@ function syncActiveReportFromRoute() {
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
   if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) selectedYear.value = today().slice(0, 4)
+  // 旧日期链接沿用其所在月份；换报表时不继承上一张报表的月份草稿。
+  if (isLargeOrderReport.value) selectedMonth.value = String(route.query?.month || startDate.value).slice(0, 7)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1876,13 +1811,11 @@ watch(() => route.fullPath, () => {
   cancelEdit()
   if (needsMemberVisitYearRoute()) return syncCurrentFiltersToRoute()
   loadReport()
-  nextTick(updateTabsLayout)
 })
 
 onMounted(async () => {
   syncActiveReportFromRoute()
   syncFiltersFromRoute()
-  window.addEventListener('resize', updateTabsLayout)
   try {
     const [response] = await Promise.all([queryStoreBusinessReportCatalog(reportRuntime.value), loadReportScope()])
     catalog.value = Array.isArray(response) ? response : []
@@ -1898,37 +1831,16 @@ onMounted(async () => {
         errorMessage.value = error?.message || '商品分类读取失败，请稍后重试。'
       })
     }
-    await nextTick()
-    updateTabsLayout()
   } catch (error) {
     errorMessage.value = error?.message || '经营报表目录读取失败，请稍后重试。'
   }
 })
 
-onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
   <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout, 'store-business-report--advanced-open': isAdvancedFiltersOpen && resultFilterColumns.length, 'store-business-report--platform': isPlatformReport }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : isPhaseFourReport ? '运营中心数据报表' : isPhaseSixReport ? '其他报表' : '门店运营报表'">
-    <div v-if="!isPlatformReport" class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
-      <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
-        <button
-          v-for="item in reportTabs"
-          :key="item.code"
-          type="button"
-          class="store-business-report__tab"
-          :class="{ 'store-business-report__tab--active': activeReport === item.code }"
-          :aria-current="activeReport === item.code ? 'page' : undefined"
-          @click="selectReport(item.code)"
-        >{{ item.name }}</button>
-      </nav>
-      <button v-if="tabsOverflow" type="button" class="store-business-report__tabs-toggle" :aria-expanded="tabsExpanded" @click="toggleTabs">
-        <ChevronUp v-if="tabsExpanded" :size="15" aria-hidden="true" />
-        <ChevronDown v-else :size="15" aria-hidden="true" />
-        {{ tabsExpanded ? '收起' : '展开' }}
-      </button>
-    </div>
-
+    <!-- 报表切换统一使用顶部数据中心，查询、导出及下钻沿用已上线业务路径。 -->
     <section class="store-business-report__filters" aria-label="报表查询条件">
       <button v-if="salarySummaryReturnLocation" type="button" class="button button--secondary store-business-report__salary-return" @click="returnToSalarySummary">
         <ArrowLeft :size="15" aria-hidden="true" /> 返回
@@ -1982,13 +1894,18 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         </section>
       </div>
       <label v-if="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <!-- 大单分期允许选择未来应计月；查询范围仍是该自然月。 -->
+      <label v-else-if="isLargeOrderReport" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" /></label>
       <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>
       <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
-        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
-        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
+        <div class="store-business-report__period-picker">
+          <!-- Platform daily reports retain the existing coverage/future-date
+               bounds and explicit query/committed-export contract. -->
+          <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :max-date="today()" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
+        </div>
       </template>
       <label v-for="field in visibleFilterSchema" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
@@ -2143,16 +2060,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 <style scoped>
 .store-business-report { display: grid; align-content: start; gap: 14px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 20px; overflow: auto; background: #f5f7fa; color: #252a34; }
 .store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; }
+/* 门店移除重复导航后为表格释放高度，平台原布局独立保留。 */
+.store-business-report--market-detail:not(.store-business-report--platform), .store-business-report--fixed-table:not(.store-business-report--platform) { grid-template-rows: auto minmax(0, 1fr); }
 .store-business-report--fixed-table.store-business-report--advanced-open { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.store-business-report--fixed-table.store-business-report--advanced-open:not(.store-business-report--platform) { grid-template-rows: auto auto minmax(0, 1fr); }
 .store-business-report--fixed-table.store-business-report--advanced-open.store-business-report--platform { grid-template-rows: auto auto minmax(0, 1fr); }
 .store-business-report h1, .store-business-report h2, .store-business-report p { margin: 0; }
-.store-business-report__tabs-shell { display: flex; align-items: flex-start; min-width: 0; border-bottom: 1px solid #d9e1eb; background: #fff; }
-.store-business-report__tabs { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; max-height: 43px; gap: 0 2px; overflow: hidden; padding: 0 12px; }
-.store-business-report__tabs-shell--expanded .store-business-report__tabs { max-height: 86px; }
-.store-business-report__tabs-toggle { display: inline-flex; flex: none; align-items: center; gap: 4px; min-height: 42px; border: 0; border-left: 1px solid #edf1f5; padding: 0 12px; background: #fff; color: #1769aa; font: inherit; font-size: 12px; cursor: pointer; }
-.store-business-report__tab { flex: none; min-height: 42px; padding: 0 15px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #697586; font: inherit; font-size: 13px; cursor: pointer; }
-.store-business-report__tab:hover { color: #1769aa; background: #f7fbff; }
-.store-business-report__tab--active { border-bottom-color: #1769aa; color: #1769aa; font-weight: 700; }
 .store-business-report__filters, .store-business-report__panel { border: 1px solid #dde4ed; border-radius: 8px; background: #fff; }
 .store-business-report__filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 13px 16px; }
 .store-business-report__scope-picker { position: relative; flex: none; }
@@ -2220,7 +2133,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__top-summaries { display: flex; flex-wrap: wrap; gap: 12px 28px; border-bottom: 1px solid #e1e8f0; padding: 12px 16px; background: #f8fbff; color: #23364d; font-size: 13px; }
 .store-business-report__top-summaries strong { margin-right: 7px; color: #607086; font-weight: 600; }
 .store-business-report__pending { display: flex; flex-wrap: wrap; gap: 8px 12px; border-bottom: 1px solid #f2d49a; padding: 10px 16px; background: #fff9ed; color: #9a6509; font-size: 12px; }
-.store-business-report__table-scroll { min-width: 0; overflow: auto; }
+/* 结果区独立承载双向滚动；外层固定布局裁剪溢出时，不能让表格直接撑出结果容器。
+   显式保留滚动条轨道，避免系统自动隐藏后宽表无可发现的拖动入口。 */
+.store-business-report__table-scroll { min-width: 0; overflow: auto; scrollbar-gutter: stable; scrollbar-color: #b7bec8 #f3f5f8; }
+.store-business-report__table-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.store-business-report__table-scroll::-webkit-scrollbar-track { background: #f3f5f8; }
+.store-business-report__table-scroll::-webkit-scrollbar-thumb { border: 2px solid #f3f5f8; border-radius: 6px; background: #b7bec8; }
+.store-business-report__table-scroll::-webkit-scrollbar-thumb:hover { background: #929dab; }
+.store-business-report__table-scroll::-webkit-scrollbar-corner { background: #f3f5f8; }
 .store-business-report--market-detail .store-business-report__table-scroll, .store-business-report--fixed-table .store-business-report__table-scroll { min-height: 0; flex: 1; }
 .store-business-report table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
@@ -2261,7 +2181,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__empty, .store-business-report__empty-cell { min-height: 130px; color: #8290a2; font-size: 13px; text-align: center; }
 .store-business-report__empty { display: grid; place-items: center; }
 .store-business-report__empty-cell { padding: 40px; }
-.store-business-report__pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 16px; color: #708096; font-size: 12px; }
+.store-business-report__pagination { flex-shrink: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 16px; color: #708096; font-size: 12px; }
 .store-business-report__pagination button { min-height: 30px; border: 1px solid #d7e0eb; border-radius: 5px; padding: 4px 9px; background: #fff; color: #445365; cursor: pointer; }
 .store-business-report__pagination button:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 1100px) { .store-business-report__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

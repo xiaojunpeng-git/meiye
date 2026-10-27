@@ -41,6 +41,8 @@ class JobPositionPolicyServices extends BaseServices
             ['id' => 301017, 'title' => '卡启用', 'feature_code' => 'cashier.v3.cashier.card.enable'],
             ['id' => 301018, 'title' => '项目替换', 'feature_code' => 'cashier.v3.cashier.card.project_replace'],
             ['id' => 301019, 'title' => '项目升级', 'feature_code' => 'cashier.v3.cashier.card.project_upgrade'],
+            // New monetary conversion is opt-in; existing position IDs never imply this leaf.
+            ['id' => 301051, 'title' => '卡转余额', 'feature_code' => 'cashier.v3.cashier.card.to_balance'],
         ]],
         ['id' => 301002, 'title' => '挂单', 'feature_code' => 'cashier.v3.hang'],
         ['id' => 301003, 'title' => '房间', 'feature_code' => 'cashier.v3.room'],
@@ -164,6 +166,8 @@ class JobPositionPolicyServices extends BaseServices
         array $adminInfo,
         array $requestCtx
     ): array {
+        // 状态切换属于岗位策略保存；仍校验账号的岗位功能权限，不继承组织通用的超管门禁。
+        app()->make(OrganizationWorkspaceWriteGate::class)->assertJobPositionSavePermission($adminInfo);
         $status = $status === 1 ? 1 : 0;
         $payload = ['position_id' => $positionId, 'status' => $status];
         /** @var OrganizationStrictIdempotencyServices $idem */
@@ -195,7 +199,8 @@ class JobPositionPolicyServices extends BaseServices
                     'msg' => $status === 1 ? '岗位已启用' : '岗位已停用',
                     'data' => ['id' => $positionId, 'status' => $status, 'version' => $version],
                 ];
-            }
+            },
+            false
         );
     }
 
@@ -273,7 +278,7 @@ class JobPositionPolicyServices extends BaseServices
         $mobileCatalog = app()->make(MobileMerchantCapabilityCatalog::class);
         return [
             'platform_menus' => $menus->getList(['type' => 0, 'is_del' => 0]),
-            'store_v3_menus' => self::STORE_V3_MENU_TREE,
+            'store_v3_menus' => (new StorePermissionCatalogServices())->menuTree(),
             // 岗位手机端权限与当前 Vue 3 商家端共用同一能力目录，禁止回读旧手机菜单。
             'mobile_menus' => $mobileCatalog->menuTree(),
             'help' => '岗位决定员工能操作哪些功能。平台后台权限只在总部平台生效；门店可用只决定门店能不能选择该岗位。',
@@ -787,7 +792,7 @@ class JobPositionPolicyServices extends BaseServices
     }
 
     /** @return array<int, string> stable policy-rule ID => Vue 3 feature code */
-    public static function storeV3FeatureMap(): array
+    public static function storeV3FeatureMap(bool $legacy = false): array
     {
         $map = [];
         $walk = static function (array $nodes) use (&$walk, &$map): void {
@@ -800,6 +805,11 @@ class JobPositionPolicyServices extends BaseServices
                 $walk((array)($node['children'] ?? []));
             }
         };
+        if (!$legacy) {
+            // 岗位树中的单表节点由权限规则登记的菜单派生，不为每张新报表手改岗位白名单。
+            return array_column(StorePermissionCatalogServices::definitions(), 'feature_code', 'id')
+                + array_column(StorePermissionCatalogServices::grantableNavigationDefinitions(), 'feature_code', 'id');
+        }
         $walk(self::STORE_V3_MENU_TREE);
         return $map;
     }
@@ -807,7 +817,14 @@ class JobPositionPolicyServices extends BaseServices
     /** @return string[] */
     public static function storeV3FeaturesFromRuleIds(array $ruleIds): array
     {
-        $catalog = self::storeV3FeatureMap();
+        // 升级已将历史默认授权展开为明确编号；新保存后取消子项不会被父级自动补回。
+        return (new StorePermissionCatalogServices())->filterEnabled(StorePermissionCatalogServices::explicitFeatures($ruleIds));
+    }
+
+    /** 仅升级器读取旧授权语义，禁止用于新会话或新岗位保存。 */
+    public static function legacyStoreV3FeaturesFromRuleIds(array $ruleIds): array
+    {
+        $catalog = self::storeV3FeatureMap(true);
         $features = [];
         foreach ($ruleIds as $ruleId) {
             $feature = $catalog[(int)$ruleId] ?? '';

@@ -1,0 +1,91 @@
+{
+  "site": "010",
+  "root": "/www/wwwroot/010.cc3798.com",
+  "writes_performed": false,
+  "application_booted": false,
+  "backend_manifest": "e5c01b22ef6986e67686336badb8fa31f8aef822915afea685fafa1440b6698b",
+  "backend_catalog": "c3499b73c1795f5fb5fca1e993d2e69aa167e6c2c02857e1261773a76450d761",
+  "backend_report_controller": "b0552be60782d885d8bf893581c800e7b141fb19502b54230b262ae291e6c41e",
+  "frontend_entries": [
+    {
+      "kind": "cashier",
+      "entry": "627330d15fe5cc4e2928c0484d29845f01acfa4d80bef541116ef5be8c921b4a",
+      "assets": [
+        {
+          "path": "view_cashier_v3/assets/index-21c3afe5.css",
+          "sha256": "21c3afe58e7671409563b181a0ea30e5816e6530ba1bfc95084467bce352c436"
+        },
+        {
+          "path": "view_cashier_v3/assets/index-51a0bb99.js",
+          "sha256": "df7d0b57cab6dbc5dda46a23f05c9812e8f2252fe62ce5c3499910accbb5ff43"
+        }
+      ]
+    },
+    {
+      "kind": "platform",
+      "entry": "1954722ab061671ba2aed07804dce541e63688a0a879c4530aaa5e3fd518a8fe",
+      "assets": [
+        {
+          "path": "view_admin/css/app.153d9d27.css",
+          "sha256": "e3196fac4f7768b46a24ff2ec5fb023ac3ac80b503aaa7f7b24ff1663ad3b59f"
+        },
+        {
+          "path": "view_admin/css/chunk-vendors.48272356.css",
+          "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+        },
+        {
+          "path": "view_admin/js/app.58f88402.js",
+          "sha256": "c2576f4c46759ece0cd6ffc5309a3ab2738a0ee4837c21ae7c992fe429362403"
+        },
+        {
+          "path": "view_admin/js/chunk-vendors.33283ef6.js",
+          "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+        }
+      ]
+    }
+  ],
+  "database": {
+    "database_name": "mohe_010_app",
+    "server_port": 3307,
+    "server_hostname": "iZbp1dgm8uf9neb154w742Z",
+    "server_version": "5.7.44",
+    "session_read_only": 1
+  },
+  "recent_upgrades": [
+    {
+      "id": 84,
+      "upgrade_key": "20261026-010-inventory-default-store-locations",
+      "code_version": "40147d669ac4783c76146419578d62e416878178",
+      "sql_checksum": "58447cb74a87dea1aca951542c3e51044745e04b8f91df833c5c8b3e117d1267",
+      "executed_at": "2026-10-26 13:09:09"
+    },
+    {
+      "id": 83,
+      "upgrade_key": "20261025-r61-combination-fulfillment-refund",
+      "code_version": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sql_checksum": "c533b04b54472b6cf19ebc7a18366230f96b7851196928a4f475db576a01232c",
+      "executed_at": "2026-10-25 20:19:07"
+    },
+    {
+      "id": 82,
+      "upgrade_key": "20261025-r59-store-profile-settings",
+      "code_version": "42363105abb5efaccb8a6ef467fb6194a890e42c",
+      "sql_checksum": "1435e888608f6dee8fc2cc4aa232294de8253b6e83307449b2ccd6a64ca90ec9",
+      "executed_at": "2026-10-25 16:53:28"
+    },
+    {
+      "id": 81,
+      "upgrade_key": "20261025-r58-reservation-custom-service",
+      "code_version": "939beba3990403b78b57e87ee9936a697f871d42",
+      "sql_checksum": "3337ce636d1bbe4f061dd9937213a1d270c811ef1a9d26282f04733d74a73bd0",
+      "executed_at": "2026-10-25 08:21:20"
+    },
+    {
+      "id": 80,
+      "upgrade_key": "20261025-r57-business-source-policy-initialize",
+      "code_version": "232dd50b16dbcabc88717ee81c972de8b3b26d33",
+      "sql_checksum": "b9bd42c807444d08d739a424b758aa68cd0cacc43f66d62762d6e0af69924921",
+      "executed_at": "2026-10-25 02:25:37"
+    }
+  ]
+}

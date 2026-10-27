@@ -1774,8 +1774,13 @@ class CashierV3CommandGatewayServices extends BaseServices
         // 重放必须重新解析第一次落回执时保存的 contexts；不能信任本次请求
         // 夹带的版本或只依赖 store_id/operator_id，否则数据范围收窄后会泄露旧 data。
         $storedContexts = json_decode((string)($existing['contexts_json'] ?? ''), true);
+        // Only the explicitly confirmed conversion subtype has this new
+        // no-version replay path; other card operations keep their old guard.
+        $cardConversionReplay = $canonicalAction === 'submit-card-operation'
+            && ($payload['operationType'] ?? '') === 'card_to_balance';
         if (!is_array($storedContexts) || ($storedContexts === []
-            && !in_array($canonicalAction, ['refund-card-or-line', 'adjust-refund-personnel', 'adjust-imported-refund-personnel', 'void-order-center-refund'], true))) {
+            && !$cardConversionReplay
+            && !in_array($canonicalAction, ['submit-checkout', 'refund-card-or-line', 'adjust-refund-personnel', 'adjust-imported-refund-personnel', 'void-order-center-refund'], true))) {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
@@ -1784,15 +1789,21 @@ class CashierV3CommandGatewayServices extends BaseServices
                 'stored_contexts_missing'
             );
         }
-        // Unified refund locks its target inside the domain transaction and intentionally stores
-        // no browser contexts. For this action, recheck the committed operation and today's scope.
-        $scopeFailure = $storedContexts === []
-            ? ($canonicalAction === 'void-order-center-refund'
+        // 唯一快照结账按已落账请求校验重放范围，不要求补传旧 contexts。
+        // 其他已支持的无 contexts 命令继续按各自已提交操作核验当前权限。
+        if ($storedContexts === [] && $canonicalAction === 'submit-checkout') {
+            $scopeFailure = $this->snapshotCheckoutReplayScopeFailure($existing, $operatorScope, $txnDataScope);
+        } elseif ($storedContexts === [] && $cardConversionReplay) {
+            $scopeFailure = $this->cardConversionReplayScopeFailure($existing, $payload, $operatorScope, $txnDataScope);
+        } else {
+            $scopeFailure = $storedContexts === []
+                ? ($canonicalAction === 'void-order-center-refund'
                 ? $this->refundVoidReplayScopeFailure($existing, $operatorScope, $txnDataScope)
                 : (in_array($canonicalAction, ['adjust-refund-personnel', 'adjust-imported-refund-personnel'], true)
                 ? $this->refundPersonnelReplayScopeFailure($existing, $operatorScope, $txnDataScope)
                 : $this->unifiedRefundReplayScopeFailure($existing, $operatorScope, $txnDataScope)))
-            : $this->historicalReplayScopeFailure($storedContexts, $operatorScope, $txnDataScope);
+                : $this->historicalReplayScopeFailure($storedContexts, $operatorScope, $txnDataScope);
+        }
         if ($scopeFailure !== '') {
             return $this->replayDenied(
                 $stateContext,
@@ -1946,6 +1957,61 @@ class CashierV3CommandGatewayServices extends BaseServices
         return '';
     }
 
+    /**
+     * 唯一快照结账不携带旧式 contexts。重放只读已成功请求的审计身份，
+     * 不读客户端版本、不重建商品快照，也不执行第二次结算。
+     * 当前门店/组织/操作员及功能权限仍必须有效；找不到原落账请求则拒绝。
+     */
+    private function snapshotCheckoutReplayScopeFailure(
+        array $existing,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        $identityFailure = $this->historicalReplayScopeFailure([], $operatorScope, $dataScope);
+        if ($identityFailure !== '') return $identityFailure;
+        if ($dataScope->isReadOnlySession() || !$dataScope->allowsStore($operatorScope->storeId())) {
+            return 'checkout_replay_store_denied';
+        }
+        $request = Db::name('cashier_v3_checkout_request')
+            ->where('tenant_id', $operatorScope->tenantId())
+            ->where('organization_id', $operatorScope->organizationId())
+            ->where('store_id', $operatorScope->storeId())
+            ->where('operator_id', $operatorScope->operatorId())
+            ->where('last_idempotency_key', (string)($existing['idempotency_key'] ?? ''))
+            ->where('source_document_type', 'cashier_snapshot')
+            ->where('request_status', 'succeeded')->field('request_id')->find();
+        return is_array($request) ? '' : 'checkout_replay_request_missing';
+    }
+
+    /**
+     * Conversion closes its card on purpose. Revalidate current authorization
+     * against the persisted operation/receipt, not a second live-card snapshot
+     * or a now-unavailable resource version; never credit the wallet again.
+     */
+    private function cardConversionReplayScopeFailure(array $existing, array $payload,
+        CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): string
+    {
+        $identityFailure = $this->historicalReplayScopeFailure([], $operatorScope, $dataScope);
+        if ($identityFailure !== '') return $identityFailure;
+        if ($dataScope->isReadOnlySession() || !$dataScope->allowsStore($operatorScope->storeId())
+            || !$dataScope->hasFeature('cashier.v3.cashier.card.to_balance')) {
+            return 'card_conversion_replay_scope_denied';
+        }
+        $operation = Db::name('cashier_v3_card_operation')
+            ->where('tenant_id', $operatorScope->tenantId())
+            ->where('store_id', $operatorScope->storeId())->where('operator_id', $operatorScope->operatorId())
+            ->where('command_idempotency_key', (string)($existing['idempotency_key'] ?? ''))
+            ->where('operation_type', 'card_to_balance')->whereIn('operation_status', ['completed', 'succeeded'])
+            ->find();
+        if (!$operation || (string)$operation['operation_no'] !== (string)($existing['business_no'] ?? '')
+            || (int)$operation['source_card_holder_id'] !== (int)($payload['sourceCardHolderId'] ?? 0)
+            || (int)$operation['member_id_after'] !== (int)($payload['memberId'] ?? 0)
+            || (int)$operation['source_remaining_value_cents'] !== (int)($payload['confirmedAmountCents'] ?? 0)) {
+            return 'card_conversion_replay_operation_missing';
+        }
+        return '';
+    }
+
     /** Empty-context refund receipts may replay only for the same authorized operation/store. */
     private function unifiedRefundReplayScopeFailure(
         array $existing,
@@ -1964,9 +2030,9 @@ class CashierV3CommandGatewayServices extends BaseServices
             ->where('operator_id', $operatorScope->operatorId())
             ->where('operation_type', 'refund')
             ->where('status', 'succeeded')->find();
-        // Catalog refunds have no original order, but their committed refund operation is still
-        // the replay authority for the same operator/store/idempotency key.
-        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document', 'catalog'], true)
+        // Catalog and balance refunds have no original order; their committed operation
+        // still binds a replay to the same operator, store and idempotency key.
+        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document', 'catalog', 'balance'], true)
             || (string)$operation['operation_no'] !== (string)($existing['business_no'] ?? '')) {
             return 'refund_replay_operation_missing';
         }

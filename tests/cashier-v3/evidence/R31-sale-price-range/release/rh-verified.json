@@ -1,0 +1,9 @@
+{
+  "site": "rh",
+  "commit": "5d51e4604eb413bb6f4b6dce79928b0eaef77726",
+  "result": "PASS",
+  "backup": "/www/backups/rh/r31-price-5d51e460",
+  "frontend": "formal admin and cashier",
+  "preview": "unchanged",
+  "database": "unchanged"
+}

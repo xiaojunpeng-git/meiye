@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "same_read_snapshot": true,
+  "old_vs_deployed_rows": {
+    "basic_salary_realtime": 6,
+    "basic_employee_summary": 4
+  },
+  "mode": 0,
+  "business_writes": 0
+}

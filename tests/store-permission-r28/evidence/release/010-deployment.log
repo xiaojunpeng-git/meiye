@@ -1,0 +1,26 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+{"result":"PASS","site":"010","mode":"prepare","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/route/admin.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/controller/admin/v1/system/StorePermissions.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/controller/store/fund/StoreFund.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/http/middleware/cashier/CashierCheckRoleMiddleware.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/organization/JobPositionPolicyServices.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/organization/StorePermissionCatalogServices.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/projection/CashierV3RootStateContract.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardPartitionProvider.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/manifest/CashierV3C4DashboardModule.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/cashier/v3/permission/CashierV3FeatureResolver.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/query/provider/StaffUnifiedQueryPageRegistrar.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/app/services/system/SystemMenusServices.php
+No syntax errors detected in /www/backups/010/20261023-r28-18669cbf/payload/backend/database/upgrades/2026-10-23-门店端独立权限规则/03-初始化.php
+SQLSTATE[42000]: Syntax error or access violation: 1142 CREATE command denied to user 'mohe_010_app'@'localhost' for table 'eb_store_v3_permission_catalog'
+{"result":"PASS","site":"010","mode":"rollback","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
+FINGERPRINT_MISMATCH: /www/wwwroot/010.cc3798.com/app/controller/admin/v1/system/StorePermissions.php
+{"result":"PASS","site":"010","mode":"rollback","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
+Class 'app\services\organization\StorePermissionCatalogServices' not found
+{"result":"PASS","site":"010","mode":"rollback","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
+R28_INSTANCE_PASS

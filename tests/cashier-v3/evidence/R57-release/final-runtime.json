@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "mode": "manual",
+      "enabled": true,
+      "inheritPrevious": false,
+      "manualChoicesEmpty": true,
+      "serverReadOnly": true,
+      "businessWrites": 0
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "mode": "manual",
+      "enabled": true,
+      "inheritPrevious": false,
+      "manualChoicesEmpty": true,
+      "serverReadOnly": true,
+      "businessWrites": 0
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "mode": "manual",
+      "enabled": true,
+      "inheritPrevious": false,
+      "manualChoicesEmpty": true,
+      "serverReadOnly": true,
+      "businessWrites": 0
+    }
+  }
+}

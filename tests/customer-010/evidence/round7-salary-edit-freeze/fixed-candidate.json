@@ -1,0 +1,25 @@
+{
+  "baseline_head": "7760eabc10e28df502f506a559302fefb8536a08",
+  "main_head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "files": {
+    "scripts/payroll/round7-browser-fixture.py": "da0df7e5096b47dec953ffc72b7eeff4c1e9703ab90c3a5d99f155d82683ebbd",
+    "scripts/payroll/round7_test_runtime.py": "a247287facac540e2b59851c7df1b14a5cee2c9ba2f9daf0208a4f6bca25bd1c",
+    "scripts/payroll/run-round7-tests.py": "5b159106e7a73339a30506b8a12c52f231e07c3c9c42e75d1ddf9c0252976b90",
+    "tests/customer-010/payroll-local.php": "128c078557ece435629d9491b124ca6a76b8f39dd007638dfcb1080a6a8894a5",
+    "tests/customer-010/payroll-manual-integration.php": "63c389b296820ebff7a97ce8607d2d9da15faa84d38e4fc0166add4d1f7bcefa",
+    "tests/report-basic/php/salary-contract.php": "27656653399a1a616958869dbfef0990abb12cfad8388ef00eeb18beb56d6bf9",
+    "tests/report-basic/php/salary-local.php": "74ece88e9151b4bbf6be826d4af2b44d98e4d37164d55ddcf18c97c4e63512b3",
+    "前端代码/cashier-v3/src/services/basicReportApi.js": "0987ce5ec186a04db89dd4d7d7a45e10973ff656426184b3a5a5b39553e4aa70",
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "5b9c974d47e59e7e434e009a77f6a713f99256952316a659282f859ec35b49bc",
+    "后端代码/app/controller/admin/v1/report/UnifiedReport.php": "63d93bda6f93b157153eff3f94addb4d6ca7bef81e1d1aa0962a4d733de739c7",
+    "后端代码/app/controller/cashier/v3/Report.php": "e711a783263a96bd07fd5c5a2428c811974b398a421f432908642b8ff24aae19",
+    "后端代码/app/services/report/BasicSalaryManualServices.php": "5323cf3220e19798a0c5a0ac1c084cea4a8bf2697ce6d49ba0e98d378a8acfba",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "33ae17775d321f6f6ebb774e36a6a79dbe5b4a93ba7897c1fd27f30d560f7f6e",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "fa3bf722148cb0d3f358a58e0a0e8159f304acfa57233d221b73fe212722c294",
+    "后端代码/database/upgrades/2026-10-27-工资人工项与编辑冻结/01-结构升级.sql": "a4a703db1067897da2638ed83c016d42683698b6b129436cce4a394571b66326",
+    "后端代码/route/admin.php": "cb685e61b4415e9b1f8eebf99221d8b18a6c859af1db69abad75ea76480efa69",
+    "后端代码/route/cashier-v3.php": "e0f09b8b5557da8a650a5ae3fb3370bd2b76f8e08005330505e279942c6e47cc"
+  },
+  "online_baseline": "不适用：本轮尚未授权部署，仅只读对比007页面；未连接远程Shell或数据库",
+  "fingerprint": "019737cf9fc166fb776dd99c5f98a7d7602411c168a60a83b210bc6b7f759c9d"
+}

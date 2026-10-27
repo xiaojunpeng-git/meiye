@@ -1,0 +1,69 @@
+{
+  "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "business_source_commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
+  "baseline_restoration_source_commit": "9a0ac8f3",
+  "baseline_restoration_file": "后端代码/app/services/product/product/StoreProductServices.php",
+  "backend_files": [
+    "后端代码/app/controller/admin/v1/position/PositionLevel.php",
+    "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+    "后端代码/app/controller/admin/v1/yeji/Yeji.php",
+    "后端代码/app/controller/cashier/Order.php",
+    "后端代码/app/controller/cashier/v3/Report.php",
+    "后端代码/app/controller/store/yeji/Yeji.php",
+    "后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php",
+    "后端代码/app/jobs/order/SpliteOrderAfterJob.php",
+    "后端代码/app/services/cashier/v3/LegacyCraftsmanPerformanceDefault.php",
+    "后端代码/app/services/cashier/v3/permission/CashierV3FeatureResolver.php",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+    "后端代码/app/services/order/BatchWriteoffServices.php",
+    "后端代码/app/services/order/StoreReservationOrderServices.php",
+    "后端代码/app/services/order/cashier/CashierAutoWriteoffServices.php",
+    "后端代码/app/services/order/store/WriteOffOrderServices.php",
+    "后端代码/app/services/organization/JobPositionPolicyServices.php",
+    "后端代码/app/services/organization/StorePermissionCatalogServices.php",
+    "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php",
+    "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php",
+    "后端代码/app/services/payroll/PositionSalaryRuleResolver.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php",
+    "后端代码/app/services/position/PositionServices.php",
+    "后端代码/app/services/position/PositionYejiServices.php",
+    "后端代码/app/services/product/product/StoreProductServices.php",
+    "后端代码/app/services/report/BasicActivityReportServices.php",
+    "后端代码/app/services/report/BasicReportHostServices.php",
+    "后端代码/app/services/report/BasicSalaryReportServices.php",
+    "后端代码/app/services/report/query/BasicRegistrationWorkerContextResolver.php",
+    "后端代码/app/services/system/SystemMenusServices.php",
+    "后端代码/app/services/system/config/SystemConfigServices.php",
+    "后端代码/app/services/yeji/YejiCommissionServices.php",
+    "后端代码/route/admin.php",
+    "后端代码/config/payroll.php",
+    "后端代码/config/basic_report.php"
+  ],
+  "frontends": {
+    "admin": {
+      "build_tree": "b637d954c52a91944133458f45a4ae23a2f33537",
+      "fixed_source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "subtree_identical": true
+    },
+    "cashier-v3": {
+      "build_tree": "925388586be2757382074a2bf8cd7eee9d768feb",
+      "fixed_source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "subtree_identical": true
+    },
+    "mobile-vue3": {
+      "build_tree": "b637d954c52a91944133458f45a4ae23a2f33537",
+      "fixed_source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+      "subtree_identical": true
+    }
+  },
+  "target_modes": {
+    "rh": 0,
+    "008": 0,
+    "010": 1
+  },
+  "business_import": false,
+  "schema_new_empty_tables": 2,
+  "menu_groups": 3,
+  "menu_reports": 21
+}

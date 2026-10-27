@@ -1,0 +1,14 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "后端代码/app/services/cashier/v3/cashier/CashierV3CashierMoreActionServices.php": "7c203c633e22484edd678d0b0c3b4552ff132dc2f55364e8caa680a7422cd476",
+    "前端代码/admin/src/pages/product/productAdd/index.vue": "439a25d0a644748e573e903b06bfdd9ecebbffc64d53d1799473ad2873223491",
+    "tests/cashier-v3/php/cashier-more-actions-backend-contract.php": "54d72e2607975af59512c16ea542a812f4079ac3e627f33d8ef3816a16883dfa",
+    "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php": "e092d522cd82cb55a2a641f729b0c98d7f960825e8e7d94930a896d6652714db",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php": "b3e2be06abb301b2c91d0a4dcc747faac4c6cc4da93e4f291346f8068a1ce5d4",
+    "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php": "1f0961d57bccb2683932ed34d286bddd3a92622ba0ab3ef276018fcb00dcd56d",
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "7a10e52e7eb788e8bae1dcf2587843c5363d15ad40b7cd0e4a8cf031c5356dd3"
+  },
+  "relatedStatus": "",
+  "online": "not applicable; local development only"
+}

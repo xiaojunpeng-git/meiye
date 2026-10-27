@@ -10,6 +10,13 @@ const TAB_ACTIONS : any = {
 	workbench: ['RESERVATION_VIEW', 'mobile.merchant.workbench', '401001']
 }
 
+// 入口显隐只读取后端有效分类；旧会话缺失分类时先隐藏，重新登录后获得明确权限。
+// 不能以门店数量或当前门店名称推测组织权限，也不替代后端每次请求的范围校验。
+export function merchantOrganizationEntryVisible(root : any = null) : boolean {
+	let state = root != null ? root : currentMerchantRoot()
+	return state != null && state.dataScope != null && String(state.dataScope.entryType || '') === 'organization'
+}
+
 export function merchantTabAction(tabKey : string) : string {
 	let actions : any = TAB_ACTIONS[tabKey]
 	return actions != null && Array.isArray(actions) && actions.length > 0 ? String(actions[0]) : ''
@@ -37,6 +44,7 @@ export function merchantTabIsAllowed(tabKey : string, root : any = null) : boole
 	// “我的”是账号与退出入口，不属于四个业务 Tab 的功能权限控制范围。
 	if (tabKey === 'profile') return state != null
 	if (state == null || typeof state != 'object') return false
+	if (tabKey === 'home' && !merchantOrganizationEntryVisible(state)) return false
 	let source : any = Array.isArray(state.availableActions) ? state.availableActions : state.capabilities
 	if (!Array.isArray(source)) return false
 	let granted = new Array<string>()

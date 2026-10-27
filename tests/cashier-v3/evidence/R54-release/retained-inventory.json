@@ -1,0 +1,7 @@
+{
+  "result": "PASS",
+  "tree": "523cf660337d05188c0de6db871fcc475320edca",
+  "source": "/private/tmp/mohe-r54-service-period-release-v3-20261024/candidate-readonly",
+  "test": "stock-pagination-contract.mjs",
+  "retainedFrom": "e43cc910"
+}

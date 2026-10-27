@@ -1,0 +1,8 @@
+{
+  "site": "rh",
+  "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "files": 102,
+  "sha256": "5baf91a898486595a709e93a5f2a267582e56b64b02abf4708a29907c12a1c5d",
+  "source_only_baseline_restore": true,
+  "scope_includes_prior_permission_prerequisites": true
+}

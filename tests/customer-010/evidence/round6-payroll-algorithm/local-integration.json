@@ -1,0 +1,14 @@
+[
+  {
+    "test": "tests/report-basic/php/salary-local.php",
+    "exit_code": 0,
+    "output": "{\"pass\":true,\"checks\":103,\"reader\":\"RegisteredMetricReadServices\",\"transaction\":\"MetricReadTransaction\",\"isolated_fixture_database\":true,\"remote_access\":false,\"persistent_business_writes\":false}\n",
+    "error": ""
+  },
+  {
+    "test": "tests/report-basic/php/activity-local.php",
+    "exit_code": 0,
+    "output": "{\"pass\":true,\"checks\":535,\"reports\":10,\"source\":\"real_registered_readers_thinkorm_isolated_local_mysql\",\"persistent_business_writes\":false}\n",
+    "error": ""
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "site": "rh",
+  "database": "ruihao",
+  "port": "3306",
+  "mode": 0,
+  "position_model": "legacy",
+  "migration": "20261025-r61-combination-fulfillment-refund",
+  "files": {
+    "app/services/report/BasicSalaryReportServices.php": "9aca202a79981fa4465a99677a27aa629ca1787915e7cb4d8b4c095911fc4f71",
+    "app/services/report/BasicActivityReportServices.php": "a6235bf0d6ff7ef2134128db8d8a3b3bb75f3d69c2a14c1599770a3de4b8077f",
+    "app/services/mobile/warehouse/MobileWarehouseServices.php": "4f7d858bdea6bb91bda535b075e08d0555ec926ab66ddaeff77341a32e6c4fb5",
+    "app/services/position/PositionServices.php": "233bfd0c1d0dee4ec878d6a2491a9768ca2a288ae108767e1d0359b5be47436b",
+    "app/services/position/PositionYejiServices.php": "e0d4dad002187afc27cf8d87ae5113ce4bace6753e1d5de3c79578f127a2100f",
+    "app/controller/admin/v1/position/PositionLevel.php": "984e8b9143145817f9716f032602c9230a575fe68c255c3a4fcac3917ce74686",
+    "app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+    "app/services/payroll/IndependentPositionSalaryRuleServices.php": null,
+    "app/services/payroll/PayrollAlgorithmPolicy.php": null,
+    "app/services/payroll/PositionSalaryRuleResolver.php": null,
+    "app/services/payroll/ProjectLaborCommissionCalculator.php": null,
+    "app/services/payroll/ProjectLaborCommissionReadServices.php": null,
+    "config/payroll.php": null,
+    "public/system.html": "2572d10ba773ef550ad91faade9dbff156a4cd6d1ade90181f9c46fcaae8184a",
+    "public/view_cashier_v3/index.html": "0fa8bd75ddb140e2e1013c7ec6986ce483311c5d8aba5f04b347cd58d5c8611b",
+    "public/view_mobile_v3/index.html": "fd606eb37a2305eb0ab83d7a7a193daa35859bdef8cc56ce257ca881f435bc76"
+  }
+}

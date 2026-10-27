@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "serverReadOnly": true,
+  "businessWrites": 0,
+  "capabilityFields": 21,
+  "filterFields": 21,
+  "listTotal": 1696,
+  "pageRows": 20,
+  "emptySearch": "PASS",
+  "limit": "CLI trusted-scope projection; no authenticated browser session or financial action."
+}

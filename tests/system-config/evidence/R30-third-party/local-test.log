@@ -1,0 +1,8 @@
+PASS missing definition reproduces skipped save
+PASS all four missing definitions restored
+PASS real save controller persists map input
+PASS fresh form reads saved map key and title
+PASS other restored selectors retain options
+PASS repeat migration preserves every existing row and saved value
+PASS all local test changes rolled back
+R30 THIRD PARTY CONFIG PASS

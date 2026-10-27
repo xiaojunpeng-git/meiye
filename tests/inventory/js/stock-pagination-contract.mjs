@@ -14,7 +14,10 @@ assert.match(app, /remoteTotal\.value = Number\(response\?\.total \?\? response\
 assert.doesNotMatch(app, /remoteTotal\.value = active\.value === 'stock' && mode\.value === 'store' \? sourceRows\.value\.length/)
 assert.match(app, /await loadCurrentList\(Object\.keys\(executed\)\.length \? \{ \.\.\.executed, page: nextPage, limit: stockPageSize \} : null\)/)
 assert.match(app, /if \(active\.value === 'stock' && stockPage\.value > stockPages\.value\)/)
-assert.match(app, /<footer v-if="active === 'stock'" class="inventory-warehouse-pagination"/)
+// 门店与平台共享 100 行固定底部分页，后端完整总数与库存汇总不按当前页重算。
+assert.match(app, /const stockPageSize = 100/)
+assert.match(app, /<footer v-if="inventoryListPage" class="inventory-warehouse-pagination inventory-list-pagination"/)
+assert.match(app, /const inventoryListPage = computed\(\(\) => storeListPage\.value \|\|/)
 assert.match(app, /stockPage\.value = 1[\s\S]*stockExecutedQuery\.value = \{\}/)
 
-console.log('STOCK_PAGINATION_CONTRACT_OK checks=9')
+console.log('STOCK_PAGINATION_CONTRACT_OK checks=11')

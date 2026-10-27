@@ -1,0 +1,43 @@
+{
+  "results": [
+    {
+      "site": "rh",
+      "terminal": "cashier",
+      "result": "BYTE_IDENTICAL",
+      "html": "26bcc641f0ca8ac41a6df580d7146f9e9963a90b44c3257fb4e8e3c706c95249",
+      "assets": {
+        "assets/index-3927b7bf.js": "83c03ca70da56e05ec92247b2b7d42591e99007c5c85c44a0e19ad1ad2236ed0",
+        "assets/index-89f60d87.css": "89f60d8780134f8c93bfee0391c9afed2bbd39a3f78ef46bbd70590da0246bac"
+      }
+    },
+    {
+      "site": "008",
+      "terminal": "cashier",
+      "result": "BYTE_IDENTICAL",
+      "html": "26bcc641f0ca8ac41a6df580d7146f9e9963a90b44c3257fb4e8e3c706c95249",
+      "assets": {
+        "assets/index-3927b7bf.js": "83c03ca70da56e05ec92247b2b7d42591e99007c5c85c44a0e19ad1ad2236ed0",
+        "assets/index-89f60d87.css": "89f60d8780134f8c93bfee0391c9afed2bbd39a3f78ef46bbd70590da0246bac"
+      }
+    },
+    {
+      "terminal": "admin",
+      "sites": [
+        "rh",
+        "008"
+      ],
+      "result": "IDENTICAL_BUSINESS_BYTES_WITH_HASH_LABEL_ONLY_DIFFERENCE",
+      "previousCanonicalCommit": "802490dcf4facafd1a29bad7fb6191d33698d772",
+      "oldHtmlSha256": "d0f573bbd734a57183efbff13cc674b6be20c34789ee1f86537ed5fc64cb8c9f",
+      "rebuiltHtmlSha256": "bbf142703d585de9f94340c162b27185ee01d294adfa697e907a2e39eaa6f3bd",
+      "identicalContentResourceRename": {
+        "from": "view_admin/js/chunk-0f56252a.84ab0fca.js",
+        "to": "view_admin/js/chunk-0f56252a.a9ab431b.js",
+        "sha256": "109635e61441932e40f37abfb0d151efc6cdc1052b69c3e19208601e91d67ca8"
+      },
+      "runtimeDifference": "Only the identical editor chunk filename hash in the loading map",
+      "artifactMutation": false
+    }
+  ],
+  "result": "PASS"
+}

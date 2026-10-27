@@ -1,0 +1,4 @@
+{
+  "error": "Command failed: ssh -q -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 mohe-server /www/server/php/74/bin/php '/www/backups/010/r57-source-policy-232dd50b/migrate.php' '/www/backups/010/r57-source-policy-232dd50b' 'migrate' '5b9250455bb2d6b30ae2fa5af9bd04d5469868f2e2f2c258b526c1d4fddaf753'\nbash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nPHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1142 ALTER command denied to user 'mohe_010_app'@'localhost' for table 'eb_member_commerce_settings' in /www/backups/010/r57-source-policy-232dd50b/migrate.php:46\nStack trace:\n#0 /www/backups/010/r57-source-policy-232dd50b/migrate.php(46): PDO->query()\n#1 {main}\n  thrown in /www/backups/010/r57-source-policy-232dd50b/migrate.php on line 46\n",
+  "started": false
+}

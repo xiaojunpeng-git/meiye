@@ -143,6 +143,16 @@ class CashierV3RootDomainAssembler
                 'id' => $storeId,
                 'name' => (string)$store['name'],
             ],
+            // 菜单展示和岗位目录读取同一份配置，客户端只消费名称/排序，不接收可执行路由。
+            'navigationRules' => (new \app\services\organization\StorePermissionCatalogServices())->snapshot()['rules'],
+            // 实例级展示开关随每次权威根投影下发；缺少配置时保持原有入口可见。
+            'storeDisplayOptions' => [
+                'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
+                'experienceEnabled' => (int)sys_config('cashier_experience_switch', 1) === 1,
+                'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
+                // 计算法仅是显隐选项名称；缺失定义/null 均保持现有金额与入口。
+                'laborFeeVisible' => (int)sys_config('cashier_labor_fee_mode', 0) !== 1,
+            ],
             'featurePermissions' => $features ?: new \stdClass(),
             'operationPermissions' => $operationFeatures ?: new \stdClass(),
             'readOnly' => $dataScope->isReadOnlySession(),
@@ -157,6 +167,7 @@ class CashierV3RootDomainAssembler
                 'name' => $operatorName,
                 'account' => (string)($dataScope->operatorProfile()['account'] ?? ''),
                 'roleName' => (string)($dataScope->operatorProfile()['role_name'] ?? ''),
+                'profile' => $this->operatorDetails($dataScope->operatorProfile()),
             ],
         ];
 
@@ -196,6 +207,15 @@ class CashierV3RootDomainAssembler
             }
         }
 
+        // Source UI and initial choices belong to this authenticated root, not
+        // browser-wide remembered state. A broken fixed default blocks only
+        // its new transaction, never the whole login or historical order list.
+        $sourcePolicy = new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices();
+        $extras['businessSourcePolicy'] = $sourcePolicy->read();
+        $member = (array)($extras['cashier']['member'] ?? []);
+        $memberId = (int)($member['memberId'] ?? $member['id'] ?? 0);
+        $extras['businessSourceDefaultsMemberId'] = $memberId;
+        $extras['businessSourceDefaults'] = $sourcePolicy->initialChoices($dataScope->tenantId(), $storeId, $memberId);
         $extras['_public_versions'] = $publicVersions;
         return $extras;
     }
@@ -235,6 +255,29 @@ class CashierV3RootDomainAssembler
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /** 只读取已认证操作员关联员工的本人资料和有效任职；不接受前端指定员工，不影响权限或结账身份。 */
+    protected function operatorDetails(array $profile): array
+    {
+        $employeeId=(int)($profile['employee_id'] ?? 0);
+        $employee=$employeeId>0 ? Db::name('employee')->where('id',$employeeId)->where('is_del',0)->where('status',1)->field('name,phone')->find() : null;
+        $staffId=(int)($profile['id'] ?? $profile['staff_id'] ?? 0);
+        // 组织选店会话的编号不是门店员工编号，必须使用该员工的直属任职，不得碰撞其他员工。
+        if (!empty($profile['_cashier_v3_delegated']) || !empty($profile['_cashier_v3_organization'])
+            || \app\services\cashier\v3\CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) $staffId=0;
+        $positions=[];
+        if ($employeeId>0) {
+            $jobs=app()->make(\app\services\organization\StaffJobPositionServices::class)->listActiveJobs($staffId,$employeeId);
+            foreach ($jobs as $job) {
+                if ((int)$job['employee_id']!==$employeeId || (int)$job['position_status']!==1) continue;
+                $name=trim((string)$job['position_name']);
+                if ($name!=='') $positions[$name]=true;
+            }
+        }
+        return ['name'=>trim((string)($employee['name'] ?? '')) ?: $this->operatorDisplayName($profile),
+            'phone'=>trim((string)($employee['phone'] ?? $profile['phone'] ?? '')),
+            'positions'=>array_keys($positions)];
     }
 
     /**

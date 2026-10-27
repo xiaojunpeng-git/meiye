@@ -2249,7 +2249,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2274,12 +2274,25 @@ WSS;
             }
         }
         $build->rule([
+            // 站点信息保持首个页签；门店业务开关只调整展示分组，沿用原配置键和保存接口。
             Build::tabs()->option('系统信息', [
                 Build::switch('station_open', $data['station_open']['info'], (int)$data['station_open']['value'])->control(1, $system)->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['station_open']['desc']),
+            ])->option('门店设置', [
                 Build::switch('mobile_reservation_switch', $data['mobile_reservation_switch']['info'], (int)$data['mobile_reservation_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['mobile_reservation_switch']['desc']),
                 Build::switch('reservation_schedule_manage', $data['reservation_schedule_manage']['info'], (int)($data['reservation_schedule_manage']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['reservation_schedule_manage']['desc'] ?? '开启后预约看板按排班与休息展示员工'),
                 Build::switch('cashier_operator_gift_switch', $data['cashier_operator_gift_switch']['info'] ?? '前台收银支持操作员赠送', (int)($data['cashier_operator_gift_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['cashier_operator_gift_switch']['desc'] ?? '关闭后收银台隐藏赠送按钮，提交时自动使用商品/储值档位预设赠送配置'),
                 Build::switch('cashier_debt_pay_switch', $data['cashier_debt_pay_switch']['info'] ?? '是否允许欠款', (int)($data['cashier_debt_pay_switch']['value'] ?? 0))->trueValue('是', 1)->falseValue('否', 0)->info($data['cashier_debt_pay_switch']['desc'] ?? '关闭后收银台购物车和充值页面隐藏欠款按钮'),
+                // 仅管理收银目录入口，不能把已存在的定制卡或卡项操作一同禁用。
+                Build::switch('cashier_custom_card_entry_switch', '开启定制卡', ($data['cashier_custom_card_entry_switch']['value'] ?? '') === '' ? 1 : (int)$data['cashier_custom_card_entry_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info('仅控制收银页定制卡入口显示，不影响已有定制卡及其他卡项操作'),
+                // 默认关闭，仅允许本次普通卡销售逐项增额、增次，不改商品配置或历史权益。
+                Build::switch('cashier_ordinary_card_sale_edit_switch', '普通卡销售可修改', (int)($data['cashier_ordinary_card_sale_edit_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后普通卡销售可逐项修改总金额和次数，均不得低于原配置'),
+                // 两个开关仅控制门店端入口和订单列表列；历史归属与体验事实仍保留。
+                Build::switch('cashier_sales_attribution_switch', '销售经理/导购', (int)($data['cashier_sales_attribution_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银归属入口及订单管理中的销售经理、导购列'),
+                Build::switch('cashier_experience_switch', '体验', (int)($data['cashier_experience_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的体验按钮'),
+                // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
+                Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
+                // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
+                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('可修改沿用现有算法；计算法按项目提成档位计算预计劳动提成，原手工费与历史业务事实独立保留'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),

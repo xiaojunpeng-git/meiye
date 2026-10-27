@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "readOnly": true,
+  "fullMemberProjection": true,
+  "serviceRecords": 0,
+  "cards": 2,
+  "reportedMemberCovered": false,
+  "repeatAndEmptySearch": "PASS",
+  "dependencies": {
+    "app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php": "ce5ea5612be853136ae7cdbb3edcee476b315ff1e01d093cb72091e80fabd0ed",
+    "app/services/cashier/v3/card/CashierV3CardReadAmountServices.php": "c78ecd68414213640d3a158a224e96da4ef8e31096cd673cd64689ec16cae45c",
+    "app/services/cashier/v3/card/CashierV3CardComponentPurchaseAmountAuthority.php": "eda75efb579ca3a132196d46a3cb1035cd56b949f91d94d15f510f1e2e561da5",
+    "app/services/cashier/v3/cashier/CashierV3EntitlementActualAmountAllocator.php": "2fd37698ff7a227adc67c504e15cfd3d44b144b867124e9d987b449750f4f722",
+    "app/services/cashier/v3/cashier/CashierV3CardOriginDebtResolver.php": "54c4626104a0dd81c6d81112cd3f9e98d26edf4e055b53916f7093b8c4e9ba02"
+  },
+  "businessWrites": 0,
+  "limit": "No nonempty service fixture in this instance; successful empty full projection verified."
+}

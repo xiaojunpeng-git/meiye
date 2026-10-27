@@ -32,7 +32,8 @@ export function positionSetStatus(data) {
 export function positionLevelSetStatus(data) {
   return request({
     url: `position/set_status_level/${data.id}/${data.status}`,
-    method: 'get'
+    method: 'get',
+    params: { expected_version: data.expected_version }
   });
 }
 // 职级列表

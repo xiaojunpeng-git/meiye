@@ -24,6 +24,14 @@
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
 							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">商品名称：{{ item.itemName || '—' }}</text><text class="employee-performance__detail-amount">{{ detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
 							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">手工费：{{ item.displayLaborFee || '—' }}</text></view>
+                            <view v-if="detailMode === 'labor' && calculated" class="employee-performance__commission" @tap="toggleCommission(item.factId)">
+                                <text>劳动提成（预计）：{{ item.displayCommission || '待核对' }}</text><text>{{ expandedFact === item.factId ? '收起' : '计算依据' }}</text>
+                            </view>
+                            <view v-if="detailMode === 'labor' && calculated && expandedFact === item.factId && item.commissionDetail != null" class="employee-performance__commission-proof">
+                                <text>{{ item.commissionDetail.month }} · 月净销售业绩：{{ item.commissionDetail.display_threshold }}</text>
+                                <text v-if="item.commissionDetail.amount_cents != null">劳动业绩 {{ item.commissionDetail.display_basis }} × {{ item.commissionDetail.rate_percent }}% · 预计提成 {{ item.commissionDetail.display_commission }}</text>
+                                <text v-else>{{ item.commissionDetail.message || '项目提成条件待核对' }}</text>
+                            </view>
 						</view>
 						<view v-if="hasMore" class="employee-performance__more" @tap="loadMore"><text>加载更多</text></view>
 					</view>
@@ -59,6 +67,8 @@
 	const detailMode = ref('cash')
 	const metrics = ref<Array<any>>([])
 	const details = ref<Array<any>>([])
+    const calculated = ref(false)
+    const expandedFact = ref('')
 	const page = ref(1)
 	const hasMore = ref(false)
 	const loading = ref(false)
@@ -94,6 +104,8 @@
 	function changeCustomStart(event : any) : void { customStartDate.value = String(event.detail.value || customStartDate.value) }
 	function changeCustomEnd(event : any) : void { customEndDate.value = String(event.detail.value || customEndDate.value) }
 	function applyCustomRange() : void { periodMode.value = 'custom'; showCustomRange.value = false; reload() }
+    // 手机只展开后端计算依据，不按当前页或所选日期重新落档。
+    function toggleCommission(factId : string) : void { expandedFact.value = expandedFact.value === factId ? '' : factId }
 	function selectDetailMode(mode : string) : void { if (detailMode.value === mode) return; detailMode.value = mode; reload() }
 
 	function requestPayload(nextPage : number) : any {
@@ -124,6 +136,8 @@
 		employeeName.value = String(payload.employee != null ? payload.employee.name || '员工' : '员工')
 		periodLabel.value = String(payload.period != null ? payload.period.label || '当前范围' : '当前范围')
 		metrics.value = Array.isArray(payload.metrics) ? payload.metrics : []
+        calculated.value = payload.laborAlgorithm != null && payload.laborAlgorithm.code === 'project_tiers'
+        if (!append) expandedFact.value = ''
 		let nextDetails = Array.isArray(payload.details) ? payload.details : []
 		details.value = append ? details.value.concat(nextDetails) : nextDetails
 		page.value = Number(payload.pagination != null ? payload.pagination.page || 1 : 1)
@@ -172,6 +186,8 @@
 	.employee-performance__detail-item { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__detail-amount { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; color: #40546b; }
 	.employee-performance__detail-result text { font-size: 13px; font-weight: 700; line-height: 20px; color: #173451; }
+    .employee-performance__commission { display: flex; flex-direction: row; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #1677cc; }
+    .employee-performance__commission-proof { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 10px; background-color: #f4f8fc; font-size: 12px; color: #40546b; }
 	.employee-performance__empty, .employee-performance__state { display: flex; min-height: 110px; flex-direction: column; align-items: center; justify-content: center; padding: 18px; font-size: 13px; line-height: 20px; color: #71839a; text-align: center; }
 	.employee-performance__state { margin-top: 12px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
 	.employee-performance__retry, .employee-performance__more { display: flex; min-height: 40px; align-items: center; justify-content: center; }

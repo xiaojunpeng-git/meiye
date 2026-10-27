@@ -1,0 +1,4 @@
+PASS real saved report rename, reparent to target, indentation, depth-first order and disabled display
+PASS reparented report retains original registered route
+PASS original configuration restored
+R28 HIERARCHY NAVIGATION PASS

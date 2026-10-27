@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "files": 102,
+  "mode": 0,
+  "position_model": "legacy",
+  "business_digest_unchanged": true,
+  "leaf_grants": 21,
+  "reports": 21,
+  "source_tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
+  "backup": "/www/backups/008/20261027-payroll-release-fc13caced13b",
+  "public_assets_checked": 5,
+  "public_h5_before": "200",
+  "public_h5_after": "200",
+  "business_import": false
+}

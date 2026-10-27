@@ -1,0 +1,5 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+R31_FILES_INSTALL_PASS
+sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+{"site":"008","result":"PASS","rangeChecks":17,"realSkuRead":1,"productionWrites":0}
+R31_INSTANCE_PASS

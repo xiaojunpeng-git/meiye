@@ -23,7 +23,7 @@ use app\model\store\SystemStoreStaff;
 use app\model\user\UserRecharge;
 use app\model\yeji\CashType;
 use app\model\yeji\StaffYeji;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\Request;
 use app\services\activity\coupon\StoreCouponUserServices;
 use app\services\order\ValidCashOrderServices;
@@ -281,16 +281,12 @@ class Yeji extends AuthController
             case 3:
                 $writeroff=StoreOrderWriteoff::where('id',$data['link_id'])->find();
                 $product_id=$writeroff['product_id'];
-                $pid=StoreProduct::where('id',$product_id)->value("pid");
-                if(empty($pid)){
-                    $pid=$product_id;
-                }
                 $data['goods_id']=$product_id;
-                $oncePrice=YejiCommission::where("product_id",$pid)->value("yeji");
-                if(empty($oncePrice)){
-                    $oncePrice=0;
-                }
-                $price=bcmul($oncePrice,$writeroff['writeoff_num']);
+                // 补录历史员工业绩只读已完成核销金额，避免新配置覆盖旧事实。
+                $price=LegacyCraftsmanPerformanceDefault::actualUnitYuan((string)$writeroff['writeoff_price']);
+                $oncePrice=LegacyCraftsmanPerformanceDefault::actualUnitYuan(
+                    bcdiv($price, (string)max(1, (int)$writeroff['writeoff_num']), 2)
+                );
                 $yeji=[
                     'goods_id'=>$product_id,
                     'price'=>$price,

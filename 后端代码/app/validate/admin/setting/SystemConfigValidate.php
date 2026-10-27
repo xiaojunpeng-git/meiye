@@ -32,6 +32,8 @@ class SystemConfigValidate extends Validate
      * @var array
      */
     protected $rule = [
+        // 手工费算法仅接受两个显示选项，不允许非法值改变展示边界。
+        'cashier_labor_fee_mode' => 'integer|in:0,1',
         'site_url' => 'url',
         'store_brokerage_ratio' => 'float|egt:0|elt:100|regex:float_two',
         'store_brokerage_two' => 'float|egt:0|elt:100|regex:float_two',

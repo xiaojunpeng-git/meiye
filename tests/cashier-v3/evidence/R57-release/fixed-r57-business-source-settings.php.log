@@ -1,0 +1,10 @@
+{
+    "status": "PASS",
+    "checks": 175,
+    "failures": [],
+    "database": "sqlite::memory:",
+    "service_sha256": "997ce01ef03fe77d59b7b0e2aa7ebff3fc69ca0cdb6c3b202f5fd8cdec47561d",
+    "controller_sha256": "1844e1d245a3a7ee41f424a2d0aef6d9faedee11f2b20e1a35ccd24bdaf29ab5",
+    "business_database_writes": 0,
+    "limits": "Fixture DDL; real MySQL migration and concurrent row locking not covered."
+}

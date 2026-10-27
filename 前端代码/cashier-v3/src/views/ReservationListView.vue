@@ -17,6 +17,7 @@ const state = useCashierV3State()
 const router = useRouter()
 const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
+const queryToolbarResetKey = ref(0)
 // 日历是单日资源排班，列表是日期区间记录检索；两种视图的状态筛选
 // 及查询快照必须独立，切换视图不能把另一种日期语义带过来。
 const calendarQuickKey = ref('all')
@@ -52,11 +53,119 @@ const activeDetailReservationId = ref('')
 const suppressedDetailReservationId = ref('')
 const reservationActionLocks = ref({})
 const reservationActionIds = ref({})
+// 色值是预约资料的枚举，不是会员分类；未标记时保持中性底色。
+const reservationColors = [
+  { value: 'red', label: '红色' }, { value: 'yellow', label: '黄色' },
+  { value: 'blue', label: '蓝色' }, { value: 'green', label: '绿色' },
+  { value: 'purple', label: '紫色' }
+]
+const colorMenu = ref(null)
+const colorMenuElement = ref(null)
+const colorSaving = ref(false)
+const menuServiceSaving = ref(false)
+const calendarMenuBusy = computed(() => colorSaving.value || menuServiceSaving.value)
+const colorSaveError = ref('')
+let colorContextGeneration = 0
+const colorCommandIds = new Map()
+
+function closeColorMenu() {
+  colorMenu.value = null
+  colorSaveError.value = ''
+}
+
+/** 右键只打开当前预约的颜色选择；菜单贴近点击位置且不超出视口。 */
+async function openColorMenu(event, block) {
+  if (calendarMenuBusy.value) return
+  colorSaveError.value = ''
+  colorMenu.value = { reservationId: block.reservationId, status: block.status, color: block.colorMark || '', x: event.clientX, y: event.clientY }
+  await nextTick()
+  const bounds = colorMenuElement.value?.getBoundingClientRect()
+  if (!bounds || !colorMenu.value) return
+  colorMenu.value.x = Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8))
+  colorMenu.value.y = Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8))
+  colorMenuElement.value.querySelector('button')?.focus({ preventScroll: true })
+}
+
+/** 保存走原网关权限与幂等事务；成功后重新读取当前筛选，不能仅缓存浏览器颜色。 */
+async function saveReservationColor(color) {
+  if (!colorMenu.value || calendarMenuBusy.value) return
+  const { reservationId } = colorMenu.value
+  const generation = colorContextGeneration
+  const key = `${reservationId}:${color}`
+  const idempotencyKey = colorCommandIds.get(key) || createCashierV3CommandId('RESERVATION_ACTION')
+  colorCommandIds.set(key, idempotencyKey)
+  colorSaving.value = true
+  colorSaveError.value = ''
+  try {
+    const result = await requestAction('mark-reservation-color', { reservationId, color, idempotencyKey, silent: true })
+    if (generation !== colorContextGeneration) return
+    // 兼容标准信封及 HTTP data 包装；业务 data 字段不能遮住顶层 result。
+    const envelope = result?.result ? result : (result?.data || result || {})
+    const status = String(envelope.result?.status || envelope.status || '').toLowerCase()
+    if (!['success', 'succeeded'].includes(status)) {
+      // 未知结果重试必须复用同一键；明确失败才允许新命令。
+      if (['failed', 'conflict'].includes(status)) colorCommandIds.delete(key)
+      colorSaveError.value = envelope.feedback?.message || envelope.result?.message || '保存结果尚未确认，请重试。'
+      return
+    }
+    colorCommandIds.delete(key)
+    closeColorMenu()
+    await queryReservations(querySnapshotForView(), false)
+  } catch (error) {
+    if (generation === colorContextGeneration) colorSaveError.value = '保存结果尚未确认，请重试。'
+  } finally {
+    if (generation === colorContextGeneration) colorSaving.value = false
+  }
+}
+
+function dismissColorMenu(event) {
+  if (event.type === 'keydown' && event.key !== 'Escape') return
+  if (event.type === 'pointerdown' && colorMenuElement.value?.contains(event.target)) return
+  closeColorMenu()
+}
+
+/** 快捷入口复用列表的服务流程：同一预约身份、前置补全、版本、幂等与后端核销保护。 */
+async function runCalendarMenuService() {
+  if (!colorMenu.value || calendarMenuBusy.value || !calendarMenuServiceAction.value) return
+  const record = calendarMenuRecord.value
+  if (!record) {
+    colorSaveError.value = '预约资料未加载完整，请刷新后重试。'
+    return
+  }
+  const action = calendarMenuServiceAction.value.action
+  const generation = colorContextGeneration
+  menuServiceSaving.value = true
+  colorSaveError.value = ''
+  try {
+    const result = await requestReservationRecordButton(record, action)
+    if (generation !== colorContextGeneration) return
+    // 项目或手艺人缺失时原流程会打开编辑器，不能让右键快捷操作绕过补全。
+    if (result?.status === 'blocked' && isEditorOpen.value) {
+      closeColorMenu()
+      return
+    }
+    const envelope = result?.result ? result : (result?.data || result || {})
+    if (['success', 'succeeded'].includes(String(envelope.result?.status || envelope.status || '').toLowerCase())) {
+      closeColorMenu()
+      await queryReservations(querySnapshotForView(), false)
+      return
+    }
+    colorSaveError.value = envelope.result?.message || envelope.message || '服务操作结果尚未确认，请重试。'
+  } catch (error) {
+    if (generation === colorContextGeneration) colorSaveError.value = '服务操作结果尚未确认，请重试。'
+  } finally {
+    if (generation === colorContextGeneration) menuServiceSaving.value = false
+  }
+}
 let reservationDetailRequestSequence = 0
 let resolvePendingMemberSelection = null
 
 const reservation = computed(() => state.reservation || {})
 const records = computed(() => Array.isArray(reservation.value.records) ? reservation.value.records : [])
+const calendarMenuRecord = computed(() => records.value.find((record) => String(record.id) === String(colorMenu.value?.reservationId)) || null)
+// 按当前记录状态只开放可执行动作；待确认、已结束预约不显示开始/结束按钮。
+const calendarMenuServiceAction = computed(() => recordActions(calendarMenuRecord.value || { status: colorMenu.value?.status })
+  .find((action) => ['start-reservation-service', 'end-reservation-service'].includes(action.action)) || null)
 const total = computed(() => Math.max(Number(reservation.value.total) || 0, records.value.length))
 const page = computed(() => Math.max(1, Number(reservation.value.page) || 1))
 const pageSize = computed(() => Math.max(1, Number(reservation.value.pageSize) || 20))
@@ -112,6 +221,8 @@ const editorSubmission = computed(() => {
   }
 })
 const calendar = computed(() => reservation.value.calendar || { resources: [], blocks: [] })
+// 筛选、资源维度变化后旧菜单失效，不能把颜色保存到用户已离开的预约上。
+watch([viewMode, calendarResourceMode, calendarQuickKey, () => calendar.value.date], closeColorMenu)
 const calendarResources = computed(() => (calendar.value.resources || []).filter((resource) => {
   if (calendarResourceMode.value === 'staff') return resource.type === 'staff' || resource.type === 'unassigned_staff'
   return resource.type === 'room' || resource.type === 'unassigned_room'
@@ -286,6 +397,16 @@ function switchReservationView(nextViewMode) {
   queryReservations(querySnapshotForView(nextViewMode))
 }
 
+/** 当前门店全部待确认入口清空旧检索并回到列表第一页，不沿用当天或会员条件。
+ * 数字与记录均由服务端在当前门店授权范围内查询，列表仍按20条分页。
+ */
+function showAllPendingReservations() {
+  viewMode.value = 'list'
+  listQuickKey.value = 'all_pending_confirmation'
+  queryToolbarResetKey.value += 1
+  return queryReservations({ ...emptyReservationQuery('all_pending_confirmation'), pageSize: 20 })
+}
+
 function reservationFieldValue(record, fieldKey) {
   const values = {
     appointment_time: record.appointmentTime,
@@ -307,7 +428,8 @@ const quickFilters = computed(() => [
   { key: 'all', label: '全部', count: quickCounts.value.all, active: activeQuickKey.value === 'all' },
   { key: 'pending_confirmation', label: '待确认', count: quickCounts.value.pendingConfirmation ?? quickCounts.value.pending_confirmation, active: activeQuickKey.value === 'pending_confirmation' },
   { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
-  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' }
+  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
+  { key: 'all_pending_confirmation', label: '全部待确认', count: quickCounts.value.allPendingConfirmation ?? 0, active: activeQuickKey.value === 'all_pending_confirmation' }
 ])
 
 const timeSlots = computed(() => {
@@ -926,6 +1048,7 @@ async function selectQuickFilter(payload = {}) {
   // 也不能让快捷筛选覆盖此前已经提交的关键词、范围或组合筛选。
   const filter = payload.filter && typeof payload.filter === 'object' ? payload.filter : payload
   const selectedKey = typeof filter?.key === 'string' && filter.key ? filter.key : activeQuickKey.value
+  if (selectedKey === 'all_pending_confirmation') return showAllPendingReservations()
   const nextQuickKey = selectedKey === 'pending' ? 'pending_confirmation' : selectedKey
   const suppliedQuery = payload.query && typeof payload.query === 'object'
     ? payload.query
@@ -1331,7 +1454,15 @@ async function refreshReservationProjectCatalog({ memberId } = {}) {
     || envelope?.reservationProjectCatalog?.catalogOptions
     || envelope?.data?.editor?.catalogOptions
     || []
-  return { catalogOptions: Array.isArray(catalogOptions) ? catalogOptions : [] }
+  // Keep source suggestions bound to the same member/catalog response. The
+  // editor owns request ordering and must not reuse another member's choice.
+  const catalog = envelope?.data?.reservationProjectCatalog
+    || envelope?.reservationProjectCatalog || envelope?.data?.editor || {}
+  return {
+    catalogOptions: Array.isArray(catalogOptions) ? catalogOptions : [],
+    initialBusinessSource: catalog.initialBusinessSource,
+    businessSourcePolicy: catalog.businessSourcePolicy
+  }
 }
 
 async function submitReservationEditor(draft) {
@@ -1436,6 +1567,11 @@ function closeReservationEditor() {
 }
 
 function resetReservationLocalContext() {
+  colorContextGeneration += 1
+  colorSaving.value = false
+  menuServiceSaving.value = false
+  colorCommandIds.clear()
+  closeColorMenu()
   closeReservationEditor()
   closeReservationDetail()
   reservationActionLocks.value = {}
@@ -1463,6 +1599,10 @@ function handleMemberSelectorClosed(event) {
 }
 
 onMounted(() => {
+  window.addEventListener('pointerdown', dismissColorMenu)
+  window.addEventListener('keydown', dismissColorMenu)
+  window.addEventListener('resize', closeColorMenu)
+  window.addEventListener('scroll', closeColorMenu, true)
   window.addEventListener('cashier-v3:open-reservation-editor', openReservationEditor)
   window.addEventListener('cashier-v3:reservation-editor-prepared', handleReservationEditorPrepared)
   window.addEventListener('cashier-v3:open-reservation-detail', handleOpenReservationDetail)
@@ -1473,6 +1613,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  colorContextGeneration += 1
+  window.removeEventListener('pointerdown', dismissColorMenu)
+  window.removeEventListener('keydown', dismissColorMenu)
+  window.removeEventListener('resize', closeColorMenu)
+  window.removeEventListener('scroll', closeColorMenu, true)
   window.removeEventListener('cashier-v3:open-reservation-editor', openReservationEditor)
   window.removeEventListener('cashier-v3:reservation-editor-prepared', handleReservationEditorPrepared)
   window.removeEventListener('cashier-v3:open-reservation-detail', handleOpenReservationDetail)
@@ -1491,6 +1636,7 @@ onBeforeUnmount(() => {
   <section class="reservation-page" :class="{ 'reservation-page--list': viewMode === 'list' }" aria-label="预约列表">
     <header class="reservation-page__toolbar">
       <UnifiedQueryToolbar
+        :key="queryToolbarResetKey"
         :show-keyword-search="false"
         :inline-quick-controls="true"
         :show-data-scope="false"
@@ -1583,6 +1729,7 @@ onBeforeUnmount(() => {
       </main>
 
       <TablePagination
+        :show-page-count="activeQuickKey === 'all_pending_confirmation'"
         :total="total"
         :page="page"
         :page-size="pageSize"
@@ -1626,19 +1773,38 @@ onBeforeUnmount(() => {
               :key="block.id"
               type="button"
               class="reservation-calendar-block"
-              :class="`reservation-calendar-block--${reservationStatus(block).phase}`"
+              :class="[
+                `reservation-calendar-block--status-${reservationStatus(block).phase}`,
+                reservationColors.some((color) => color.value === block.colorMark) ? `reservation-calendar-block--mark-${block.colorMark}` : ''
+              ]"
               :style="blockStyle(block, blockIndex, blocksForResource(resource.id, time).length)"
               @click="openReservationDetail(reservationPayload(block.reservationId || block.id))"
+              @contextmenu.prevent.stop="openColorMenu($event, block)"
             >
-              <strong>{{ block.memberName }}</strong>
+              <span class="reservation-calendar-block__heading">
+                <strong>{{ block.memberName }}</strong>
+                <span class="reservation-calendar-status">{{ reservationStatus(block).label }}</span>
+              </span>
               <span>{{ blockTimeLabel(block) }} · {{ block.projectCount }}项</span>
-              <span>{{ block.status }} · {{ block.roomName }}</span>
+              <span :class="{ 'reservation-calendar-block__room-with-custom-service': block.hasCustomServices }">{{ block.roomName }}</span>
+              <span v-if="block.hasCustomServices" class="reservation-calendar-block__custom-service" title="含定制服务" aria-label="含定制服务">定制服务</span>
             </button>
           </div>
         </div>
         <div v-if="!timeSlots.length" class="reservation-empty">营业时段尚未由后端加载，日历不会自行补造默认时间。</div>
       </div>
     </main>
+
+    <Teleport to="body">
+      <div v-if="colorMenu" ref="colorMenuElement" class="reservation-color-menu" role="group" aria-label="预约颜色标记" :aria-busy="calendarMenuBusy" :style="{ left: `${colorMenu.x}px`, top: `${colorMenu.y}px` }" @contextmenu.prevent>
+        <div class="reservation-color-menu__swatches">
+          <button v-for="color in reservationColors" :key="color.value" type="button" class="reservation-color-menu__swatch" :class="`reservation-color-menu__swatch--${color.value}`" :aria-label="color.label" :title="color.label" :aria-pressed="colorMenu.color === color.value" :disabled="calendarMenuBusy" @click="saveReservationColor(color.value)"></button>
+        </div>
+        <button v-if="calendarMenuServiceAction" type="button" class="reservation-color-menu__service" :disabled="calendarMenuBusy" @click="runCalendarMenuService">{{ menuServiceSaving ? '处理中…' : calendarMenuServiceAction.label }}</button>
+        <button type="button" class="reservation-color-menu__clear" :disabled="calendarMenuBusy" @click="saveReservationColor('')">{{ colorSaving ? '保存中…' : '清除标记' }}</button>
+        <p v-if="colorSaveError" class="reservation-color-menu__error" role="alert">{{ colorSaveError }}</p>
+      </div>
+    </Teleport>
 
     <ReservationEditorOverlay
       v-if="isEditorOpen"
@@ -1674,3 +1840,21 @@ onBeforeUnmount(() => {
     />
   </section>
 </template>
+
+<style scoped>
+/* 标识固定在卡片右下角；房间文本预留宽度，不覆盖状态，也不拦截卡片点击。 */
+.reservation-calendar-block__room-with-custom-service { padding-right: 58px; }
+.reservation-calendar-block .reservation-calendar-block__custom-service {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+  pointer-events: none;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: #475467;
+  background: #fff;
+  font-size: 10px;
+  line-height: 15px;
+}
+</style>

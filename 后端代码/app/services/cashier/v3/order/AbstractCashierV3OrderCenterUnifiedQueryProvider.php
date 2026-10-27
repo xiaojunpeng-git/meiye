@@ -9,6 +9,7 @@ use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryPreferenceServices;
 use app\services\query\UnifiedQueryProvider;
 use think\facade\Db;
+use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 
 /**
  * 将订单中心现有的权威只读投影接入统一查询与导出。
@@ -127,6 +128,9 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     /** @return array<string,mixed> */
     protected function run(array $context, array $payload, array $definitions): array
     {
+        // 在领域 Reader 下推前撤下关闭的来源筛选，不能只在最终分页引擎中移除。
+        $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+        if (($policy['enabled'] ?? true) === false) $payload = CashierV3OrderCenterQueryExecutionServices::withoutBusinessSource($payload);
         $payload['pageCode'] = $this->pageCode();
         unset($payload['queryCutoffDate'], $payload['query_cutoff_date']);
         $memberInitials = $this->memberInitialKeyword($payload);
@@ -173,7 +177,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             return '';
         }
         if ($keyword === '' && $filters) {
-            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode())['keywordFields'];
+            $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), ($policy['enabled'] ?? true) !== false, (int)sys_config('cashier_debt_pay_switch', 0) === 1)['keywordFields'];
             if (count($filters) !== count($expected)) {
                 return '';
             }
@@ -230,6 +235,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 ['max_rows' => UnifiedQueryExecutionServices::MAX_SOURCE_ROWS]
             );
         }
+        // 消费订单与全部订单复用同一逐明细分类解析，筛选、列表及导出才不会出现两套口径。
+        if ($type === 'sales') $records = $this->salesQueries->attachCurrentItemCategories($records);
         return (new CashierV3OrderCenterQueryIdentities())->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
     }
 
@@ -243,6 +250,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             if (isset($this->sourcePayload['_allOrderTypes']) && !in_array($label, $this->sourcePayload['_allOrderTypes'], true)) continue;
             $records = $type === 'sales' ? $this->allSalesRows($operatorScope, $dataScope)
                 : $this->allRecordRows($type, $operatorScope, $dataScope);
+            if ($type === 'sales') $records = $this->salesQueries->attachCurrentItemCategories($records);
             $projected = $identities->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
             foreach ($projected as $row) {
                 // ID 保留给原业务命令，record_id 用于跨类型的排序和页面行键。
@@ -250,6 +258,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 $row['business_type'] = $label;
                 $row['order_no'] = $row[$type === 'sales' ? 'sales_order_no' : $type . '_order_no'];
                 $row['event_completed_at'] = $row[$type === 'refund' ? 'refund_completed_at' : 'payment_completed_at'];
+                $row = self::mixedDisplayFields($type, $row);
                 $rows[] = $row;
             }
             if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) {
@@ -258,6 +267,30 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         }
         $this->sourcePage = ['recordType' => 'all', 'dataStatus' => 'ready', 'dataAsOf' => date('c'), 'statusOptions' => []];
         return $rows;
+    }
+
+    /** 混合页的通用列与其列表展示读取同一业务字段；专用列及原始金额保持不变。 */
+    private static function mixedDisplayFields(string $type, array $row): array
+    {
+        if ($type === 'sales') return $row;
+        $nameField = $type === 'recharge' ? 'recharge_plan' : 'product_name';
+        $amountField = $type . '_amount';
+        $row['item_name'] = $row[$nameField] ?? null;
+        $row['line_amount'] = $row[$amountField] ?? null;
+        if ($type === 'refund') {
+            $row['payment_method'] = $row['refund_method'] ?? null;
+            $row['order_status'] = $row['refund_status'] ?? null;
+        } elseif ($type === 'supplement') {
+            $row['order_status'] = $row['payment_status'] ?? null;
+        }
+        return $row;
+    }
+
+    /** 旧单据空串或“—”统一为查询空值；各订单页筛选/导出共用，不回写历史记录。 */
+    protected static function filterableAllOrderSource($source): ?string
+    {
+        $value = trim((string)($source ?? ''));
+        return $value === '' || $value === '—' ? null : $value;
     }
 
     protected function allSalesRows($operatorScope, $dataScope): array
@@ -381,6 +414,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'labor_fee_amount' => ['laborFeeAmount', 'manualLaborFeeAmount'],
             'labor_performance_type' => ['laborPerformanceTypeLabel', 'laborPerformanceType'],
             'labor_performance_ratio' => ['laborPerformanceRatio'],
+            'consumption_performance_amount' => ['consumptionPerformanceAmount'],
             'labor_performance_amount' => ['laborPerformanceAmount'],
             'service_status' => ['serviceStatus'], 'service_completed_at' => ['serviceCompletedAt', 'completedAt'],
             'voided_at' => ['voidedAt'], 'void_reason' => ['voidReason'], 'void_operator' => ['voidOperatorName'],
@@ -393,7 +427,9 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'record_status' => ['recordStatus', 'statusLabel', 'status'], 'operation_reason' => ['operationReason', 'reason'], 'completed_at' => ['completedAt'],
             'project_count' => ['projectCount'], 'detail_remark' => ['detailRemark'],
         ];
-        $definition = CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode());
+        // Reuse the current field contract for row projection and export; hiding
+        // debt never edits the source record or its historical settlement values.
+        $definition = CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), true, (int)sys_config('cashier_debt_pay_switch', 0) === 1);
         $fields = array_column($definition['fields'], 'key');
         $types = array_column($definition['fields'], 'type', 'key');
         $rows = [];
@@ -404,13 +440,16 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 // 未就绪的金额/日期不是零，保留空值语义，避免区间筛选把缺失值当零。
                 if ($row[$field] === '' && in_array($types[$field], ['integer','decimal','amount','date','datetime'], true)) $row[$field] = null;
             }
+            // 来源控件在各页签共用 is_null；必须在统一投影归一，而不能只处理混合页。
+            if (array_key_exists('source', $row)) $row['source'] = self::filterableAllOrderSource($row['source']);
             if ($type === 'sales') {
                 // 直接使用表格的权威明细，不重算价格、不把权益价值计入整单收款。
-                foreach (['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];
+                foreach (['item_name','product_category','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];
                 foreach ($record['items'] ?? [] as $item) {
                     foreach (['item_name'=>'name','unit_price'=>'unitPrice','quantity'=>'quantity'] as $key=>$source) {
                         if (isset($item[$source]) && $item[$source] !== '') $row[$key][] = $item[$source];
                     }
+                    $row['product_category'][] = (string)($item['category'] ?? '未分类');
                     // 导出与表格同取用券前金额；权益行仍展示独立核销价值。
                     $amount = $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'amountBeforeCoupon'] ?? null;
                     if ($amount !== null) $row['line_amount'][] = $amount;
@@ -421,6 +460,10 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                             if ($name !== '') $row[$key][] = $name;
                         }
                     }
+                }
+                if (is_array($row['items'] ?? null)) {
+                    foreach ($row['items'] as &$item) unset($item['_categoryProductIds']);
+                    unset($item);
                 }
             }
             if (in_array($type, ['refund', 'supplement'], true)) {

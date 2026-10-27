@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "source_sha256": "b270143f37fe890c7a3cb32ad6db1a3e8223864746e2f8f897a3b0f424b38c10",
+  "read_only": true,
+  "single_batch_report_match": true,
+  "money_conserved": true,
+  "read_schema_ready": true,
+  "mutation_readiness_still_blocked": true,
+  "member_row_before_sha256": "4a5b916a57fc6ae48a6b4e3e1655d03b9e8c45ea0b7cd8e389278ff0971a169a",
+  "member_row_after_sha256": "4a5b916a57fc6ae48a6b4e3e1655d03b9e8c45ea0b7cd8e389278ff0971a169a",
+  "application_grants_unchanged": true,
+  "business_writes": false,
+  "deployed": false,
+  "probe_sha256": "41aa949bac998553d66c227669e3f4c6fbc5ea6fce96a813f18293f050e8c674",
+  "observedAt": "2026-10-23T18:34:42.094Z"
+}

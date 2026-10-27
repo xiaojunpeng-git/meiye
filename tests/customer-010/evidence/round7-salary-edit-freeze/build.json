@@ -1,0 +1,12 @@
+{
+  "source_fingerprint": "019737cf9fc166fb776dd99c5f98a7d7602411c168a60a83b210bc6b7f759c9d",
+  "source_root": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/cashier-v3",
+  "build_kind": "本地前端构建验证，非8080集成发布包",
+  "assets": {
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/index-5763393d.css": "5763393dfd606f9c33ee746e0928b07238b4028c46063f7cf9f53d030fb4b67d",
+    "assets/index-b2ee669c.js": "74cd195e6fd57994c7bb25dd74fec8b0c4dc4b0eab32a6f898bb00012e859c31",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "index.html": "a204eae2f3d7f1f5b26bcf3dc5a91d19857b5b7e38a8597e33926e3ae77b8a00"
+  }
+}

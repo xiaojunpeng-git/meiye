@@ -1,0 +1,38 @@
+[
+  {
+    "commit": "5fd8225287b31944894975deacb166d230f6e71f",
+    "transport": "live public HTTP through Playwright request transport",
+    "url": "https://010.cc3798.com/view_cashier_v3/#/cashier",
+    "finalUrl": "https://010.cc3798.com/view_cashier_v3/#/login",
+    "passwordInputs": 1,
+    "runtimeErrors": [],
+    "entryReferences": [
+      "/view_cashier_v3/assets/index-2a9cee22.js",
+      "/view_cashier_v3/assets/index-fc98d845.css"
+    ],
+    "result": "PASS"
+  },
+  {
+    "commit": "5fd8225287b31944894975deacb166d230f6e71f",
+    "transport": "live public HTTP through Playwright request transport",
+    "url": "https://010.cc3798.com/admin/login",
+    "finalUrl": "https://010.cc3798.com/admin/login",
+    "passwordInputs": 1,
+    "runtimeErrors": [],
+    "entryReferences": [
+      "/de/prismplayer/2.13.2/skins/default/aliplayer-min.css",
+      "/view_admin/css/chunk-vendors.48272356.css",
+      "/view_admin/css/app.499a090c.css",
+      "//api/get_script",
+      "/view_admin/css/chunk-355364e2.b1b701f6.css",
+      "/view_admin/js/chunk-355364e2.78e61b49.js",
+      "/view_admin/css/chunk-36952bd6.b5dda9a7.css",
+      "/view_admin/js/chunk-36952bd6.3c58ca9e.js",
+      "/js/es.js",
+      "/de/prismplayer/2.13.2/aliplayer-min.js",
+      "/view_admin/js/chunk-vendors.33283ef6.js",
+      "/view_admin/js/app.7f36242b.js"
+    ],
+    "result": "PASS"
+  }
+]

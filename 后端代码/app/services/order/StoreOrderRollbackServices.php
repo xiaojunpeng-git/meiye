@@ -88,6 +88,9 @@ class StoreOrderRollbackServices
             if ((int)($writeoff['status'] ?? 0) === 1) {
                 return;
             }
+            // Whole-order rollback also has an orphan branch; it must not
+            // recreate rights that were already converted into wallet value.
+            \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted((int)$writeoff['oid']);
             StoreOrderWriteoff::where('id', $writeoffId)->update(['status' => 1]);
             StaffYeji::where('link_id', $writeoffId)->where('type', 3)->update(['status' => 1]);
             $cartId = (int)($writeoff['order_cart_id'] ?? 0);

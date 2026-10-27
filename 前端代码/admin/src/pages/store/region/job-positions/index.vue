@@ -30,10 +30,10 @@
           <tbody>
             <tr v-for="row in list" :key="row.id">
               <td><strong>{{ row.name }}</strong><small>{{ row.remark || '未填写岗位说明' }}</small></td>
-              <td><button class="jp-switch" :class="{ on: Number(row.status) === 1, disabled: !canWrite || saving }" type="button" :disabled="!canWrite || saving" @click="toggleStatus(row)"><span></span>{{ Number(row.status) === 1 ? '启用' : '停用' }}</button></td>
-              <td><button class="jp-switch" :class="{ on: Number(row.allow_store_select) === 1, disabled: !canWrite || saving || Number(row.status) !== 1 }" type="button" :disabled="!canWrite || saving || Number(row.status) !== 1" @click="toggleStoreSelect(row)"><span></span>{{ Number(row.allow_store_select) === 1 ? '可用' : '不可用' }}</button></td>
+              <td><button class="jp-switch" :class="{ on: Number(row.status) === 1, disabled: !canSaveJobPosition || saving }" type="button" :disabled="!canSaveJobPosition || saving" @click="toggleStatus(row)"><span></span>{{ Number(row.status) === 1 ? '启用' : '停用' }}</button></td>
+              <td><button class="jp-switch" :class="{ on: Number(row.allow_store_select) === 1, disabled: !canSaveJobPosition || saving || Number(row.status) !== 1 }" type="button" :disabled="!canSaveJobPosition || saving || Number(row.status) !== 1" @click="toggleStoreSelect(row)"><span></span>{{ Number(row.allow_store_select) === 1 ? '可用' : '不可用' }}</button></td>
               <td>{{ channels(row) }}</td>
-              <td><button class="link-button" type="button" @click="openEdit(row)">编辑</button></td>
+              <td><button class="link-button" type="button" :disabled="!canSaveJobPosition || saving" @click="openEdit(row)">编辑</button></td>
             </tr>
           </tbody>
         </table>
@@ -125,7 +125,10 @@ export default {
       if (!this.canSaveJobPosition) return this.showToast(this.writeStatus.write_enabled ? '当前账号无权保存岗位' : (this.writeStatus.reason_text || READONLY_TIP));
       this.selectedId = 0; this.formOpen = true;
     },
-    openEdit(row) { this.selectedId = Number(row.id) || 0; this.formOpen = true; },
+    openEdit(row) {
+      if (!this.canSaveJobPosition || this.saving) return;
+      this.selectedId = Number(row.id) || 0; this.formOpen = true;
+    },
     writeHeaders(action, payload) {
       const bound = resolveOrgWriteToken({ token: this.pendingToken, fingerprint: this.pendingFingerprint }, action, payload, requestToken);
       this.pendingToken = bound.token; this.pendingFingerprint = bound.fingerprint;
@@ -134,7 +137,7 @@ export default {
     resetToken() { this.pendingToken = ''; this.pendingFingerprint = ''; },
     save(form) {
       // 通用 can_write 包含超管限制；岗位保存只遵守总写开关，功能权限由后端复核。
-      if (!this.writeStatus.write_enabled) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
+      if (!this.canSaveJobPosition) return this.showToast(this.writeStatus.write_enabled ? '当前账号无权保存岗位' : (this.writeStatus.reason_text || READONLY_TIP));
       if (this.saving) return;
       const payload = {
         id: Number(form.id || 0), name: String(form.name || '').trim(), status: Number(form.status) === 1 ? 1 : 0,
@@ -155,13 +158,13 @@ export default {
     ask(text) { return new Promise((resolve) => { this.confirm = { open: true, text, resolver: resolve }; }); },
     resolveConfirm(ok) { const fn = this.confirm.resolver; this.confirm = { open: false, text: '', resolver: null }; if (fn) fn(!!ok); },
     async toggleStatus(row) {
-      if (!this.canWrite || this.saving) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
+      if (!this.canSaveJobPosition || this.saving) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
       const next = Number(row.status) === 1 ? 0 : 1;
       if (!await this.ask(next ? '确认启用该岗位？' : '停用后门店不能再新增选择，已绑定人员不会自动失去权限，是否继续？')) return;
       await this.persistPatch(row, { status: next });
     },
     async toggleStoreSelect(row) {
-      if (!this.canWrite || this.saving) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
+      if (!this.canSaveJobPosition || this.saving) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
       const next = Number(row.allow_store_select) === 1 ? 0 : 1;
       if (!await this.ask(next ? '开启后门店可在新建或编辑本店员工时选择该岗位，是否继续？' : '关闭后门店不能再新增选择该岗位，已绑定人员不会自动失去权限，是否继续？')) return;
       await this.persistPatch(row, { allow_store_select: next });

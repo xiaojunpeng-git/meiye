@@ -150,7 +150,9 @@ final class CashierV3SupplementAttributionServices
             $row = $query->field('repayment_id,repayment_no,member_id,business_date,' . $table[2])->find();
             if ($row) return ['id' => (string)$row['repayment_id'], 'no' => (string)$row[$table[1]],
                 'member_id' => (int)$row['member_id'], 'business_date' => (string)$row['business_date'],
-                'amount_cents' => (int)$row[$table[2]], 'kind' => $table[3]];
+                // Sales-manager cash performance must not reintroduce the wallet-funded share on edit.
+                'amount_cents' => (int)$row[$table[2]] - ($table[3] === 'debt_repayment'
+                    ? \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::balanceCents((string)$row['repayment_id']) : 0), 'kind' => $table[3]];
         }
         throw self::fail('当前门店找不到有效补交记录。');
     }

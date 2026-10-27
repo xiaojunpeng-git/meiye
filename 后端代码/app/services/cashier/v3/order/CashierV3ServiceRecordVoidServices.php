@@ -196,6 +196,8 @@ final class CashierV3ServiceRecordVoidServices
         $holder = $holderId > 0 ? (array)Db::name('user_card_holder')->where('id', $holderId)->lock(true)->find() : [];
         if ($detailId > 0 && (!$detail || (int)($detail['oid'] ?? 0) !== (int)($source['origin_order_id'] ?? 0))) throw self::failure('service_void_benefit_detail_missing');
         if ($holderId > 0 && (!$holder || (int)($holder['uid'] ?? 0) !== (int)$source['member_id'])) throw self::failure('service_void_card_holder_missing');
+        // A restored use would change the value of an already closed conversion.
+        \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertHolderNotConverted($holderId, $scope->tenantId());
         // 时间卡以有效期作为可用条件，legacy 的百万次数仅是兼容投影，
         // 从未在核销时扣减。因此作废也不能把它当作普通次卡回加，否则
         // 每一次“核销后作废”都会虚增该投影次数。

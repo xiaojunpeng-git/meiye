@@ -40,6 +40,10 @@ Route::group('cashierapi/v3', function () {
     // 门店端独立登录：统一员工账号 → 可进入门店列表 → 门店绑定会话。
     Route::post('login', 'StoreLogin/login')->option(['real_name' => '门店端账号登录']);
 
+    // 无门店会话时仅可消费平台签发的一次性票据；不能由客户端指定门店或员工。
+    Route::post('platform-entry/consume', 'PlatformStoreEntry/consume')
+        ->option(['real_name' => '平台进入门店']);
+
     /**
      * 需登录、强制门店、按角色校验
      */
@@ -57,6 +61,10 @@ Route::group('cashierapi/v3', function () {
         // 报表只读统一事实服务；门店范围由 V3 会话权限生成，客户端只能缩小范围。
         Route::get('report/unified/catalog', 'Report/catalog')
             ->option(['real_name' => '收银V3经营报表目录']);
+        Route::get('report/basic/catalog', 'Report/basicCatalog')->option(['real_name' => '基础报表目录']);
+        Route::get('report/basic/query', 'Report/basicQuery')->option(['real_name' => '基础报表统一查询']);
+        Route::post('report/basic/save', 'Report/basicSave')->option(['real_name' => '保存刷单登记']);
+        Route::post('report/basic/salary/save', 'Report/basicSalarySave')->option(['real_name' => '保存工资人工项']);
         Route::get('report/unified/scope', 'Report/scope')
             ->option(['real_name' => '收银V3经营报表权限范围']);
         Route::get('report/unified/query', 'Report/query')
@@ -138,6 +146,15 @@ Route::group('cashierapi/v3/management', function () {
     AllowOriginMiddleware::class,
     StationOpenMiddleware::class,
 ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
+
+// 独立门店设置权限与会话门店共同约束全部读写；组织委托会话只读。
+Route::group('cashierapi/v3/management/store-settings', function () {
+    Route::get('', 'store.system.StoreProfileSettings/index')->option(['real_name'=>'V3读取本店基础设置']);
+    Route::put('', 'store.system.StoreProfileSettings/save')->option(['real_name'=>'V3保存本店基础设置']);
+    Route::get('cities', 'store.system.StoreProfileSettings/cities')->option(['real_name'=>'V3门店地区选项']);
+    Route::post('image', 'store.system.StoreProfileSettings/upload')->option(['real_name'=>'V3上传本店照片']);
+})->middleware([AuthTokenMiddleware::class,ForceStoreSessionMiddleware::class,CashierCheckRoleMiddleware::class,InstallMiddleware::class,AllowOriginMiddleware::class,StationOpenMiddleware::class])
+    ->middleware(\app\http\middleware\SystemLogMiddleware::class,'cashier');
 
 // 房间资料控制器属于既有门店控制器命名空间 app\controller\store，不能放在
 // 上面的 cashier.v3.* 控制器前缀组内，否则会被解析为

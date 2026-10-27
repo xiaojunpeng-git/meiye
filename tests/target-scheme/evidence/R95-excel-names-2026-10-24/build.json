@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/前端代码/admin",
+  "hotEntry": "http://127.0.0.1:18081/admin/login",
+  "output": "/private/tmp/mohe-r95-excel-local-build-20261024",
+  "htmlSha256": "13549b2ee8c97946b8ab81957ad06ee9f34c0bd30d0f98accf14d6f604665580",
+  "release": false
+}

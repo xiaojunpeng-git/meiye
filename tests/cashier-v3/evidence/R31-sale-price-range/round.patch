@@ -1,0 +1,283 @@
+--- a/后端代码/app/services/cashier/v3/cashier/CashierV3CashierMoreActionServices.php
++++ b/后端代码/app/services/cashier/v3/cashier/CashierV3CashierMoreActionServices.php
+@@ -148,7 +148,7 @@
+                 ->where('id', $skuId)
+                 ->where('product_id', $productId)
+                 ->where('type', 0)
+-                ->field('id,product_id,cost,price,ot_price')
++                ->field('id,product_id,cost,price,ot_price,price_range_min,price_range_max')
+                 ->lock(true)
+                 ->find()
+             : null;
+@@ -160,6 +160,9 @@
+                 ['reason' => 'price_change_catalog_authority_missing', 'line_id' => $lineKey]
+             );
+         }
++        // 使用同一事务已锁定SKU的可售价区间，按单价校验后再写入本次唯一业务草稿。
++        // 不信任客户端提交的上下限；即使改为0元，也不能绕过已配置的最低售价。
++        self::assertSalePriceRange($sku, (string)$product['store_name'], intdiv($lineAmountCents, $quantity));
+         $authoritySnapshot = json_decode((string)($line['authority_snapshot_json'] ?? ''), true);
+         if (!is_array($authoritySnapshot)) {
+             throw self::invalid('price_change_authority_snapshot_invalid');
+@@ -216,6 +219,38 @@
+             ]);
+         $this->refreshLineFingerprint($workspaceId);
+         return '商品价格已更新。';
++    }
++
++    /**
++     * 可售价区间约束单件售价：0为该侧无限制，等值上下限自然形成固定售价。
++     * 只在改价命令中读取已锁定配置，不新增结账版本或第二份可落账快照。
++     */
++    private static function assertSalePriceRange(array $sku, string $name, int $unitPriceCents): void
++    {
++        $minimum = self::decimalMoneyToCents($sku['price_range_min'] ?? 0, 'sale_price_min_invalid');
++        $maximum = self::decimalMoneyToCents($sku['price_range_max'] ?? 0, 'sale_price_max_invalid');
++        self::assertSalePriceRangeCents($minimum, $maximum, $name, $unitPriceCents, 1);
++    }
++
++    /** 浏览器改价草稿最终提交共用此校验；乘数量比较整行金额，避免浮点单价和优惠后金额误判。 */
++    public static function assertSalePriceRangeCents(int $minimum, int $maximum, string $name, int $amountCents, int $quantity): void
++    {
++        if ($quantity <= 0 || $minimum < 0 || $maximum < 0) {
++            throw self::invalid('sale_price_range_invalid');
++        }
++        if (($minimum > 0 && $amountCents < self::multiply($minimum, $quantity, 'sale_price_range_overflow'))
++            || ($maximum > 0 && $amountCents > self::multiply($maximum, $quantity, 'sale_price_range_overflow'))) {
++            // 收银只保存整数元；提示历史小数边界时展示实际可填写的整数上下限。
++            $minimumYuan = intdiv($minimum, 100) + ($minimum % 100 > 0 ? 1 : 0);
++            $maximumText = $maximum > 0 ? intdiv($maximum, 100) . '元' : '不限';
++            throw new CashierV3CommandException(
++                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
++                (trim($name) ?: '该商品') . '的售价区间是:最低' . $minimumYuan . '元,最高' . $maximumText,
++                CashierV3ResultCode::STATUS_FAILED,
++                ['reason' => 'price_change_outside_sale_price_range',
++                    'minimum_unit_price_cents' => $minimum, 'maximum_unit_price_cents' => $maximum]
++            );
++        }
+     }
+ 
+     private function updateSupplement(
+--- a/前端代码/admin/src/pages/product/productAdd/index.vue
++++ b/前端代码/admin/src/pages/product/productAdd/index.vue
+@@ -874,7 +874,7 @@
+ 				@on-change='changePrice'
+               ></InputNumber>
+             </FormItem>
+-			<FormItem label="调价区间：" v-if="formData.product_type == 0 && merchantType !=1">
++			<FormItem label="可售价区间：" v-if="formData.product_type == 0 && merchantType !=1">
+ 			  <div class="acea-row row-middle">
+ 				  <InputNumber
+ 				    v-model="formData.attr.price_range_min"
+@@ -1108,7 +1108,7 @@
+ 				@on-change='changePrice'
+               ></InputNumber>
+             </FormItem>
+-			<FormItem label="调价区间：" v-if="merchantType !=1">
++			<FormItem label="可售价区间：" v-if="merchantType !=1">
+ 			  <div class="acea-row row-middle">
+ 				  <InputNumber
+ 				    v-model="formData.attr.price_range_min"
+@@ -1301,7 +1301,7 @@
+ 				@on-change='changePrice'
+ 			  ></InputNumber>
+ 			</FormItem>
+-			<FormItem label="调价区间：" v-if="merchantType !=1">
++			<FormItem label="可售价区间：" v-if="merchantType !=1">
+ 			  <div class="acea-row row-middle">
+ 				  <InputNumber
+ 				    v-model="formData.attr.price_range_min"
+@@ -2369,21 +2369,21 @@
+         this.$set(item, 'pm', 1);
+       });
+     },
+-	// 单规格-调价区间
++	// 单规格-可售价区间
+ 	changePrice(e) {
+ 		if(!this.$route.params.id){
+ 			this.formData.attr.price_range_min = e
+ 			this.formData.attr.price_range_max = e
+ 		}
+ 	},
+-	// 多规格-调价区间
++	// 多规格-可售价区间
+ 	changeManyPrice(index,e){
+ 		if(!this.$route.params.id){
+ 			this.manyFormValidate[index].price_range_min = e;
+ 			this.manyFormValidate[index].price_range_max = e;
+ 		}
+ 	},
+-	// 多规格-调价区间-关闭弹窗
++	// 多规格-可售价区间-关闭弹窗
+ 	closePriceSet(i) {
+ 	  document.body.click()
+ 	  this.$refs['popoverRef_' + i][0].doClose(); //关闭的
+@@ -2411,11 +2411,11 @@
+ 		});
+ 		this.closePriceSet(i);
+ 	},
+-	// 多规格-调价区间-获取输入的调价价格
++	// 多规格-可售价区间-获取输入的调价价格
+ 	priceReplace(event) {
+ 	  this.priceSetNum = this.cleanPrice(event.target.value);
+ 	},
+-	// 多规格-调价区间-价格处理
++	// 多规格-可售价区间-价格处理
+ 	cleanPrice(value) {
+ 	  // 移除非数字和非小数点的字符
+ 	  let cleanedValue = value.replace(/[^\d.]/g, '');
+@@ -3566,13 +3566,13 @@
+         );
+ 		if(this.merchantType != 1){
+ 			headerList.splice(priceIndex + 1, 0, {
+-			  title: '调价-最低价',
++			  title: '可售价区间-最低价',
+ 			  slot: 'price_range_min',
+ 			  align: 'center',
+ 			  minWidth: '150px',
+ 			});
+ 			headerList.splice(priceIndex + 2, 0, {
+-			  title: '调价-最高价',
++			  title: '可售价区间-最高价',
+ 			  slot: 'price_range_max',
+ 			  align: 'center',
+ 			  minWidth: '150px',
+@@ -3600,14 +3600,14 @@
+ 		);
+ 		if(this.merchantType != 1){
+ 			headerList.splice(priceIndex + 1, 0, {
+-			  title: '调价-最低价',
++			  title: '可售价区间-最低价',
+ 			  tips: '（最小值）',
+ 			  slot: 'price_range_min',
+ 			  align: 'center',
+ 			  minWidth: '150px',
+ 			});
+ 			headerList.splice(priceIndex + 2, 0, {
+-			  title: '调价-最高价',
++			  title: '可售价区间-最高价',
+ 			  tips: '（最大值）',
+ 			  slot: 'price_range_max',
+ 			  align: 'center',
+@@ -3637,7 +3637,7 @@
+ 		}
+ 		if(min>0 && max>0){
+ 			if(price<min || price>max){
+-				this.$Message.warning('售价需在调价区间内');
++				this.$Message.warning('售价需在可售价区间内');
+ 				return false
+ 			}
+ 			return true
+--- a/tests/cashier-v3/php/cashier-more-actions-backend-contract.php
++++ b/tests/cashier-v3/php/cashier-more-actions-backend-contract.php
+@@ -54,7 +54,7 @@
+         && strpos($manifest, "'update-cashier-line-price'") !== false
+         && strpos($manifest, "'update-cashier-supplement'") !== false,
+     'eventless workspace edits' => strpos($event, "'update-cashier-line-price' => \$eventless(\$workspaceDraft)") !== false,
+-    'current sku locked cost' => strpos($service, "->field('id,product_id,cost,price,ot_price')") !== false
++    'current sku locked cost' => strpos($service, "->field('id,product_id,cost,price,ot_price,price_range_min,price_range_max')") !== false
+         && strpos($service, "'price_change_below_configured_cost'") !== false
+         && strpos($service, '$minimumLineAmountCents') !== false,
+     'exact zero price bypasses cost floor but positive prices do not' => strpos(
+--- a/后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php
++++ b/后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php
+@@ -22,6 +22,7 @@
+ 
+     private const SKU_FIELDS = [
+         'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price', 'cost',
++        'price_range_min', 'price_range_max',
+         'stock', 'code', 'bar_code', 'is_show', 'type', 'write_times', 'write_valid',
+         'write_days', 'write_start', 'write_end',
+     ];
+--- a/后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php
++++ b/后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php
+@@ -1576,6 +1576,11 @@
+             'categoryNames' => $categoryNames,
+             'unitPriceCents' => $unitPriceCents,
+             'originalUnitPriceCents' => $originalUnitPriceCents,
++            // 可售价区间属于改价约束，随同一SKU展示，不生成另一份结账版本。
++            'salePriceRange' => [
++                'minimumCents' => self::moneyToCents($row['sku_price_range_min'] ?? 0, 'price_range_min'),
++                'maximumCents' => self::moneyToCents($row['sku_price_range_max'] ?? 0, 'price_range_max'),
++            ],
+             'configuredCostCents' => $configuredCostCents,
+             'stock' => $stock,
+             'isInventory' => (int)($row['product_is_inventory'] ?? 0) === 1,
+@@ -2008,6 +2013,7 @@
+             'code' => $item['code'],
+             'category' => $item['categoryName'],
+             'categoryId' => $item['categoryId'],
++            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
+             'price' => self::centsToMoney($item['unitPriceCents']),
+             'originalPrice' => self::centsToMoney($item['originalUnitPriceCents']),
+             'productVersion' => $item['productVersion'],
+@@ -2088,6 +2094,7 @@
+             'code' => $item['code'],
+             'categoryId' => $item['categoryId'],
+             'category' => $item['categoryName'],
++            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
+             'unitPrice' => self::centsToMoney($item['unitPriceCents']),
+             'originalUnitPrice' => self::centsToMoney($item['originalUnitPriceCents']),
+             'serviceSource' => '本次购买',
+--- a/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php
++++ b/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php
+@@ -638,6 +638,21 @@
+                 \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount(
+                     $cardPurchaseSnapshot, $increase, $quantity, $lineAmount, $discount
+                 );
++                // 唯一快照可能来自浏览器本地改价，不能只校验旧工作台命令。
++                // 按手工改价后的单价约束，优惠券抵扣不改变商品售价区间，也不重写本单金额。
++                $range = (array)($server['display_snapshot']['salePriceRange'] ?? []);
++                $beforeCouponAmount = $lineAmount + $discount;
++                // 多卡升级的补差价不是目标卡售价，沿用本次已确认的目标卡总售价。
++                if (!empty($line['cardOperationUpgrade']['multiCardUpgrade'])
++                    && isset($cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'])) {
++                    $beforeCouponAmount = (int)$cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'];
++                }
++                if ($beforeCouponAmount !== $unit * $quantity) {
++                    \app\services\cashier\v3\cashier\CashierV3CashierMoreActionServices::assertSalePriceRangeCents(
++                        (int)($range['minimumCents'] ?? 0), (int)($range['maximumCents'] ?? 0),
++                        (string)($server['display_snapshot']['name'] ?? ''), $beforeCouponAmount, $quantity
++                    );
++                }
+                 $isPresale = !$customCard && !empty($line['isPresale']);
+                 $saleLines[] = [
+                     'lineId' => (string)($line['lineId'] ?? 'snapshot-' . $index),
+--- a/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
++++ b/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
+@@ -32,6 +32,7 @@
+ } from '@/services/cashierV3OrderProjectionContract'
+ import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
+ import { checkoutBalancePreview } from '@/services/cashierV3CheckoutBalancePreview'
++import { salePriceRangeMessage } from '@/services/cashierV3SalePriceRange'
+ import { combinationChoicePreflightFailure } from '@/services/cashierV3CombinationChoicePreflight'
+ import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
+ import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
+@@ -2319,6 +2320,8 @@
+       finalAmount: amount,
+       originalAmount: amount,
+       debtAmountCents: 0,
++      // 记录此SKU的单价边界供改价即时提示，后端最终提交仍自行核验。
++      salePriceRange: clonePlain(item.salePriceRange || null),
+       cardPurchaseSnapshot: clonePlain(item.cardPurchaseSnapshot || {}),
+       localCatalogItem: { itemId, catalogKind }
+     }
+@@ -5248,6 +5251,18 @@
+     }
+     const lineAmountCents = Number(rawAmount) * 100
+     if (!Number.isSafeInteger(lineAmountCents)) return
++    const itemId = Number(editor.line.catalogItemId ?? editor.line.skuId ?? editor.line.itemId ?? 0)
++    const currentItem = (Array.isArray(catalog.value.items) ? catalog.value.items : [])
++      .find((item) => Number(item.id) === itemId)
++    // 多件购买必须比较单价，错误时保留编辑框与当前草稿，不先写入再回滚。
++    const rangeMessage = salePriceRangeMessage(
++      editor.line.name, lineAmountCents, Number(editor.line.quantity || 1),
++      currentItem?.salePriceRange ?? editor.line.salePriceRange
++    )
++    if (rangeMessage) {
++      moreActionValidationMessage.value = rangeMessage
++      return
++    }
+     savedPriceAmountCents = lineAmountCents
+     action = 'update-cashier-line-price'
+     payload = { lineId: editor.line.id, lineAmountCents, reason }

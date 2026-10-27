@@ -12,8 +12,8 @@ function currentStoreV3Token() {
   return readStoreV3SessionToken()
 }
 
-async function post(path, body = {}, token = '') {
-  const authorizationToken = String(token || currentStoreV3Token()).trim()
+async function post(path, body = {}, token = '', skipToken = false) {
+  const authorizationToken = skipToken ? '' : String(token || currentStoreV3Token()).trim()
   const response = await fetch(endpoint(path), {
     method: 'POST',
     credentials: 'omit',
@@ -33,6 +33,11 @@ async function post(path, body = {}, token = '') {
 
 export function loginStoreV3(payload) {
   return post('/cashierapi/v3/login', payload)
+}
+
+/** 平台身份桥只传一次性票据，不携带当前页签可能残留的门店令牌。 */
+export function consumePlatformStoreEntry(ticket) {
+  return post('/cashierapi/v3/platform-entry/consume', { ticket: String(ticket || '') }, '', true)
 }
 
 /** 列表与登录选店共用服务端候选口径；前端只展示，不扩张授权范围。 */

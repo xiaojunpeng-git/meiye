@@ -1,0 +1,47 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "baselineCommit": "132c0912014cf1c26ca80be4bf145e540cd4f2c5",
+  "baselineTree": "0bb2b5bde4c3a9c730b1e9207a01d1b7aa9b2ac2",
+  "candidateTree": "409461aa4cd36f2da56278266ebfe702524611ae",
+  "paths": [
+    "scripts/r54-member-service-dependency-gate.cjs",
+    "tests/cashier-v3/js/r54-member-service-failure.cjs",
+    "tests/cashier-v3/js/r54-query-period.cjs",
+    "tests/cashier-v3/php/r54-member-service-readonly.php",
+    "前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue",
+    "前端代码/cashier-v3/src/views/BusinessDashboardView.vue",
+    "前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue",
+    "前端代码/cashier-v3/src/views/EmployeeDashboardView.vue",
+    "前端代码/cashier-v3/src/views/EngineeringManagementView.vue",
+    "前端代码/cashier-v3/src/views/RoutePlaceholderView.vue",
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+    "前端代码/cashier-v3/src/views/StoreTargetDashboardView.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryDateRange.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQuerySettingsDrawer.vue",
+    "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php"
+  ],
+  "preservedFiles": {},
+  "sharedIndexBefore": "102de8456c13d8f9f2f24165a0b64c6aef72de2621c9514811c3d82615639dca",
+  "sharedIndexUntouched": true,
+  "patchSHA256": "593a20e3d395557bb69f8fb9976397b17804c687d15bfd0d471fa93d14e1d3ca",
+  "acceptedFingerprintFile": "tests/cashier-v3/evidence/R54-query-period/fixed-files.json",
+  "excluded": [
+    "member multi-person selection",
+    "unaccepted report business changes",
+    "guest coupon visibility",
+    "other shared workspace edits"
+  ],
+  "authorization": {
+    "sites": [
+      "rh",
+      "008",
+      "010"
+    ],
+    "rhFormalAndPreview": true,
+    "databaseMigrations": false,
+    "platformStaticUnchanged": true
+  },
+  "supplementalAcceptanceRequired": true
+}

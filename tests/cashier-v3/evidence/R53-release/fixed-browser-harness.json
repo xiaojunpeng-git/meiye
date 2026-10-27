@@ -1,0 +1,7 @@
+{
+  "tree": "0ff03c6478b16b36683ff58f680b8250b8f35d46",
+  "originalSHA256": "4c44ba1b6600f09cf1db31ad66933ed4d410910f9459c2db227581f5799fcd05",
+  "evaluatedHarnessSHA256": "c9fe94611a1689d5fdbd206d75c1fe1f6829dd8677bda5b703f69824a3cbde26",
+  "productionSourcesReadonly": true,
+  "adaptation": "evidence destination and immutable-tree metadata only; source manifest replaces workspace diff"
+}

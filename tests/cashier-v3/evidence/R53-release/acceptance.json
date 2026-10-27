@@ -1,0 +1,7 @@
+{
+  "productManagerConfirmed": true,
+  "candidateTree": "0ff03c6478b16b36683ff58f680b8250b8f35d46",
+  "confirmation": "确认补验，保留已上线依赖后按顺序发布（推荐）",
+  "scope": "本轮47个文件及两份独立已上线依赖；瑞昊正式与预览核验后push，再008、010；平台静态包不变",
+  "migrationAuthorization": "三站分别独立备份，权限登记与既有启用收银岗位授权，两个补交关联索引；不改历史订单或余额"
+}

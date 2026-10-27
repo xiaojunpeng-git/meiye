@@ -1,0 +1,108 @@
+{
+  "result": "PASS",
+  "actor_employee_id": 84,
+  "service_authorization_checked": true,
+  "algorithm": {
+    "code": "project_tiers",
+    "label": "项目档位计算（预计）",
+    "independent_positions": true,
+    "settled": false
+  },
+  "metrics": [
+    {
+      "code": "staff_sales_yeji",
+      "name": "现金业绩",
+      "value": "23947",
+      "unit": "amount"
+    },
+    {
+      "code": "staff_labor_yeji",
+      "name": "劳动业绩",
+      "value": "2240",
+      "unit": "amount"
+    },
+    {
+      "code": "staff_point_visit_num",
+      "name": "点客数",
+      "value": "3",
+      "unit": "count"
+    },
+    {
+      "code": "staff_service_num",
+      "name": "服务人次",
+      "value": "13.1",
+      "unit": "count"
+    },
+    {
+      "code": "staff_project_num",
+      "name": "项目数",
+      "value": "17",
+      "unit": "count"
+    },
+    {
+      "code": "staff_labor_fee",
+      "name": "手工费",
+      "value": "0",
+      "unit": "amount"
+    },
+    {
+      "code": "staff_net_sales",
+      "name": "净销售业绩",
+      "value": "23947",
+      "unit": "amount"
+    },
+    {
+      "code": "project_labor_commission",
+      "name": "劳动提成（预计）",
+      "value": "627",
+      "unit": "amount"
+    }
+  ],
+  "commission": {
+    "visible": true,
+    "complete": true,
+    "displayValue": "627"
+  },
+  "first_detail": {
+    "factId": "IMP007-W72753-labor-102256",
+    "businessDate": "2026-10-22",
+    "orderNo": "wx844669101052788736",
+    "itemName": "舒心安神洗",
+    "displaySaleAmount": "49",
+    "displayConsumptionAmount": "49",
+    "commissionDetail": {
+      "fact_id": "IMP007-W72753-labor-102256",
+      "business_date": "2026-10-22",
+      "project_id": 2345,
+      "project_name": "舒心安神洗",
+      "month": "2026-10",
+      "status": "预计",
+      "amount_cents": 1680,
+      "basis_cents": 6000,
+      "threshold_cents": 2394700,
+      "rate_percent": "28",
+      "range": "20001-25000",
+      "rule_id": 56,
+      "display_basis": "60",
+      "display_threshold": "23947",
+      "display_commission": "17"
+    },
+    "displayCommission": "17",
+    "displayLaborFee": "0",
+    "storeName": "海沧店",
+    "memberName": "海沧店",
+    "sourceLineId": "IMP007-125393-line-71243",
+    "ruleName": "历史记录承接",
+    "value": 60,
+    "displayValue": "60"
+  },
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "total": 17,
+    "hasMore": false
+  },
+  "page2_count": 0,
+  "platform_mobile_commission_yuan": 627.2,
+  "business_writes": 0
+}

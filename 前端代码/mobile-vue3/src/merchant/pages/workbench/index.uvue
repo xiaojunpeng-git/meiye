@@ -1,6 +1,6 @@
 <template>
 	<view class="merchant-workbench" :class="{ 'merchant-workbench--native-mini': platformUsesNativeCanvas }">
-		<view class="merchant-workbench__header">
+		<view v-if="organizationEntryVisible" class="merchant-workbench__header">
 			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore">
 				<view class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
 			</picker>
@@ -31,6 +31,7 @@
 
 				<view class="merchant-workbench__section-heading merchant-workbench__section-heading--functions"><view><text class="merchant-workbench__section-kicker">快捷入口</text><text class="merchant-workbench__section-title">常用功能</text></view></view>
 				<view class="merchant-workbench__grid">
+					<navigator v-if="merchantActionIsAllowed('mobile.merchant.growth')" class="merchant-workbench__entry" url="/src/merchant/pages/growth/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>学</text></view><text class="merchant-workbench__entry-label">成长管理</text></navigator>
 					<navigator v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__entry" url="/src/merchant/pages/reservation-confirmations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--confirmation"><text>确</text></view><text class="merchant-workbench__entry-label">预约确认</text></navigator>
 					<navigator v-if="canOpenReservationEntry('service')" class="merchant-workbench__entry" url="/src/merchant/pages/reservations/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--reservation"><text>服</text></view><text class="merchant-workbench__entry-label">预约服务</text></navigator>
 					<navigator v-if="canOpenWorkbenchEntry('mobile.merchant.customer_care')" class="merchant-workbench__entry" url="/src/merchant/pages/customer-care/index" open-type="navigate"><view class="merchant-workbench__entry-icon merchant-workbench__entry-icon--care"><text>客</text></view><text class="merchant-workbench__entry-label">客情管理</text></navigator>
@@ -51,7 +52,7 @@
 	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
-	import { merchantActionIsAllowed } from '../../../shared/platform/merchant-tab-permissions.uts'
+	import { merchantActionIsAllowed, merchantOrganizationEntryVisible } from '../../../shared/platform/merchant-tab-permissions.uts'
 
 	const openTaskCount = ref(0)
 	const dueNotArrivedCount = ref(0)
@@ -62,6 +63,7 @@
 	const careFailed = ref(false)
 	const reservationFailed = ref(false)
 	const confirmationFailed = ref(false)
+	const organizationEntryVisible = ref(false)
 	const storeContexts = ref<Array<any>>([])
 	const storeLabels = ref<Array<string>>([])
 	const activeStoreIndex = ref(0)
@@ -74,6 +76,7 @@
 
 	function loadStoreContext() : void {
 		let root = currentMerchantRoot()
+		organizationEntryVisible.value = merchantOrganizationEntryVisible(root)
 		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
 		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
 		storeContexts.value = contexts
@@ -85,7 +88,7 @@
 	}
 
 	function selectStore(event : any) : void {
-		if (switchingStore.value) return
+		if (!merchantOrganizationEntryVisible() || switchingStore.value) return
 		let index = Number(event.detail.value || 0)
 		if (index < 0 || index >= storeContexts.value.length || index == activeStoreIndex.value) return
 		let targetContextId = String(storeContexts.value[index].contextId || '')

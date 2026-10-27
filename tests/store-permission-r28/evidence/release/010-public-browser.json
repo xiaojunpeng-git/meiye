@@ -1,0 +1,20 @@
+[
+  {
+    "commit": "18669cbf303299b217f32d1d0a99727ba13dc1be",
+    "transport": "live public HTTP through Playwright request transport",
+    "url": "https://010.cc3798.com/view_cashier_v3/#/reservation",
+    "finalUrl": "https://010.cc3798.com/view_cashier_v3/#/login",
+    "passwordInputs": 1,
+    "runtimeErrors": [],
+    "result": "PASS"
+  },
+  {
+    "commit": "18669cbf303299b217f32d1d0a99727ba13dc1be",
+    "transport": "live public HTTP through Playwright request transport",
+    "url": "https://010.cc3798.com/admin/login",
+    "finalUrl": "https://010.cc3798.com/admin/login",
+    "passwordInputs": 1,
+    "runtimeErrors": [],
+    "result": "PASS"
+  }
+]

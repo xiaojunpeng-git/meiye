@@ -1,0 +1,46 @@
+{
+  "tree": "523cf660337d05188c0de6db871fcc475320edca",
+  "target": "/Users/xiaojunpeng/.cache/mohe-r54-service-period-tests/523cf660337d05188c0de6db871fcc475320edca",
+  "wholeApplicationRootReadonly": true,
+  "results": [
+    {
+      "file": "tests/cashier-v3/php/r54-member-service-readonly.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "\"serverReadOnly\":true"
+    },
+    {
+      "file": "tests/cashier-v3/php/member-detail-v2-contract.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "PASS"
+    },
+    {
+      "file": "tests/cashier-v3/php/r53-card-history-sqlite.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "R53_CARD_HISTORY_SQLITE=PASS"
+    },
+    {
+      "file": "tests/cashier-v3/php/r53-historical-scope-contract.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "R53_HISTORICAL_SCOPE_SQLITE_OK"
+    },
+    {
+      "file": "tests/cashier-v3/php/r53-card-to-balance-gateway.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "PASS"
+    },
+    {
+      "file": "tests/cashier-v3/php/r53-conversion-reversal-guard.php",
+      "result": "PASS",
+      "status": 0,
+      "marker": "PASS"
+    }
+  ],
+  "sourceStable": true,
+  "complete": true,
+  "result": "PASS"
+}

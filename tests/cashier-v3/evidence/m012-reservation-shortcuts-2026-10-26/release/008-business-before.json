@@ -1,0 +1,13 @@
+{
+  "site": "008",
+  "database": "mohe_008",
+  "readOnly": true,
+  "patched": false,
+  "pendingCount": 0,
+  "total": 2,
+  "pageRows": 2,
+  "calendarBlocks": 4,
+  "markedBlocks": 0,
+  "customSnapshotMatch": false,
+  "realCommandExecuted": false
+}

@@ -1,0 +1,847 @@
+{
+    "revision": 29,
+    "rules": [
+        {
+            "id": -2801,
+            "title": "运营管理",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 0,
+            "enabled": 1,
+            "grantable": false,
+            "account_menu": false
+        },
+        {
+            "id": -2802,
+            "title": "库存管理",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 10,
+            "enabled": 1,
+            "grantable": false,
+            "account_menu": false
+        },
+        {
+            "id": -2803,
+            "title": "财务管理",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 20,
+            "enabled": 1,
+            "grantable": false,
+            "account_menu": false
+        },
+        {
+            "id": -2804,
+            "title": "数据中心",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 30,
+            "enabled": 1,
+            "grantable": false,
+            "account_menu": false
+        },
+        {
+            "id": -2805,
+            "title": "基础设置",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 40,
+            "enabled": 1,
+            "grantable": false,
+            "account_menu": true
+        },
+        {
+            "id": 301001,
+            "title": "收银",
+            "feature_code": "cashier.v3.cashier",
+            "parent_id": -2801,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301010,
+            "title": "充值",
+            "feature_code": "cashier.v3.cashier.recharge",
+            "parent_id": 301001,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301011,
+            "title": "赠送",
+            "feature_code": "cashier.v3.cashier.gift",
+            "parent_id": 301001,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301012,
+            "title": "结账",
+            "feature_code": "cashier.v3.cashier.checkout",
+            "parent_id": 301001,
+            "sort": 20,
+            "enabled": 1
+        },
+        {
+            "id": 301050,
+            "title": "旧数据录入",
+            "feature_code": "cashier.v3.cashier.old_card_entry",
+            "parent_id": 301001,
+            "sort": 30,
+            "enabled": 1
+        },
+        {
+            "id": 301013,
+            "title": "卡升级",
+            "feature_code": "cashier.v3.cashier.card.upgrade",
+            "parent_id": 301001,
+            "sort": 40,
+            "enabled": 1
+        },
+        {
+            "id": 301014,
+            "title": "卡延期",
+            "feature_code": "cashier.v3.cashier.card.extend",
+            "parent_id": 301001,
+            "sort": 50,
+            "enabled": 1
+        },
+        {
+            "id": 301015,
+            "title": "卡转让",
+            "feature_code": "cashier.v3.cashier.card.transfer",
+            "parent_id": 301001,
+            "sort": 60,
+            "enabled": 1
+        },
+        {
+            "id": 301016,
+            "title": "卡停用",
+            "feature_code": "cashier.v3.cashier.card.disable",
+            "parent_id": 301001,
+            "sort": 70,
+            "enabled": 1
+        },
+        {
+            "id": 301017,
+            "title": "卡启用",
+            "feature_code": "cashier.v3.cashier.card.enable",
+            "parent_id": 301001,
+            "sort": 80,
+            "enabled": 1
+        },
+        {
+            "id": 301018,
+            "title": "项目替换",
+            "feature_code": "cashier.v3.cashier.card.project_replace",
+            "parent_id": 301001,
+            "sort": 90,
+            "enabled": 1
+        },
+        {
+            "id": 301019,
+            "title": "项目升级",
+            "feature_code": "cashier.v3.cashier.card.project_upgrade",
+            "parent_id": 301001,
+            "sort": 100,
+            "enabled": 1
+        },
+        {
+            "id": 301002,
+            "title": "挂单",
+            "feature_code": "cashier.v3.hang",
+            "parent_id": -2801,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301003,
+            "title": "房间",
+            "feature_code": "cashier.v3.room",
+            "parent_id": -2801,
+            "sort": 20,
+            "enabled": 1
+        },
+        {
+            "id": 301004,
+            "title": "预约",
+            "feature_code": "cashier.v3.reservation",
+            "parent_id": -2801,
+            "sort": 30,
+            "enabled": 1
+        },
+        {
+            "id": 301005,
+            "title": "会员",
+            "feature_code": "cashier.v3.member",
+            "parent_id": -2801,
+            "sort": 40,
+            "enabled": 1
+        },
+        {
+            "id": 301020,
+            "title": "新增会员",
+            "feature_code": "cashier.v3.member.create",
+            "parent_id": 301005,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301021,
+            "title": "编辑会员",
+            "feature_code": "cashier.v3.member.edit",
+            "parent_id": 301005,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301009,
+            "title": "费用",
+            "feature_code": "cashier.v3.fund",
+            "parent_id": -2801,
+            "sort": 50,
+            "enabled": 1
+        },
+        {
+            "id": 301008,
+            "title": "客情",
+            "feature_code": "cashier.v3.care",
+            "parent_id": -2801,
+            "sort": 60,
+            "enabled": 1
+        },
+        {
+            "id": 301006,
+            "title": "订单",
+            "feature_code": "cashier.v3.order_center",
+            "parent_id": -2806,
+            "sort": 70,
+            "enabled": 1
+        },
+        {
+            "id": 301030,
+            "title": "人员调整",
+            "feature_code": "cashier.v3.order.staff_adjust",
+            "parent_id": 301006,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301031,
+            "title": "退款",
+            "feature_code": "cashier.v3.order.refund",
+            "parent_id": 301006,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301032,
+            "title": "作废订单",
+            "feature_code": "cashier.v3.order.void",
+            "parent_id": 301006,
+            "sort": 20,
+            "enabled": 1
+        },
+        {
+            "id": 301033,
+            "title": "重开",
+            "feature_code": "cashier.v3.order.reopen",
+            "parent_id": 301006,
+            "sort": 30,
+            "enabled": 1
+        },
+        {
+            "id": 301034,
+            "title": "小票打印",
+            "feature_code": "cashier.v3.order.receipt_print",
+            "parent_id": 301006,
+            "sort": 40,
+            "enabled": 1
+        },
+        {
+            "id": 301035,
+            "title": "查看欠款\/补交",
+            "feature_code": "cashier.v3.order.debt_view",
+            "parent_id": 301006,
+            "sort": 50,
+            "enabled": 1
+        },
+        {
+            "id": 301036,
+            "title": "查看服务记录详情",
+            "feature_code": "cashier.v3.order.service_detail",
+            "parent_id": 301006,
+            "sort": 60,
+            "enabled": 1
+        },
+        {
+            "id": 301037,
+            "title": "作废服务记录",
+            "feature_code": "cashier.v3.order.service_void",
+            "parent_id": 301006,
+            "sort": 70,
+            "enabled": 1
+        },
+        {
+            "id": 301007,
+            "title": "管理",
+            "feature_code": "cashier.v3.management_center",
+            "parent_id": -2805,
+            "sort": 80,
+            "enabled": 1
+        },
+        {
+            "id": 301060,
+            "title": "人员管理",
+            "feature_code": "cashier.v3.management.staff",
+            "parent_id": 301007,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301040,
+            "title": "新增员工",
+            "feature_code": "cashier.v3.staff.create",
+            "parent_id": 301060,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301041,
+            "title": "编辑员工",
+            "feature_code": "cashier.v3.staff.edit",
+            "parent_id": 301060,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301061,
+            "title": "房间设置",
+            "feature_code": "cashier.v3.management.rooms",
+            "parent_id": 301007,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301062,
+            "title": "经营看板",
+            "feature_code": "cashier.v3.management.dashboard",
+            "parent_id": -2804,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301200,
+            "title": "数据",
+            "feature_code": "cashier.v3.data",
+            "parent_id": -2804,
+            "sort": 20,
+            "enabled": 1
+        },
+        {
+            "id": 301201,
+            "title": "目标",
+            "feature_code": "cashier.v3.targets",
+            "parent_id": -2804,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301100,
+            "title": "库存",
+            "feature_code": "cashier.v3.inventory.overview",
+            "parent_id": -2802,
+            "sort": 110,
+            "enabled": 1
+        },
+        {
+            "id": 301101,
+            "title": "入库",
+            "feature_code": "cashier.v3.inventory.inbound",
+            "parent_id": 301100,
+            "sort": 0,
+            "enabled": 1
+        },
+        {
+            "id": 301102,
+            "title": "出库",
+            "feature_code": "cashier.v3.inventory.outbound",
+            "parent_id": 301100,
+            "sort": 10,
+            "enabled": 1
+        },
+        {
+            "id": 301103,
+            "title": "库存查询",
+            "feature_code": "cashier.v3.inventory.stock",
+            "parent_id": 301100,
+            "sort": 20,
+            "enabled": 1
+        },
+        {
+            "id": 301104,
+            "title": "盘点",
+            "feature_code": "cashier.v3.inventory.count",
+            "parent_id": 301100,
+            "sort": 30,
+            "enabled": 1
+        },
+        {
+            "id": 301105,
+            "title": "库存明细",
+            "feature_code": "cashier.v3.inventory.movement",
+            "parent_id": 301100,
+            "sort": 40,
+            "enabled": 1
+        },
+        {
+            "id": 301106,
+            "title": "库存统计",
+            "feature_code": "cashier.v3.inventory.statistics",
+            "parent_id": 301100,
+            "sort": 50,
+            "enabled": 1
+        },
+        {
+            "id": 301107,
+            "title": "请货",
+            "feature_code": "cashier.v3.inventory.request",
+            "parent_id": 301100,
+            "sort": 60,
+            "enabled": 1
+        },
+        {
+            "id": 301108,
+            "title": "调拨",
+            "feature_code": "cashier.v3.inventory.transfer",
+            "parent_id": 301100,
+            "sort": 70,
+            "enabled": 1
+        },
+        {
+            "id": 301109,
+            "title": "院装",
+            "feature_code": "cashier.v3.inventory.usage",
+            "parent_id": 301100,
+            "sort": 80,
+            "enabled": 1
+        },
+        {
+            "id": 301110,
+            "title": "导入",
+            "feature_code": "cashier.v3.inventory.import",
+            "parent_id": 301100,
+            "sort": 90,
+            "enabled": 1
+        },
+        {
+            "id": 301120,
+            "title": "发起预售领用",
+            "feature_code": "cashier.v3.inventory.presale_claim.create",
+            "parent_id": 301100,
+            "sort": 100,
+            "enabled": 1
+        },
+        {
+            "id": 301121,
+            "title": "查看预售领用明细",
+            "feature_code": "cashier.v3.inventory.presale_claim.detail",
+            "parent_id": 301100,
+            "sort": 110,
+            "enabled": 1
+        },
+        {
+            "id": 301122,
+            "title": "作废预售领用",
+            "feature_code": "cashier.v3.inventory.presale_claim.void",
+            "parent_id": 301100,
+            "sort": 120,
+            "enabled": 1
+        },
+        {
+            "id": -2806,
+            "title": "订单管理",
+            "feature_code": "",
+            "parent_id": 0,
+            "sort": 5,
+            "enabled": 0,
+            "grantable": false,
+            "account_menu": false
+        },
+        {
+            "id": -29001,
+            "title": "合作方品项汇总",
+            "navigation_key": "report.partner_item_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 0,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29002,
+            "title": "合作方品项明细",
+            "navigation_key": "report.partner_item_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 10,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29003,
+            "title": "会员消费明细",
+            "navigation_key": "report.member_consumption_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 20,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29004,
+            "title": "门店品项分析",
+            "navigation_key": "report.store_item_analysis",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 30,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29005,
+            "title": "门店手艺人消耗",
+            "navigation_key": "report.store_craftsman_consumption",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 40,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29006,
+            "title": "门店销售人业绩",
+            "navigation_key": "report.store_salesperson_performance",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 50,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29007,
+            "title": "市场业绩表",
+            "navigation_key": "report.market_performance",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 60,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29008,
+            "title": "市场明细表",
+            "navigation_key": "report.market_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 70,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29009,
+            "title": "会员进店分析表",
+            "navigation_key": "report.member_visit_analysis",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 80,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29010,
+            "title": "会员进店年度汇总表",
+            "navigation_key": "report.member_visit_annual_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 90,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29011,
+            "title": "地推拓客明细表",
+            "navigation_key": "report.field_acquisition_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 100,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29012,
+            "title": "地推拓客汇总表",
+            "navigation_key": "report.field_acquisition_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 110,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29013,
+            "title": "异业收客汇总表",
+            "navigation_key": "report.cross_industry_customer_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 120,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29014,
+            "title": "异业收客明细表",
+            "navigation_key": "report.cross_industry_customer_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 130,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29015,
+            "title": "新客汇总表",
+            "navigation_key": "report.new_customer_analysis_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 140,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29016,
+            "title": "新客明细表",
+            "navigation_key": "report.new_customer_analysis",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 150,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29017,
+            "title": "销售人生美大单统计表",
+            "navigation_key": "report.salesperson_large_order_statistics",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 160,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29018,
+            "title": "院店退款台账",
+            "navigation_key": "report.store_refund_ledger",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 170,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29019,
+            "title": "其他多收款业绩表",
+            "navigation_key": "report.phase_six_other_multi_payment",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 180,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29020,
+            "title": "员工薪资汇总月报表",
+            "navigation_key": "report.phase_six_salary_summary",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 190,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29021,
+            "title": "员工薪资明细月报表",
+            "navigation_key": "report.phase_six_salary_detail",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 200,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -29022,
+            "title": "六维数据分析表",
+            "navigation_key": "report.six_dimension_analysis",
+            "owner_feature": "cashier.v3.data",
+            "parent_id": 301200,
+            "sort": 210,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30001,
+            "title": "全部订单",
+            "navigation_key": "order.all",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 0,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30002,
+            "title": "消费订单",
+            "navigation_key": "order.sales",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 10,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30003,
+            "title": "充值订单",
+            "navigation_key": "order.recharge",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 20,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30004,
+            "title": "退款记录",
+            "navigation_key": "order.refund",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 30,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30005,
+            "title": "欠款管理",
+            "navigation_key": "order.debt",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 40,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30006,
+            "title": "服务记录",
+            "navigation_key": "order.service",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 50,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30007,
+            "title": "补交记录",
+            "navigation_key": "order.supplement",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 60,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30008,
+            "title": "赠送记录",
+            "navigation_key": "order.gift",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 70,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -30009,
+            "title": "卡操作记录",
+            "navigation_key": "order.card_operation",
+            "owner_feature": "cashier.v3.order_center",
+            "parent_id": 301006,
+            "sort": 80,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -31001,
+            "title": "修改密码",
+            "navigation_key": "account.password",
+            "owner_feature": "",
+            "parent_id": -2805,
+            "sort": 80,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -31002,
+            "title": "退出系统",
+            "navigation_key": "account.logout",
+            "owner_feature": "",
+            "parent_id": -2805,
+            "sort": 90,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        },
+        {
+            "id": -32001,
+            "title": "会员领用",
+            "navigation_key": "inventory.presale_claim",
+            "owner_feature": "cashier.v3.inventory.outbound",
+            "parent_id": 301100,
+            "sort": 25,
+            "feature_code": "",
+            "enabled": 1,
+            "grantable": false
+        }
+    ]
+}

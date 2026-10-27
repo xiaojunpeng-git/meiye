@@ -197,6 +197,12 @@ final class CashierV3MemberModule
                     $memberId,
                     $scope['operator_scope']->storeId()
                 );
+                // Local cashier member selection deliberately does not persist
+                // the workspace/root member. Return this selected member's
+                // per-kind defaults with its existing read-only summary instead
+                // of borrowing the root projection's previous member history.
+                $summary['sourceDefaults'] = (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
+                    ->initialChoices($scope['data_scope']->tenantId(), $scope['operator_scope']->storeId(), $memberId);
                 return ['data' => ['memberSummary' => $summary]];
             });
         }
@@ -259,6 +265,10 @@ final class CashierV3MemberModule
                         $scope['data_scope']
                     );
                     $rechargeOptions = self::rechargeOptions($member);
+                    // The member-list recharge entry may target somebody other
+                    // than the cashier root member; never borrow root defaults.
+                    $member['sourceDefaults'] = (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
+                        ->initialChoices($scope['data_scope']->tenantId(), $scope['operator_scope']->storeId(), $memberId);
                     return [
                         'data' => [
                             'member' => $member,
@@ -873,6 +883,27 @@ final class CashierV3MemberModule
 
         $priority = self::priorityContext($operatorScope, $storeIds);
         $query = self::memberVisibilityQuery($storeIds, $keyword, $allowNameInitials);
+        // 最近选择只在浏览器保存 ID；服务端仍用本选择器的权限与门店范围
+        // 对最多 10 个 ID 做精确重读，不接受缓存中的姓名/状态作为权威资料。
+        if (array_key_exists('recentMemberIds', $payload)) {
+            $candidateIds = $payload['recentMemberIds'];
+            if (!is_array($candidateIds) || count($candidateIds) > 10) {
+                return ['records' => [], 'total' => 0, 'page' => 1, 'pageSize' => $pageSize, 'isLoading' => false];
+            }
+            $recentIds = [];
+            foreach ($candidateIds as $candidateId) {
+                if ((!is_string($candidateId) && !is_int($candidateId))
+                    || !preg_match('/^[1-9][0-9]{0,18}$/D', (string)$candidateId)
+                    || filter_var($candidateId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                    return ['records' => [], 'total' => 0, 'page' => 1, 'pageSize' => $pageSize, 'isLoading' => false];
+                }
+                $recentIds[] = (int)$candidateId;
+            }
+            if ($recentIds === []) {
+                return ['records' => [], 'total' => 0, 'page' => 1, 'pageSize' => $pageSize, 'isLoading' => false];
+            }
+            $query->whereIn('u.uid', array_values(array_unique($recentIds)));
+        }
         if ($excludeCancelled) {
             // 在计数和分页之前过滤，避免注销号码仍出现在收银搜索结果或造成空页。
             $query->where('u.is_del', 0)->whereRaw("(u.delete_time IS NULL OR CAST(u.delete_time AS CHAR) IN ('', '0', '0000-00-00 00:00:00'))");

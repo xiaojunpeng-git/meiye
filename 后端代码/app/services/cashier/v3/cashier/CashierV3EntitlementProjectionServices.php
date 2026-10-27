@@ -710,6 +710,64 @@ final class CashierV3EntitlementProjectionServices
         foreach ($snapshot['holders'] as $holder) {
             $holdersByOrder[(int)$holder['oid']] = $holder;
         }
+        // Transfer availability is advisory and batched. A missing occupancy dependency
+        // disables conversion only; it must never make the member's entire asset list fail.
+        $transferBusy = []; $transferOccupancyReady = true; $transferClosedDetails = []; $transferClosedHolders = [];
+        $transferHistoricalPaid = [];
+        $transferTerminalOrders = [];
+        $detailHolders = [];
+        foreach ($snapshot['carts'] as $cart) {
+            if ((int)($cart['is_writeoff'] ?? 0) !== 0) $transferClosedDetails[(int)$cart['id']] = true;
+            if (isset($holdersByOrder[(int)$cart['oid']])) {
+                $detailHolders[(int)$cart['id']] = (int)$holdersByOrder[(int)$cart['oid']]['id'];
+            }
+        }
+        try {
+            $transferTerminalOrders = array_fill_keys(\app\services\cashier\v3\card\CashierV3CardToBalanceServices::legacyRelatedTerminalOrderIds(
+                array_keys($orders)), true);
+            $storelessIds = array_column(array_values(array_filter($snapshot['holders'], static function (array $holder): bool {
+                return (int)$holder['store_id'] === 0;
+            })), 'id');
+            // Read the immutable migration amounts once per list, never one full
+            // transfer/refund snapshot per card. A technical zero is not paid value.
+            $registeredIds = \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::importedHolderIds($storelessIds, $tenantId);
+            if ($registeredIds) {
+                foreach (Db::name('migration_entitlement_scope')->where('tenant_id', $tenantId)
+                    ->whereIn('card_holder_id', $registeredIds)->where('status', 'active')
+                    ->field('card_holder_id,source_snapshot_json')->select()->toArray() as $historicalScope) {
+                    $historicalSnapshot = json_decode((string)$historicalScope['source_snapshot_json'], true) ?: [];
+                    $historicalPaid = trim((string)($historicalSnapshot['source_paid_amount_yuan'] ?? ''));
+                    if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $historicalPaid)) {
+                        $transferHistoricalPaid[(int)$historicalScope['card_holder_id']] = bcadd($historicalPaid, '0', 2);
+                    }
+                }
+            }
+            $transferBusy = \app\services\cashier\v3\card\CashierV3CardToBalanceServices::occupiedHolders(
+                $tenantId, array_map('intval', array_column($snapshot['holders'], 'id')), $detailHolders);
+            if ($detailHolders) {
+                foreach (Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
+                    ->whereIn('card_holder_id', array_column($snapshot['holders'], 'id'))
+                    ->whereNotIn('status', ['active', 'exhausted', 'disabled'])->field('card_holder_id')->select()->toArray() as $closedRule) {
+                    $transferClosedHolders[(int)$closedRule['card_holder_id']] = true;
+                }
+                $transferClosedGroups = [];
+                foreach (Db::name('cashier_v3_card_rule_group_state')->where('tenant_id', $tenantId)
+                    ->whereIn('card_holder_id', array_column($snapshot['holders'], 'id'))
+                    ->whereNotIn('status', ['active', 'exhausted'])->field('card_holder_id,group_no')->select()->toArray() as $group) {
+                    $transferClosedGroups[(int)$group['card_holder_id'] . ':' . (int)$group['group_no']] = true;
+                }
+                foreach (Db::name('cashier_v3_card_rule_component')->where('tenant_id', $tenantId)
+                    ->whereIn('legacy_detail_id', array_keys($detailHolders))
+                    ->field('legacy_detail_id,status,card_holder_id,combination_group_no')->select()->toArray() as $component) {
+                    if (!in_array((string)$component['status'], ['active', 'exhausted'], true)
+                        || isset($transferClosedGroups[(int)$component['card_holder_id'] . ':' . (int)$component['combination_group_no']])) {
+                        $transferClosedDetails[(int)$component['legacy_detail_id']] = true;
+                    }
+                }
+            }
+        } catch (\Throwable $error) {
+            $transferOccupancyReady = false;
+        }
         // 已售定制卡按门店业务标识识别内部载体，旧壳编号只兼容历史权益；
         // 不能按卡名、有效期或次数猜测，也不能漏掉新客户按事务创建的载体。
         $customCardProductIds = [];
@@ -1085,7 +1143,7 @@ final class CashierV3EntitlementProjectionServices
                     'purchaseAmount' => $independent['purchaseAmount'] === null ? null
                         : bcadd($shared['purchaseAmount'], $independent['purchaseAmount'], 2),
                     'remainingAmount' => $independent['remainingAmount'] === null ? null
-                        : bcadd($cardDisabled ? '0.00' : $sharedRemaining, $independent['remainingAmount'], 2),
+                        : bcadd($sharedRemaining, $independent['remainingAmount'], 2),
                     'calculationVersion' => CashierV3SharedCardPurchaseAmount::CALCULATION_VERSION,
                 ];
             }
@@ -1107,6 +1165,32 @@ final class CashierV3EntitlementProjectionServices
                 : ($operationStatus === 'upgraded'
                     ? '已升级为其他卡项，当前不可使用'
                     : ($cardDisabled ? '卡项已停用' : ''));
+            // Expiry and a reversible disable do not destroy paid value. This new
+            // field carries no version and never borrows cash-refund qualification.
+            $transferProjects = array_values(array_filter($projects, static function (array $project) use ($transferClosedDetails): bool {
+                return !isset($transferClosedDetails[(int)$project['id']]);
+            }));
+            $transferAmount = $this->transferRemainingAmount($transferProjects, $holderRuleAuthority, $order,
+                $outstandingDebtAmount, $this->cancelledDebt($order, null, $tenantId),
+                $sharedRefunds[$holderId] ?? [], $transferHistoricalPaid[$holderId] ?? null,
+                $sourceAmounts['remainingAmount'], $kind['code']);
+            $transferCents = is_string($transferAmount) && preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D', $transferAmount)
+                ? (int)bcmul($transferAmount, '100', 0) : 0;
+            $transferReason = $sourceOrderUnavailableReason !== '' ? $sourceOrderUnavailableReason
+                : (isset($transferTerminalOrders[(int)$order['id']]) ? '本卡来源订单已有退款或作废流程，请先处理原流程'
+                : ($operationStatus === 'upgraded' || isset($transferClosedHolders[$holderId]) ? '本卡已终止'
+                    : (bccomp($outstandingDebtAmount, '0', 2) > 0 ? '本卡存在待还欠款，请先补交或取消'
+                        : (!$transferOccupancyReady ? '预约占用校验暂不可用'
+                            : (isset($transferBusy[$holderId]) ? '本卡存在预约或服务占用，请先处理'
+                                : ($transferCents <= 0 ? '本卡没有实际剩余金额'
+                                    : ($transferCents % 100 !== 0 ? '本卡剩余金额不是整数元，请先核对' : '')))))));
+            // Keep the established disabled shared-card display unchanged; only
+            // balanceTransfer exposes the actual value retained behind that gate.
+            if ($cardDisabled && isset($sharedRemaining, $independent)
+                && is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count'
+                && (string)($holderRuleAuthority['cardRuleType'] ?? '') !== 'combination') {
+                $sourceAmounts['remainingAmount'] = $independent['remainingAmount'];
+            }
             $sources[] = [
                 'id' => $holderId,
                 'entitlementInstanceId' => $holderId,
@@ -1128,6 +1212,8 @@ final class CashierV3EntitlementProjectionServices
                     is_array($holderRuleAuthority) && !empty($holderRuleAuthority['unlimited'])
                 ),
                 'remainingAmount' => $sourceAmounts['remainingAmount'],
+                'balanceTransfer' => ['amountCents' => $transferCents, 'eligible' => $transferReason === '',
+                    'unavailableReason' => $transferReason],
                 'outstandingDebtAmount' => $outstandingDebtAmount,
                 'cancelledDebtAmount' => $this->cancelledDebt($order, $debts[(int)($order['id'] ?? 0)] ?? null, $tenantId),
                 'amountCalculationVersion' => $sourceAmounts['calculationVersion'],
@@ -1433,6 +1519,45 @@ final class CashierV3EntitlementProjectionServices
     private function expiryDate(int $end): string
     {
         return $end > 0 ? date('Y-m-d', $end) : '';
+    }
+
+    /**
+     * Conversion alone excludes terminal details, restores a migration shared
+     * pool's real paid source, and then deducts card-level debt exactly once.
+     * Existing selector display values and the original carrier order stay intact.
+     */
+    private function transferRemainingAmount(array $projects, ?array $authority, array $order,
+        string $pending, string $cancelled, array $refund, ?string $historicalPaid,
+        ?string $displayRemaining, string $sourceKind): ?string
+    {
+        if (!$projects) return '0.00';
+        $blocked = bcadd($pending, $cancelled, 2);
+        if (is_array($authority) && (string)($authority['cardRuleType'] ?? '') === 'combination') {
+            // sourceAmounts deliberately returns raw group value. Filtering a
+            // closed component must not silently release previously cancelled debt.
+            $raw = $this->sourceAmounts($projects)['remainingAmount'];
+            if ($raw === null) return null;
+            $usable = bcsub($raw, $blocked, 2);
+            return bccomp($usable, '0', 2) > 0 ? $usable : '0.00';
+        }
+        if (is_array($authority) && (string)$authority['ruleType'] === 'choice_count') {
+            $sharedOrder = $order;
+            if ((int)($order['store_id'] ?? -1) === 0 && ($order['mark'] ?? '') === 'migration_entitlement'
+                && $historicalPaid !== null) $sharedOrder['pay_price'] = $historicalPaid;
+            $shared = CashierV3SharedCardPurchaseAmount::project($sharedOrder, $authority, [
+                'r26RefundedCents' => (int)($refund['returned'] ?? 0),
+                'r26RefundRemovedTimes' => (int)($refund['removed'] ?? 0),
+            ]);
+            if ($shared === null) return null;
+            $independent = array_values(array_filter($projects, static function (array $project): bool {
+                return CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($project);
+            }));
+            $independentAmount = $independent ? $this->sourceAmounts($independent)['remainingAmount'] : '0.00';
+            if ($independentAmount === null) return null;
+            $sharedAmount = count($projects) > count($independent) ? bcsub($shared['remainingAmount'], $blocked, 2) : '0.00';
+            return bcadd(bccomp($sharedAmount, '0', 2) > 0 ? $sharedAmount : '0.00', $independentAmount, 2);
+        }
+        return $sourceKind === 'time_card' ? $displayRemaining : $this->sourceAmounts($projects)['remainingAmount'];
     }
 
     /** @return array{purchaseAmount:?string,remainingAmount:?string,calculationVersion:string} */

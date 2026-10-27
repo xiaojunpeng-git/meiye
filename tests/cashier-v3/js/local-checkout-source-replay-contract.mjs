@@ -10,7 +10,7 @@ const checks = [
   ['本地预览保存来源字段', /localCheckoutPreviewSnapshot\(\)[\s\S]*primarySourceId:[\s\S]*rewardAmountCents:/],
   ['来源修改只更新浏览器快照', /action === 'update-checkout-business-source'[\s\S]*只更新浏览器内快照/],
   ['业务日期修改只更新浏览器快照', /action === 'update-checkout-sales-date'[\s\S]*preview\.businessDate/],
-  ['最终快照同时包含来源与支付明细', /source: checkoutSourceSnapshot\([\s\S]*payment,/],
+  ['最终快照同时包含来源与支付明细', /lines: \[\.\.\.lines, \.\.\.paymentLines\][\s\S]*source: sourceSnapshot/],
   ['权益行快照保留卡名卡号项目名', /sourceNameSnapshot:[\s\S]*sourceCodeSnapshot:[\s\S]*projectNameSnapshot:/],
   ['最终只提交一次 submit-checkout', /finalizeLocalCheckoutPreview[\s\S]*action: 'submit-checkout'[\s\S]*checkoutSnapshot/],
   ['普通前端清单存在且可审计', /const checkoutRequestActions = new Set\(\[/]

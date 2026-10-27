@@ -277,6 +277,14 @@ const EMPTY_BOOTSTRAP = {
     id: null,
     name: '当前门店'
   },
+  navigationRules: [],
+  // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
+  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true },
+  // Old, unmigrated servers retain their previous source behavior; current
+  // servers explicitly provide false for fixed-source mode, never truthy-fallback.
+  businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
+  businessSourceDefaults: {},
+  businessSourceDefaultsMemberId: 0,
   featurePermissions: {
     'cashier.v3.cashier': false,
     'cashier.v3.writeoff': false,
@@ -286,6 +294,17 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.hang': false,
     'cashier.v3.order_center': false,
     'cashier.v3.management_center': false,
+    'cashier.v3.fund': false,
+    'cashier.v3.care': false,
+    'cashier.v3.data': false,
+    // 登录首屏须识别服务端已授权的基础报表容器；逐表叶权限仍由后端按实时规则校验。
+    'cashier.v3.basic_reports': false,
+    'cashier.v3.targets': false,
+    'cashier.v3.management.staff': false,
+    'cashier.v3.management.rooms': false,
+    'cashier.v3.management.store_profile': false,
+    'cashier.v3.management.dashboard': false,
+
     'cashier.v3.member.create': false,
     'cashier.v3.member.batch': false,
     'cashier.v3.inventory.overview': false,
@@ -310,6 +329,8 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.cashier.card.transfer': false,
     'cashier.v3.cashier.card.disable': false,
     'cashier.v3.cashier.card.enable': false,
+    // Registered here so login/root normalization preserves the explicit grant.
+    'cashier.v3.cashier.card.to_balance': false,
     'cashier.v3.cashier.card.project_replace': false,
     'cashier.v3.cashier.card.project_upgrade': false,
     'cashier.v3.member.create': false,
@@ -339,7 +360,8 @@ const EMPTY_BOOTSTRAP = {
   operator: {
     name: '当前账号',
     account: '',
-    roleName: ''
+    roleName: '',
+    profile: { name: '', phone: '', positions: [] }
   },
   pendingHangCount: 0,
   cashier: EMPTY_CASHIER,
@@ -460,6 +482,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     id: 'store-1',
     name: '瑞昊一店'
   },
+  navigationRules: [],
   featurePermissions: {
     'cashier.v3.cashier': true,
     'cashier.v3.writeoff': true,
@@ -469,6 +492,16 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.hang': true,
     'cashier.v3.order_center': true,
     'cashier.v3.management_center': true,
+    'cashier.v3.fund': true,
+    'cashier.v3.care': true,
+    'cashier.v3.data': true,
+    'cashier.v3.basic_reports': true,
+    'cashier.v3.targets': true,
+    'cashier.v3.management.staff': true,
+    'cashier.v3.management.rooms': true,
+    'cashier.v3.management.store_profile': true,
+    'cashier.v3.management.dashboard': true,
+
     'cashier.v3.member.create': true,
     'cashier.v3.member.batch': true,
     'cashier.v3.inventory.overview': true,
@@ -494,6 +527,8 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.cashier.card.transfer': true,
     'cashier.v3.cashier.card.disable': true,
     'cashier.v3.cashier.card.enable': true,
+    // Asset conversion is never implicitly granted by the local preview fixture.
+    'cashier.v3.cashier.card.to_balance': false,
     'cashier.v3.cashier.card.project_replace': true,
     'cashier.v3.cashier.card.project_upgrade': true,
     'cashier.v3.member.create': true,
@@ -1913,6 +1948,19 @@ function normalizeBootstrap(rawBootstrap = {}) {
         || raw.storeId || raw.store_id || raw.store?.id || null,
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
+    navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
+    storeDisplayOptions: {
+      salesAttributionEnabled: raw.storeDisplayOptions?.salesAttributionEnabled !== false,
+      experienceEnabled: raw.storeDisplayOptions?.experienceEnabled !== false,
+      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false,
+      // 缺省兼容可修改；仅后端明确关闭展示时隐藏，金额快照不参与归一化。
+      laborFeeVisible: raw.storeDisplayOptions?.laborFeeVisible !== false
+    },
+    businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
+      ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },
+    businessSourceDefaults: raw.businessSourceDefaults && typeof raw.businessSourceDefaults === 'object'
+      ? { ...raw.businessSourceDefaults } : {},
+    businessSourceDefaultsMemberId: Math.max(0, Number(raw.businessSourceDefaultsMemberId) || 0),
     featurePermissions: {
       ...base.featurePermissions,
       ...incomingFeaturePermissions
@@ -2563,6 +2611,8 @@ const CARD_OPERATION_FEATURE_BY_TYPE = Object.freeze({
   card_extension: 'cashier.v3.cashier.card.extend',
   card_transfer: 'cashier.v3.cashier.card.transfer',
   card_disable: 'cashier.v3.cashier.card.disable',
+  // 独立岗位叶权限；退款/停用权限不授予转余额能力。
+  card_to_balance: 'cashier.v3.cashier.card.to_balance',
   card_enable: 'cashier.v3.cashier.card.enable',
   project_replacement: 'cashier.v3.cashier.card.project_replace',
   project_upgrade: 'cashier.v3.cashier.card.project_upgrade'
@@ -2750,6 +2800,10 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // 单次预约颜色由领域事务按会话门店锁行保存，不依赖预约业务版本。
+  if (action === 'mark-reservation-color') {
+    return { invalid: false, contexts: [] }
+  }
   // 普通充值的确认页是浏览器快照；最终事务自行锁定会员余额与配置，
   // 不需要服务端编辑草稿，更不能附带收银工作台展示版本。
   if (action === 'submit-recharge-checkout' && payload.checkoutSnapshot) {
@@ -2781,7 +2835,7 @@ function resolveCommandContexts(action, payload) {
   // the current card and benefit rows inside the transaction, so no browser
   // projection/version context is accepted or required for this branch.
   if (action === 'submit-card-operation'
-    && String(payload?.operationType || '') === 'project_replacement') {
+    && ['project_replacement', 'card_to_balance'].includes(String(payload?.operationType || ''))) {
     return { invalid: false, contexts: [] }
   }
   // A final browser-owned checkout snapshot is self-contained. Never carry
@@ -2830,7 +2884,11 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('reservation', payload.reservationId))
   }
 
-  if (payload.serviceOrderId || payload.serviceSessionId) {
+  // 预约开始/结束只声明 reservation context；关联服务单由后端按预约头
+  // 重新发现并锁定。列表携带的 serviceOrderId 是展示关联，不能推导出
+  // 未签发的 service_order 版本，也不能给该命令附加契约外的资源。
+  if ((payload.serviceOrderId || payload.serviceSessionId)
+    && !['start-reservation-service', 'end-reservation-service'].includes(action)) {
     const serviceOrderId = payload.serviceOrderId || payload.serviceSessionId
     contexts.push(buildCommandContext('service_order', serviceOrderId))
   }
@@ -3644,7 +3702,8 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
   const readOnly = isReadOnlyAction(canonicalAction)
   const liveProjectReplacement = canonicalAction === 'submit-card-operation'
-    && String(requestBody.operationType || '') === 'project_replacement'
+    // 卡转余额也只依赖最终业务快照和服务端事务锁，不引入浏览器版本。
+    && ['project_replacement', 'card_to_balance'].includes(String(requestBody.operationType || ''))
   // 普通结账与充值的最终确认都只提交本次浏览器快照；后端事务锁定权威资源。
   const directCheckoutSnapshot = (
     canonicalAction === 'submit-checkout'
@@ -3741,6 +3800,8 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 因而和独立欠款操作一样允许空 command contexts，不能误拿收银工作台版本阻断。
   // 退款及其销售人改派由领域事务锁定退款单、核对人员版本，不继承收银工作台版本。
   const serverDiscoverableContextActions = [
+    // 颜色属于单次预约元数据，由领域按会话门店锁行；仍校验响应命令绑定。
+    'mark-reservation-color',
     'cancel-order-center-debt',
     'refund-imported-card',
     'refund-card-or-line',

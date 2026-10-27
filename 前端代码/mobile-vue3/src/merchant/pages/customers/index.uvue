@@ -1,6 +1,6 @@
 <template>
 	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }">
-		<view class="customer-page__header">
+		<view v-if="customerOrganizationEntryVisible" class="customer-page__header">
 			<view class="customer-page__title-row">
 				<view class="customer-page__org-filter" @tap="openCustomerStorePicker"><text>{{ customerActiveStoreLabel }}›</text></view>
 			</view>
@@ -195,6 +195,7 @@
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
+	import { merchantOrganizationEntryVisible } from '../../../shared/platform/merchant-tab-permissions.uts'
 	import { clearMerchantRoot, currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
 	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
@@ -272,6 +273,7 @@
 	const listFilterSnapshotOperators = ref<any>({})
 	const listFilterSnapshotDateShortcuts = ref<any>({})
 	const listFilterSnapshotBirthdayShortcuts = ref<any>({})
+	const customerOrganizationEntryVisible = ref(false)
 	const customerStoreContexts = ref<Array<any>>([])
 	const customerActiveStoreIndex = ref(0)
 	const customerActiveStoreLabel = ref('门店信息加载中')
@@ -286,6 +288,8 @@
 
 	function loadCustomerStoreContext() : void {
 		let root = currentMerchantRoot()
+		customerOrganizationEntryVisible.value = merchantOrganizationEntryVisible(root)
+		if (!customerOrganizationEntryVisible.value) customerStorePickerVisible.value = false
 		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
 		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
 		customerStoreContexts.value = contexts
@@ -296,7 +300,7 @@
 	}
 
 	function openCustomerStorePicker() : void {
-		if (customerSwitchingStore.value || customerStoreContexts.value.length <= 1) return
+		if (!merchantOrganizationEntryVisible() || customerSwitchingStore.value || customerStoreContexts.value.length <= 1) return
 		customerStoreKeyword.value = ''
 		pendingCustomerStoreContext.value = customerStoreContexts.value[customerActiveStoreIndex.value] || null
 		customerStorePickerVisible.value = true

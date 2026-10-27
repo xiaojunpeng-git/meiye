@@ -13,6 +13,7 @@ namespace app\services\system;
 
 use app\dao\system\SystemMenusDao;
 use app\services\BaseServices;
+use app\services\report\BasicReportCatalogServices;
 use mohe\exceptions\AdminException;
 use mohe\services\FormBuilder as Form;
 use mohe\utils\Arr;
@@ -204,6 +205,19 @@ class SystemMenusServices extends BaseServices
 		}
         $menusList = $this->dao->getMenusRoule(['auth_type' => 1, 'is_show' => 1, 'is_del' => 0, 'type' => $type, 'route' => $rulesStr]);
         $unique = $this->dao->getMenusUnique(['type' => $type, 'unique' => $rulesStr]);
+        // 010 旧平台路由仍检查隐藏的 admin-report-basic。岗位编辑器只回传可见菜单，
+        // 会删掉这个旧 ID；只给已拥有 21 张表任一精确叶子授权的账号补路由令牌。
+        // 此投影不写角色 rules，也不参与后端接口授权；单表查询仍逐叶子校验。
+        if ($type === 1 && ($level || $adminType === 3) && config('basic_report.platform_menu_all_stores')) {
+            $unique = self::withBasicReportRouteAuth($unique);
+        }
+        // 独立目录沿用“权限规则”维护资格，只补导航，不修改任何平台/商家端岗位授权记录。
+        if ($type === 1 && in_array('setting-system-menus', $unique, true)) {
+            $extraId = (int)\think\facade\Db::name('system_menus')->where('unique_auth','setting-store-permissions')->where('is_del',0)->value('id');
+            $extra = $extraId > 0 ? $this->dao->getMenusRoule(['auth_type'=>1,'is_show'=>1,'is_del'=>0,'type'=>1,'route'=>[$extraId]]) : [];
+            $known = $menusList->column('id');
+            foreach ($extra as $row) if (!in_array($row['id'],$known)) $menusList[]=$row;
+        }
         $menuData = $this->getMenusData($menusList, $type);
         // 岗位可只授权叶子功能。平台导航需要完整祖先链，但 API/功能权限仍严格取原规则。
         // 不改变其他终端或超级管理员的既有菜单构建行为。
@@ -211,6 +225,20 @@ class SystemMenusServices extends BaseServices
             $menuData = $this->completePlatformMenuAncestors($menuData);
         }
         return [Arr::getMenuIviewList($menuData), $unique];
+    }
+
+    /** 仅为旧 Vue 路由补一个展示令牌；未知权限和没有叶子权限的账号不得继承。 */
+    private static function withBasicReportRouteAuth(array $unique): array
+    {
+        if (in_array('admin-report-basic', $unique, true)) return $unique;
+        $grants = array_fill_keys($unique, true);
+        foreach (BasicReportCatalogServices::entries() as $entry) {
+            if (isset($grants['admin-report-' . $entry['code']])) {
+                $unique[] = 'admin-report-basic';
+                break;
+            }
+        }
+        return $unique;
     }
 
     /**

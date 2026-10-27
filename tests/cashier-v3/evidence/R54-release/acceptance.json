@@ -1,0 +1,11 @@
+{
+  "candidateTree": "523cf660337d05188c0de6db871fcc475320edca",
+  "productManagerConfirmed": true,
+  "rhFormalAndPreview": true,
+  "complete010AmountGuard": true,
+  "order": ["commit", "rh", "push", "008", "010"],
+  "databaseMigrations": false,
+  "platformStaticUnchanged": true,
+  "authorization": "产品经理测试通过；明确补验最终候选并同意010整元校验补齐；三站按原顺序发布。",
+  "backupScope": "逐实例独立文件备份及回滚点；无数据库写入或迁移。"
+}

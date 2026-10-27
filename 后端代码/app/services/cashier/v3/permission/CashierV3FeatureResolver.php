@@ -31,12 +31,15 @@ class CashierV3FeatureResolver
         'cashier.v3.cashier.card.transfer',
         'cashier.v3.cashier.card.disable',
         'cashier.v3.cashier.card.enable',
+        'cashier.v3.cashier.card.to_balance',
         'cashier.v3.cashier.card.project_replace',
         'cashier.v3.cashier.card.project_upgrade',
         'cashier.v3.writeoff',
         'cashier.v3.room',
         'cashier.v3.reservation',
         'cashier.v3.member',
+        'cashier.v3.fund', 'cashier.v3.care', 'cashier.v3.data', 'cashier.v3.basic_reports', 'cashier.v3.targets',
+        'cashier.v3.management.staff', 'cashier.v3.management.rooms', 'cashier.v3.management.store_profile', 'cashier.v3.management.dashboard',
         'cashier.v3.hang',
         'cashier.v3.order_center',
         'cashier.v3.management_center',
@@ -143,6 +146,7 @@ class CashierV3FeatureResolver
         if (!empty($operatorProfile['_trusted_mobile_merchant_session'])) {
             $granted = array_merge($granted, $this->mobileMerchantFeatures((int)($operatorProfile['employee_id'] ?? 0)));
         }
+        // 门店规则只裁剪 store_v3 部分；可信商家端桥接继续遵守其独立能力目录。
         return array_values(array_unique($granted));
     }
 
@@ -159,11 +163,13 @@ class CashierV3FeatureResolver
                 foreach ($nodes as $node) {
                     $code = trim((string)($node['feature_code'] ?? ''));
                     if ($code !== '') $visible[$code] = true;
+                    // 组织选店只读会话从逐表叶子得到容器入口，不能依赖已隐藏的旧总权限节点。
+                    if (strpos($code, 'cashier.v3.basic_report.basic_') === 0) $visible['cashier.v3.basic_reports'] = true;
                     $walk((array)($node['children'] ?? []));
                 }
             };
-            $walk(JobPositionPolicyServices::STORE_V3_MENU_TREE);
-            return array_keys($visible);
+            $walk((new \app\services\organization\StorePermissionCatalogServices())->menuTree());
+            return (new \app\services\organization\StorePermissionCatalogServices())->filterEnabled(array_keys($visible));
         }
         return $this->resolveGrantedFeatures($operatorProfile);
     }

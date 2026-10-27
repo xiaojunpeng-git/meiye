@@ -13,7 +13,7 @@ use app\model\order\StoreOrder;
 use app\model\order\StoreOrderCartInfo;
 use app\model\product\product\StoreProduct;
 use app\model\user\UserCardHolder;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\services\order\StoreCartServices;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\order\StoreOrderCartInfoServices;
@@ -251,9 +251,10 @@ class SpliteOrderAfterJob extends BaseJobs
                             'service_object' => $svcObj,
                         ],
                     ];
-                    $onePrice = YejiCommission::where("product_id", $pid)->value("yeji");
-                    $syncAll = [];
                     $cartRowArr = is_array($cartOne) ? $cartOne : $cartOne->toArray();
+                    // 旧拆单自动核销与即时核销同取当前项目/卡项值；无显式值才按本次单价。
+                    $onePrice = $writeOffOrderServices->resolveUnitPerformancePublic($cartRowArr, $cartInfoDecoded);
+                    $syncAll = [];
                     $matchedServiceYeji = $this->findServiceYejiForCart($serviceYejiAll, $cartRowArr, (int)$cartOne['product_id']);
                     if ($matchedServiceYeji) {
                         $syncOne = $matchedServiceYeji;
@@ -274,13 +275,12 @@ class SpliteOrderAfterJob extends BaseJobs
                                     $totalAssigned = bcadd($totalAssigned, (string)($nvChoose['yeji'] ?? 0), 2);
                                 }
                                 if (bccomp($totalAssigned, (string)$syncOne['price'], 2) !== 0) {
-                                    $onceYeji = bcdiv((string)$syncOne['price'], (string)$len, 2);
-                                    $yu = bcsub((string)$syncOne['price'], bcmul($onceYeji, (string)$len, 2), 2);
+                                    // 拆单后的新服务也按整数元分配，最后一人承接尾差。
+                                    $parts = LegacyCraftsmanPerformanceDefault::splitYuan(
+                                        (string)(int)$syncOne['price'], $len
+                                    );
                                     foreach ($syncOne['staffChoose'] as $nkChoose => &$nvChoose) {
-                                        $nvChoose['yeji'] = $onceYeji;
-                                        if ($nkChoose === $len - 1 && bccomp($yu, '0', 2) > 0) {
-                                            $nvChoose['yeji'] = bcadd($onceYeji, $yu, 2);
-                                        }
+                                        $nvChoose['yeji'] = $parts[$nkChoose];
                                     }
                                     unset($nvChoose);
                                 }

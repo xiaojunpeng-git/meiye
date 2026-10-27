@@ -1,0 +1,34 @@
+PASS complete stable code registry
+PASS navigation upgrade fills registered submenus
+PASS navigation upgrade repeat preserves metadata and revision
+PASS navigation upgrade leaves every job channel row unchanged
+PASS member no longer grants care or fund
+PASS management container never regrants unchecked children
+PASS independent cashier.v3.care
+PASS independent cashier.v3.fund
+PASS independent cashier.v3.data
+PASS independent cashier.v3.targets
+PASS leaf inherits only business ancestors
+PASS atomic metadata revision increments
+PASS saved names sort and state survive reread
+PASS disabled fund denied on server despite persisted grant
+PASS disable fund does not affect member
+PASS stale concurrent editor rejected
+PASS metadata audit carries exact before and after
+PASS reenable restores original explicit grant
+PASS disabled persisted data group denies report and target capabilities on server
+PASS disabling data group preserves operation grants
+PASS orphan business entry rejected instead of silently disappearing
+PASS invalid cycle rejected
+PASS invalid duplicate rejected
+PASS invalid missing rejected
+PASS invalid fake rejected
+PASS invalid fraction rejected
+PASS member cannot call staff API
+PASS member cannot call target API
+PASS staff manifest bound to separate capability
+PASS target manifest bound to separate capability
+PASS platform and mobile job grants unchanged
+migration retains old effective permissions position 74
+#0 /tmp/r28-release-catalog-mysql.php(79): check(false, 'migration retai...')
+#1 {main}

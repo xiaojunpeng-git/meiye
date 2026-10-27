@@ -1983,21 +1983,24 @@ class StoreProductServices extends BaseServices
         $where['store_stock'] = $store_stock > 0 ? $store_stock : 2;
         $data = $this->getProductList($where, $isStock, $limit, ['attrValue', 'descriptions']);
         if ($data['list']) {
-            $cardProjectLabor = [];
+            $cardProjectDefaults = [];
             if ((int)($where['choose_type'] ?? 0) === 97) {
-                // 卡内新增项目的初值来自项目规则；只按本页项目批量读取，保存后由卡内关联独立持有。
+                // 卡内新增项目的手工费和手艺人业绩初值来自同一项目规则；
+                // 只按本页项目批量读取，卡项保存后仍由关联行独立持有，不随项目改价追改。
                 $projectIds = array_values(array_unique(array_map(static function ($row) {
                     return (int)($row['pid'] ?: $row['id']);
                 }, $data['list'])));
                 if ($projectIds) {
                     try {
-                        $cardProjectLabor = Db::name('cashier_v3_project_performance_rule')
+                        $cardProjectDefaults = Db::name('cashier_v3_project_performance_rule')
                             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                             ->whereIn('project_id', $projectIds)
-                            ->column('labor_configured_unit_amount_cents', 'project_id');
+                            ->field('project_id,labor_configured_unit_amount_cents,craftsman_default_unit_amount_cents')
+                            ->select()->toArray();
+                        $cardProjectDefaults = array_column($cardProjectDefaults, null, 'project_id');
                     } catch (\Throwable $exception) {
-                        // 旧实例缺少项目规则升级时仍可选项目，手工初值按 0；保存前迁移门禁另行核对。
-                        $cardProjectLabor = [];
+                        // 旧实例缺少项目规则升级时仍可选项目；无明确手艺人值继续按默认单价。
+                        $cardProjectDefaults = [];
                     }
                 }
             }
@@ -2036,8 +2039,12 @@ class StoreProductServices extends BaseServices
             foreach ($data['list'] as &$item) {
                 if ((int)($where['choose_type'] ?? 0) === 97) {
                     $masterId = (int)($item['pid'] ?: $item['id']);
+                    $defaults = $cardProjectDefaults[$masterId] ?? [];
                     foreach ($item['attrValue'] as &$sku) {
-                        $sku['labor_fee'] = (int)round((int)($cardProjectLabor[$masterId] ?? 0) / 100);
+                        $sku['labor_fee'] = (int)round((int)($defaults['labor_configured_unit_amount_cents'] ?? 0) / 100);
+                        // NULL 保留“默认单价”；配置 0 则是明确的手动 0 元。
+                        $sku['craftsman_default_unit_amount'] = ($defaults['craftsman_default_unit_amount_cents'] ?? null) === null
+                            ? null : intdiv((int)$defaults['craftsman_default_unit_amount_cents'], 100);
                     }
                     unset($sku);
                 }
@@ -4354,6 +4361,9 @@ class StoreProductServices extends BaseServices
             }
             $data['level_list'] = $level_list;
         }
+        // 商品编辑（含新增、复制）共用的只读元数据；与R37收银显隐读取同一配置。
+        // 仅隐藏卡内项目列，不能据此重算、清空商品配置或历史手工费。
+        if ($type === 0) $data['labor_fee_visible'] = (int)sys_config('cashier_labor_fee_mode', 0) !== 1;
         return $data;
     }
 

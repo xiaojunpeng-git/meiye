@@ -1,0 +1,22 @@
+{
+  "source": "d4615e662ce9cc4e902cb6d579e5a6dd6a4446bd",
+  "preserve": "372b928398090c823dac099831e70270880b5451",
+  "deployedTree": "25aa8f4af420ac3735906b436d1bce699b94151e",
+  "baselineTree": "e9a1e8ba76f2d1cba461f38eba5f62c00e6c4fb3",
+  "candidateTree": "f7cd01f85d91d1d06c11395c4081b1c065fc75be",
+  "retained": [
+    "后端代码/app/controller/admin/v1/target/StoreTarget.php",
+    "后端代码/app/services/target/TargetSchemeServices.php",
+    "后端代码/app/services/report/GroupManagementDashboardTargetServices.php",
+    "tests/target-scheme/js/r95-scheme-controls.mjs",
+    "tests/target-scheme/php/r95-line-binding-integration.php",
+    "tests/target-scheme/php/r95-local-migration-parity.php",
+    "后端代码/database/upgrades/2026-10-20-目标方案逐行生效/00-升级说明.md",
+    "后端代码/database/upgrades/2026-10-20-目标方案逐行生效/01-前置检查.sql",
+    "后端代码/database/upgrades/2026-10-20-目标方案逐行生效/02-正式升级.sql",
+    "后端代码/database/upgrades/2026-10-20-目标方案逐行生效/03-升级后验证.sql"
+  ],
+  "businessPatchSha256": "eb48c97621b20468aca4b2a5930574cc11d79da85fb5601fbc9f2980cc0f889c",
+  "sharedHead": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "sharedIndexSha256": "102de8456c13d8f9f2f24165a0b64c6aef72de2621c9514811c3d82615639dca"
+}

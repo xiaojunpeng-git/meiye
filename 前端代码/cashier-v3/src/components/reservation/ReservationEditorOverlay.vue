@@ -53,6 +53,7 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  businessSourcePolicy: { type: Object, default: null },
   isSubmitting: {
     type: Boolean,
     default: false
@@ -113,6 +114,11 @@ const refreshedCatalogOptions = ref(null)
 const isCraftsmanPickerOpen = ref(false)
 const editorDialogRef = ref(null)
 const defaultAppointmentStartTime = '09:00'
+// 独立准备接口优先提供策略；兼容旧调用方时从草稿读取，不影响项目权益来源。
+const sourcePolicy = computed(() => props.businessSourcePolicy || draft.value.businessSourcePolicy || { enabled: true, mode: 'manual' })
+const sourceEnabled = computed(() => sourcePolicy.value.enabled !== false)
+let memberSourceRequest = 0
+let sourceSelectionSerial = 0
 
 const selectedMember = computed(() => draft.value.member || props.member || null)
 const hasSelectedMember = computed(() => Boolean(
@@ -176,7 +182,7 @@ const craftsmanLabel = computed(() => selectedCraftsmen.value.length
   : '待分配手艺人')
 const summaryRows = computed(() => [
   { label: '会员', value: memberLabel.value },
-  { label: '客户来源', value: businessSourceLabel.value },
+  ...(sourceEnabled.value ? [{ label: '客户来源', value: businessSourceLabel.value }] : []),
   { label: '预约时间', value: reservationRangeLabel.value },
   { label: '项目', value: projectLines.value.length ? projectLines.value.map((item) => `${roleText(item)}：${projectName(item)}`).join('；') : '未填写项目（仅占用预约时段）' },
   { label: '手艺人', value: craftsmanLabel.value },
@@ -592,10 +598,15 @@ async function chooseMember() {
     const member = result?.member || result
     if (!member || typeof member !== 'object') return
     const memberId = member.memberId || member.id || draft.value.memberId
+    const changedMember = String(memberId) !== String(draft.value.memberId || '')
+    const requestSerial = ++memberSourceRequest
+    const selectionSerial = sourceSelectionSerial
     updateDraft({
       ...draft.value,
       member,
       memberId,
+      // 仅新预约切会员清掉未确认的归因；编辑/重试始终保留当前预约的已确认值。
+      ...(changedMember ? { businessSourcePrimaryId: 0, businessSourceSecondaryId: 0, businessSourceLabel: '' } : {}),
       memberName: member.memberName || member.name || draft.value.memberName,
       // 仅在首次选会员时套用一次；已有预约编辑与后续手工改选不回填。
       ...(Array.isArray(member.exclusiveDefaultCraftsmen)
@@ -607,8 +618,17 @@ async function chooseMember() {
     if (typeof props.onRefreshCatalog === 'function' && memberId) {
       Promise.resolve(props.onRefreshCatalog({ memberId }))
         .then((catalog) => {
-          if (Array.isArray(catalog?.catalogOptions) && String(draft.value.memberId || '') === String(memberId)) {
+          if (requestSerial !== memberSourceRequest || String(draft.value.memberId || '') !== String(memberId)) return
+          if (Array.isArray(catalog?.catalogOptions)) {
             refreshedCatalogOptions.value = catalog.catalogOptions
+          }
+          if (changedMember && selectionSerial === sourceSelectionSerial && !Number(draft.value.businessSourcePrimaryId)) {
+            const source = catalog?.initialBusinessSource || {}
+            updateDraft({ ...draft.value,
+              ...(catalog?.businessSourcePolicy ? { businessSourcePolicy: catalog.businessSourcePolicy } : {}),
+              businessSourcePrimaryId: Number(source.primarySourceId || 0),
+              businessSourceSecondaryId: Number(source.secondarySourceId || 0),
+              businessSourceLabel: source.displayNameSnapshot || '' })
           }
         })
         .catch(() => {})
@@ -757,6 +777,7 @@ function submitDraft() {
 }
 
 function chooseBusinessPrimary(value) {
+  sourceSelectionSerial++
   const primary = props.businessSources.find((source) => Number(source.id) === Number(value))
   updateDraft({
     businessSourcePrimaryId: Number(primary?.id || 0),
@@ -766,6 +787,7 @@ function chooseBusinessPrimary(value) {
 }
 
 function chooseBusinessSecondary(value) {
+  sourceSelectionSerial++
   const secondary = businessSourceChildren.value.find((source) => Number(source.id) === Number(value))
   updateDraft({
     businessSourceSecondaryId: Number(secondary?.id || 0),
@@ -776,8 +798,8 @@ function chooseBusinessSecondary(value) {
 function collectMissingFields() {
   const missing = []
   if (!hasSelectedMember.value) missing.push('会员')
-  if (!Number(draft.value.businessSourcePrimaryId)) missing.push('客户来源')
-  if (selectedBusinessSource.value?.requireSecondary && !Number(draft.value.businessSourceSecondaryId)) missing.push('二级来源')
+  if (sourceEnabled.value && !Number(draft.value.businessSourcePrimaryId)) missing.push('客户来源')
+  if (sourceEnabled.value && selectedBusinessSource.value?.requireSecondary && !Number(draft.value.businessSourceSecondaryId)) missing.push('二级来源')
   if (projectLines.value.some((line) => normalizedProjectSource(line) === 'card' && !Number(line?.entitlementSourceDetailId || line?.sourceDetailId))) {
     missing.push('已购项目来源')
   }
@@ -881,7 +903,7 @@ useModalFocusTrap({
         </div>
       </section>
 
-      <section class="reservation-editor-step reservation-editor-step--compact">
+      <section v-if="sourceEnabled" class="reservation-editor-step reservation-editor-step--compact">
         <header class="reservation-editor-step__header">
           <span class="reservation-editor-step__number">2</span>
           <div><h3>客户来源</h3></div>

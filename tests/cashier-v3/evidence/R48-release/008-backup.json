@@ -1,0 +1,11 @@
+{
+  "instance": "008",
+  "commit": "c3625d2adeb67a01ca95e078517dcf45d503fef3",
+  "backup": "/www/backups/008.cc3798.com/20261022-r48-c3625d2a",
+  "result": "PASS",
+  "archives": {
+    "backend": "d3697665af7bf5cfc0188ab24e5fe4969b99f536f97c98a24f348af98ec87da3",
+    "cashier": "25749a688638490f002a536720e541d18e96dfdbc590429ff91500d1adf41c7d",
+    "platform": "8fc3c1e98c3a670153d8560510b82ced4eead391087e8ea2b3b6adef273959cd"
+  }
+}

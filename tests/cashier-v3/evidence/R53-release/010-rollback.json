@@ -1,0 +1,6 @@
+{
+  "result": "PASS",
+  "backup": "/www/backups/010/r53-card-balance-5fd82252",
+  "retainedCompatibleIndexes": true,
+  "error": "Command failed: ssh -q -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 mohe-server /www/server/php/74/bin/php '/www/wwwroot/010.cc3798.com/database/upgrades/2026-10-24-卡转余额/03-补交关联锁定索引.php' --apply\nbash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nSQLSTATE[42000]: Syntax error or access violation: 1142 ALTER command denied to user 'mohe_010_app'@'localhost' for table 'eb_store_order'\n"
+}

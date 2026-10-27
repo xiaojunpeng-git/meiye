@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "prior_store_data_roles_checked": 9,
+  "native_store_count": 130,
+  "scope_tree_roots": 1,
+  "original_grants_retained": true,
+  "business_writes": 0
+}

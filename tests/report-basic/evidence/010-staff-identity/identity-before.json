@@ -1,0 +1,899 @@
+{
+  "head": "4f13dba0eac686adf2a029bac6dffc011a920c3a",
+  "r51_preserved_commit": "dfea59566663c76f0cae00d1fb851c45a262f9f9",
+  "probe_sha256": "f6872775d40a45d02e3f125dc472e53ebce19e8f156a5f7961de6cbd909c7399",
+  "local_import_sources": {
+    "后端代码/database/upgrades/2026-10-23-渼约010测试导入/01-业务快照导入.sql": "6170d3518e80949055d331fd55d2406b8101e1174b928a44855ec5dc3049b460",
+    "后端代码/database/upgrades/2026-10-23-渼约010测试导入/06-007原门店管理员登录010.sql": "3444336b26bb1267f2b3f2a7c91d4bf0cb05e50d35876874f296ebf9af1b90dc"
+  },
+  "remote": {
+    "site": "010",
+    "verifiedAt": "2026-10-23T18:28:03+00:00",
+    "database": {
+      "db": "mohe_010_app",
+      "port": 3307,
+      "ro": 1
+    },
+    "read_databases": [
+      "mohe_010_app",
+      "mohe_010"
+    ],
+    "schema": {
+      "mohe_010": {
+        "eb_system_store_staff": [
+          "id",
+          "store_id",
+          "uid",
+          "account",
+          "pwd",
+          "avatar",
+          "staff_name",
+          "phone",
+          "roles",
+          "last_ip",
+          "last_time",
+          "login_count",
+          "level",
+          "verify_status",
+          "order_status",
+          "is_admin",
+          "is_store",
+          "is_manager",
+          "is_cashier",
+          "is_customer",
+          "customer_phone",
+          "customer_url",
+          "work_member_id",
+          "work_member_code",
+          "status",
+          "notify",
+          "is_way",
+          "is_del",
+          "add_time",
+          "position",
+          "position_level",
+          "department",
+          "employee_number",
+          "join_date",
+          "id_card",
+          "birthday_date",
+          "birthday_type",
+          "age",
+          "join_area",
+          "birthday_area",
+          "now_area",
+          "contract_begin",
+          "contract_end",
+          "can_choose",
+          "is_reservable",
+          "is_butler",
+          "is_fencheng",
+          "salary_status",
+          "is_hezuofang",
+          "off_work_time",
+          "staff_intro"
+        ]
+      },
+      "mohe_010_app": {
+        "codex_010_balance_split_audit": [
+          "source_uid",
+          "original_now_money",
+          "original_ben_money",
+          "original_give_money",
+          "target_give_money",
+          "correction",
+          "rule_name"
+        ],
+        "codex_010_legacy_writeoff_projection": [
+          "source_writeoff_id",
+          "source_uid",
+          "member_id",
+          "source_order_id",
+          "source_status",
+          "record_status",
+          "original_amount",
+          "integer_amount",
+          "source_writeoff_at",
+          "voided_at",
+          "void_reason",
+          "linked_void_order_count"
+        ],
+        "codex_010_member_asset_projection": [
+          "target_uid",
+          "source_count",
+          "total_balance",
+          "principal_balance",
+          "gift_balance",
+          "integral"
+        ],
+        "codex_010_member_aux_projection": [
+          "target_uid",
+          "exp",
+          "pay_count",
+          "spread_count",
+          "brokerage_price",
+          "max_sign_num",
+          "max_level",
+          "is_promoter"
+        ],
+        "codex_010_member_map": [
+          "source_uid",
+          "target_uid",
+          "is_merged"
+        ],
+        "codex_010_member_merge_group": [
+          "source_uid",
+          "target_uid"
+        ],
+        "codex_010_migration_batch": [
+          "batch_key",
+          "source_schema",
+          "source_archive_sha256",
+          "source_member_count",
+          "target_member_count",
+          "committed_at"
+        ],
+        "codex_010_migration_exceptions": [
+          "issue_type",
+          "source_table",
+          "source_id"
+        ],
+        "codex_010_phone_identity_projection": [
+          "phone_digest",
+          "target_uid",
+          "source_account_count"
+        ],
+        "codex_010_writeoff_allocation": [
+          "writeoff_id",
+          "order_id",
+          "writeoff_status",
+          "integer_price"
+        ],
+        "codex_010_writeoff_order_target": [
+          "order_id",
+          "writeoff_status",
+          "original_total",
+          "integer_total",
+          "floor_total",
+          "parent_pay_price",
+          "capped_by_parent"
+        ],
+        "codex_010_writeoff_rounding_audit": [
+          "writeoff_id",
+          "original_price",
+          "rounded_price",
+          "rounding_delta",
+          "source_snapshot",
+          "rule_name"
+        ],
+        "eb_employee": [
+          "id",
+          "name",
+          "phone",
+          "avatar",
+          "avatar_type",
+          "uid",
+          "status",
+          "status_version",
+          "employment_type_code",
+          "employment_type_version",
+          "auth_version",
+          "is_del",
+          "add_time",
+          "update_time",
+          "mentor_employee_id",
+          "education",
+          "education_version",
+          "default_craftsman_performance_type",
+          "craftsman_setting_version"
+        ],
+        "eb_employee_internal_account": [
+          "id",
+          "employee_id",
+          "account",
+          "pwd",
+          "status",
+          "credential_version",
+          "last_ip",
+          "last_time",
+          "login_count",
+          "is_del",
+          "add_time",
+          "update_time"
+        ],
+        "eb_staff_job_position": [
+          "id",
+          "employee_id",
+          "store_id",
+          "staff_id",
+          "position_id",
+          "status",
+          "start_time",
+          "end_time",
+          "reason",
+          "is_del",
+          "request_token",
+          "operator_id",
+          "operator_name",
+          "add_time",
+          "update_time"
+        ],
+        "eb_system_store_staff": [
+          "id",
+          "employee_id",
+          "active_employee_id",
+          "store_id",
+          "uid",
+          "account",
+          "pwd",
+          "avatar",
+          "staff_name",
+          "phone",
+          "roles",
+          "last_ip",
+          "last_time",
+          "login_count",
+          "level",
+          "verify_status",
+          "order_status",
+          "is_admin",
+          "is_store",
+          "is_manager",
+          "is_cashier",
+          "is_customer",
+          "customer_phone",
+          "customer_url",
+          "work_member_id",
+          "work_member_code",
+          "status",
+          "notify",
+          "is_way",
+          "is_del",
+          "add_time",
+          "position",
+          "position_level",
+          "department",
+          "employee_number",
+          "join_date",
+          "id_card",
+          "birthday_date",
+          "birthday_type",
+          "age",
+          "join_area",
+          "birthday_area",
+          "now_area",
+          "contract_begin",
+          "contract_end",
+          "can_choose",
+          "cashier_salesperson_enabled",
+          "cashier_craftsman_enabled",
+          "craftsman_performance_type",
+          "is_reservable",
+          "is_butler",
+          "is_fencheng",
+          "salary_status",
+          "is_hezuofang",
+          "off_work_time",
+          "staff_intro",
+          "mentor_employee_id"
+        ]
+      }
+    },
+    "remote_writes": false,
+    "application_booted": false,
+    "pii_selected": false,
+    "mapping_applied": false,
+    "store_1_staff": [
+      {
+        "id": 1,
+        "store_id": 1,
+        "employee_id": 1,
+        "status": 1,
+        "is_del": 0,
+        "level": 0,
+        "is_admin": 1,
+        "position": 0
+      },
+      {
+        "id": 19,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 1
+      },
+      {
+        "id": 24,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 2
+      },
+      {
+        "id": 76,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 79,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 81,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 82,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 177,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 1,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 223,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 2,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 273,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 2,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 278,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 2,
+        "is_admin": 0,
+        "position": 4
+      },
+      {
+        "id": 279,
+        "store_id": 1,
+        "employee_id": null,
+        "status": 1,
+        "is_del": 0,
+        "level": 2,
+        "is_admin": 0,
+        "position": 4
+      }
+    ],
+    "same_primary_key_staff": {
+      "mohe_010_app": [
+        {
+          "id": 1,
+          "store_id": 1,
+          "employee_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 0,
+          "is_admin": 1,
+          "position": 0,
+          "add_time": 1766461707
+        },
+        {
+          "id": 19,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 1,
+          "add_time": 1767877528
+        },
+        {
+          "id": 24,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 2,
+          "add_time": 1767877528
+        },
+        {
+          "id": 76,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 79,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 81,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 82,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 177,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1775891959
+        },
+        {
+          "id": 223,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1780659299
+        },
+        {
+          "id": 273,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792132307
+        },
+        {
+          "id": 278,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792589386
+        },
+        {
+          "id": 279,
+          "store_id": 1,
+          "employee_id": null,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792670494
+        }
+      ],
+      "mohe_010": [
+        {
+          "id": 1,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 0,
+          "is_admin": 1,
+          "position": 0,
+          "add_time": 1766461707
+        },
+        {
+          "id": 19,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 1,
+          "add_time": 1767877528
+        },
+        {
+          "id": 24,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 2,
+          "add_time": 1767877528
+        },
+        {
+          "id": 76,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 79,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 81,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 82,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1767877528
+        },
+        {
+          "id": 177,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 1,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1775891959
+        },
+        {
+          "id": 223,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1780659299
+        },
+        {
+          "id": 273,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792132307
+        },
+        {
+          "id": 278,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792589386
+        },
+        {
+          "id": 279,
+          "store_id": 1,
+          "status": 1,
+          "is_del": 0,
+          "level": 2,
+          "is_admin": 0,
+          "position": 4,
+          "add_time": 1792670494
+        }
+      ]
+    },
+    "identity_records": {
+      "mohe_010_app": {
+        "eb_employee": {
+          "exists": true,
+          "rows": [
+            {
+              "id": 1,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 2,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 3,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 4,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 5,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 6,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 7,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 8,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 9,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 10,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            },
+            {
+              "id": 106,
+              "status": 1,
+              "is_del": 0,
+              "uid": null
+            }
+          ]
+        },
+        "eb_staff_job_position": {
+          "exists": true,
+          "rows": [
+            {
+              "id": 764,
+              "employee_id": 1,
+              "staff_id": 1,
+              "store_id": 1,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1766461707,
+              "end_time": 0,
+              "request_token": "010-007-manager-1"
+            },
+            {
+              "id": 765,
+              "employee_id": 2,
+              "staff_id": 2,
+              "store_id": 2,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1766741037,
+              "end_time": 0,
+              "request_token": "010-007-manager-2"
+            },
+            {
+              "id": 766,
+              "employee_id": 3,
+              "staff_id": 3,
+              "store_id": 3,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1766741346,
+              "end_time": 0,
+              "request_token": "010-007-manager-3"
+            },
+            {
+              "id": 767,
+              "employee_id": 4,
+              "staff_id": 4,
+              "store_id": 4,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1783685293,
+              "end_time": 0,
+              "request_token": "010-007-manager-4"
+            },
+            {
+              "id": 768,
+              "employee_id": 5,
+              "staff_id": 5,
+              "store_id": 6,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767160665,
+              "end_time": 0,
+              "request_token": "010-007-manager-5"
+            },
+            {
+              "id": 769,
+              "employee_id": 6,
+              "staff_id": 6,
+              "store_id": 7,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767160742,
+              "end_time": 0,
+              "request_token": "010-007-manager-6"
+            },
+            {
+              "id": 770,
+              "employee_id": 7,
+              "staff_id": 7,
+              "store_id": 8,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767160880,
+              "end_time": 0,
+              "request_token": "010-007-manager-7"
+            },
+            {
+              "id": 771,
+              "employee_id": 8,
+              "staff_id": 8,
+              "store_id": 9,
+              "position_id": 2,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767160987,
+              "end_time": 0,
+              "request_token": "010-007-manager-8"
+            },
+            {
+              "id": 772,
+              "employee_id": 9,
+              "staff_id": 9,
+              "store_id": 10,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767161083,
+              "end_time": 0,
+              "request_token": "010-007-manager-9"
+            },
+            {
+              "id": 773,
+              "employee_id": 10,
+              "staff_id": 10,
+              "store_id": 11,
+              "position_id": 2,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1769027764,
+              "end_time": 0,
+              "request_token": "010-007-manager-10"
+            },
+            {
+              "id": 774,
+              "employee_id": 106,
+              "staff_id": 106,
+              "store_id": 31,
+              "position_id": 1,
+              "status": 1,
+              "is_del": 0,
+              "start_time": 1767161186,
+              "end_time": 0,
+              "request_token": "010-007-manager-106"
+            }
+          ]
+        }
+      },
+      "mohe_010": {
+        "eb_employee": {
+          "exists": false
+        },
+        "eb_staff_job_position": {
+          "exists": false
+        }
+      }
+    },
+    "migration_batches": [
+      {
+        "batch_key": "010-linlin-20261023-refresh-1",
+        "source_schema": "mohe_010_refresh",
+        "source_archive_sha256": "970dfd1c383862e30dd668bd6dbfec0805a996dc23d1a5673f70283058f8eb36",
+        "committed_at": 1792747970
+      }
+    ],
+    "existing_uid_employee_links": []
+  },
+  "remote_writes": false,
+  "mapping_applied": false,
+  "source_boundary": "Import scripts used mohe_010_refresh. This probe reads ONLY authorized mohe_010_app and mohe_010; same PK in mohe_010 alone does not establish equality to the refresh archive."
+}

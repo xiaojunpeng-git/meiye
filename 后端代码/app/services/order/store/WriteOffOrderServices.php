@@ -19,7 +19,7 @@ use app\model\order\StoreOrderWriteoff;
 use app\model\product\product\StoreProduct;
 use app\model\user\UserCard;
 use app\model\user\UserCardHolder;
-use app\model\yeji\YejiCommission;
+use app\services\cashier\v3\LegacyCraftsmanPerformanceDefault;
 use app\services\message\service\StoreServiceServices;
 use app\services\order\StoreCartServices;
 use app\services\order\StoreOrderCartInfoServices;
@@ -448,7 +448,10 @@ class WriteOffOrderServices extends BaseServices
             if(empty($pid)){
                 $pid=$_info['productInfo']['id'] ?? 0;
             }
-            $_info['yeji']=YejiCommission::where("product_id",$pid)->value("yeji");
+            // 旧核销列表与落账使用同一当前项目/卡项默认值；缺源才沿用这次的实际单价。
+            $_info['yeji'] = LegacyCraftsmanPerformanceDefault::orderDetailUnitYuan(
+                (int)$item['product_id'], (int)$orderInfo['id'], (int)$item['id']
+            ) ?? LegacyCraftsmanPerformanceDefault::actualUnitYuan((string)$onePrice);
             $_info['productInfo'] = get_thumb_water($_info['productInfo']);
             $item['cart_info'] = $_info;
             $writeoffed_num = 0;
@@ -513,12 +516,16 @@ class WriteOffOrderServices extends BaseServices
             return [];
         }
         $selectedNums = [];
+        $selectedHolders = [];
         foreach ($cartIds as $cart) {
             $cid = (string)($cart['cart_id'] ?? '');
             if ($cid === '' || $cid === '0') {
                 continue;
             }
             $selectedNums[$cid] = (int)($cart['cart_num'] ?? 0);
+            if ((int)($cart['holder_id'] ?? 0) > 0) {
+                $selectedHolders[$cid] = (int)$cart['holder_id'];
+            }
         }
         // 未勾选具体行时不接受 syncAll，避免整单路径被伪造跨行业绩。
         if ($selectedNums === []) {
@@ -527,7 +534,7 @@ class WriteOffOrderServices extends BaseServices
 
         $cartRows = StoreOrderCartInfo::where('oid', $orderId)
             ->whereIn('cart_id', array_keys($selectedNums))
-            ->field('cart_id,product_id,product_type,pay_price,write_times,cart_info')
+            ->field('id,oid,uid,cart_id,cart_type,is_gift,product_id,product_type,pay_price,write_times,cart_info')
             ->select()
             ->toArray();
         $byCartId = [];
@@ -592,6 +599,10 @@ class WriteOffOrderServices extends BaseServices
                 if (bccomp($yeji, '0', 2) < 0) {
                     throw new ValidateException('手艺人业绩不能为负');
                 }
+                // 新核销事实以整数元保存；历史分值仅能作为归整来源。
+                if (bccomp($yeji, bcadd($yeji, '0', 0), 2) !== 0) {
+                    throw new ValidateException('手艺人业绩必须为整数元');
+                }
                 $yejiSum = bcadd($yejiSum, $yeji, 2);
                 $staff['staff_id'] = $sid;
                 $staff['yeji'] = (float)$yeji;
@@ -600,24 +611,9 @@ class WriteOffOrderServices extends BaseServices
 
             $cartNum = max(1, $selectedNums[$cid]);
             $productInfo = is_array($decoded['productInfo'] ?? null) ? $decoded['productInfo'] : [];
-            $performanceProductId = (int)($productInfo['pid'] ?? 0);
-            if ($performanceProductId <= 0) {
-                $performanceProductId = (int)($productInfo['id'] ?? $cart['product_id'] ?? 0);
-            }
-            $configuredPerformance = $performanceProductId > 0
-                ? YejiCommission::where('product_id', $performanceProductId)->value('yeji')
-                : null;
-            if ($configuredPerformance !== null && $configuredPerformance !== '') {
-                $unitPerformance = bcadd((string)$configuredPerformance, '0', 2);
-            } else {
-                $snapshotUnit = $decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? null;
-                if ($snapshotUnit !== null && $snapshotUnit !== '') {
-                    $unitPerformance = bcadd((string)$snapshotUnit, '0', 2);
-                } else {
-                    $writeTimes = max(1, (int)($cart['write_times'] ?? 1));
-                    $unitPerformance = bcdiv((string)($cart['pay_price'] ?? '0'), (string)$writeTimes, 2);
-                }
-            }
+            $unitPerformance = $this->resolveUnitPerformancePublic(
+                $cart, $decoded, $selectedHolders[$cid] ?? 0
+            );
             $linePrice = bcmul($unitPerformance, (string)$cartNum, 2);
             if (bccomp($yejiSum, $linePrice, 2) > 0) {
                 throw new ValidateException('手艺人业绩合计不能超过项目耗卡业绩');
@@ -634,15 +630,11 @@ class WriteOffOrderServices extends BaseServices
                 }
                 if ($perfMode !== 'writeoff_amount') {
                     $n = count($cleanedStaff);
-                    $totalCents = (int)bcmul($linePrice, '100', 0);
-                    $avgCents = intdiv($totalCents, $n);
-                    $remCents = $totalCents - $avgCents * $n;
+                    $totalYuan = (int)$linePrice;
+                    $avgYuan = intdiv($totalYuan, $n);
+                    $remYuan = $totalYuan - $avgYuan * $n;
                     foreach ($cleanedStaff as $idx => $staff) {
-                        $cents = $avgCents + ($remCents > 0 ? 1 : 0);
-                        if ($remCents > 0) {
-                            $remCents--;
-                        }
-                        $cleanedStaff[$idx]['yeji'] = $cents / 100;
+                        $cleanedStaff[$idx]['yeji'] = $avgYuan + ($idx === $n - 1 ? $remYuan : 0);
                     }
                 }
             }
@@ -654,7 +646,9 @@ class WriteOffOrderServices extends BaseServices
                 'value' => $cartNum,
                 'price' => (float)$linePrice,
                 'once_price' => (float)$unitPerformance,
-                'true_price' => (float)($decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? 0),
+                'true_price' => (float)LegacyCraftsmanPerformanceDefault::actualUnitYuan(
+                    (string)($decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? 0)
+                ),
                 'write_times' => (int)($cart['write_times'] ?? 0),
                 'staffChoose' => $cleanedStaff,
                 'staffIds' => array_values(array_map(static function ($s) {
@@ -952,6 +946,8 @@ class WriteOffOrderServices extends BaseServices
             'defer_side_effects' => !empty($extra['defer_side_effects']),
         ];
         $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot, $isAuto) {
+            // Recheck after locking the order shared with group refund freeze; stale UI cannot consume rights.
+            (new \app\services\activity\combination\CombinationFulfillmentServices())->assertUsable((int)$orderInfo['id'], true);
             if ($cartIds) {//选择商品、件数核销
                 $writeoffSum = 0;
                 foreach ($cartIds as $cart) {
@@ -1684,10 +1680,8 @@ class WriteOffOrderServices extends BaseServices
         return $this->resolveCartInfoPayPrice($cartInfo, $cartRow);
     }
 
-    /**
-     * 耗卡业绩单价：优先项目提成配置，其次购物车快照价，再次总价/总次数。
-     */
-    public function resolveUnitPerformancePublic(array $cart, array $decoded = []): string
+    /** 当前卡项/项目业绩单价；无显式设置才取本次实际单价。 */
+    public function resolveUnitPerformancePublic(array $cart, array $decoded = [], int $holderId = 0): string
     {
         if ($decoded === [] && isset($cart['cart_info'])) {
             $decoded = is_string($cart['cart_info'])
@@ -1698,22 +1692,18 @@ class WriteOffOrderServices extends BaseServices
             $decoded = [];
         }
         $productInfo = is_array($decoded['productInfo'] ?? null) ? $decoded['productInfo'] : [];
-        $performanceProductId = (int)($productInfo['pid'] ?? 0);
-        if ($performanceProductId <= 0) {
-            $performanceProductId = (int)($productInfo['id'] ?? $cart['product_id'] ?? 0);
-        }
-        $configuredPerformance = $performanceProductId > 0
-            ? YejiCommission::where('product_id', $performanceProductId)->value('yeji')
-            : null;
+        $configuredPerformance = LegacyCraftsmanPerformanceDefault::cartUnitYuan($cart, $holderId);
         if ($configuredPerformance !== null && $configuredPerformance !== '') {
-            return bcadd((string)$configuredPerformance, '0', 2);
+            return (string)$configuredPerformance;
         }
         $snapshotUnit = $decoded['truePrice'] ?? $decoded['price'] ?? $productInfo['price'] ?? null;
         if ($snapshotUnit !== null && $snapshotUnit !== '') {
-            return bcadd((string)$snapshotUnit, '0', 2);
+            return LegacyCraftsmanPerformanceDefault::actualUnitYuan((string)$snapshotUnit);
         }
         $writeTimes = max(1, (int)($cart['write_times'] ?? 1));
-        return bcdiv((string)($cart['pay_price'] ?? '0'), (string)$writeTimes, 2);
+        return LegacyCraftsmanPerformanceDefault::actualUnitYuan(
+            bcdiv((string)($cart['pay_price'] ?? '0'), (string)$writeTimes, 2)
+        );
     }
 
     /**

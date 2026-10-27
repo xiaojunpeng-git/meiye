@@ -1,0 +1,11 @@
+PASS conversion waits for origin without locking holder first
+PASS conversion real service contender exits1205 without deadlock or mutation
+PASS card_authority waits for origin without locking holder first
+PASS card_authority real service contender exits1205 without deadlock or mutation
+PASS replacement_void waits for origin without locking holder first
+PASS replacement_void real service contender exits1205 without deadlock or mutation
+PASS gateway_provider waits for origin without locking holder first
+PASS gateway_provider real service contender exits1205 without deadlock or mutation
+PASS gateway_benefit_pool waits for origin without locking holder first
+PASS gateway_benefit_pool real service contender exits1205 without deadlock or mutation
+R53_ORIGIN_LOCK_ORDER_MYSQL_OK checks=11

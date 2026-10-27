@@ -4,6 +4,7 @@
         <!--创建表单-->
         <Form :ref="'formSubmit'+field" :model="submitValue" :label-width="124">
             <use-component @changeValue="changeValue" :errorsValidate="errorsValidate" :validate="validate" :rules="rules">
+                <template #store-settings><slot name="store-settings"></slot></template>
             </use-component>
             <!--自定义内容-->
             <slot name="content" class="content"></slot>

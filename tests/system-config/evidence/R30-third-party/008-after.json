@@ -1,0 +1,200 @@
+{
+    "site": "008",
+    "database": "mohe_008",
+    "configs": [
+        {
+            "id": "536",
+            "menu_name": "aliyun_AccessKeyId",
+            "type": "text",
+            "config_tab_id": "94",
+            "info": "AccessKeyId",
+            "desc": "阿里云AccessKeyId",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "537",
+            "menu_name": "aliyun_AccessKeySecret",
+            "type": "text",
+            "config_tab_id": "94",
+            "info": "AccessKeySecret",
+            "desc": "阿里云AccessKeySecret",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "539",
+            "menu_name": "aliyun_SignName",
+            "type": "text",
+            "config_tab_id": "94",
+            "info": "短信签名",
+            "desc": "短信签名",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "325",
+            "menu_name": "config_export_open",
+            "type": "radio",
+            "config_tab_id": "66",
+            "info": "电子面单是否开启",
+            "desc": "电子面单是否开启",
+            "status": "1",
+            "stored_length": "4"
+        },
+        {
+            "id": "304",
+            "menu_name": "config_export_siid",
+            "type": "text",
+            "config_tab_id": "66",
+            "info": "电子面单打印机编号",
+            "desc": "请购买快递100电子面单打印机，快递100电子面单打印机型号：快递100云打印机二代3寸 电脑WiFi两用",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "303",
+            "menu_name": "config_export_to_address",
+            "type": "text",
+            "config_tab_id": "66",
+            "info": "发货人详细地址",
+            "desc": "快递面单发货人详细地址",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "301",
+            "menu_name": "config_export_to_name",
+            "type": "text",
+            "config_tab_id": "66",
+            "info": "发货人姓名",
+            "desc": "快递面单发货人姓名",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "302",
+            "menu_name": "config_export_to_tel",
+            "type": "text",
+            "config_tab_id": "66",
+            "info": "发货人电话",
+            "desc": "快递面单发货人电话",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "187",
+            "menu_name": "copy_product_apikey",
+            "type": "text",
+            "config_tab_id": "41",
+            "info": "99Api apiKey",
+            "desc": "复制商品第三方平台接口秘钥",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "834",
+            "menu_name": "logistics_type",
+            "type": "radio",
+            "config_tab_id": "64",
+            "info": "接口选择",
+            "desc": "建议使用一号通更方便不用配置密钥，阿里云云市场购买链接：https:\/\/0x9.me\/w9vnq",
+            "status": "1",
+            "stored_length": "1"
+        },
+        {
+            "id": "535",
+            "menu_name": "sms_type",
+            "type": "radio",
+            "config_tab_id": "18",
+            "info": "短信类型",
+            "desc": "短信类型，选择发送的短信类型",
+            "status": "1",
+            "stored_length": "4"
+        },
+        {
+            "id": "833",
+            "menu_name": "system_express_app_code",
+            "type": "text",
+            "config_tab_id": "64",
+            "info": "快递查询密钥",
+            "desc": "阿里云云市场快递查询接口密钥购买地址：https:\/\/market.aliyun.com\/products\/57126001\/cmapi021863.html?userCode=dligum2z",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "835",
+            "menu_name": "system_product_copy_type",
+            "type": "radio",
+            "config_tab_id": "41",
+            "info": "接口选择",
+            "desc": "采集商品接口选择，一号通快速注册开通使用不用配置apikey，或者去99api网址：https:\/\/www.99api.com\/注册帐号，推荐一号通方便快捷",
+            "status": "1",
+            "stored_length": "1"
+        },
+        {
+            "id": "397",
+            "menu_name": "system_statistics",
+            "type": "textarea",
+            "config_tab_id": "84",
+            "info": "代码统计",
+            "desc": "百度统计或其他JS代码",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "832",
+            "menu_name": "tengxun_map_key",
+            "type": "text",
+            "config_tab_id": "68",
+            "info": "腾讯地图KEY",
+            "desc": "腾讯地图KEY，申请地址：https:\/\/lbs.qq.com",
+            "status": "1",
+            "stored_length": "2"
+        },
+        {
+            "id": "236",
+            "menu_name": "verify_expire_time",
+            "type": "text",
+            "config_tab_id": "26",
+            "info": "验证码有效期（分）",
+            "desc": "短信验证码过期时间（分钟）",
+            "status": "1",
+            "stored_length": "1"
+        }
+    ],
+    "files": {
+        "app\/services\/system\/config\/SystemConfigServices.php": "d09790911084808d1afee66b83002909876a6a367040116d6641dec4b1426aa0",
+        "app\/controller\/admin\/v1\/system\/config\/SystemConfig.php": "eda9661d276ddfeacb51c9db46879ca86534f6ad84d4b07ea541761f7e93026b",
+        "app\/validate\/admin\/setting\/SystemConfigValidate.php": "b86abe6f70679a2016c9c2e2b899a4d5fc88b99b6ec3e7252fe72c8364197ff9",
+        "route\/admin.php": "db53376d8aeb5f2c0fc1e3d66ef3bac35ca466cbe4b4fbd5291795da53f0ccf4",
+        "public\/system.html": "42bd95bde509ddeff6c20a607b8ab1aa6012aca853c1528ad2193d838a8f92ed"
+    },
+    "upgrades": [
+        {
+            "upgrade_key": "20261024-r30-third-party-config",
+            "code_version": "bef3f9459c0e8d5fc4eeb5f041ffa92c90630727",
+            "executed_at": "2026-10-24 08:55:27"
+        },
+        {
+            "upgrade_key": "20261023-r51-basic-reports",
+            "code_version": "dfea59566663c76f0cae00d1fb851c45a262f9f9",
+            "executed_at": "2026-10-24 01:45:41"
+        },
+        {
+            "upgrade_key": "20261023-r28-store-permission-catalog",
+            "code_version": "18669cbf303299b217f32d1d0a99727ba13dc1be",
+            "executed_at": "2026-10-23 21:00:22"
+        },
+        {
+            "upgrade_key": "20261023_growth_18_help_and_message",
+            "code_version": "6472685463a1483756069a687a727003f63f95d9",
+            "executed_at": "2026-10-23 11:36:01"
+        },
+        {
+            "upgrade_key": "20261023_growth_17_setting_action",
+            "code_version": "6472685463a1483756069a687a727003f63f95d9",
+            "executed_at": "2026-10-23 11:36:01"
+        }
+    ]
+}

@@ -1,0 +1,18 @@
+{
+  "main_head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "task_head": "7760eabc10e28df502f506a559302fefb8536a08",
+  "task_status": " M tests/customer-010/evidence/round6-payroll-release/push.json\n M tests/customer-010/payroll-local.php\n M tests/report-basic/php/salary-contract.php\n M tests/report-basic/php/salary-local.php\n M 前端代码/cashier-v3/src/services/basicReportApi.js\n M 前端代码/cashier-v3/src/views/BasicReportsView.vue\n M 后端代码/app/controller/admin/v1/report/UnifiedReport.php\n M 后端代码/app/controller/cashier/v3/Report.php\n M 后端代码/app/services/report/BasicSalaryReportServices.php\n M 后端代码/app/services/report/query/BasicBusinessQueryProvider.php\n M 后端代码/route/admin.php\n M 后端代码/route/cashier-v3.php\n?? scripts/payroll/round7-browser-fixture.py\n?? scripts/payroll/round7_test_runtime.py\n?? scripts/payroll/run-round7-tests.py\n?? tests/customer-010/evidence/round6-payroll-algorithm/candidate.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/008-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/010-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/rh-payload.tar.gz\n?? tests/customer-010/evidence/round7-salary-edit-freeze/\n?? tests/customer-010/payroll-manual-integration.php\n?? 前端代码/cashier-v3/node_modules\n?? 前端代码/inventory-vue3/node_modules\n?? 后端代码/app/services/report/BasicSalaryManualServices.php\n?? 后端代码/database/upgrades/2026-10-27-工资人工项与编辑冻结/\n",
+  "main_related_files": {
+    "tests/report-basic/php/salary-contract.php": "715b5bfdc8b9ed1d884f6231bc586fbc6897a68d4613589b90662ddf73bce630",
+    "tests/report-basic/php/salary-local.php": "163575c78b88df265d7fcf5fce22d9c34dea1471676327a53a47bb8f4e12d741",
+    "前端代码/cashier-v3/src/services/basicReportApi.js": "517804b3c32f808e1a9a2235bdbb43a91e2a2fbe5992ce2a39f66e95b22351bc",
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "c526efe1781c7cbd2196270e16bd33af388e438578aa4d8e8b88a5443cda39fa",
+    "后端代码/app/controller/admin/v1/report/UnifiedReport.php": "adf14724730c97265a38128e9a1977d793b7ea9eea40ea942657b5e35ca9a7c2",
+    "后端代码/app/controller/cashier/v3/Report.php": "4b60e62acc41c8fcb97404ee943e2649901097f67bb0ced4823d00b5651e0b67",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "9aca202a79981fa4465a99677a27aa629ca1787915e7cb4d8b4c095911fc4f71",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "af494e196af6a271bb2006002fd2527bfae1ac438bbee3224c6e9a6b20348947",
+    "后端代码/route/admin.php": "fd51afab8d4b72303a0aa214f2167b8848945578299859b62eeb0655685e7d1c",
+    "后端代码/route/cashier-v3.php": "d8d86c083428008e99e0aef35c36073d3173f0d9ceaca1793ba0b319d2b8f08f"
+  },
+  "source_policy": "沿用现有受控任务工作树；未建立源码副本，未覆盖主工作区改动；本地构建不是8080发布包"
+}
