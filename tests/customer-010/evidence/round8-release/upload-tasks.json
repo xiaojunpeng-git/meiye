@@ -6,9 +6,10 @@
     "version": "0.68.0",
     "project": "/private/tmp/beauty-round8-release/rh",
     "taskId": "confirmation_upload_943d9007-cfaf-4d4c-9be1-40f171b18cae",
-    "last_status": "pending",
-    "uploaded": false,
-    "experience_binding": "not independently verified"
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload tool success; binding not separately verified",
+    "package_size_bytes": 1753391
   },
   {
     "site": "008",
@@ -17,9 +18,10 @@
     "version": "0.68.0",
     "project": "/private/tmp/beauty-round8-release/008",
     "taskId": "confirmation_upload_d65fe4bf-a053-47f5-bc01-62427280a983",
-    "last_status": "pending",
-    "uploaded": false,
-    "experience_binding": "not independently verified"
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload tool success; binding not separately verified",
+    "package_size_bytes": 1753392
   },
   {
     "site": "010",
@@ -28,8 +30,9 @@
     "version": "0.68.0",
     "project": "/private/tmp/beauty-round8-release/010",
     "taskId": "confirmation_upload_e50ebba1-5988-4039-8af8-09d5277833f3",
-    "last_status": "pending",
-    "uploaded": false,
-    "experience_binding": "not independently verified"
+    "last_status": "success",
+    "uploaded": true,
+    "experience_binding": "upload tool success; binding not separately verified",
+    "package_size_bytes": 1753392
   }
 ]
