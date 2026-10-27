@@ -1,0 +1,39 @@
+{
+  "result": "PASS",
+  "mode": 1,
+  "detail_count": 2048,
+  "employee_store_count": 81,
+  "complete_rows": 80,
+  "complete_total_cents": 5355433,
+  "gaps": {
+    "项目提成配置缺失或重复，项目 8996": 1
+  },
+  "sample": [
+    {
+      "fact_id": "IMP007-W67557-labor-94674",
+      "project_id": 2345,
+      "basis_cents": 6000,
+      "threshold_cents": 954300,
+      "rate_percent": "25",
+      "amount_cents": 1500
+    },
+    {
+      "fact_id": "IMP007-W67558-labor-94676",
+      "project_id": 2450,
+      "basis_cents": 17000,
+      "threshold_cents": 954200,
+      "rate_percent": "25",
+      "amount_cents": 4250
+    },
+    {
+      "fact_id": "IMP007-W67565-labor-94685",
+      "project_id": 2345,
+      "basis_cents": 6000,
+      "threshold_cents": 5800,
+      "rate_percent": "25",
+      "amount_cents": 1500
+    }
+  ],
+  "elapsed_seconds": 0.306,
+  "persistent_writes": 0
+}

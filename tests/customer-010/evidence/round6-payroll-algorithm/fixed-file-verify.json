@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "tree": "93bda4ae1651609e39972be1ca48a3abf934059f",
+  "verified_files": 30,
+  "php_lint_files": [
+    "后端代码/config/payroll.php",
+    "后端代码/app/services/report/BasicSalaryReportServices.php",
+    "后端代码/app/services/report/BasicActivityReportServices.php",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+    "后端代码/app/services/position/PositionServices.php",
+    "后端代码/app/services/position/PositionYejiServices.php",
+    "后端代码/app/controller/admin/v1/position/PositionLevel.php",
+    "后端代码/app/services/system/config/SystemConfigServices.php",
+    "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php",
+    "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php",
+    "后端代码/app/services/payroll/PositionSalaryRuleResolver.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php",
+    "scripts/payroll/install-010.php",
+    "tests/customer-010/payroll-calculator.php",
+    "tests/customer-010/payroll-local.php",
+    "tests/report-basic/php/salary-contract.php"
+  ],
+  "commented_business_boundaries": true
+}

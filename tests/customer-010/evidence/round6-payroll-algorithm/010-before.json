@@ -1,0 +1,30 @@
+{
+  "site": "010",
+  "files": {
+    "app/services/report/BasicSalaryReportServices.php": "9aca202a79981fa4465a99677a27aa629ca1787915e7cb4d8b4c095911fc4f71",
+    "app/services/report/BasicActivityReportServices.php": "a6235bf0d6ff7ef2134128db8d8a3b3bb75f3d69c2a14c1599770a3de4b8077f",
+    "app/services/mobile/warehouse/MobileWarehouseServices.php": "4f7d858bdea6bb91bda535b075e08d0555ec926ab66ddaeff77341a32e6c4fb5",
+    "app/services/position/PositionServices.php": "233bfd0c1d0dee4ec878d6a2491a9768ca2a288ae108767e1d0359b5be47436b",
+    "app/services/position/PositionYejiServices.php": "e0d4dad002187afc27cf8d87ae5113ce4bace6753e1d5de3c79578f127a2100f",
+    "app/controller/admin/v1/position/PositionLevel.php": "984e8b9143145817f9716f032602c9230a575fe68c255c3a4fcac3917ce74686",
+    "app/services/yeji/YejiCommissionServices.php": "eac0a7c0046f6d71cc58a8695471b9ebc73e740fad12a04ba265c786c1e38680",
+    "app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+    "app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af",
+    "public/system.html": "b065d8f217ec80ba176bc24c9bd6bab3f8f2fd9b1e98f3ef6f5aa9914248df82",
+    "public/view_cashier_v3/index.html": "426a2505e9095a53e9fabf71ab2b8fffee3a701d21c97845d84daf44c286e3d3",
+    "public/view_mobile_v3/index.html": "fd606eb37a2305eb0ab83d7a7a193daa35859bdef8cc56ce257ca881f435bc76"
+  },
+  "assets": {
+    "public/system.html": [],
+    "public/view_cashier_v3/index.html": [
+      "/view_cashier_v3/assets/index-602ce90e.js",
+      "/view_cashier_v3/assets/index-f4d74b18.css"
+    ],
+    "public/view_mobile_v3/index.html": [
+      "/view_mobile_v3/assets/uni.ff98ee44.css",
+      "/view_mobile_v3/assets/index-Bj_Zz962.js",
+      "/view_mobile_v3/assets/index-CQXQ6p9m.css"
+    ]
+  },
+  "service": "active"
+}

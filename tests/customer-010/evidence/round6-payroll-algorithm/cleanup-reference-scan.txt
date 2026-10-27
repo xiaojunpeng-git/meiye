@@ -1,0 +1,12 @@
+前端代码/admin/src/pages/position/position.vue:17:    <Modal v-model="rulesOpen" :title="independent ? '职位工资规则' : '职级配置'" footer-hide scrollable width="1200"><position-level ref="positionLevel" @getList="getList" /></Modal>
+前端代码/admin/src/pages/position/position.vue:22:import positionLevel from '@/components/positionLevel';
+前端代码/admin/src/pages/position/position.vue:25:  name: 'PositionSalaryConfiguration', components: { positionLevel },
+前端代码/admin/src/pages/position/position.vue:51:    openRules(row) { this.$refs.positionLevel.tableFrom = { page: 1, limit: 20, name: '', position_id: row.id }; this.$refs.positionLevel.getList(); this.rulesOpen = true; },
+前端代码/admin/src/components/positionLevel/index.vue:23:import { positionLevelList, editPositionLevel, positionLevelSetStatus } from '@/api/position';
+前端代码/admin/src/components/positionLevel/index.vue:35:      if (!this.independent) columns.push({ title: '职级', key: 'position_level_label', minWidth: 100 });
+前端代码/admin/src/components/positionLevel/index.vue:44:      try { const { data } = await positionLevelList(this.tableFrom); this.tableList = data.list; this.total = data.count; this.independent = data.independent_positions === true; }
+前端代码/admin/src/components/positionLevel/index.vue:52:      try { await positionLevelSetStatus({ id: row.id, status: row.status, expected_version: row.version }); this.saved(); }
+后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php:321:        if ($commission!==null) foreach ($commission['totals'] as $commissionTotal) {
+后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php:322:            $commissionComplete=$commissionComplete && $commissionTotal['complete'];
+后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php:323:            if ($commissionTotal['amount_cents']!==null) $commissionAmount+=$commissionTotal['amount_cents'];
+后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php:367:                'laborAlgorithm'=>\app\services\payroll\PayrollAlgorithmPolicy::projection(),

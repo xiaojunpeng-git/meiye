@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "tree": "93bda4ae1651609e39972be1ca48a3abf934059f",
+  "online_h5": true,
+  "user_completed_login": true,
+  "monthly_labor": 2240,
+  "monthly_preview_display": 627,
+  "first_labor": 60,
+  "first_rate_percent": 28,
+  "first_preview_display": 17,
+  "stored_handwork_display": 0,
+  "cash_first_page_rows": 20,
+  "cash_after_load_more_rows": 24,
+  "cash_more_after_last_page": false,
+  "today_empty": true,
+  "filter_reset": true,
+  "credentials_recorded": false,
+  "business_data_writes": 0
+}
