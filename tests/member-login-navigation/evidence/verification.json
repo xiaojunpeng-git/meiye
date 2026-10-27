@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "fixedPatch": "66160ff5",
+  "nativeCompiledEventReplayed": true,
+  "resultPage": "pages/user/index",
+  "serverProfileSaveCalled": false,
+  "pendingAcceptance": true
+}

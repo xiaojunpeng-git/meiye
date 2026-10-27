@@ -1,0 +1,9 @@
+PASS MP single-page login save enters member centre once
+PASS MP deep-link save returns to its caller once
+PASS failed return falls back to member centre
+PASS unrelated profile modal keeps its existing configured return
+PASS H5 existing profile return remains unchanged
+PASS failed save stays on profile form
+PASS missing phone authorization still blocks business navigation
+PASS close-profile existing success path retained
+LOGIN_NAVIGATION_FLOW_PASS

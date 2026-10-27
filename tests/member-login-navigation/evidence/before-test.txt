@@ -1,0 +1,8 @@
+AssertionError [ERR_ASSERTION]: one navigation after profile save
+    at /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/member-login-navigation/success-flow.cjs:29:67 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 1,
+  operator: 'strictEqual'
+}

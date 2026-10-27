@@ -1,0 +1,76 @@
+diff --git a/前端代码/uniapp/components/eidtUserModal/index.vue b/前端代码/uniapp/components/eidtUserModal/index.vue
+index ee82678e..4779435c 100644
+--- a/前端代码/uniapp/components/eidtUserModal/index.vue
++++ b/前端代码/uniapp/components/eidtUserModal/index.vue
+@@ -72,6 +72,11 @@
+ 			isShow: {
+ 				type: Boolean,
+ 				value: false
++			},
++			// 普通资料编辑沿用原返回方式；登录页关闭此项并统一决定进入会员端的路径。
++			navigateOnSuccess: {
++				type: Boolean,
++				default: true
+ 			}
+ 		},
+ 		data() {
+@@ -166,10 +171,10 @@
+ 					return that.$util.Tips({
+ 						title: res.msg,
+ 						icon: 'success'
+-					}, {
++					}, this.navigateOnSuccess ? {
+ 						tab: 3,
+ 						url: this.configData.wechat_auth_switch ? 2 : 1
+-					});
++					} : undefined);
+ 				}).catch(msg => {
+ 					return that.$util.Tips({
+ 						title: msg || '保存失败'
+@@ -337,4 +342,4 @@
+ 			}
+ 		}
+ 	}
+-</style>
+\ No newline at end of file
++</style>
+diff --git a/前端代码/uniapp/pages/users/wechat_login/index.vue b/前端代码/uniapp/pages/users/wechat_login/index.vue
+index f3a6b1d5..9606f1aa 100644
+--- a/前端代码/uniapp/pages/users/wechat_login/index.vue
++++ b/前端代码/uniapp/pages/users/wechat_login/index.vue
+@@ -48,7 +48,7 @@
+ 		</view>
+ 	
+ 		<block>
+-			<editUserModal :isShow="isShow" @closeEdit="closeEdit" @editSuccess="editSuccess">
++			<editUserModal :isShow="isShow" :navigateOnSuccess="profileEditNavigatesBack" @closeEdit="closeEdit" @editSuccess="editSuccess">
+ 			</editUserModal>
+ 		</block>
+ 		<!-- #ifdef MP -->
+@@ -120,6 +120,15 @@
+ 			privacyAgreementPopup
+ 		},
+ 		computed: {
++			// 小程序登录由本页统一收尾，资料弹窗只报告保存结果，避免再次返回上一页。
++			profileEditNavigatesBack() {
++				// #ifdef MP
++				return false;
++				// #endif
++				// #ifndef MP
++				return true;
++				// #endif
++			},
+ 			/**
+ 			 * 登录页只展示会员端名称，避免平台全局名称带“后台”字样时误导会员。
+ 			 */
+@@ -292,6 +301,10 @@
+ 			},
+ 			editSuccess() {
+ 				this.isShow = false
++				// #ifdef MP
++				// 资料已保存且授权状态已写入，沿用原登录返回/兜底路径及手机号门禁。
++				this.finishLogin();
++				// #endif
+ 			},
+ 			closeEdit() {
+ 				this.isShow = false

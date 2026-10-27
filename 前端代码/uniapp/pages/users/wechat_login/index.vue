@@ -48,7 +48,7 @@
 		</view>
 	
 		<block>
-			<editUserModal :isShow="isShow" @closeEdit="closeEdit" @editSuccess="editSuccess">
+			<editUserModal :isShow="isShow" :navigateOnSuccess="profileEditNavigatesBack" @closeEdit="closeEdit" @editSuccess="editSuccess">
 			</editUserModal>
 		</block>
 		<!-- #ifdef MP -->
@@ -120,6 +120,15 @@
 			privacyAgreementPopup
 		},
 		computed: {
+			// 小程序登录由本页统一收尾，资料弹窗只报告保存结果，避免再次返回上一页。
+			profileEditNavigatesBack() {
+				// #ifdef MP
+				return false;
+				// #endif
+				// #ifndef MP
+				return true;
+				// #endif
+			},
 			/**
 			 * 登录页只展示会员端名称，避免平台全局名称带“后台”字样时误导会员。
 			 */
@@ -292,6 +301,10 @@
 			},
 			editSuccess() {
 				this.isShow = false
+				// #ifdef MP
+				// 资料已保存且授权状态已写入，沿用原登录返回/兜底路径及手机号门禁。
+				this.finishLogin();
+				// #endif
 			},
 			closeEdit() {
 				this.isShow = false

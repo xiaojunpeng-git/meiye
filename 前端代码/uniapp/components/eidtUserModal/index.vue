@@ -72,6 +72,11 @@
 			isShow: {
 				type: Boolean,
 				value: false
+			},
+			// 普通资料编辑沿用原返回方式；登录页关闭此项并统一决定进入会员端的路径。
+			navigateOnSuccess: {
+				type: Boolean,
+				default: true
 			}
 		},
 		data() {
@@ -166,10 +171,10 @@
 					return that.$util.Tips({
 						title: res.msg,
 						icon: 'success'
-					}, {
+					}, this.navigateOnSuccess ? {
 						tab: 3,
 						url: this.configData.wechat_auth_switch ? 2 : 1
-					});
+					} : undefined);
 				}).catch(msg => {
 					return that.$util.Tips({
 						title: msg || '保存失败'

@@ -1,0 +1,17 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "parentRelease": "77ea458f1daf5b75d03fb1bf23946ef2a896e9db",
+  "files": {
+    "前端代码/uniapp/pages/users/wechat_login/index.vue": "830a684c20de0a582212f47daff0602bf8a199a201abf0b5f1bcd802e4202b0d",
+    "前端代码/uniapp/components/eidtUserModal/index.vue": "6e7f8d7a84f7ab6a063480958cbf7d77fa382fd2496028253f6a5a8906169f9c"
+  },
+  "runtimeObservation": {
+    "isLogin": true,
+    "phonePresent": true,
+    "storePhonePresent": true,
+    "profileModal": false,
+    "routeBefore": "pages/users/wechat_login/index",
+    "routeAfterExistingFinishLogin": "pages/user/index",
+    "tokensOrPhoneValuesCollected": false
+  }
+}
