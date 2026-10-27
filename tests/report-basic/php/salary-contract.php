@@ -1,5 +1,6 @@
 <?php
 /** R51 无框架、无数据库契约：静态元数据、日期权限边界、白名单表达式解析。 */
+require_once __DIR__.'/../../../后端代码/app/services/payroll/PayrollAlgorithmPolicy.php';
 require_once __DIR__.'/../../../后端代码/app/services/report/BasicSalaryReportServices.php';
 use app\services\report\BasicSalaryReportServices as Salary;
 $checks = 0;

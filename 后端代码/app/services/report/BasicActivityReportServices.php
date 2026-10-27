@@ -3,6 +3,8 @@ namespace app\services\report;
 
 use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
+use app\services\payroll\PayrollAlgorithmPolicy;
+use app\services\payroll\ProjectLaborCommissionReadServices;
 
 /**
  * R51 sales/service/personnel projections of registered V3 facts, never legacy report SQL.
@@ -49,6 +51,10 @@ final class BasicActivityReportServices
             'followup' => ['followup_staff_id', 'quantity', 'sale_amount'],
             'performance' => ['performance_type', 'sales_performance', 'labor_performance', 'labor_fee', 'project_count'],
         ];
+        if ($kind==='employee') {
+            if (PayrollAlgorithmPolicy::independentPositions()) $metrics[$kind]=array_values(array_diff($metrics[$kind],['position_level_name']));
+            if (PayrollAlgorithmPolicy::calculated()) $metrics[$kind]=array_merge($metrics[$kind],['labor_commission','commission_status']);
+        }
         $labels = [
             'store_id'=>'门店ID', 'store_name'=>'门店', 'employee_id'=>'员工ID', 'employee_name'=>'员工',
             'business_date'=>'业务日期', 'document_no'=>'业务单号', 'member_name'=>'客户名称',
@@ -62,8 +68,10 @@ final class BasicActivityReportServices
             'followup_staff_id'=>'跟单任职ID',
             'position_name'=>'当前职务', 'position_level_name'=>'当前职级', 'service_visits'=>'客次',
             'point_visits'=>'指定客', 'labor_unit_price'=>'劳动客单价',
+            'labor_commission'=>'劳动提成（预计）','commission_status'=>'提成计算状态',
         ];
-        $money = ['sale_amount', 'cash_performance', 'consumption_amount', 'sales_performance', 'labor_performance', 'labor_fee', 'cash_amount', 'balance_amount', 'employee_balance_performance', 'labor_unit_price'];
+        if (PayrollAlgorithmPolicy::independentPositions()) $labels['position_name']='当前职位';
+        $money = ['labor_commission','sale_amount', 'cash_performance', 'consumption_amount', 'sales_performance', 'labor_performance', 'labor_fee', 'cash_amount', 'balance_amount', 'employee_balance_performance', 'labor_unit_price'];
         if (in_array($kind, ['product','followup'], true)) $labels['quantity'] = '销售数量';
         if ($kind === 'followup') $labels['employee_name'] = '跟单人员';
         $numbers = ['store_id', 'employee_id', 'item_id', 'followup_staff_id', 'quantity', 'customer_count', 'project_count', 'sales_quantity'];
@@ -122,6 +130,11 @@ final class BasicActivityReportServices
         unset($row);
         $sources = [];
         foreach ($fields as $field) $sources[$field['key']] = $this->source($field['key'], $kind);
+        // 缺配置的提成列不得被默认合计忽略 null 后显示成完整工资。
+        if ($kind==='employee' && PayrollAlgorithmPolicy::calculated()) foreach ($fields as &$field) {
+            if ($field['key']==='labor_commission') foreach ($rows as $row) if ($row['labor_commission']===null) $field['summable']=false;
+        }
+        unset($field);
         return ['rows'=>$rows, 'fields'=>$fields, 'field_sources'=>$sources,
             'sum_fields'=>array_column(array_filter($fields, static function ($f) { return $f['summable']; }), 'key'),
             'metric_version'=>'r51-activity-v1', 'coverage_start'=>StoreUnifiedReportServices::COVERAGE_START,
@@ -329,7 +342,8 @@ final class BasicActivityReportServices
             $pairs[] = $pair; $byStore[$pair['store_id']][] = $pair;
         }
         $positions = (new EmployeeCurrentPositionDimensionServices())->resolve($pairs);
-        $levels = $this->employeeCurrentLevels($pairs);
+        $levels = PayrollAlgorithmPolicy::independentPositions() ? [] : $this->employeeCurrentLevels($pairs);
+        $commissions=PayrollAlgorithmPolicy::calculated() ? (new ProjectLaborCommissionReadServices($reader))->read($stores,$range,$employees)['totals'] : [];
         $points = [];
         // The point metric has a registered period-total shape, not a daily shape.
         // Its result merges employee IDs, so query each store separately to retain row grain.
@@ -343,6 +357,12 @@ final class BasicActivityReportServices
             $pairKey = $row['store_id'].'|'.$row['employee_id'];
             $row['position_name'] = $positions[$pairKey] ?? null;
             $row['position_level_name'] = $levels[$pairKey] ?? null;
+            if (PayrollAlgorithmPolicy::calculated()) {
+                $commission=$commissions[$row['store_id'].':'.$row['employee_id']] ?? ['amount_cents'=>0,'complete'=>true,'details'=>[],'gaps'=>[]];
+                $row['labor_commission']=$commission['amount_cents'];
+                $row['commission_details']=$commission['details'];
+                $row['commission_status']=$commission['complete'] ? '预计计算完成' : implode('；',array_unique($commission['gaps']));
+            }
             $tenths = $visits[$key] ?? 0;
             $row['service_visits'] = $tenths / 10;
             $row['point_visits'] = ($points[$key] ?? 0) / 10;
@@ -641,7 +661,9 @@ final class BasicActivityReportServices
             'consumption_amount'=>'项目实际完成后形成的项目级消耗业绩，不按手艺人人数重复计算。',
             'sales_performance'=>'最终有效的逐人销售分配，退款按退款业务日冲减；被调整替代或已作废分配不计入。',
             'labor_performance'=>'有效服务分给该员工的劳动业绩，按业务日期读取带符号的调整事实，不冒充项目级消耗。',
-            'labor_fee'=>'与劳动分配一起保存的独立手工费，不以劳动业绩代替。',
+            'labor_fee'=>'与劳动分配一起保存的独立手工费，不以劳动业绩或劳动提成代替。',
+            'labor_commission'=>'按本人本门店自然月净销售业绩匹配各项目配置比例，乘该项目已分配劳动业绩后汇总；跨月分别计算。仅为预计，不代表锁薪。',
+            'commission_status'=>'所有项目规则均明确时显示预计完成；缺配置、重复配置或项目关联缺失时显示具体待核对原因。',
             'project_count'=>'服务完成时最终分给该员工的项目数，保留小数；非金额数字。',
             'sales_quantity'=>'直接销售项目数量乘原销售分配权重；只计有效销售分配，不把补交或退款当成再次销售；非金额数字。',
             'category_path'=>'由已核实的品项身份关联平台商品当前分类；无法核实则留空，不按名称猜测。',

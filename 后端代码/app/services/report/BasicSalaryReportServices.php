@@ -6,6 +6,9 @@ namespace app\services\report;
 use app\services\query\metric\MetricReadTransaction;
 use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
+use app\services\payroll\PayrollAlgorithmPolicy;
+use app\services\payroll\ProjectLaborCommissionReadServices;
+use app\services\payroll\PositionSalaryRuleResolver;
 
 /**
  * R51 月度实时工资只读投影。Host 注入门店及本人权限，Provider 负责结果筛选、合计和分页。
@@ -40,6 +43,8 @@ final class BasicSalaryReportServices
     private $reader;
     private $transaction;
     private $cache = [];
+    private $positionResolver;
+    private $projectCommissions = [];
     private $firstCourseSourceCounts = ['candidates'=>0, 'history'=>0];
 
     /** 可注入同契约 Reader/一致读取器用于隔离验证，不接受浏览器提供的计算器或数据。 */
@@ -60,6 +65,11 @@ final class BasicSalaryReportServices
         foreach (['month'=>'工资月份', 'store_name'=>'门店', 'employee_name'=>'员工', 'position_name'=>'岗位',
             'position_level_name'=>'职级', 'calculation_status'=>'计算状态'] as $key=>$label) {
             $out[] = $this->field($key, $label, 'text', false, false, in_array($key, ['store_name','employee_name'], true));
+        }
+        if (PayrollAlgorithmPolicy::independentPositions()) {
+            $out=array_values(array_filter($out,static function($field){return $field['key']!=='position_level_name';}));
+            foreach ($out as &$field) if ($field['key']==='position_name') $field['label']='职位';
+            unset($field);
         }
         foreach (['sales_performance'=>'个人现金分配业绩', 'labor_performance'=>'个人劳动业绩', 'labor_fee'=>'个人手工费']
             + self::BASES + self::COMMISSIONS + self::FORMULAS as $key=>$label) {
@@ -92,8 +102,13 @@ final class BasicSalaryReportServices
         return $this->transaction->run(function () use ($stores, $range, $employeeId, $fields): array {
             $this->assertSupplementalReadEngines();
             $staff = $this->staff($stores, $range, $employeeId);
+            $this->positionResolver=new PositionSalaryRuleResolver();
+            $this->projectCommissions=PayrollAlgorithmPolicy::calculated()
+                ? (new ProjectLaborCommissionReadServices($this->reader))->read($stores,$range,$employeeId>0 ? [$employeeId] : [])['totals'] : [];
             $positions = array_values(array_unique(array_column($staff, 'position_id')));
-            $rules = $positions ? Db::name('position_yeji')->whereIn('position_id', $positions)->where('status', 1)->order('id')->select()->toArray() : [];
+            // 独立职位需要只读来源规则；旧模型保持原筛选与结果。
+            $rules = PayrollAlgorithmPolicy::independentPositions() ? PositionSalaryRuleResolver::allRules()
+                : ($positions ? Db::name('position_yeji')->whereIn('position_id', $positions)->where('status', 1)->order('id')->select()->toArray() : []);
             // table_ids=1 是旧工资专用字段关联，不是任何客户的商品分类 ID。
             $config = Db::name('salary_field')->whereFindInSet('table_ids', 1)->field('key,name,type,info')->select()->toArray();
             $rows = [];
@@ -136,6 +151,8 @@ final class BasicSalaryReportServices
             'cashier_v3_order_center_void_operation','cashier_v3_service_record_void_operation',
             'cashier_v3_sales_order','cashier_v3_checkout_payment_draft','cashier_v3_entitlement_writeoff_fact',
             'cashier_v3_card_purchase_receipt','cashier_v3_card_operation_settlement'];
+        if (PayrollAlgorithmPolicy::independentPositions()) $tables[]='position_salary_rule';
+        if (PayrollAlgorithmPolicy::calculated()) $tables[]='yeji_commission';
         $prefix = (string)Db::connect()->getConfig('prefix');
         $names = array_map(static function ($name) use ($prefix) { return $prefix.$name; }, $tables);
         $engines = Db::query('SELECT TABLE_NAME,ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('
@@ -176,12 +193,18 @@ final class BasicSalaryReportServices
             ->where('j.start_time', '<=', strtotime($range['end'].' 23:59:59 Asia/Shanghai'))
             ->where(function ($q) use ($range) { $q->where('j.end_time', 0)->whereOr('j.end_time', '>=', strtotime($range['start'].' 00:00:00 Asia/Shanghai')); });
         if ($employee > 0) $q->where('j.employee_id', $employee);
-        $jobs = $q->field('j.id job_id,j.employee_id,j.store_id,j.staff_id,j.position_id,j.start_time,j.end_time,e.name employee_name,p.name position_name,ss.position_level,l.name position_level_name,s.name store_name')->order('j.id')->select()->toArray();
+        $jobs = $q->field('j.id job_id,j.employee_id,j.store_id,j.staff_id,j.position_id,j.start_time,j.end_time,ss.position legacy_position,e.name employee_name,p.name position_name,ss.position_level,l.name position_level_name,s.name store_name')->order('j.id')->select()->toArray();
         $rows = [];
         foreach ($jobs as $job) {
             $key = $job['store_id'].':'.$job['employee_id'];
-            if (isset($rows[$key])) { $rows[$key]['job_ambiguous'] = true; continue; }
-            $rows[$key] = $job;
+            if (PayrollAlgorithmPolicy::independentPositions()) {
+                // 保留全部任职时段；等价转换在规则适配器中合并，不能只取第一条旧职位。
+                $segments=$rows[$key]['job_segments'] ?? []; $segments[]=$job;
+                $rows[$key]=$job; $rows[$key]['job_segments']=$segments;
+            } else {
+                if (isset($rows[$key])) { $rows[$key]['job_ambiguous'] = true; continue; }
+                $rows[$key] = $job;
+            }
         }
         // 当前员工即使未绑岗位也要呈现缺口；旧数据没有稳定身份时阻止伪空报表。
         $roster = Db::name('system_store_staff')->alias('ss')->leftJoin('employee e', 'e.id=ss.employee_id')
@@ -262,7 +285,12 @@ final class BasicSalaryReportServices
             return (int)$r['position_id'] === (int)$person['position_id'] && ((int)$r['position_level_id'] === 0
                 || (int)$r['position_level_id'] === (int)$person['position_level']);
         }));
+        if (PayrollAlgorithmPolicy::independentPositions()) {
+            try { $applicable=$this->positionResolver->forJobs($person,$range,$rules); }
+            catch (\DomainException $error) { $applicable=[]; $this->gap($row,'position_name','JOB_RULE_CONFLICT',$error->getMessage()); }
+        }
         $this->commissions($row, $values, $person, $range, $applicable);
+        if (PayrollAlgorithmPolicy::calculated()) $this->projectLaborCommission($row,$values,$person);
         $formulas = [];
         foreach ($config as $field) {
             $key = (string)$field['key'];
@@ -407,6 +435,8 @@ final class BasicSalaryReportServices
             $type = (int)$rule['type']; $store = (int)$rule['range_type'] === 1;
             $target = $store ? ([1=>'mendianxianjinticheng',2=>'mendianlaodongticheng',3=>'mendiankoukaticheng',4=>'mendianshijikoukaticheng'][$type] ?? '')
                 : ([1=>'xiao_money',2=>'work_get'][$type] ?? '');
+            // 计算法只替换个人劳动提成，其他职位工资项和现有算法继续使用原路径。
+            if (PayrollAlgorithmPolicy::calculated() && !$store && $type===2) continue;
             // 旧个人扣卡规则被明确排除；不把它变成个人现金提成。
             if (!$store && $type === 3) continue;
             if ($target === '') { foreach (self::COMMISSIONS as $key=>$label) $broken[$key] = '未知提成类型或范围，规则 '.$rule['id']; continue; }
@@ -420,6 +450,7 @@ final class BasicSalaryReportServices
                     $target = $this->hasProductCategory($categories) ? 'product_money' : 'xiao_money';
                 }
                 $days = $this->agentDays($rule, $person, $range);
+                if (isset($rule['_effective_days'])) $days=$days===null ? $rule['_effective_days'] : array_values(array_intersect($days,$rule['_effective_days']));
                 // 产品已确认：门店 type2 是项目消耗，个人 type2 是劳动分配；充值标记不改变两者基数。
                 $metric = $store ? ([1=>'cash_performance',2=>'consume_amount',3=>'balance_deduction_amount',4=>'balance_deduction_amount'][$type]) : ($type === 2 ? 'staff_labor_yeji' : 'staff_sales_yeji');
                 if ($store && $type === 1)
@@ -449,6 +480,7 @@ final class BasicSalaryReportServices
                 if (!preg_match('/^\d+(?:\.\d{1,4})?$/D', $rate) || bccomp($rate, '100', 4) > 0) throw new \DomainException('提点必须在 0 至 100%');
                 if ($threshold < $min || $threshold > $max) continue;
                 $signature = $target.':'.$rule['time_type'].':'.($type === 2 ? 'labor' : $rule['has_recharge']).':'.implode(',', $categories);
+                if (isset($rule['_effective_days'])) $signature.=':'.implode(',',$rule['_effective_days']);
                 if (isset($matched[$signature])) throw new \DomainException('阶梯边界重叠，同时命中规则 '.$matched[$signature].' 与 '.$rule['id']);
                 $matched[$signature] = $rule['id'];
                 $cents = (int)self::roundDecimal(bcdiv(bcmul((string)$amount, $rate, 8), '100', 8), 0);
@@ -472,6 +504,20 @@ final class BasicSalaryReportServices
                 $values[$key] = bcdiv((string)$totals[$key], '100', 2); $row[$key] = (float)$values[$key];
                 $values[$base] = bcdiv((string)$bases[$base], '100', 2); $row[$base] = (float)$values[$base];
             }
+        }
+    }
+
+    /** 项目提成独立替换个人劳动结果；不修改手工费，不叠加旧职位劳动提成。 */
+    private function projectLaborCommission(array &$row,array &$values,array $person): void
+    {
+        $total=$this->projectCommissions[$person['store_id'].':'.$person['employee_id']]
+            ?? ['amount_cents'=>0,'basis_cents'=>0,'complete'=>true,'details'=>[],'gaps'=>[]];
+        $row['gaps']=array_values(array_filter($row['gaps'],static function($gap){return !in_array($gap['field'],['work_get','work_yeji'],true);}));
+        $row['commission_details']=$total['details'];
+        foreach (['work_get'=>'amount_cents','work_yeji'=>'basis_cents'] as $field=>$source) {
+            $values[$field]=$total['complete'] ? bcdiv((string)$total[$source],'100',2) : null;
+            $row[$field]=$values[$field]===null ? null : (float)$values[$field];
+            if (!$total['complete']) $this->gap($row,$field,'PROJECT_COMMISSION_UNAVAILABLE',implode('；',array_unique($total['gaps'])));
         }
     }
 
@@ -893,7 +939,9 @@ final class BasicSalaryReportServices
             if (isset(self::MANUAL[$key])) $text = '独立读取该员工在该门店、该月原先人工填写的补充数值；未填写的人工数值沿用原工资缺省零参与试算，原空值另行保留，不回写，当前只读；格式异常不当作零。';
             elseif ($key === 'mendianxianjinyeji' || $key === 'mendianxianjinticheng') $text = '统一现金业绩作为门店现金提成基数，不扣合作人员分配款；排除充值时只剔除成功正向充值收款，分类按原销售卡内项目及当前平台分类查询，不减充值本金或净充值。';
             elseif ($key === 'mendianlaodongyeji' || $key === 'mendianlaodongticheng') $text = '门店项目成功完成服务后计入统一消耗业绩，按岗位职级和销售档位计算门店消耗提成；不是余额扣款，也不是个人劳动分配，充值不加入消耗基数。';
-            elseif ($key === 'work_yeji' || $key === 'work_get') $text = '成功服务后分配给本人的劳动业绩，按岗位职级和销售档位计算劳动提成；即使旧配置勾选包含充值，也不把充值加入劳动基数。';
+            elseif ($key === 'work_yeji' || $key === 'work_get') $text = PayrollAlgorithmPolicy::calculated()
+                ? '成功服务分配给本人的劳动业绩，按本员工本门店自然月净销售业绩匹配项目提成档位；预计结果，不代表已锁薪。手工费单独保留。'
+                : '成功服务后分配给本人的劳动业绩，按岗位职级和销售档位计算劳动提成；即使旧配置勾选包含充值，也不把充值加入劳动基数。';
             elseif ($key === 'mendianshijikoukayeji' || $key === 'mendianshijikoukaticheng') $text = '从净余额订单扣款中，整笔排除该会员在本店同一业务日有成功余额充值入账的扣款；零现金赠金或欠款充值也算充值事件，已作废或已冲销充值不算；散客不排除，不减充值额、不追资金批次，分类仍按原销售项目守恒分摊。';
             elseif (isset(self::FORMULAS[$key])) $text = '按已配置工资公式的白名单字段与四则运算实时计算；任一依赖缺失、循环或除零时保持空值并说明原因。';
             elseif (isset(self::COMMISSIONS[$key]) || isset(self::BASES[$key])) $text = '读取月内岗位及职级匹配的提成规则，按规则区间和提点试算；代班只统计已登记日期，个人金额先按权威原业务行及卡内项目守恒分配再筛分类，原行或冲销链缺失时明确报告原因。';

@@ -228,6 +228,12 @@ final class MobileWarehouseServices
      */
     public function employeePerformance(array $merchant, array $input): array
     {
+        // 汇总、明细、完整月落档基数在同一次一致读取中取得；不生成或保存工资事实。
+        return Db::transaction(function () use ($merchant,$input) { return $this->employeePerformanceProjection($merchant,$input); });
+    }
+
+    private function employeePerformanceProjection(array $merchant, array $input): array
+    {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
         $entry = $this->entryScopes->resolve($merchant);
         $storeIds = array_values(array_unique(array_map('intval', (array)$entry['authorizedStoreIds'])));
@@ -308,6 +314,14 @@ final class MobileWarehouseServices
         $total = (int)$detailPage['total'];
         $detailRows = $detailPage['rows'];
         $detailContext = $this->detailBusinessContext($detailRows, $storeIds, $employeeId);
+        $calculated=\app\services\payroll\PayrollAlgorithmPolicy::calculated();
+        $commission=$calculated ? (new \app\services\payroll\ProjectLaborCommissionReadServices($metricReader))->read($storeIds,$metricRange,[$employeeId]) : null;
+        $commissionAmount=0;$commissionComplete=true;
+        // 提成分组与明细分页总数独立命名，不能覆盖后面的分页契约。
+        if ($commission!==null) foreach ($commission['totals'] as $commissionTotal) {
+            $commissionComplete=$commissionComplete && $commissionTotal['complete'];
+            if ($commissionTotal['amount_cents']!==null) $commissionAmount+=$commissionTotal['amount_cents'];
+        }
         $details = [];
         foreach ($detailRows as $row) {
             $amount = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['metric_value'] ?? 0));
@@ -331,6 +345,9 @@ final class MobileWarehouseServices
                     ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$context['sale_amount_cents']) : '—',
                 'displayConsumptionAmount' => $hasService
                     ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$context['consumption_amount_cents']) : '—',
+                'commissionDetail' => $calculated && $detailMode==='labor' ? ($commission['details'][$factId] ?? null) : null,
+                'displayCommission' => $calculated && $detailMode==='labor'
+                    ? (isset($commission['details'][$factId]['amount_cents']) ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan($commission['details'][$factId]['amount_cents']) : '待核对') : null,
                 'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
@@ -347,6 +364,8 @@ final class MobileWarehouseServices
         return [
             'employeePerformance' => [
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
+                'laborAlgorithm'=>\app\services\payroll\PayrollAlgorithmPolicy::projection(),
+                'commission'=>['visible'=>$calculated,'complete'=>$commissionComplete,'displayValue'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对'],
                 'period' => $period,
                 'metrics' => [
                     // 人员现金业绩是销售人分配事实，不是整店收款；页面按产品用语展示。
@@ -356,7 +375,10 @@ final class MobileWarehouseServices
                     ['code' => 'staff_service_num', 'name' => '服务人次', 'value' => self::displayScaledCount($metricAmounts['staff_service_num'], 1), 'unit' => 'count'],
                     ['code' => 'staff_project_num', 'name' => '项目数', 'value' => self::displayScaledCount($metricAmounts['staff_project_num'], 6), 'unit' => 'count'],
                     ['code' => 'staff_labor_fee', 'name' => '手工费', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_fee']), 'unit' => 'amount'],
-                ],
+                ] + ($calculated ? [
+                    6=>['code'=>'staff_net_sales','name'=>'净销售业绩','value'=>\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)(new \app\services\report\StoreSalespersonNetReadServices())->matrix($storeIds,$metricRange,[$employeeId])['summary']['total_metric_value']),'unit'=>'amount'],
+                    7=>['code'=>'project_labor_commission','name'=>'劳动提成（预计）','value'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对','unit'=>'amount'],
+                ] : []),
                 'detailMode' => $detailMode,
                 'details' => $details,
                 'pagination' => ['page' => $page, 'pageSize' => $pageSize, 'total' => $total, 'hasMore' => $page * $pageSize < $total],

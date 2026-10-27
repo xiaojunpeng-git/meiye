@@ -2292,7 +2292,7 @@ WSS;
                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
                 // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
-                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
+                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('可修改沿用现有算法；计算法按项目提成档位计算预计劳动提成，原手工费与历史业务事实独立保留'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),

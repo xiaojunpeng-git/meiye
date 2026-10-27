@@ -29,6 +29,7 @@ const loading = ref(false)
 const error = ref('')
 const exporting = ref(false)
 const fieldGuide = ref(false)
+const commissionProof = ref(null)
 const resultsScroll = ref(null)
 const editor = ref(null)
 const saving = ref(false)
@@ -173,6 +174,7 @@ function display(row, field) {
   if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
+  if (['project_count','xiangmushu'].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
 }
 function summary(field, index) {
@@ -180,7 +182,7 @@ function summary(field, index) {
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : amount
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu'].includes(field.key) ? String(Number(amount)) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
@@ -201,7 +203,7 @@ function trapFocus(event) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-watch(() => Boolean(editor.value || fieldGuide.value), async open => {
+watch(() => Boolean(editor.value || fieldGuide.value || commissionProof.value), async open => {
   if (open) {
     returnFocus = document.activeElement
     await nextTick()
@@ -210,7 +212,7 @@ watch(() => Boolean(editor.value || fieldGuide.value), async open => {
 })
 watch(() => route.params.report, async () => {
   const routeRequest = ++requestId
-  controller?.abort(); editor.value = null; executedQuery.value = null
+  controller?.abort(); editor.value = null; commissionProof.value = null; executedQuery.value = null
   // 切换报表立即清掉上一张表的行、合计和编辑资格，不能把旧数据短暂展示在新表名下。
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
   loading.value = false; error.value = ''
@@ -239,7 +241,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </script>
 
 <template>
-  <main class="basic-reports" :inert="editor || fieldGuide ? '' : null">
+  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof ? '' : null">
     <header class="basic-reports__header">
       <div><button v-if="route.params.report" type="button" class="basic-reports__icon" aria-label="返回基础报表" title="返回基础报表" @click="router.push({ name: route.name })"><ArrowLeft :size="18" /></button><h1>{{ active?.name || '基础报表' }}</h1></div>
       <button v-if="active?.available && data.can_edit" type="button" class="button button--primary" @click="edit()">新增登记</button>
@@ -273,7 +275,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit">操作</th></tr>
             <tr class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit">-</th></tr></thead>
-            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }">{{ display(row, field) }}</td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td></tr></tbody>
+            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><button v-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td></tr></tbody>
           </table>
           <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
         </div>
@@ -294,6 +296,8 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
           </div><footer><button type="button" class="button button--secondary" :disabled="saving" @click="editor = null">取消</button><button class="button button--primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
         </form>
       </div>
+      <!-- 依据由后端随授权行返回；弹窗不读取另一份数据或重新计算提成。 -->
+      <div v-if="commissionProof" class="basic-report-dialog" role="dialog" aria-modal="true" aria-label="劳动提成计算依据" @keydown="trapFocus" @keydown.esc="commissionProof = null"><section><header><h2>{{ commissionProof.employee_name }} · 劳动提成计算依据</h2><button type="button" class="basic-reports__icon" aria-label="关闭" @click="commissionProof = null"><X :size="18" /></button></header><p>按员工、门店和自然月计算，当前为预计结果。</p><dl><template v-for="proof in commissionProof.commission_details" :key="proof.fact_id"><dt>{{ proof.business_date }} · {{ proof.project_name || '待核对项目' }}</dt><dd v-if="proof.amount_cents != null">月净销售业绩 {{ proof.display_threshold }}；劳动业绩 {{ proof.display_basis }} × {{ proof.rate_percent }}%；预计提成 {{ proof.display_commission }}</dd><dd v-else>{{ proof.message }}</dd></template></dl></section></div>
       <div v-if="fieldGuide" class="basic-report-dialog" role="dialog" aria-modal="true" aria-label="列名取值来源" @keydown="trapFocus" @keydown.esc="fieldGuide = false"><section><header><h2>列名取值来源</h2><button type="button" class="basic-reports__icon" aria-label="关闭" @click="fieldGuide = false"><X :size="18" /></button></header><dl><template v-for="field in visibleFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ data.field_sources?.[field.key] || '该条业务记录的稳定身份。' }}</dd></template></dl></section></div>
     </Teleport>
   </main>

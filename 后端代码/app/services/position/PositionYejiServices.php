@@ -5,7 +5,6 @@ use app\dao\position\PositionYejiDao;
 use app\model\position\Position;
 use app\model\position\PositionLevel;
 use app\model\product\category\StoreProductCategory;
-use app\Request;
 use think\facade\Db;
 use app\services\BaseServices;
 /**
@@ -33,7 +32,13 @@ class PositionYejiServices extends BaseServices
         if (!$limit) {
             [$page, $limit] = $this->getPageValue();
         }
-        $list = $this->dao->getList($where, $page, $limit);
+        $independent=\app\services\payroll\PayrollAlgorithmPolicy::independentPositions();
+        if ($independent) {
+            if (empty($where['position_id'])) throw new \InvalidArgumentException('请选择明确职位');
+            $all=(new \app\services\payroll\PositionSalaryRuleResolver())->resolve((int)$where['position_id'],\app\services\payroll\PositionSalaryRuleResolver::allRules());
+            usort($all,static function($a,$b){return (int)$b['id']<=>(int)$a['id'];});
+            $count=count($all);$list=array_slice($all,($page-1)*$limit,$limit);
+        } else $list = $this->dao->getList($where, $page, $limit);
         $attr=['','现金','手工','扣储值-包含当天充值','扣储值-不包含当天充值'];
         $hasRecharge=['不包含','包含','不包含'];
         $yejiAttr=['','所属门店','个人'];
@@ -46,8 +51,11 @@ class PositionYejiServices extends BaseServices
             $list[$nk]['range_type']=$yejiAttr[$v['range_type']] ?? '';
             $list[$nk]['has_recharge']=$hasRecharge[$v['has_recharge']] ?? '';
             $list[$nk]['commission']=$v['commission']."%";
+            if ($independent && \app\services\payroll\PayrollAlgorithmPolicy::calculated() && (int)$v['type']===2 && (int)$v['range_type']===2) {
+                $list[$nk]['type_label']='个人劳动提成';$list[$nk]['commission']='按项目配置';
+            }
         }
-        $count = $this->dao->count($where);
-        return compact('list', 'count');
+        if (!$independent) $count = $this->dao->count($where);
+        return compact('list', 'count') + ['independent_positions'=>$independent];
     }
 }

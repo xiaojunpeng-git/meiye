@@ -42,6 +42,7 @@ class PositionServices extends BaseServices
             $list[$nk]['cates']=implode(",",$cates);
         }
         $count = $this->dao->count($where);
-        return compact('list', 'count');
+        // 模型能力由实例配置决定，不随手工费算法切换；前端据此隐藏旧职级。
+        return compact('list', 'count') + ['independent_positions'=>\app\services\payroll\PayrollAlgorithmPolicy::independentPositions()];
     }
 }
