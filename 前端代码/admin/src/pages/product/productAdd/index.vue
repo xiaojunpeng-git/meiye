@@ -1768,6 +1768,8 @@ export default {
   name: 'productAdd',
   data() {
     return {
+      // 来自后端实例显示配置；独立于商品表单，隐藏列时不清空或删除卡内手工费。
+      cardLaborFeeVisible: true,
 	  priceSetType:0,//区间改价类型
 	  priceSetNum:0,//区间改价输入的价格
       ruleValidate: {
@@ -2317,7 +2319,8 @@ export default {
         columns.push({ title: '单次核销金额', slot: 'writeoff_amount', minWidth: 160 });
       }
       columns.push({ title: '操作', slot: 'action', minWidth: 80 });
-      return columns;
+      // 普通卡与组合卡共用列定义，仅省略显示，不参与卡内项目数据组装或保存。
+      return columns.filter(column => this.cardLaborFeeVisible || column.slot !== 'labor_fee');
     },
   },
   destroyed() {
@@ -4455,6 +4458,7 @@ export default {
     getProductBrokerage() {
       productBrokerage((this.$route.params.id || this.$route.query.copy || 0), 0).then((res) => {
         const { storeInfo, attrValue, level_list, store_brokerage_ratio, store_brokerage_two } = res.data;
+        this.cardLaborFeeVisible = res.data.labor_fee_visible !== false;
         const { is_vip, level_type, is_brokerage, is_sub } = storeInfo;
         this.isVip = is_vip;
         this.levelType = level_type;
