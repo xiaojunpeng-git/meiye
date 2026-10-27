@@ -67,6 +67,7 @@ $input = [
 $itemId = (int)$items[0]['id'];
 $originalPaymentAmount = (int)$payment['amount_cents'];
 $originalAllocationAmount = (int)$allocation['amount_cents'];
+$originalRepaymentAmount = (int)$repayment['repayment_amount_cents'];
 $originalRepaidDebt = (string)$items[0]['repaid_debt'];
 $originalRatio = (int)$config['partner_default_ratio'];
 
@@ -78,8 +79,9 @@ try {
         ->update(['amount_cents' => 98000]);
     Db::name('cashier_v3_payment_sale_allocation_fact')->where('id', (int)$allocation['id'])
         ->update(['amount_cents' => 98000]);
-    Db::name('store_debt_item')->where('id', $itemId)->update(['repaid_debt' => '1000.00']);
-    $items[0]['repaid_debt'] = '1000.00';
+    Db::name('cashier_v3_debt_repayment')->where('repayment_id', $repaymentId)
+        ->update(['repayment_amount_cents' => 98000]);
+    Db::name('store_debt_item')->where('id', $itemId)->update(['repaid_debt' => '1980.00']);
 
     $before = $service->query([(int)$repayment['store_id']], $input);
     $beforeRow = $findRepayment($before, $repaymentId);
@@ -88,22 +90,16 @@ try {
         && $moneyCents($beforeRow['actual_cash_performance']) === 98000,
         'legacy row starts as 980 receipt with no guessed partner share');
 
-    CashierV3SalesDebtBalanceServices::freezeInTx(
-        (string)$repayment['tenant_id'],
-        $repaymentId,
-        $debt,
-        $items,
-        [$itemId => 198000],
-        [$itemId => ['authority' => ['order_line_id' => (string)$sale['source_line_id']]]],
-        0
-    );
+    $repayment['repayment_amount_cents'] = 98000;
+    $assert(CashierV3SalesDebtBalanceServices::rebuildHistoricalCashOnlySingleItemInTx($repayment),
+        'migration rebuilds a missing single-item cash settlement without guessing allocation');
     $snapshot = (array)Db::name(CashierV3SalesDebtBalanceServices::TABLE)
         ->where('repayment_id', $repaymentId)->where('debt_item_id', $itemId)->find();
     $assert((int)$snapshot['cash_performance_amount_cents'] === 98000
         && (int)$snapshot['partner_category_id_snapshot'] === 26321
         && (int)$snapshot['partner_default_ratio_snapshot'] === 30
         && (int)$snapshot['partner_share_amount_cents'] === 29400,
-        'repayment freezes 980 cash and 294 partner share in the same transaction');
+        'rebuilt repayment freezes 980 cash and 294 partner share in the same transaction');
 
     $after = $service->query([(int)$repayment['store_id']], $input);
     $afterRow = $findRepayment($after, $repaymentId);
@@ -141,6 +137,8 @@ $assert((int)Db::name('cashier_v3_payment_fact')->where('fact_id', (string)$paym
         === $originalPaymentAmount
     && (int)Db::name('cashier_v3_payment_sale_allocation_fact')->where('id', (int)$allocation['id'])->value('amount_cents')
         === $originalAllocationAmount
+    && (int)Db::name('cashier_v3_debt_repayment')->where('repayment_id', $repaymentId)->value('repayment_amount_cents')
+        === $originalRepaymentAmount
     && (string)Db::name('store_debt_item')->where('id', $itemId)->value('repaid_debt') === $originalRepaidDebt
     && (int)Db::name('cashier_v3_report_category_config')->where('id', (int)$config['id'])->value('partner_default_ratio')
         === $originalRatio

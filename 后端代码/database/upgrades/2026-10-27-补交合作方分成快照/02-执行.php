@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
+use app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices;
 use app\services\report\StoreReportPartnerCategorySnapshotServices;
 use think\facade\Db;
 
@@ -50,6 +51,28 @@ if (isset($args['apply'])) {
     Db::connect()->getSchemaInfo($table, true);
 }
 $schemaReady = isset($existing['partner_snapshot_frozen_at']) || isset($args['apply']);
+$repaymentTable = $prefix . 'cashier_v3_debt_repayment';
+if (!preg_match('/^[a-zA-Z0-9_]+$/D', $repaymentTable)) throw new RuntimeException('非法补交表名');
+$missingRows = $schemaReady ? Db::query(
+    "SELECT repayment.* FROM `{$repaymentTable}` repayment "
+    . "LEFT JOIN `{$table}` settlement ON settlement.tenant_id=repayment.tenant_id "
+    . "AND settlement.repayment_id=repayment.repayment_id "
+    . "WHERE repayment.status='succeeded' AND settlement.id IS NULL ORDER BY repayment.id"
+) : [];
+$recreated = $skippedMissing = 0;
+if (isset($args['apply'])) {
+    foreach ($missingRows as $missingRow) {
+        Db::transaction(function () use ($missingRow, &$recreated, &$skippedMissing): void {
+            $locked = (array)Db::name('cashier_v3_debt_repayment')->where('id', (int)$missingRow['id'])
+                ->where('status', 'succeeded')->lock(true)->find();
+            if ($locked !== [] && CashierV3SalesDebtBalanceServices::rebuildHistoricalCashOnlySingleItemInTx($locked)) {
+                $recreated++;
+            } else {
+                $skippedMissing++;
+            }
+        });
+    }
+}
 $pending = $schemaReady ? (int)Db::name('cashier_v3_debt_repayment_item_settlement')->alias('settlement')
     ->join('cashier_v3_debt_repayment repayment', "repayment.tenant_id=settlement.tenant_id AND repayment.repayment_id=settlement.repayment_id AND repayment.status='succeeded'")
     ->where('settlement.partner_snapshot_frozen_at', 0)->count() : 0;
@@ -93,4 +116,6 @@ if (isset($args['apply']) && $pending > 0) {
 }
 echo json_encode(['migration'=>'20261027-supplement-partner-snapshot','database'=>$database,
     'apply'=>isset($args['apply']),'added_columns'=>$added,'pending_before'=>$pending,
+    'missing_settlement_repayments'=>count($missingRows),'recreated_settlements'=>$recreated,
+    'skipped_missing_settlements'=>$skippedMissing,
     'schema_ready'=>$schemaReady,'backfilled_rows'=>$backfilled,'unresolved_rows'=>$unresolved], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;

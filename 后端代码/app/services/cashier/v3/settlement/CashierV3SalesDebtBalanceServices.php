@@ -53,7 +53,7 @@ final class CashierV3SalesDebtBalanceServices
     }
 
     /** Freeze the exact increment per debt item; future void never reapportions other repayments. */
-    public static function freezeInTx(string $tenantId, string $repaymentId, array $debt, array $items, array $targets, array $personnel, int $balanceCents): array
+    public static function freezeInTx(string $tenantId, string $repaymentId, array $debt, array $items, array $targets, array $personnel, int $balanceCents, int $frozenAt = 0): array
     {
         CashierV3TransactionGuard::assertInTransaction('salesDebtBalance.freeze');
         $weights = [];
@@ -105,12 +105,51 @@ final class CashierV3SalesDebtBalanceServices
                 'cash_performance_amount_cents' => $cashAmount,
                 'category_id_snapshot' => (int)($exactCategory['id'] ?? 0),
                 'category_path_snapshot' => (string)($exactCategory['path'] ?? ''),
-                'partner_snapshot_frozen_at' => time(),
+                'partner_snapshot_frozen_at' => $frozenAt > 0 ? $frozenAt : time(),
             ], $partner));
             if ((int)$inserted !== 1) throw new \RuntimeException('sales_debt_item_settlement_write_failed');
             $cashAmounts[$id] = $cashAmount;
         }
         return $cashAmounts;
+    }
+
+    /**
+     * Rebuild a missing historical snapshot only when one cash-only repayment maps
+     * to exactly one debt item. Multi-item or balance-backed history is skipped:
+     * its item allocation/origin cannot be reconstructed without guessing.
+     */
+    public static function rebuildHistoricalCashOnlySingleItemInTx(array $repayment): bool
+    {
+        CashierV3TransactionGuard::assertInTransaction('salesDebtBalance.rebuildHistorical');
+        $repaymentId = (string)($repayment['repayment_id'] ?? '');
+        $tenantId = (string)($repayment['tenant_id'] ?? '');
+        $amountCents = (int)($repayment['repayment_amount_cents'] ?? 0);
+        if ($repaymentId === '' || (string)($repayment['status'] ?? '') !== 'succeeded'
+            || $amountCents <= 0 || $amountCents % 100 !== 0
+            || Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('repayment_id', $repaymentId)->count()) {
+            return false;
+        }
+        if (self::balanceCents($repaymentId) !== 0) return false;
+        $debt = (array)Db::name('store_debt')->where('id', (int)($repayment['debt_id'] ?? 0))->lock(true)->find();
+        $items = Db::name('store_debt_item')->where('debt_id', (int)($repayment['debt_id'] ?? 0))
+            ->order('id')->lock(true)->select()->toArray();
+        if ($debt === [] || count($items) !== 1) return false;
+        $itemId = (int)$items[0]['id'];
+        $currentCents = (int)bcmul((string)$items[0]['repaid_debt'], '100', 0);
+        if ($currentCents < $amountCents || $currentCents % 100 !== 0) return false;
+        $lineIds = Db::name('cashier_v3_payment_fact')->alias('payment')
+            ->join('cashier_v3_payment_sale_allocation_fact allocation',
+                "allocation.payment_fact_id=payment.fact_id AND allocation.status='effective'")
+            ->join('cashier_v3_sale_fact sale', 'sale.fact_id=allocation.sale_fact_id')
+            ->where('payment.order_id', $repaymentId)->where('payment.source_document_type', 'debt_repayment')
+            ->where('payment.status', 'effective')->column('sale.source_line_id');
+        $lineIds = array_values(array_unique(array_filter(array_map('strval', $lineIds))));
+        $personnel = count($lineIds) === 1 ? [$itemId => ['authority' => ['order_line_id' => $lineIds[0]]]] : [];
+        // freezeInTx expects the pre-repayment value and an authoritative target.
+        $items[0]['repaid_debt'] = bcdiv((string)($currentCents - $amountCents), '100', 2);
+        self::freezeInTx($tenantId, $repaymentId, $debt, $items, [$itemId => $currentCents], $personnel, 0,
+            max(1, (int)($repayment['settled_at'] ?? 0)));
+        return true;
     }
 
     /** Only active repayments reduce cash refundability; voided rows stay immutable audit evidence. */
