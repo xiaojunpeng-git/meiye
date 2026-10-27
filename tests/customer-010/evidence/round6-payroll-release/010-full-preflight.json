@@ -44,6 +44,10 @@
     "public/view_cashier_v3/index.html": "f899c05668ab0a66fc980421b0cf285eb1077145216a0d176430a3aef6ee33fb",
     "public/view_mobile_v3/index.html": "b3da79f52d1b84ad5c8bc9dd6edcb489a81d2d5d8e9e52c7df616a8141ac0093"
   },
+  "business_bounds": {
+    "performance": 104065,
+    "orders": 125710
+  },
   "business": {
     "performance": {
       "n": 104057,

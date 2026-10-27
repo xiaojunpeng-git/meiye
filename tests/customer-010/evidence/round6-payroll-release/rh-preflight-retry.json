@@ -1,0 +1,5 @@
+{
+  "reason": "Normal production business digest advanced before prepare; no files switched or DB writes",
+  "old_staging": "/www/backups/rh/20261027-payroll-release-fc13caced13b-preflight-attempt1",
+  "fixed_source_unchanged": true
+}

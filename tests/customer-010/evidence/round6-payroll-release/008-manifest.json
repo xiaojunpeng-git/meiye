@@ -1,7 +1,7 @@
 {
   "site": "008",
   "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
-  "source_commit": null,
+  "source_commit": "315efb5447fa5bd5d0da29719cba6a5451d23cde",
   "business_source_commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
   "files": {
     "app/controller/admin/v1/position/PositionLevel.php": "9c86d016cd3ec8f9f6c045767c5a4978b3dc84723737d0c3e42b0c7b57ddb000",
@@ -1537,6 +1537,10 @@
       "orders": 6545,
       "old_wage_rules": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "tiers": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "business_bounds": {
+      "performance": 19,
+      "orders": 6547
     }
   },
   "preserve_algorithm": 0,

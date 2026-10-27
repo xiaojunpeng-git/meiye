@@ -44,13 +44,17 @@
     "public/view_cashier_v3/index.html": "0fa8bd75ddb140e2e1013c7ec6986ce483311c5d8aba5f04b347cd58d5c8611b",
     "public/view_mobile_v3/index.html": "fd606eb37a2305eb0ab83d7a7a193daa35859bdef8cc56ce257ca881f435bc76"
   },
+  "business_bounds": {
+    "performance": 158387,
+    "orders": 2334745
+  },
   "business": {
     "performance": {
-      "n": 149444,
-      "amount": "4818169294",
-      "fee": "9289470"
+      "n": 149598,
+      "amount": "4821376594",
+      "fee": "9306470"
     },
-    "orders": 300390,
+    "orders": 300395,
     "old_wage_rules": "97e3c2ca90cc6066716e91f228186bd4734f1249b1e4c2bd2ddd71ac70b28199",
     "tiers": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
@@ -61,8 +65,8 @@
     "preserved_projects": 0,
     "preserved_cards": 2533,
     "fallback_cards": 12598,
-    "source_hash": "40adf9599bf24a202ef7137229de3041c997a5f470d995ba18b90397761c1393",
-    "sha256": "226f69482140cc9a6c42cbbe08bdc98f175c0c19c59dfbeb357d7c26dbb8144c"
+    "source_hash": "13067760b6c86d100d3b3e45fe8b71dcddf58005dbd591296a237d669192b620",
+    "sha256": "360a14c8e40e138cba601c2b5f8db7ee2282bd67ac70e52a53bc986101923342"
   },
   "permissions": {
     "catalog": {

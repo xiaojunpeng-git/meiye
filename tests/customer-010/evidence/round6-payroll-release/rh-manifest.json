@@ -1,7 +1,7 @@
 {
   "site": "rh",
   "tree": "fc13caced13b08a040dd9947f3c998fe7b728ac3",
-  "source_commit": null,
+  "source_commit": "315efb5447fa5bd5d0da29719cba6a5451d23cde",
   "business_source_commit": "931edeac5220c1eab53c62d104a1d97f8aebe9e1",
   "files": {
     "app/controller/admin/v1/position/PositionLevel.php": "9c86d016cd3ec8f9f6c045767c5a4978b3dc84723737d0c3e42b0c7b57ddb000",
@@ -1530,13 +1530,17 @@
     },
     "business": {
       "performance": {
-        "n": 149444,
-        "amount": "4818169294",
-        "fee": "9289470"
+        "n": 149598,
+        "amount": "4821376594",
+        "fee": "9306470"
       },
-      "orders": 300390,
+      "orders": 300395,
       "old_wage_rules": "97e3c2ca90cc6066716e91f228186bd4734f1249b1e4c2bd2ddd71ac70b28199",
       "tiers": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "business_bounds": {
+      "performance": 158387,
+      "orders": 2334745
     }
   },
   "preserve_algorithm": 0,
