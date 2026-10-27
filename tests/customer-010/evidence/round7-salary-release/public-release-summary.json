@@ -495,6 +495,51 @@
       "public/view_cashier_v3/assets/index-b2ee669c.js": "74cd195e6fd57994c7bb25dd74fec8b0c4dc4b0eab32a6f898bb00012e859c31",
       "public/view_cashier_v3/index.html": "a204eae2f3d7f1f5b26bcf3dc5a91d19857b5b7e38a8597e33926e3ae77b8a00"
     },
-    "new_empty_schema": 3
+    "new_empty_schema": 3,
+    "explicit_finance_grant": {
+      "approved_by_product_manager": true,
+      "position_id": 8,
+      "actions": [
+        "edit",
+        "freeze"
+      ],
+      "result": {
+        "result": "PASS",
+        "data": {
+          "position_id": 8,
+          "affected_accounts": 2,
+          "capability_ids": [
+            2351,
+            2352
+          ],
+          "source_version": 5,
+          "other_channels_unchanged": true,
+          "freeze_unchanged": true
+        },
+        "replay": false,
+        "backup": "/www/backups/010/round7-e888c787e5d9-20261027174851/finance-grant-before.json"
+      },
+      "verification": {
+        "result": "PASS",
+        "accounts": [
+          {
+            "admin_id": 38,
+            "edit": true,
+            "freeze": true,
+            "source_projection_consistent": true
+          },
+          {
+            "admin_id": 39,
+            "edit": true,
+            "freeze": true,
+            "source_projection_consistent": true
+          }
+        ],
+        "position_source_form_retains_both_actions": true,
+        "manual_rows": 0,
+        "freeze_rows": 0
+      },
+      "actual_account_ui_verified": "A0751 shows edit and freeze; edit mode entered and cancelled without saving"
+    }
   }
 }

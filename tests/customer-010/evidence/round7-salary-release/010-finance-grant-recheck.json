@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "configuration_already_matches": true,
+  "data": {
+    "position_id": 8,
+    "affected_accounts": 2,
+    "capability_ids": [
+      2351,
+      2352
+    ],
+    "source_version": 5,
+    "other_channels_unchanged": true,
+    "freeze_unchanged": true
+  },
+  "replay": true,
+  "backup": "/www/backups/010/round7-e888c787e5d9-20261027174851/finance-grant-before.json"
+}
