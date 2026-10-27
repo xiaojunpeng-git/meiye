@@ -148,7 +148,7 @@ final class CashierV3CashierMoreActionServices
                 ->where('id', $skuId)
                 ->where('product_id', $productId)
                 ->where('type', 0)
-                ->field('id,product_id,cost,price,ot_price,price_range_min,price_range_max')
+                ->field('id,product_id,cost,price,ot_price')
                 ->lock(true)
                 ->find()
             : null;
@@ -160,9 +160,6 @@ final class CashierV3CashierMoreActionServices
                 ['reason' => 'price_change_catalog_authority_missing', 'line_id' => $lineKey]
             );
         }
-        // 使用同一事务已锁定SKU的可售价区间，按单价校验后再写入本次唯一业务草稿。
-        // 不信任客户端提交的上下限；即使改为0元，也不能绕过已配置的最低售价。
-        self::assertSalePriceRange($sku, (string)$product['store_name'], intdiv($lineAmountCents, $quantity));
         $authoritySnapshot = json_decode((string)($line['authority_snapshot_json'] ?? ''), true);
         if (!is_array($authoritySnapshot)) {
             throw self::invalid('price_change_authority_snapshot_invalid');
@@ -219,38 +216,6 @@ final class CashierV3CashierMoreActionServices
             ]);
         $this->refreshLineFingerprint($workspaceId);
         return '商品价格已更新。';
-    }
-
-    /**
-     * 可售价区间约束单件售价：0为该侧无限制，等值上下限自然形成固定售价。
-     * 只在改价命令中读取已锁定配置，不新增结账版本或第二份可落账快照。
-     */
-    private static function assertSalePriceRange(array $sku, string $name, int $unitPriceCents): void
-    {
-        $minimum = self::decimalMoneyToCents($sku['price_range_min'] ?? 0, 'sale_price_min_invalid');
-        $maximum = self::decimalMoneyToCents($sku['price_range_max'] ?? 0, 'sale_price_max_invalid');
-        self::assertSalePriceRangeCents($minimum, $maximum, $name, $unitPriceCents, 1);
-    }
-
-    /** 浏览器改价草稿最终提交共用此校验；乘数量比较整行金额，避免浮点单价和优惠后金额误判。 */
-    public static function assertSalePriceRangeCents(int $minimum, int $maximum, string $name, int $amountCents, int $quantity): void
-    {
-        if ($quantity <= 0 || $minimum < 0 || $maximum < 0) {
-            throw self::invalid('sale_price_range_invalid');
-        }
-        if (($minimum > 0 && $amountCents < self::multiply($minimum, $quantity, 'sale_price_range_overflow'))
-            || ($maximum > 0 && $amountCents > self::multiply($maximum, $quantity, 'sale_price_range_overflow'))) {
-            // 收银只保存整数元；提示历史小数边界时展示实际可填写的整数上下限。
-            $minimumYuan = intdiv($minimum, 100) + ($minimum % 100 > 0 ? 1 : 0);
-            $maximumText = $maximum > 0 ? intdiv($maximum, 100) . '元' : '不限';
-            throw new CashierV3CommandException(
-                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                (trim($name) ?: '该商品') . '的售价区间是:最低' . $minimumYuan . '元,最高' . $maximumText,
-                CashierV3ResultCode::STATUS_FAILED,
-                ['reason' => 'price_change_outside_sale_price_range',
-                    'minimum_unit_price_cents' => $minimum, 'maximum_unit_price_cents' => $maximum]
-            );
-        }
     }
 
     private function updateSupplement(

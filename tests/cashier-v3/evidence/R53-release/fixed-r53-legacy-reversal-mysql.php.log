@@ -1,9 +1,0 @@
-PASS repayment terminal refund: conversion blocked; associated rows unchanged
-PASS repayment terminal void: conversion blocked; associated rows unchanged
-PASS actual reverseRepayOnRefund: conversion blocked; associated rows unchanged
-PASS ledger-only terminal action=1: conversion blocked; associated rows unchanged
-PASS ledger-only terminal action=2: conversion blocked; associated rows unchanged
-PASS ambiguous ledger mapping: unlocked/locked resolver and terminal refund/void fail closed without mutation
-PASS unrelated ledger-only terminal refund/void accepted without mutation
-PASS unrelated terminal refund/void and real repayment reversal: 40 -> 30; converted rows unchanged
-PASS R53 legacy undo and refund/void gates blocked without mutation; 19 checks; fixtures rolled back

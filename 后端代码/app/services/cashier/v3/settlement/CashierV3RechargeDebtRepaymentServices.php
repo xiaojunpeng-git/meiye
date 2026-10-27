@@ -10,6 +10,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
@@ -67,6 +68,15 @@ final class CashierV3RechargeDebtRepaymentServices
             || (int)($recharge['store_id'] ?? 0) !== $operator->storeId()) {
             throw self::failure('recharge_repayment_recharge_missing');
         }
+        // 原充值单来源是欠款弹窗的默认选项；本次明确选择的来源归属于补交，
+        // 不反写原充值单，也不读取收银工具栏来源。
+        $originalSource = [
+            'business_source_primary_id' => (int)($recharge['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => trim((string)($recharge['business_source_primary_name_snapshot'] ?? '')),
+            'business_source_secondary_id' => (int)($recharge['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => trim((string)($recharge['business_source_secondary_name_snapshot'] ?? '')),
+            'business_source_label_snapshot' => trim((string)($recharge['business_source_label_snapshot'] ?? '')),
+        ];
         $total = self::cents((string)($debt['total_debt'] ?? ''));
         $repaidBefore = self::cents((string)($debt['repaid_debt'] ?? ''));
         $pending = $total - $repaidBefore;
@@ -107,14 +117,26 @@ final class CashierV3RechargeDebtRepaymentServices
             }
             return $this->replayedResult((array)$existing);
         }
-        // Successful historical retries above remain untouched. New repayment
-        // uses its own confirmed policy choice, never the original recharge.
-        $input['businessSource'] = self::sourceSnapshotColumns(
-            (new CashierV3CheckoutBusinessSourceSelectionServices())->validateConfirmedChoice(
-                'repayment', $dataScope->tenantId(), $operator->storeId(), $input['memberId'],
-                (array)($scope['payload']['businessSource'] ?? [])
-            )
-        );
+        // 历史已完成补交保持原幂等回放结果。新补交必须有明确来源；
+        // 与原单一致时保留历史快照，重选则在事务内从当前有效目录解析名称。
+        if ($originalSource['business_source_primary_id'] <= 0
+            || $originalSource['business_source_primary_name_snapshot'] === ''
+            || $originalSource['business_source_label_snapshot'] === ''
+            || ($originalSource['business_source_secondary_id'] > 0 && $originalSource['business_source_secondary_name_snapshot'] === '')) {
+            $originalSource = self::sourceSnapshotColumns([]);
+        }
+        if ($input['businessSource']['business_source_primary_id'] <= 0) {
+            throw self::failure('recharge_repayment_business_source_required');
+        }
+        if ($input['businessSource'] === $originalSource) {
+            $input['businessSource'] = $originalSource;
+        } else {
+            $selected = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
+                $input['businessSource']['business_source_primary_id'],
+                $input['businessSource']['business_source_secondary_id'], true
+            );
+            $input['businessSource'] = self::sourceSnapshotColumns($selected);
+        }
         // 充值补交奖励与本金分开保存；资格只依据服务端核定来源，余额仍只补入本金。
         $rewardAmountCents = CashierV3RepaymentReward::forSource($input['rewardAmountCents'], $input['businessSource']['business_source_primary_name_snapshot']);
         $recordId = (int)Db::name('cashier_v3_recharge_debt_repayment')->insertGetId([

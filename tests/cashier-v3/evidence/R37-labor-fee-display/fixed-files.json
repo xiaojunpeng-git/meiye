@@ -1,0 +1,21 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "files": {
+    "后端代码/app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df",
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js": "73650c574887e28159c03fc8aeda0e91be07498b1ae6c5711d464cf71f47bce1",
+    "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js": "84279fb08ed361457fba0c03e66159f1f32a7b3c88be57bbb9149e50445830c5",
+    "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "78bc249481f0717ed44495d29ac4f715594a9fd7a16556334f1ef98fd40f9746",
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "780da6af96ce44beabd6408ddc13bf71fce0f48cff7008cffec07d685a772e2d",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue": "17676ed0ab83f7d5b1f8d9544721be6263d1db6953682f33c315937b90e2ae04",
+    "前端代码/cashier-v3/src/styles/base.css": "382a45c5dc2421cb9a609708867a0293370f9d3f0e556b52b6600cc9ee9d6475",
+    "后端代码/app/validate/admin/setting/SystemConfigValidate.php": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213",
+    "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e",
+    "tests/cashier-v3/js/r37-labor-fee-display.mjs": "e31c9f4507fc3447d8581db6382d712012786c08b615a0fb419449eeb4204049",
+    "tests/cashier-v3/php/r37-labor-fee-display.php": "fed655437fe50fd94d2c77c781721aad0186792d8952ecf78ec02e85ee19ed73"
+  },
+  "patchSha256": "d4fc6d768636d03f94fc371706a0d3ceabb30ead5e8d9dcb0c1635db904108d3",
+  "remote": "不适用：未连接任何线上实例",
+  "acceptance": "2026-10-27 产品经理测试通过；发布准备仅扩展测试参数以验证不可编辑候选，不改变业务范围"
+}

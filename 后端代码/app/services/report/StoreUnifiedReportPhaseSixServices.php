@@ -1856,16 +1856,6 @@ final class StoreUnifiedReportPhaseSixServices
         $categories=$this->salaryCurrentProductCategories($categoryLinks);
         $names=(new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
 
-        // New repayments freeze the exact cash share per item; legacy cumulative reconstruction
-        // remains read-only fallback only for historical rows without a settlement snapshot.
-        $settlementItems=[];
-        foreach(Db::name(\app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::TABLE)
-            ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('repayment_id',array_keys($dimensions))
-            ->field('repayment_id,debt_item_id,amount_cents,balance_amount_cents')->select()->toArray() as $settlement){
-            $settlementItems[(string)$settlement['repayment_id']][(int)$settlement['debt_item_id']]
-                =(int)$settlement['amount_cents']-(int)$settlement['balance_amount_cents'];
-        }
-
         foreach($dimensions as $repaymentId=>&$dimension){
             $debtId=(int)($dimension['debt_id']??0);
             if($debtId<=0)continue;
@@ -1875,8 +1865,7 @@ final class StoreUnifiedReportPhaseSixServices
             $after=CashierV3DebtRepaymentServices::proportionalCumulativeAllocation((int)$dimension['after_cents'],$debtItems);
             $weights=[];$paths=[];
             foreach($debtItems as $item){
-                $itemId=(int)$item['id'];$itemAmount=isset($settlementItems[$repaymentId])
-                    ?(int)($settlementItems[$repaymentId][$itemId]??0):(int)($after[$itemId]??0)-(int)($before[$itemId]??0);
+                $itemId=(int)$item['id'];$itemAmount=(int)($after[$itemId]??0)-(int)($before[$itemId]??0);
                 if($itemAmount<=0)continue;
                 if((int)$item['product_type']!==5){
                     $category=$categories['item:'.$itemId]??[];$categoryId=(int)($category['id']??0);

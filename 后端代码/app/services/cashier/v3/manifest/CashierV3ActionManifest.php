@@ -603,8 +603,6 @@ class CashierV3ActionManifest
                 'consumers' => ['reservation.updated' => []],
             ],
             'select-reservation-member' => $eventless($selection),
-            // 仅改变预约视觉标记；审计由 reservation_operation 保存，不生成服务或经营事实。
-            'mark-reservation-color' => $eventless('仅保存当前预约的日历颜色标记，不改变预约状态、会员资料或服务事实。'),
 
             // C3 | hang order
             'submit-hang-order' => [
@@ -769,7 +767,6 @@ class CashierV3ActionManifest
             ],
             'correct-sales-order-attribution' => self::attributionCorrectionEventContract('correct-sales-order-attribution'),
             'correct-service-order-date' => self::attributionCorrectionEventContract('correct-service-order-date'),
-            'correct-service-order-attribution' => self::attributionCorrectionEventContract('correct-service-order-attribution'),
             'correct-service-order-guide' => [
                 'required_event_types' => ['service_record.guide_corrected'],
                 'allowed_event_types' => ['service_record.guide_corrected'],

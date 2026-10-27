@@ -88,15 +88,11 @@ try {
     $invalid['request_token'] = jpToken()['header_token'];
     $response = (new JobPositionSaveLocalController($invalid, $admin))->job_position_save()->getData();
     jpAssert((int)$response['status'] === 400 && $response['msg'] === '请填写岗位名称', '原有业务校验保留');
-    $status = $svc->setPositionStatus($positionId, 0, $admin, jpToken());
-    jpAssert((int)$status['data']['status'] === 0
-        && (int)Db::name('position')->where('id', $positionId)->value('status') === 0,
-        '岗位功能授权账号可切换启停状态');
+    jpReject(static function () use ($svc, $positionId, $admin) {
+        $svc->setPositionStatus($positionId, 0, $admin, jpToken());
+    }, '无权限执行该操作');
     Db::name('system_role')->where('id', $role)->update(['status' => 0]);
     jpReject(static function () use ($svc, $data, $admin) { $svc->savePosition($data, $admin, jpToken()); }, '无权保存岗位');
-    jpReject(static function () use ($svc, $positionId, $admin) {
-        $svc->setPositionStatus($positionId, 1, $admin, jpToken());
-    }, '无权保存岗位');
     Db::name('system_role')->where('id', $role)->update(['status' => 1]);
     Db::name('system_admin')->where('id', $id)->update(['status' => 0]);
     jpReject(static function () use ($svc, $data, $admin) { $svc->savePosition($data, $admin, jpToken()); }, '无权保存岗位');

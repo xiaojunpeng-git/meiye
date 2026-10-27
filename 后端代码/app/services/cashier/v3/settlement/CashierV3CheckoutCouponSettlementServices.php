@@ -9,7 +9,6 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\activity\coupon\StoreCouponOrderRule;
-use app\services\activity\coupon\StoreCouponAllowanceServices;
 use think\facade\Db;
 
 /** Final-transaction CAS consumption of coupons frozen on checkout lines. */
@@ -42,14 +41,13 @@ final class CashierV3CheckoutCouponSettlementServices
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
             $issue = (int)($coupon['cid'] ?? 0) > 0
                 ? (array)Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->find() : [];
-            $reusable = (int)($issue['coupon_type'] ?? 0) === StoreCouponAllowanceServices::TYPE;
             if (!$coupon
                 || (int)($issue['use_mode'] ?? StoreCouponOrderRule::DETAIL) !== StoreCouponOrderRule::DETAIL
                 || (int)$orderCouponResult['consumedCount'] > 0
                 || (int)($coupon['uid'] ?? 0) !== (int)$plan->header()['member_id']
                 || (int)($coupon['status'] ?? -1) !== 0
                 || (int)($coupon['is_fail'] ?? -1) !== 0
-                || (!$reusable && (int)($coupon['use_time'] ?? -1) !== 0)
+                || (int)($coupon['use_time'] ?? -1) !== 0
                 || (int)($coupon['start_time'] ?? 0) > $now
                 || ((int)($coupon['end_time'] ?? 0) > 0 && (int)$coupon['end_time'] < $now)
                 || trim((string)($coupon['coupon_title'] ?? '')) !== trim((string)$line['coupon_name_snapshot'])
@@ -60,26 +58,11 @@ final class CashierV3CheckoutCouponSettlementServices
                     : ($discount !== (int)($line['discount_amount_cents'] ?? -1)))) {
                 throw self::failure('checkout_coupon_frozen_authority_changed');
             }
-            if ($reusable) {
-                // Non-cash tender uses the existing sale/refund cap facts; only
-                // its allowance lifecycle differs from an ordinary one-use coupon.
-                if ((int)($line['coupon_payment_cents'] ?? 0) !== $discount
-                    || $discount > (int)$line['sale_amount_cents'] - (int)$line['debt_amount_cents']) {
-                    throw self::failure('checkout_allowance_tender_invalid');
-                }
-                (new StoreCouponAllowanceServices())->consumeInTx($couponId, $discount, [
-                    'tenant_id' => $scope->tenantId(), 'store_id' => (int)$plan->header()['store_id'],
-                    'member_id' => (int)$plan->header()['member_id'], 'order_id' => $orderId,
-                    'order_line_id' => (string)$line['order_line_id'],
-                    'product_id' => (int)$line['item_id'],
-                ], $now);
-            } else {
-                $updated = Db::name('store_coupon_user')->where('id', $couponId)
+            $updated = Db::name('store_coupon_user')->where('id', $couponId)
                 ->where('uid', (int)$plan->header()['member_id'])
                 ->where('status', 0)->where('is_fail', 0)->where('use_time', 0)
                 ->update(['status' => 1, 'use_time' => $now]);
-                if ((int)$updated !== 1) throw self::failure('checkout_coupon_consume_race');
-            }
+            if ((int)$updated !== 1) throw self::failure('checkout_coupon_consume_race');
             $consumed[$couponId] = [
                 'couponUserId' => $couponId,
                 'couponName' => (string)$line['coupon_name_snapshot'],

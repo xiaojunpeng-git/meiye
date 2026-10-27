@@ -22,7 +22,6 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
 
     private const SKU_FIELDS = [
         'id', 'product_id', 'product_type', 'unique', 'suk', 'price', 'ot_price', 'cost',
-        'price_range_min', 'price_range_max',
         'stock', 'code', 'bar_code', 'is_show', 'type', 'write_times', 'write_valid',
         'write_days', 'write_start', 'write_end',
     ];

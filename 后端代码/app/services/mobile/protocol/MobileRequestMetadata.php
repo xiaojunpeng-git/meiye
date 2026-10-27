@@ -36,16 +36,12 @@ final class MobileRequestMetadata
 
     public static function merchant($request): array
     {
-        // 仅成长证据上传精确路由允许multipart；身份、凭据、上下文和禁止Cookie的校验不变。
-        $growthUpload=trim((string)$request->pathinfo(),'/')==='api/mobile/merchant/growth/asset/upload'
-            && strtoupper((string)$request->method())==='POST';
-        return self::resolve($request, 'MERCHANT_SESSION', MobileApiResponse::MERCHANT_CONTRACT, $growthUpload);
+        return self::resolve($request, 'MERCHANT_SESSION', MobileApiResponse::MERCHANT_CONTRACT);
     }
 
-    private static function resolve($request, string $profile, string $expectedContract, bool $allowMultipart = false): array
+    private static function resolve($request, string $profile, string $expectedContract): array
     {
-        if (strtoupper((string)$request->method()) !== 'GET' && !self::isJson($request)
-            && !($allowMultipart && strpos(strtolower((string)$request->header('Content-Type','')), 'multipart/form-data;') === 0)) {
+        if (strtoupper((string)$request->method()) !== 'GET' && !self::isJson($request)) {
             throw MobileApiException::protocol('UNSUPPORTED_MEDIA_TYPE', '移动接口只接受 application/json 请求。', 'Content-Type');
         }
         $headers = [];

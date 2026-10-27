@@ -50,12 +50,6 @@
 			   </view>
 			   <view class="info-value line1">{{ staffDisplayName }}<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 ml-8"></text></view>
 		   </view>
-		   <view v-if="orderId && !butlerEdit && customServiceEnabled" class="info-row acea-row row-between-wrapper" @click="openCustomServices">
-			   <text class="info-label">定制服务</text>
-			   <view class="info-value custom-service-summary">{{ customServiceSummary }}<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 ml-8"></text></view>
-		   </view>
-		   <view v-if="customServiceError" class="info-row"><text>{{ customServiceError }}</text><text @click="loadCustomServices"> 重试</text></view>
-		   <view v-if="!customServiceLoading && !customServiceError && !customServiceEnabled && customServices.length" class="info-row"><text>定制服务已关闭</text><text @click="customServices = []">清除已选内容</text></view>
 	   </view>
 
 	   <view class="bg--w111-fff pl-24 pr-24 pt-32 pb-32 rd-16rpx relative w-710 m-auto mt-20" v-if="!orderId">
@@ -434,7 +428,7 @@ import {getReservationInfo,getReservationDate,getReservationTimes,postReservatio
 import {postCartAdd, getProductslist, storeReservationDetail, storeReservationUpdate} from '@/api/store.js';
 import { merchantReservationDetail, merchantReservationUpdate } from '@/api/merchant.js';
 import { setCouponReceive } from '@/api/api.js';
-import {getReservationOrderInfo,postReservationOrderCreate,getUserPurchasedRemainItems,getReservationCustomServices} from '@/api/order.js';
+import {getReservationOrderInfo,postReservationOrderCreate,getUserPurchasedRemainItems} from '@/api/order.js';
 import { isMobileReservationOpen } from '@/utils/mobileReservation.js';
 import { openYuyueSubscribe, openGuanjiaSubscribe } from '@/utils/SubscribeMessage.js';
 import { resolveProjectDuration, resolveAddonDuration } from '@/utils/serviceDuration.js';
@@ -460,11 +454,6 @@ export default {
 			timeArrow:false,
 			productId:0,
 			storeId:0,
-			customServices: [],
-			customServiceEnabled: false,
-			customServiceLoading: false,
-			customServiceError: '',
-			customServiceEpoch: 0,
 			unique:'',
 			attrList:[],
 			storeName:'',
@@ -558,9 +547,6 @@ export default {
 				return Number(item.is_dian) === 1 ? `${name}(点)` : name;
 			}).join('、');
 		},
-		customServiceSummary() {
-			return this.customServices.map(item => `${item.name} × ${item.quantity}`).join('、') || '未选择';
-		},
 		staffPickerQuery() {
 			if (!this.selectedTimeRange || !this.selectedTimeRange.begin) return {};
 			return {
@@ -637,16 +623,6 @@ export default {
 			return `/pages/store/list/index?type=1&isCollage=3&storeId=${this.storeId || ''}&product_id=${this.pid || this.productId}&card_product_id=${this.cardProductId || ''}`;
 		},
 	},
-	watch: {
-		// Invalidate both selections and late responses on a real store change.
-		storeId(value, previous) {
-			if (Number(value || 0) === Number(previous || 0)) return;
-			this.customServices = [];
-			this.customServiceEnabled = false;
-			this.loadCustomServices();
-		}
-	},
-	onShow() { if (Number(this.storeId) > 0) this.loadCustomServices(); },
 	onLoad(options){
 		this.fromMerchant = options.merchant === '1' || options.from === 'merchant'
 			|| (this.$store && this.$store.state.merchant && this.$store.state.merchant.mode === 'merchant');
@@ -685,32 +661,6 @@ export default {
 		uni.$on('activeReservation', this.storeChange);
 	},
 	methods: {
-		loadCustomServices() {
-			const storeId = Number(this.storeId || 0);
-			const epoch = ++this.customServiceEpoch;
-			this.customServiceLoading = true;
-			this.customServiceError = '';
-			// The no-order path purchases a product; it is not a V3 booking yet.
-			if (!storeId || !this.orderId || this.butlerEdit) { this.customServiceEnabled = false; this.customServiceLoading = false; return; }
-			return getReservationCustomServices(storeId).then(res => {
-				if (epoch !== this.customServiceEpoch || storeId !== Number(this.storeId)) return;
-				this.customServiceEnabled = res.data && res.data.enabled === true;
-			}).catch(() => {
-				if (epoch === this.customServiceEpoch && storeId === Number(this.storeId)) this.customServiceError = '定制服务加载失败';
-			}).finally(() => { if (epoch === this.customServiceEpoch) this.customServiceLoading = false; });
-		},
-		openCustomServices() {
-			const storeId = Number(this.storeId);
-			const epoch = this.customServiceEpoch;
-			if (!this.customServiceEnabled || !storeId) return;
-			uni.navigateTo({
-				url: `/pages/activity/reservation_custom_services/index?store_id=${storeId}`,
-				events: { chosen: items => {
-					if (storeId === Number(this.storeId) && epoch === this.customServiceEpoch) this.customServices = items;
-				} },
-				success: res => res.eventChannel.emit('initialSelection', this.customServices)
-			});
-		},
 		buildAddonPayload() {
 			return this.addonItems.map(item => {
 				const payload = {
@@ -757,7 +707,6 @@ export default {
 				store_id:this.storeId,
 				service_duration_minutes: this.totalServiceDuration,
 				addon_items: this.buildAddonPayload(),
-				custom_services: this.customServices.map(item => ({ id: item.id, quantity: item.quantity })),
 				mark: (this.serviceMark || '').trim(),
 				...this.buildStaffPayload(),
 			};
@@ -857,8 +806,7 @@ export default {
 				this.storeId = 0;
 				this.storeName = '';
 			}
-			// 新建预约不继承购卡订单备注；编辑时仅恢复该预约本身已保存的备注。
-			this.serviceMark = editDetail ? String(editDetail.mark ?? '').trim() : '';
+			this.serviceMark = String(editDetail?.mark ?? data.mark ?? '').trim();
 			this.customFormTitle = data.custom_form_title;
 			this.maxCartNum = data.cart_num;
 			this.storeId = data.store_id || this.storeId;
@@ -1713,7 +1661,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.custom-service-summary { max-width: 65%; white-space: normal; overflow-wrap: anywhere; text-align: right; }
 .booking-page {
 	min-height: 100vh;
 	background: #fbf7f4;

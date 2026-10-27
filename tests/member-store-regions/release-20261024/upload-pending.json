@@ -1,0 +1,24 @@
+{
+  "task": "M008-EMERG-R3-REGION",
+  "sourceCommit": "4f13dba0eac686adf2a029bac6dffc011a920c3a",
+  "customer": "渼约008",
+  "terminal": "会员端 Vue2 uniapp",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "apiOrigin": "https://008.cc3798.com",
+  "version": "3.0.15",
+  "project": "/private/tmp/m008-r3-regions-20261024/mini-final/008-member",
+  "artifactSha256": "098306906edfa8d729bd77b3cbaaaa009ee3075c8a8abdd4266629f5fdb2ad70",
+  "pendingTask": {
+    "taskId": "confirmation_upload_676f724f-d14d-48d6-bc73-e99076c6e99a",
+    "tool": "upload",
+    "clientName": "Codex",
+    "status": "pending",
+    "polls": 0,
+    "reason": "Waiting for confirmation in WeChat DevTools; do not resend or proactively poll."
+  },
+  "developmentUpload": "NOT CONFIRMED",
+  "trialDesignation": "NOT CONFIRMED",
+  "reviewSubmitted": false,
+  "formallyPublished": false,
+  "simulatorOrDeviceAcceptance": "NOT TESTED for this round; disclosed before PM acceptance"
+}

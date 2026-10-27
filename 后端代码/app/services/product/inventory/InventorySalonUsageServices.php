@@ -99,19 +99,18 @@ final class InventorySalonUsageServices
         return $this->listForScope($scope, $projectId, '', $from, $to);
     }
 
-    /** 平台院装只查当前授权的单仓；按单据分页并返回完整总数供查询栏与底部分页共用。 */
-    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to, int $hqLocationId = 0, int $page = 1, int $limit = 100): array
+    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to, int $hqLocationId = 0): array
     {
         // 只读院装菜单不要求领用写权限，门店范围仍由同一个后端策略决定。
         [$scope] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId, false);
-        $result = $this->listForScope($scope, 0, $keyword, $from, $to, $page, $limit);
+        $result = $this->listForScope($scope, 0, $keyword, $from, $to);
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
         foreach ($result['items'] as &$item) $item['can_void'] = !empty($item['can_void']) && in_array('inventory.location.manage', $access['features'], true);
         unset($item);
         return $result;
     }
 
-    private function listForScope(array $scope, int $projectId, string $keyword, string $from, string $to, int $page = 0, int $limit = 0): array
+    private function listForScope(array $scope, int $projectId, string $keyword, string $from, string $to): array
     {
         $from = $this->date($from); $to = $this->date($to); if ($from > $to) throw new \InvalidArgumentException('inventory_salon_usage_date_range_invalid');
         $query = Db::name('inventory_salon_usage_document')->alias('d')
@@ -126,16 +125,9 @@ final class InventorySalonUsageServices
             $like = '%' . $keyword . '%';
             $query->where(function ($inner) use ($like): void { $inner->whereLike('d.usage_no|d.project_name_snapshot|d.remark', $like); });
         }
-        // 只对平台普通列表启用分页；门店既有调用保留原返回形状。总数在分页前按单据计算。
-        $paged = $page > 0 && $limit > 0;
-        $page = max(1, $page);
-        $limit = max(1, min(100, $limit));
-        $total = $paged ? (int)(clone $query)->count('DISTINCT d.id') : 0;
-        $itemsQuery = $query->order('d.business_date desc')->order('d.id desc')
+        $items = $query->order('d.business_date desc')->order('d.id desc')
             ->field('d.id,d.usage_no,d.operation_type,d.project_id,d.project_name_snapshot,d.store_id,d.location_id,loc.location_name,d.operator_name_snapshot operator_name,d.document_status,d.business_date,d.remark,d.settled_at,d.recorded_at operation_at,COUNT(l.id) detail_count')
-            ->group('d.id');
-        if ($paged) $itemsQuery->page($page, $limit);
-        $items = $itemsQuery->select()->toArray();
+            ->group('d.id')->select()->toArray();
         $issueIds = array_values(array_map('intval', array_column(array_filter($items,
             static fn (array $item): bool => (string)$item['operation_type'] === 'ISSUE'
                 && (string)$item['document_status'] === 'SETTLED'), 'id')));
@@ -154,7 +146,7 @@ final class InventorySalonUsageServices
                 && !isset($returned[(int)$item['id']]);
         }
         unset($item);
-        return ['items' => $items, 'from' => $from, 'to' => $to] + ($paged ? ['total' => $total, 'page' => $page, 'limit' => $limit] : []);
+        return ['items' => $items, 'from' => $from, 'to' => $to];
     }
 
     /**

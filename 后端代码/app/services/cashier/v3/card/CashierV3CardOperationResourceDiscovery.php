@@ -40,10 +40,10 @@ final class CashierV3CardOperationResourceDiscovery
             throw self::failure('card_operation_discovery_scope_missing');
         }
         $type = trim((string)($payload['operationType'] ?? ''));
-        if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT || $type === 'card_to_balance') {
-            // Replacement/conversion validate live rows in their own domain
-            // transaction. Do not manufacture a second version plan from the
-            // read projection for either operation.
+        if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+            // Replacement is checked against live rows by the authority
+            // transaction. Do not manufacture a member_benefit_pool version
+            // plan from the read projection for this operation.
             return ['contractVersion' => self::CONTRACT_VERSION, 'resources' => []];
         }
         if ($type === CashierV3CardOperationKernel::TYPE_CARD_UPGRADE) {

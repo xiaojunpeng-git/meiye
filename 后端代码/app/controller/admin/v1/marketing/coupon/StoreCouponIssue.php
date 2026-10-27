@@ -121,14 +121,6 @@ class StoreCouponIssue extends AuthController
             ['order_tiers', []],//整单应收档位与全单张数
         ]);
         $data['allow_transfer'] = (int)!empty($data['allow_transfer']);
-        // Allowance claims are non-cash accounts, never percentage discounts.
-        if (!in_array((int)$data['coupon_type'], [1, 2, 3], true)) return $this->fail('请选择正确的优惠类型');
-        if ((int)$data['coupon_type'] === 3) {
-            try { \app\services\activity\coupon\StoreCouponAllowanceServices::wholeCents($data['coupon_price']); }
-            catch (\app\services\cashier\v3\CashierV3CommandException $e) { return $this->fail($e->getMessage()); }
-            $data['allow_transfer'] = 0;
-            if ((int)$data['use_mode'] !== StoreCouponOrderRule::DETAIL) return $this->fail('多次抵用券仅支持明细抵用');
-        }
         if ($data['applicable_type'] == 1) {
             $data['applicable_store_id'] = [];
         } elseif ($data['applicable_type'] == 2) {
@@ -201,12 +193,6 @@ class StoreCouponIssue extends AuthController
         if ($id > 0) {
             $existing = $this->services->get($id);
             if (!$existing || (int)$existing->is_del === 1) return $this->fail('优惠券不存在');
-            // Previously issued allowance faces cannot be repurposed by editing a template.
-            if (((int)$existing->coupon_type === 3 || (int)$data['coupon_type'] === 3)
-                && ((int)$existing->coupon_type !== (int)$data['coupon_type']
-                    || bccomp((string)$existing->coupon_price, (string)$data['coupon_price'], 2) !== 0)) {
-                return $this->fail('多次抵用券已发行，类型和总额度不可修改，请新建优惠券');
-            }
             $data['use_mode'] = (int)($existing->use_mode ?? StoreCouponOrderRule::DETAIL);
             $data['order_tiers_json'] = (string)($existing->order_tiers_json ?? '');
             if ($data['use_mode'] === StoreCouponOrderRule::ORDER
@@ -263,8 +249,6 @@ class StoreCouponIssue extends AuthController
             ['allow_transfer', 0],
         ], true);
         $allowTransfer = (int)$allowTransfer === 1 ? 1 : 0;
-        // Generic transfer has no allowance ledger ownership transition.
-        if ((int)$info->coupon_type === 3 && $allowTransfer) return $this->fail('多次抵用券暂不支持转赠');
         if (!$this->services->update($id, ['allow_transfer' => $allowTransfer])) {
             return $this->fail('转赠设置保存失败');
         }

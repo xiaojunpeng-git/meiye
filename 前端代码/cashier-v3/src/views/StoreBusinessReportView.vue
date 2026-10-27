@@ -348,8 +348,7 @@ const isFirstPhaseReport = computed(() => [
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
-const isLargeOrderReport = computed(() => activeReport.value === 'salesperson_large_order_statistics')
-const usesNaturalMonthFilter = computed(() => isLargeOrderReport.value || ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
+const usesNaturalMonthFilter = computed(() => ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
 // 两端共有报表只展示后端声明的静态固定维度；平台组织范围仍由原权限控件控制。
 const isSharedStoreReport = computed(() => STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value))
@@ -388,8 +387,7 @@ const isHeadquartersAcquisition = computed(() => activeReport.value === 'phase_s
 const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
 // 总部拓客、会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
-// 大单两端按应计自然月查询；其余报表维持原周期。
-const reportPeriodMode = computed(() => isLargeOrderReport.value ? 'month' : (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+const reportPeriodMode = computed(() => (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -824,8 +822,7 @@ function reportParams(overrides = {}) {
     start_date: dates.start,
     end_date: dates.end,
     ...(reportPeriodMode.value === 'year' ? { year: selectedYear.value } : {}),
-    // 月份和日期使用同一次归一化，避免无效输入造成参数相互矛盾。
-    ...(reportPeriodMode.value === 'month' ? { month: dates.start.slice(0, 7) } : {}),
+    ...(reportPeriodMode.value === 'month' ? { month: selectedMonth.value } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
     product_type: productType.value,
@@ -933,16 +930,8 @@ async function exportReport() {
   exporting.value = true
   errorMessage.value = ''
   try {
-    // 大单月份输入是待查询条件；导出使用当前可见结果的已查询月份。
-    const visibleMonth = isLargeOrderReport.value
-      ? String(result.value?.range?.start || route.query?.month || route.query?.start_date || selectedMonth.value).slice(0, 7)
-      : ''
-    const visibleMonthDates = visibleMonth ? monthBounds(visibleMonth) : null
     // 导出仍由服务端使用同一权限和固定字段白名单，浏览器只负责下载结果。
-    const exported = await exportStoreBusinessReport(reportParams({
-      page: 1, limit: 100,
-      ...(visibleMonthDates ? { month: visibleMonth, start_date: visibleMonthDates.start, end_date: visibleMonthDates.end } : {})
-    }), reportRuntime.value)
+    const exported = await exportStoreBusinessReport(reportParams({ page: 1, limit: 100 }), reportRuntime.value)
     const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
     const exportRecords = Array.isArray(exported.records) ? exported.records : []
     const summaryRow = exported.summary_row || exported.summaryRow
@@ -1005,8 +994,6 @@ function syncActiveReportFromRoute() {
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
   if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) selectedYear.value = today().slice(0, 4)
-  // 旧日期链接沿用其所在月份；换报表时不继承上一张报表的月份草稿。
-  if (isLargeOrderReport.value) selectedMonth.value = String(route.query?.month || startDate.value).slice(0, 7)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1894,8 +1881,6 @@ onMounted(async () => {
         </section>
       </div>
       <label v-if="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
-      <!-- 大单分期允许选择未来应计月；查询范围仍是该自然月。 -->
-      <label v-else-if="isLargeOrderReport" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" /></label>
       <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>

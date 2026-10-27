@@ -426,19 +426,12 @@ final class CashierV3UnifiedRefundServices
             'canRefund' => true, 'unavailableReason' => '', 'wallet' => $wallet];
     }
 
-    /** Transfer reads the same monetary authority, without refund tender/owner eligibility. */
-    public function transferSnapshot(int $holderId, int $memberId, string $tenantId, bool $lock = false): array
-    {
-        if ($lock) CashierV3TransactionGuard::assertInTransaction('cardToBalance.snapshot');
-        return $this->cardSnapshot($holderId, $memberId, $tenantId, $lock, null, true);
-    }
-
-    private function cardSnapshot(int $holderId, int $memberId, string $tenantId, bool $lock, ?array $candidate = null, bool $transfer = false): array
+    private function cardSnapshot(int $holderId, int $memberId, string $tenantId, bool $lock, ?array $candidate = null): array
     {
         if (!$candidate) {
             $query = Db::name('user_card_holder')->alias('h')->join('store_order o', 'o.id=h.oid')
                 ->where('h.id', $holderId)->where('h.uid', $memberId)
-                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,h.is_del,o.order_id,o.pay_price,o.coupon_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action,o.paid,o.is_del AS order_deleted,o.is_system_del,o.is_user_del,o.mark,o.card_upgrade_use_oid');
+                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,h.is_del,o.order_id,o.pay_price,o.coupon_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action,o.paid,o.is_del AS order_deleted,o.is_system_del,o.is_user_del');
             $candidate = (array)$query->lock($lock)->find();
         }
         if (!$candidate || (int)($candidate['id'] ?? 0) !== $holderId || (int)($candidate['uid'] ?? 0) !== $memberId) {
@@ -448,62 +441,29 @@ final class CashierV3UnifiedRefundServices
             || (int)($candidate['terminal_action'] ?? 0) !== 0
             || (int)($candidate['paid'] ?? 1) !== 1
             || (int)($candidate['order_deleted'] ?? 0) !== 0
-            || ((int)($candidate['is_system_del'] ?? 0) !== 0
-                && !($transfer && (int)$candidate['origin_store_id'] === 0
-                    && (string)($candidate['mark'] ?? '') === 'migration_entitlement'))
+            || (int)($candidate['is_system_del'] ?? 0) !== 0
             || (int)($candidate['is_user_del'] ?? 0) !== 0;
-        if ($transfer && (int)($candidate['card_upgrade_use_oid'] ?? 0) > 0) $voided = true;
         $originId = (int)$candidate['oid'];
         $cardState = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->lock($lock)->find();
         if ($cardState && ((int)$cardState['current_member_id'] !== $memberId
-            || !in_array((string)$cardState['card_status'], $transfer ? ['enabled', 'disabled'] : ['enabled'], true))) $voided = true;
+            || (string)$cardState['card_status'] !== 'enabled')) $voided = true;
         $rule = (array)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->lock($lock)->find();
-        if ($rule && !in_array((string)$rule['status'], $transfer ? ['active', 'exhausted', 'disabled'] : ['active', 'exhausted'], true)) $voided = true;
+        if ($rule && !in_array((string)$rule['status'], ['active', 'exhausted'], true)) $voided = true;
         $isTime = (string)($rule['rule_type'] ?? '') === 'time' || (int)$candidate['write_times'] >= 1000000;
         $carts = Db::name('store_order_cart_info')->where('oid', $originId)->where('cart_type', 2)
-            ->where('product_type', 6)->field('id,oid,product_id,cart_info,pay_price,debt_amount,repaid_debt_amount,is_gift,write_times,write_surplus_times,write_end,is_writeoff')
+            ->where('product_type', 6)->field('id,oid,product_id,cart_info,pay_price,debt_amount,repaid_debt_amount,is_gift,write_times,write_surplus_times,write_end')
             ->order('id asc')->lock($lock)->select()->toArray();
-        $allCarts = $carts;
-        if ($transfer) {
-            // Closed/replaced detail rows can retain physical surplus for audit.
-            // They cannot create new money. Keep all rows for sale allocation so
-            // filtering a dead component never reallocates its price to live ones.
-            $componentStates = Db::name('cashier_v3_card_rule_component')->where('tenant_id', $tenantId)
-                ->where('card_holder_id', $holderId)->lock($lock)->select()->toArray();
-            $componentStates = array_column($componentStates, null, 'legacy_detail_id');
-            $closedGroups = [];
-            if (($rule['rule_type'] ?? '') === 'combination') {
-                foreach (Db::name('cashier_v3_card_rule_group_state')->where('tenant_id', $tenantId)
-                    ->where('card_holder_id', $holderId)->lock($lock)->select()->toArray() as $group) {
-                    if (!in_array((string)$group['status'], ['active', 'exhausted'], true)) $closedGroups[(int)$group['group_no']] = true;
-                }
-            }
-            $carts = array_values(array_filter($carts, static function (array $cart) use ($componentStates, $closedGroups): bool {
-                $component = $componentStates[(int)$cart['id']] ?? null;
-                return (int)$cart['is_writeoff'] === 0 && (!$component
-                    || (in_array((string)$component['status'], ['active', 'exhausted'], true)
-                        && !isset($closedGroups[(int)($component['combination_group_no'] ?? 0)])));
-            }));
-        }
         $components = [];
         $sum = 0;
-        $transferIndependentSum = 0;
         $saleOrder = ['id' => $originId, 'pay_price' => (string)$candidate['pay_price']];
-        if ($transfer && (int)$candidate['origin_store_id'] === 0
-            && (string)($candidate['mark'] ?? '') === 'migration_entitlement') {
-            // A storeless migration carrier is deliberately zero-priced. Its
-            // immutable paid source, not that technical zero, values shared pools.
-            $sourcePaid = \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::sourcePaidPrice($holderId, $tenantId);
-            if ($sourcePaid !== null) $saleOrder['pay_price'] = $sourcePaid;
-        }
         $sharedCount = (string)($rule['rule_type'] ?? '') === 'choice_count';
         $combination = (string)($rule['rule_type'] ?? '') === 'combination';
         if ($sharedCount) {
             // A choice-count card has one monetary value and one usage pool. Legacy
             // project carts are selectable services, not independent refundable balances.
-            $purchase = self::moneyCents((string)$saleOrder['pay_price'], true);
+            $purchase = self::moneyCents((string)$candidate['pay_price'], true);
             $total = (int)($rule['shared_total_times'] ?? 0);
             $left = (int)($rule['shared_remaining_times'] ?? -1);
             $history = Db::name(self::TABLE)->where('tenant_id', $tenantId)
@@ -537,38 +497,9 @@ final class CashierV3UnifiedRefundServices
                 'purchaseAmountCents' => $purchase, 'remainingAmountCents' => $sum,
                 'totalTimes' => $total, 'remainingTimes' => $left, 'refundedCents' => $refunded,
                 'removedTimes' => $removed];
-            if ($transfer) {
-                $hasSharedOption = false;
-                foreach ($carts as $cart) {
-                    $detailSnapshot = json_decode((string)$cart['cart_info'], true) ?: [];
-                    if (!CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($detailSnapshot)) {
-                        $hasSharedOption = true;
-                        continue;
-                    }
-                    // Replacement-created rights retain their own price/quantity;
-                    // they are not another selectable copy of the original pool.
-                    $detailAmount = (new CashierV3CardComponentPurchaseAmountAuthority())->resolve(
-                        $cart, $detailSnapshot, [], null)['purchaseAmountCents'];
-                    $detailTotal = (int)$cart['write_times']; $detailLeft = (int)$cart['write_surplus_times'];
-                    if ($detailTotal <= 0 || $detailLeft < 0 || $detailLeft > $detailTotal) {
-                        throw self::fail('独立权益次数异常，请先核对。', 'card_transfer_independent_times_invalid');
-                    }
-                    $detailRemaining = self::moneyCents(CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                        self::centsToMoney($detailAmount), $detailTotal, $detailTotal - $detailLeft, $detailSnapshot), true);
-                    $transferIndependentSum += $detailRemaining;
-                    $components[] = ['id' => (int)$cart['id'], 'name' => $this->projectName($detailSnapshot),
-                        'purchaseAmountCents' => $detailAmount, 'remainingAmountCents' => $detailRemaining,
-                        'totalTimes' => $detailTotal, 'remainingTimes' => $detailLeft, 'independent' => true];
-                }
-                if (!$hasSharedOption) {
-                    $sum = 0;
-                    $components[0]['remainingAmountCents'] = 0;
-                }
-                $sum += $transferIndependentSum;
-            }
         } elseif ($combination) {
             // 每个共享组只计一次金额与余次；任选种数项目仍用既有项目实收分摊。
-            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $allCarts);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $carts);
             $authorities = (new CashierV3CardRuleEntitlementAuthorityServices())
                 ->authoritiesForHolders($tenantId, [$holderId])[$holderId] ?? [];
             $seenSharedGroups = [];
@@ -604,7 +535,7 @@ final class CashierV3UnifiedRefundServices
                             CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION]), true);
                 }
             }
-            if (!$transfer && $purchaseSum !== self::moneyCents((string)$saleOrder['pay_price'], true)) {
+            if ($purchaseSum !== self::moneyCents((string)$candidate['pay_price'], true)) {
                 throw self::fail('组合卡已售金额与项目分摊不一致。', 'refund_combination_sale_mismatch');
             }
             $components[] = ['id' => 0, 'name' => (string)$candidate['card_name'] . '（整卡）',
@@ -613,7 +544,7 @@ final class CashierV3UnifiedRefundServices
                 'remainingTimes' => (int)$candidate['write_surplus_times'],
                 'refundedCents' => 0, 'removedTimes' => 0];
         } else {
-            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $allCarts);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $carts);
             $ruleAuthorities = (new CashierV3CardRuleEntitlementAuthorityServices())
                 ->authoritiesForHolders($tenantId, [$holderId]);
             foreach ($carts as $cart) {
@@ -622,11 +553,8 @@ final class CashierV3UnifiedRefundServices
                 $authority = (new CashierV3CardComponentPurchaseAmountAuthority())->resolve(
                     $cart, $snapshot, $allocations, $ruleAuthorities[$holderId][(int)$cart['id']] ?? null);
                 $purchase = $authority['purchaseAmountCents'];
-                $ruleAuthority = $ruleAuthorities[$holderId][(int)$cart['id']] ?? null;
-                $useRuleTimes = $transfer && is_array($ruleAuthority)
-                    && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot);
-                $total = $useRuleTimes ? (int)$ruleAuthority['totalTimes'] : (int)$cart['write_times'];
-                $left = $useRuleTimes ? (int)$ruleAuthority['remainingTimes'] : (int)$cart['write_surplus_times'];
+                $total = (int)$cart['write_times'];
+                $left = (int)$cart['write_surplus_times'];
                 $refunded = (int)($snapshot['r26RefundedCents'] ?? 0);
                 $removed = (int)($snapshot['r26RefundRemovedTimes'] ?? 0);
                 if ($total <= 0 || $left < 0 || $left > $total || $removed > $total - $left) {
@@ -650,9 +578,7 @@ final class CashierV3UnifiedRefundServices
         $order = ['id' => $originId, 'uid' => (int)$candidate['origin_uid'],
             'store_id' => (int)$candidate['origin_store_id'], 'tenant_id' => $tenantId,
             'debt_amount' => $candidate['debt_amount'], 'repaid_debt_amount' => $candidate['repaid_debt_amount']];
-        // Debt belongs to the immutable origin sale, even after a holder transfer.
-        $debtMemberId = $transfer ? (int)$candidate['origin_uid'] : $memberId;
-        $debt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt($order, $debtMemberId, $lock);
+        $debt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt($order, $memberId, $lock);
         if ($debt === null) {
             $debts = Db::name('store_debt')->where('order_id', $originId)->lock($lock)->select()->toArray();
             if (count($debts) > 1) throw self::fail('本卡欠款资料不一致，请联系管理员。', 'refund_debt_duplicate');
@@ -666,13 +592,13 @@ final class CashierV3UnifiedRefundServices
         // execution cap share the writeoff projection's debt/cancellation restriction.
         // Cancelled debt never becomes cash-refundable merely because pending debt is zero.
         $cancelledCents = self::moneyCents((new CashierV3CardOriginDebtResolver())
-            ->cancelledCardDebt($order, $debtMemberId, $tenantId, $lock), true);
+            ->cancelledCardDebt($order, $memberId, $tenantId, $lock), true);
         $usableSum = 0;
         if ($sharedCount || $combination) {
-            $usableSum = max(0, $sum - $transferIndependentSum - $debtCents - $cancelledCents) + $transferIndependentSum;
+            $usableSum = max(0, $sum - $debtCents - $cancelledCents);
             foreach ($components as &$component) {
                 $component['usableRemainingAmountCents'] = max(0,
-                    (int)$component['remainingAmountCents'] - (!empty($component['independent']) ? 0 : $debtCents + $cancelledCents));
+                    (int)$component['remainingAmountCents'] - $debtCents - $cancelledCents);
             }
             unset($component);
         } else {
@@ -682,26 +608,11 @@ final class CashierV3UnifiedRefundServices
                 $cart = $cartsById[(int)$component['id']];
                 $usable = $writeoff->usableEntitlementAmount($cart, $order,
                     self::centsToMoney((int)$component['remainingAmountCents']),
-                    (float)$debt, $transfer ? $allCarts : $carts, $lock);
+                    (float)$debt, $carts, $lock);
                 $component['usableRemainingAmountCents'] = self::moneyCents((string)$usable, true);
                 $usableSum += $component['usableRemainingAmountCents'];
             }
             unset($component);
-        }
-        if ($transfer) {
-            // A conversion closes all rights and credits only the actual remaining
-            // value. No cash cap, original purchaser or refund qualification applies.
-            $reason = $voided ? '本卡已作废、退款或终止，不能转余额。'
-                : ($debtCents > 0 ? '本卡存在待还欠款，请先补交或取消。'
-                    : ($usableSum <= 0 ? '本卡没有实际剩余金额。'
-                        : ($usableSum % 100 !== 0 ? '本卡剩余金额不是整数元，请先核对。' : '')));
-            return ['holderId' => $holderId, 'memberId' => $memberId,
-                'originMemberId' => (int)$candidate['origin_uid'], 'originStoreId' => (int)$candidate['origin_store_id'],
-                'sourceOrderId' => (string)$originId, 'sourceOrderNo' => (string)$candidate['order_id'],
-                'cardName' => (string)$candidate['card_name'], 'cardNo' => (string)$candidate['card_no'],
-                'amountCents' => $usableSum, 'remainingAmountCents' => $sum,
-                'pendingDebtCents' => $debtCents, 'cancelledDebtCents' => $cancelledCents,
-                'components' => $components, 'eligible' => $reason === '', 'unavailableReason' => $reason];
         }
         // Imported zero-price cards still have real remaining rights. They must not
         // abort the entire picker merely because their refundable cash value is zero.

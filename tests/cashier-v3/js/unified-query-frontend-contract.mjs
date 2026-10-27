@@ -493,14 +493,9 @@ assert.match(memberSource, /:executed-query="lastSuccessfulQuery"/, '工具栏�
 assert.match(memberSource, /role="alert"/, '查询失败以页面级可访问错误提示呈现')
 assert.doesNotMatch(memberSource, /queryModel/, '失败请求不得通过 queryModel 伪装为已执行查询')
 assert.match(memberSource, /await unifiedQuery\.load\(\{ silent: true \}\)[\s\S]*?await queryMembers\(initialQueryPayload/, 'stateContext 就绪后先加载服务端能力，再执行首屏真实查询')
-// R55 explicitly replaces member query settings/quick inputs with standard
-// inline filters; other pages still exercise the original toolbar above.
-assert.doesNotMatch(memberSource, /saveMemberQuerySettings|settings-button-label="查询设置"/, '会员列表不再保留已撤下的设置入口或无调用保存分支')
-assert.equal((memberSource.match(/<MemberReportQueryToolbar/g) || []).length, 1, '会员列表只接入一个标准筛选工具栏')
-const memberToolbarSource = fs.readFileSync(path.join(frontend, 'components/query/MemberReportQueryToolbar.vue'), 'utf8')
-assert.match(memberToolbarSource, /UnifiedReportQueryToolbar/, '会员更多筛选复用统一报表控件')
-assert.match(memberToolbarSource, /memberReportFields\(props\.fields\)/, '筛选项来自服务端字段白名单')
-assert.match(memberToolbarSource, /cloneUnifiedQuerySnapshot\(props\.executedQuery\)/, '会员导出继续冻结成功查询而非筛选草稿')
+assert.match(memberSource, /unifiedQueryActionSucceeded\(result\)[\s\S]*?await unifiedQuery\.load/, '保存查询设置成功后刷新 capability 与命令版本')
+assert.equal((memberSource.match(/<UnifiedQueryToolbar/g) || []).length, 1, '会员列表只接入一个统一查询工具栏')
+assert.match(memberSource, /settings-button-label="查询设置"/, '会员列表把唯一工具栏入口命名为查询设置')
 assert.doesNotMatch(memberSource, /@click="isSettingsOpen = true"/, '会员列表不另建重复的页面级查询设置按钮')
 
 const settingsSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQuerySettingsDrawer.vue'), 'utf8')

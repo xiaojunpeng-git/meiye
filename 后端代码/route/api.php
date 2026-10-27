@@ -445,7 +445,6 @@ Route::group('api', function () {
 		Route::get('reservation/order/purchased_items', 'v1.order.StoreReservationOrder/getUserPurchasedRemainItems')->name('reservationPurchasedItems'); //用户可预约已购项目
 		// 新生命周期会员预约：只读写 V3 权威表，不读取或迁移历史预约。
 		Route::get('reservation/v3/order/list', 'v1.order.V3ReservationOrder/listing')->name('memberV3ReservationList');
-		Route::get('reservation/v3/custom-services', 'v1.order.V3ReservationOrder/customServices')->name('memberV3ReservationCustomServices');
 		Route::get('reservation/v3/order/detail/:id', 'v1.order.V3ReservationOrder/detail')->name('memberV3ReservationDetail');
 		Route::post('reservation/v3/order/create/:orderId', 'v1.order.V3ReservationOrder/create')->name('memberV3ReservationCreate');
 		Route::post('reservation/v3/order/cancel/:id', 'v1.order.V3ReservationOrder/cancel')->name('memberV3ReservationCancel');

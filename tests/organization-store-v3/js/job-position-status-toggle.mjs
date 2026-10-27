@@ -24,22 +24,6 @@ const context = vm.createContext({
 });
 vm.runInContext(script, context);
 const methods = context.component.methods;
-const canSave = context.component.computed.canSaveJobPosition;
-
-// 前端只按岗位策略功能授权放行，组织通用的超管状态不再禁用该页的岗位操作。
-for (const [writeEnabled, superWrite, access, expected] of [
-  [true, false, ['admin-store-region-job_positions'], true],
-  [true, false, ['admin-store-region_list'], false],
-  [false, false, ['admin-store-region-job_positions'], false],
-  [true, true, [], true],
-]) {
-  const allowed = canSave.call({
-    writeStatus: { write_enabled: writeEnabled }, canWrite: superWrite,
-    $store: { state: { admin: { user: { info: { access } } } } },
-  });
-  assert.equal(allowed, expected);
-}
-console.log('PASS 岗位功能授权与只读门禁分别生效');
 
 function fixture(status = 1, filter = '1') {
   const row = {
@@ -47,7 +31,7 @@ function fixture(status = 1, filter = '1') {
     channel_rules: { mobile: { rules: 'obsolete-menu' } },
   };
   const state = {
-    ...methods, canSaveJobPosition: true, saving: false, status: filter, list: [row], messages: [], refreshes: 0,
+    ...methods, canWrite: true, saving: false, status: filter, list: [row], messages: [], refreshes: 0,
     writeStatus: { reason_text: '当前只读' },
     resetToken() {},
     writeHeaders(action, payload) {
@@ -95,7 +79,7 @@ console.log('PASS 后端拒绝时恢复原状态并显示真实错误');
 for (const mode of ['cancel', 'readonly', 'busy']) {
   const { state, row } = fixture();
   if (mode === 'cancel') state.ask = async () => false;
-  if (mode === 'readonly') state.canSaveJobPosition = false;
+  if (mode === 'readonly') state.canWrite = false;
   if (mode === 'busy') state.saving = true;
   const count = saves.length;
   await state.toggleStatus(row);

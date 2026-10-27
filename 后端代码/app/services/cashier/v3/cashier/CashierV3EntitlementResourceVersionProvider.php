@@ -297,17 +297,6 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
         }
 
         if ($kind === 'card_holder') {
-            $originId = 0;
-            $order = null;
-            if ($lock) {
-                // Gateway resource locks must use the same origin -> holder
-                // order as the domain writers; a later writer cannot undo an
-                // inverse lock already acquired here. Revalidate discovery below.
-                $hint = Db::name('user_card_holder')->where('id', $id)->field('oid')->find();
-                $originId = (int)($hint['oid'] ?? 0);
-                $order = $originId > 0 ? $this->loadActiveOrder($originId, 0, true) : null;
-                if (!$order) return null;
-            }
             $query = Db::name('user_card_holder')
                 ->field('id,uid,oid,card_name,card_no,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
                 ->where('id', $id)
@@ -316,10 +305,10 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 $query->lock(true);
             }
             $holder = $query->find();
-            if (!$holder || ($lock && (int)$holder['oid'] !== $originId)) {
+            if (!$holder) {
                 return null;
             }
-            if (!$lock) $order = $this->loadActiveOrder((int)$holder['oid'], 0, false);
+            $order = $this->loadActiveOrder((int)$holder['oid'], 0, $lock);
             if (!$order
                 || (!$this->allowsHistoricalHolder($holder, $order, $operatorScope)
                     && (!$this->allowsSourceStore((int)$holder['store_id'], $operatorScope)
@@ -413,16 +402,6 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             ];
         }
 
-        $originId = 0;
-        $order = null;
-        if ($lock) {
-            // Benefit-pool locking follows the same origin mutex as conversion.
-            // A cart discovered earlier can move; its locked oid must still match.
-            $hint = Db::name('store_order_cart_info')->where('id', $id)->field('oid')->find();
-            $originId = (int)($hint['oid'] ?? 0);
-            $order = $originId > 0 ? $this->loadActiveOrder($originId, 0, true) : null;
-            if (!$order) return null;
-        }
         $query = Db::name('store_order_cart_info')
             ->field('id,oid,cart_id,product_id,cart_type,product_type,cart_info,write_times,write_surplus_times,is_writeoff,write_start,write_end,pay_price,debt_amount,repaid_debt_amount,is_gift')
             ->where('id', $id)
@@ -432,10 +411,10 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             $query->lock(true);
         }
         $cart = $query->find();
-        if (!$cart || ($lock && (int)$cart['oid'] !== $originId)) {
+        if (!$cart) {
             return null;
         }
-        if (!$lock) $order = $this->loadActiveOrder((int)$cart['oid'], 0, false);
+        $order = $this->loadActiveOrder((int)$cart['oid'], 0, $lock);
         if (!$order) {
             return null;
         }

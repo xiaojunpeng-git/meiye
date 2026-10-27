@@ -1,0 +1,12 @@
+{
+  "site": "010",
+  "mode": "before",
+  "result": "PASS",
+  "config": null,
+  "effective": 0,
+  "existingFormSHA256": "28ba0429ed124f2e8ebf5ca73a99cea7aca57a4aa6250221ee941a52f7337891",
+  "otherConfigSHA256": "9a42fd06ed69778210402695ae9d23918befd3e09723ce98d8af00f70114644f",
+  "rootVisibilityCases": [],
+  "readOnly": true,
+  "businessWrites": 0
+}

@@ -1,8 +1,0 @@
-{
-  "result": "PASS",
-  "branch": "release/r48-coupon-allowance-20261022",
-  "commit": "c3625d2adeb67a01ca95e078517dcf45d503fef3",
-  "baseline": "7d69cffed6b1979cbfaac43ba76b33ca8bd47f82",
-  "verifiedAt": "2026-10-22T11:51:41.584Z",
-  "rhVerifiedAt": "2026-10-22T11:50:37.541Z"
-}

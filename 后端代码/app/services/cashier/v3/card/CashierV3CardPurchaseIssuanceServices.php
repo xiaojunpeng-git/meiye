@@ -186,12 +186,12 @@ final class CashierV3CardPurchaseIssuanceServices
         }
         $issueAmounts = $lineIssueAmounts[$issueNo];
 
-        // Card kind belongs to this final sale-line snapshot. A normal card
-        // must never discover a custom configuration from another checkout row.
-        $acceptedPurchase = $this->salesLineCardPurchaseSnapshot($salesLine);
-        $customConfiguration = (string)($acceptedPurchase['sourceKind'] ?? '') === 'custom_card'
-            ? $this->lockCustomConfiguration($header, $workspaceId, $workspaceLineKey, $commandIdempotencyKey)
-            : null;
+        $customConfiguration = $this->lockCustomConfiguration(
+            $header,
+            $workspaceId,
+            $workspaceLineKey,
+            $commandIdempotencyKey
+        );
         // Lock the physical card SKU in the final transaction so issuance is
         // bound to the selected store resource.  The browser checkout
         // snapshot owns price and displayed card data; do not compare those
@@ -207,17 +207,11 @@ final class CashierV3CardPurchaseIssuanceServices
         $purchase = $customConfiguration
             ? (is_array($line['authority_snapshot']['cardPurchase'] ?? null)
                 ? $line['authority_snapshot']['cardPurchase'] : [])
-            : $acceptedPurchase;
-        // Revalidate under final issuance locks; switching off edits after preparation
-        // must not issue increased rights or allow a forged project snapshot.
-        $ordinaryIncrease = CashierV3OrdinaryCardSaleAdjustment::validate($purchase,
-            (array)($line['authority_snapshot']['cardPurchase'] ?? []), $operatorScope->storeId(), $skuId);
-        // The final persisted sale must still cover the accepted pre-coupon base.
-        CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount($purchase, $ordinaryIncrease,
-            (int)$salesLine['quantity'], (int)$salesLine['sale_amount_cents'],
-            (int)$salesLine['discount_amount_cents']);
-        // Debt policy is checked separately against the live safety setting;
-        // ordinary row edits remain bound to their accepted signed definition.
+            : $this->salesLineCardPurchaseSnapshot($salesLine);
+        // The debt write-off rule is frozen on issuance, so a stale browser
+        // snapshot must not silently issue a card under the opposite rule.
+        // Compare only this safety policy; prices and card components remain
+        // the customer's accepted checkout snapshot.
         $this->assertDebtWriteoffPolicyCurrent($purchase, $line, (bool)$customConfiguration);
         // The selected card definition is immutable browser intent. The locked
         // catalogue row above supplies identity only and may not replace it.
@@ -770,11 +764,7 @@ final class CashierV3CardPurchaseIssuanceServices
                 || $priceCents < 0) {
                 throw self::failure('card_purchase_component_snapshot_invalid');
             }
-            // Ordinary-card edits store a total, not total/times: division would
-            // introduce fractional yuan and silently alter the accepted amount pool.
-            $hasOrdinaryTotal = $ruleType === 'normal' && isset($purchase['ordinarySaleBaseline'])
-                && array_key_exists('configuredAmountCents', $component);
-            $amount = $isCustomCard || $hasOrdinaryTotal
+            $amount = $isCustomCard
                 ? (int)($component['configuredAmountCents'] ?? -1)
                 : ($usesIndependentTimes ? $this->multiply($priceCents, $times) : $priceCents);
             if ($amount < 0) {
@@ -1055,35 +1045,29 @@ final class CashierV3CardPurchaseIssuanceServices
         string $workspaceLineKey,
         string $commandIdempotencyKey
     ): ?array {
-        // Direct checkout stores sale:<browser lineId>, while its authority
-        // binding yields the unprefixed browser lineId. Resolve that exact row
-        // first and require this command's identity; never fall back to row 0.
         $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
             ->where('tenant_id', (string)$header['tenant_id'])
             ->where('store_id', (int)$header['store_id'])
             ->where('workspace_id', $workspaceId)
-            ->where('workspace_line_key', 'sale:' . substr($workspaceLineKey, 0, 59))
+            ->where('workspace_line_key', $workspaceLineKey)
             ->lock(true)
             ->find();
-        if ($row && ($commandIdempotencyKey === ''
-            || strpos((string)$row['created_command_idempotency_key'], $commandIdempotencyKey . ':snapshot:') !== 0)) {
-            $row = null;
-        }
-        // Legacy workspace lines already contain the sale: namespace. Keep
-        // only their exact line binding, scoped to store, tenant and workspace.
-        if (!$row) {
+        // Direct snapshot checkout creates the configuration and consumes it
+        // within one final command. A persisted checkout line ID is generated
+        // after that configuration, so it is not a reliable lookup key here.
+        // The command idempotency key is the immutable transaction identity;
+        // use it only as a precise fallback, never as a broad workspace scan.
+        if (!$row && $commandIdempotencyKey !== '') {
             $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
                 ->where('tenant_id', (string)$header['tenant_id'])
                 ->where('store_id', (int)$header['store_id'])
                 ->where('workspace_id', $workspaceId)
-                ->where('workspace_line_key', $workspaceLineKey)
+                ->where('created_command_idempotency_key', $commandIdempotencyKey . ':snapshot:0')
                 ->lock(true)
                 ->find();
         }
         if (!$row) {
-            // A custom sale cannot silently become a catalogue carrier sale
-            // when its accepted configuration is missing or belongs elsewhere.
-            throw self::failure('custom_card_configuration_missing');
+            return null;
         }
         $row = (array)$row;
         if ((string)($row['status'] ?? '') !== 'in_cart'

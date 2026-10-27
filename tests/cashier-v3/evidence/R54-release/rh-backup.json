@@ -1,7 +1,0 @@
-{
-  "directory": "/www/backups/rh/r54-service-period-7b38fbc0",
-  "manifestSHA256": "71b427de851cbc35e86813a4ab5f3e8ce76ca4d90f9a56cd686094c2571a8bb7",
-  "independentFileBackup": true,
-  "databaseBackup": "Not applicable: no database writes or migration.",
-  "rollback": "install.php rollback with pinned manifest"
-}

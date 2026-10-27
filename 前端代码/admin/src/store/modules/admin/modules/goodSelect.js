@@ -174,6 +174,23 @@ export default {
               ]
             },
             {
+              img: '/uploads/attach/2020/05/20200515/f95dd1f3f71fef869e80533df9ccb1a0.png',
+              info: [
+                {
+                  title: '标题',
+                  value: '我的拼团',
+                  maxlength: 5,
+                  tips: '请填写标题'
+                },
+                {
+                  title: '链接',
+                  value: '/pages/activity/user_combination_records/index',
+                  maxlength: 999,
+                  tips: '请填写链接'
+                }
+              ]
+            },
+            {
               img: '/uploads/attach/2020/05/20200515/8bf36e0cd9f9490c1f06abcd7efe8c2d.png',
               info: [
                 {

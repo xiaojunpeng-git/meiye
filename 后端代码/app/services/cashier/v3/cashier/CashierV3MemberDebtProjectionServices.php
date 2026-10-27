@@ -159,10 +159,6 @@ final class CashierV3MemberDebtProjectionServices
                 'member' => [
                     'id' => (string)$memberId,
                     'memberId' => $memberId,
-                    // Debt may be opened outside the cashier's active member.
-                    // Supply that authorized member's per-kind source choices.
-                    'sourceDefaults' => (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
-                        ->initialChoices($scope->tenantId(), $operator->storeId(), $memberId),
                     'name' => $name !== '' ? $name : '未命名会员',
                     'phone' => (string)($member['phone'] ?? ''),
                     'memberNo' => (string)($member['bar_code'] ?? ''),
@@ -265,202 +261,81 @@ final class CashierV3MemberDebtProjectionServices
     }
 
     /**
-     * Read the current platform categories of the goods or projects behind each debt.
-     * A card is only a container: its outer category cannot classify repayment of its projects.
-     * Ambiguous historical card orders and missing component links remain unclassified.
+     * Read each debt item's current platform product category for order-center display.
+     * A store SKU (type 1) inherits its platform parent, never its own store category.
+     * Category changes are reflected on the next query; absent ID links stay unclassified.
      *
      * @param array<int,int> $debtIds IDs already constrained by the caller's data scope
-     * @return array<int,array<int,array>>
+     * @return array<int,string>
      */
-    public function currentCategoriesForDebts(array $debtIds): array
+    public function categorySummariesForDebts(array $debtIds): array
     {
         $debtIds = array_values(array_unique(array_filter(array_map('intval', $debtIds))));
         if ($debtIds === []) return [];
 
         $items = $this->rows(Db::name('store_debt_item')->alias('i')
-            ->join('store_debt debt', 'debt.id=i.debt_id')
+            ->leftJoin('store_product p', 'p.id=i.product_id')
+            ->leftJoin('store_product parent', 'parent.id=p.pid AND parent.type=0')
             ->whereIn('i.debt_id', $debtIds)
-            ->field('i.debt_id,i.id debt_item_id,i.order_id,i.product_type debt_product_type,i.product_id,debt.store_id,debt.uid debt_member_id')
+            ->field('i.debt_id,i.id debt_item_id,p.id product_id,p.type product_type,p.cate_id,parent.cate_id parent_cate_id')
             ->order('i.id asc')->select());
-        $cardOrderIds = [];
-        foreach ($items as $item) {
-            if ((int)$item['debt_product_type'] === 5 && (int)$item['order_id'] > 0) {
-                $cardOrderIds[(int)$item['order_id']] = true;
-            }
+        $categories = [];
+        foreach ($this->rows(Db::name('store_product_category')
+            ->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()) as $category) {
+            $categories[(int)$category['id']] = $category;
         }
-        $cardItemsByOrder = $cardHeadersByOrder = $componentsByOrder = [];
-        if ($cardOrderIds !== []) {
-            // Count across the original order, not just this page's debts; otherwise
-            // one card could inherit another card's projects in a mixed historical order.
-            foreach ($this->rows(Db::name('store_debt_item')->whereIn('order_id', array_keys($cardOrderIds))
-                ->where('product_type', 5)->field('order_id')->select()) as $cardItem) {
-                $orderId = (int)$cardItem['order_id'];
-                $cardItemsByOrder[$orderId] = ($cardItemsByOrder[$orderId] ?? 0) + 1;
-            }
-            $cartRows = $this->rows(Db::name('store_order_cart_info')->alias('c')
-                ->join('store_order o', 'o.id=c.oid')
-                ->whereIn('c.oid', array_keys($cardOrderIds))->whereIn('c.product_type', [5, 6])
-                ->field('c.oid,c.product_id,c.cart_type,c.product_type,o.store_id,o.uid member_id')
-                ->order('c.id asc')->select());
-            foreach ($cartRows as $cartRow) {
-                $orderId = (int)$cartRow['oid'];
-                if ((int)$cartRow['cart_type'] === 2 && (int)$cartRow['product_type'] === 6) {
-                    $componentsByOrder[$orderId][] = $cartRow;
-                } elseif ((int)$cartRow['product_type'] === 5 && (int)$cartRow['cart_type'] !== 2) {
-                    $cardHeadersByOrder[$orderId][] = (int)$cartRow['product_id'];
-                }
-            }
-        }
-        $unresolvedCardItems = [];
-        foreach ($items as $item) {
-            if ((int)$item['debt_product_type'] !== 5) continue;
-            $orderId = (int)$item['order_id'];
-            $headers = $cardHeadersByOrder[$orderId] ?? [];
-            if (($cardItemsByOrder[$orderId] ?? 0) !== 1 || count($headers) > 1
-                || ($headers !== [] && $headers[0] !== (int)$item['product_id'])
-                || ($componentsByOrder[$orderId] ?? []) === []) $unresolvedCardItems[] = $item;
-        }
-        $issuedComponents = $this->issuedCardComponentsForDebtItems($unresolvedCardItems);
-        // Resolve the same product IDs with the business store as every other report.
-        $links = [];
-        foreach ($items as $item) {
-            $store = (int)$item['store_id'];
-            $candidates = array_merge([$item], $componentsByOrder[(int)$item['order_id']] ?? [],
-                $issuedComponents[(int)$item['debt_item_id']] ?? []);
-            foreach ($candidates as $candidate) {
-                $id = (int)$candidate['product_id'];
-                $links[$store . ':' . $id] = ['store_id' => $store, 'product_id' => $id];
-            }
-        }
-        $categories = (new \app\services\report\StoreReportCurrentProductCategoryServices())->resolve($links);
-        $byDebt = [];
+
+        $pathsByDebt = [];
         foreach ($items as $item) {
             $debtId = (int)($item['debt_id'] ?? 0);
             if ($debtId <= 0) continue;
-            $itemCategories = [];
-            $store = (int)$item['store_id'];
-            if ((int)$item['debt_product_type'] === 5) {
-                $orderId = (int)$item['order_id'];
-                $headers = $cardHeadersByOrder[$orderId] ?? [];
-                $components = [];
-                if (($cardItemsByOrder[$orderId] ?? 0) === 1 && count($headers) <= 1
-                    && ($headers === [] || $headers[0] === (int)$item['product_id'])) {
-                    $components = array_values(array_filter($componentsByOrder[$orderId] ?? [], static function (array $component) use ($item): bool {
-                        return (int)$component['store_id'] === (int)$item['store_id']
-                            && (int)$component['member_id'] === (int)$item['debt_member_id'];
-                    }));
-                }
-                if ($components === []) $components = $issuedComponents[(int)$item['debt_item_id']] ?? [];
-                foreach ($components as $component) {
-                    $category = $categories[$store . ':' . (int)$component['product_id']] ?? [];
-                    if (in_array((int)($category['product_type'] ?? -1), [4, 5], true)) $category = [];
-                    $itemCategories[] = $category ?: ['id' => 0, 'path' => ''];
-                }
-            } else {
-                $itemCategories[] = $categories[$store . ':' . (int)$item['product_id']] ?? ['id' => 0, 'path' => ''];
+            $rawIds = (int)($item['product_type'] ?? -1) === 1
+                ? trim((string)($item['parent_cate_id'] ?? ''))
+                : trim((string)($item['cate_id'] ?? ''));
+            $itemPaths = [];
+            foreach (explode(',', $rawIds) as $rawId) {
+                $rawId = trim($rawId);
+                if (preg_match('/^[1-9][0-9]*$/D', $rawId) !== 1) continue;
+                $path = $this->categoryPath((int)$rawId, $categories);
+                if ($path !== '') $itemPaths[$path] = true;
             }
-            if ($itemCategories === []) $itemCategories[] = ['id' => 0, 'path' => ''];
-            foreach ($itemCategories as $category) $byDebt[$debtId][(int)$category['id']] = $category;
+            // One debt can contain several goods. Preserve an unclassified item instead
+            // of silently making the classified siblings appear to cover the whole debt.
+            if ($itemPaths === []) $pathsByDebt[$debtId]['未分类'] = true;
+            else foreach (array_keys($itemPaths) as $path) $pathsByDebt[$debtId][$path] = true;
         }
-        return array_map('array_values', $byDebt);
-    }
 
-    /** Display and filtering consume the same verified category set, including unresolved components. */
-    public function categorySummariesForDebts(array $debtIds): array
-    {
         $summaries = [];
-        foreach ($this->currentCategoriesForDebts($debtIds) as $id => $categories) {
-            $summaries[$id] = \app\services\report\StoreReportSaleCategoryServices::label($categories);
+        foreach ($pathsByDebt as $debtId => $paths) {
+            $labels = array_keys($paths);
+            // Platform data may store both an ancestor and its descendant. Keep the
+            // deepest visible path so the same category is not displayed twice.
+            $labels = array_values(array_filter($labels, static function (string $label) use ($labels): bool {
+                foreach ($labels as $other) {
+                    if ($other !== $label && str_starts_with($other, $label . '/')) return false;
+                }
+                return true;
+            }));
+            $summaries[(int)$debtId] = implode('、', array_slice($labels, 0, 2))
+                . (count($labels) > 2 ? '等' : '');
         }
         return $summaries;
     }
 
-    /**
-     * Some historical debts retain a legacy order ID while the issued card has
-     * a different order ID. Resolve its projects only through a unique holder
-     * matching member, store, card product and issue time; names are not IDs.
-     *
-     * @param array<int,array<string,mixed>> $items Debt rows with id/debt_item_id, debt_id and product_id
-     * @return array<int,array<int,array<string,mixed>>> Components keyed by debt-item ID
-     */
-    public function issuedCardComponentsForDebtItems(array $items): array
+    /** A broken, cyclic or deleted category chain has no trustworthy display path. */
+    private function categoryPath(int $categoryId, array $categories): string
     {
-        $cardItems = $debtIds = [];
-        foreach ($items as $item) {
-            if ((int)($item['product_type'] ?? $item['debt_product_type'] ?? 0) !== 5) continue;
-            $itemId = (int)($item['debt_item_id'] ?? $item['id'] ?? 0);
-            $debtId = (int)($item['debt_id'] ?? 0);
-            if ($itemId <= 0 || $debtId <= 0 || (int)($item['product_id'] ?? 0) <= 0) continue;
-            $cardItems[$itemId] = $item;
-            $debtIds[$debtId] = true;
+        $names = [];
+        $seen = [];
+        while ($categoryId > 0 && isset($categories[$categoryId]) && !isset($seen[$categoryId]) && count($names) < 12) {
+            $seen[$categoryId] = true;
+            $name = trim((string)($categories[$categoryId]['cate_name'] ?? ''));
+            if ($name === '') return '';
+            $names[] = $name;
+            $categoryId = (int)($categories[$categoryId]['pid'] ?? 0);
         }
-        if ($cardItems === []) return [];
-
-        $debts = [];
-        foreach ($this->rows(Db::name('store_debt')->whereIn('id', array_keys($debtIds))
-            ->field('id,uid,store_id,add_time')->select()) as $debt) {
-            $debts[(int)$debt['id']] = $debt;
-        }
-        $members = $products = $stores = $times = [];
-        foreach ($cardItems as $item) {
-            $debt = $debts[(int)$item['debt_id']] ?? null;
-            if (!$debt) continue;
-            $members[(int)$debt['uid']] = true;
-            $products[(int)$item['product_id']] = true;
-            $stores[(int)$debt['store_id']] = true;
-            $times[(int)$debt['add_time']] = true;
-        }
-        if ($members === [] || $products === [] || $stores === [] || $times === []) return [];
-        $holdersByIdentity = [];
-        foreach ($this->rows(Db::name('user_card_holder')
-            ->whereIn('uid', array_keys($members))->whereIn('store_id', array_keys($stores))
-            ->whereIn('product_id', array_keys($products))->where('product_type', 5)
-            ->whereBetween('add_time', [min(array_keys($times)), max(array_keys($times))])
-            ->field('id,uid,store_id,product_id,add_time,oid')->select()) as $holder) {
-            $key = implode(':', [(int)$holder['uid'], (int)$holder['store_id'],
-                (int)$holder['product_id'], (int)$holder['add_time']]);
-            $holdersByIdentity[$key][] = $holder;
-        }
-        $ordersByItem = $orderIds = [];
-        foreach ($cardItems as $itemId => $item) {
-            $debt = $debts[(int)$item['debt_id']] ?? null;
-            if (!$debt) continue;
-            $key = implode(':', [(int)$debt['uid'], (int)$debt['store_id'],
-                (int)$item['product_id'], (int)$debt['add_time']]);
-            $holders = $holdersByIdentity[$key] ?? [];
-            if (count($holders) !== 1 || (int)$holders[0]['oid'] <= 0) continue;
-            $orderId = (int)$holders[0]['oid'];
-            $ordersByItem[$itemId] = $orderId;
-            $orderIds[$orderId] = true;
-        }
-        if ($orderIds === []) return [];
-        $cartByOrder = [];
-        foreach ($this->rows(Db::name('store_order_cart_info')->alias('c')
-            ->join('store_order o', 'o.id=c.oid')
-            ->leftJoin('store_product p', 'p.id=c.product_id')
-            ->leftJoin('store_product parent', 'parent.id=p.pid AND parent.type=0 AND parent.relation_id=0')
-            ->whereIn('c.oid', array_keys($orderIds))->whereIn('c.product_type', [5, 6])
-            ->field('c.id,c.oid,c.uid,o.store_id,c.product_id,c.product_type,c.cart_type,c.total_price,c.pay_price,p.type product_scope_type,p.relation_id product_store_id,p.cate_id,parent.cate_id parent_cate_id')
-            ->order('c.id asc')->select()) as $cart) {
-            $cartByOrder[(int)$cart['oid']][] = $cart;
-        }
-        $resolved = [];
-        foreach ($ordersByItem as $itemId => $orderId) {
-            $item = $cardItems[$itemId];
-            $debt = $debts[(int)$item['debt_id']];
-            $headers = $components = [];
-            foreach ($cartByOrder[$orderId] ?? [] as $cart) {
-                if ((int)$cart['uid'] !== (int)$debt['uid'] || (int)$cart['store_id'] !== (int)$debt['store_id']) {
-                    $headers = $components = [];
-                    break;
-                }
-                if ((int)$cart['product_type'] === 5 && (int)$cart['cart_type'] !== 2) $headers[] = $cart;
-                elseif ((int)$cart['product_type'] === 6 && (int)$cart['cart_type'] === 2) $components[] = $cart;
-            }
-            if (count($headers) === 1 && (int)$headers[0]['product_id'] === (int)$item['product_id']
-                && $components !== []) $resolved[$itemId] = $components;
-        }
-        return $resolved;
+        return $categoryId === 0 ? implode('/', array_reverse($names)) : '';
     }
 
     /** @return array<int,array<int,string>> */

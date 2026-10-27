@@ -91,9 +91,6 @@ final class CashierV3DebtRestorationServices
         if (!$debt || (int)$debt['store_id'] !== $operator->storeId()) {
             throw self::failure('无权恢复该欠款。', 'debt_restore_store');
         }
-        // Cancellation reduced the transferred value; restoring that debt after
-        // conversion would leave a new receivable with no surviving card rights.
-        \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertDebtNotConverted($debt, $dataScope->tenantId());
         // 旧卡退款已不可逆地终止剩余权益；恢复其关联欠款会让会员重新背债，
         // 却无法恢复原卡，必须在服务端阻止（页面显隐不能承担此约束）。
         $originOrder = (array)Db::name('store_order')->where('id', (int)($debt['order_id'] ?? 0))->find();

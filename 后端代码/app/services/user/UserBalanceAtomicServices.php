@@ -50,12 +50,6 @@ class UserBalanceAtomicServices extends BaseServices
             'ledger_type' => 'manual_refund_credit', 'pm' => 1,
             'title' => '退款转入余额', 'mark' => '退款转入余额{%num%}元',
         ],
-        // R53 converts existing card rights to bonus only; it is neither
-        // a recharge collection nor a refund of the original tender.
-        'card_to_balance' => [
-            'ledger_type' => 'card_to_balance', 'pm' => 1,
-            'title' => '卡转余额', 'mark' => '卡内剩余金额转入赠金{%num%}元',
-        ],
         // 余额退款只扣会员钱包，本金优先；与手工登记的现金退款额分别记账。
         'manual_refund_debit' => [
             'ledger_type' => 'manual_refund_debit', 'pm' => 0,

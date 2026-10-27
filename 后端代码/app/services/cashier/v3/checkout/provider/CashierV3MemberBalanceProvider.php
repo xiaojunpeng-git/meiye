@@ -38,12 +38,7 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         return (string)$memberId;
     }
 
-    /**
-     * Reads need the real account schema, not permission to inspect a mutation
-     * trigger. Member/store authorization and balance invariants are still
-     * checked by each reader; this status must never authorize a debit.
-     */
-    public function readReadinessStatus(): array
+    public function readinessStatus(): array
     {
         $required = [
             'uid', 'now_money', 'ben_money', 'give_money', 'balance_version',
@@ -69,13 +64,17 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
                 && (int)$columns[$moneyColumn]['NUMERIC_SCALE'] === 2
                 && (string)$columns[$moneyColumn]['IS_NULLABLE'] === 'NO';
         }
-        $ready = $missing === [] && $versionExact && $moneyExact;
+        $trigger = $this->triggerStatus();
+        $ready = $missing === [] && $versionExact && $moneyExact && $trigger['ready'];
         $reasons = [];
         if ($missing !== [] || !$versionExact || !$moneyExact) {
             $reasons[] = 'member_balance_schema_not_ready';
         }
+        if (!$trigger['ready']) {
+            $reasons[] = 'member_balance_version_trigger_not_ready';
+        }
         return [
-            'dependency' => 'member_balance_read',
+            'dependency' => 'member_balance_authority',
             'contractVersion' => self::CONTRACT_VERSION,
             'ready' => $ready,
             'reasons' => $reasons,
@@ -84,22 +83,6 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
                 'versionColumnExact' => $versionExact,
                 'moneyColumnsExact' => $moneyExact,
             ],
-        ];
-    }
-
-    /** Mutation readiness retains the trigger proof and existing contract. */
-    public function readinessStatus(): array
-    {
-        $read = $this->readReadinessStatus();
-        $trigger = $this->triggerStatus();
-        $reasons = $read['reasons'];
-        if (!$trigger['ready']) $reasons[] = 'member_balance_version_trigger_not_ready';
-        return [
-            'dependency' => 'member_balance_authority',
-            'contractVersion' => self::CONTRACT_VERSION,
-            'ready' => $read['ready'] && $trigger['ready'],
-            'reasons' => $reasons,
-            'schema' => $read['schema'],
             'trigger' => $trigger,
             'versionSource' => 'eb_user.balance_version',
             'versionAdvance' => 'database_trigger_on_real_balance_change',
@@ -201,7 +184,7 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
     ): array {
         $this->assertBaseDataScope($operatorScope, $dataScope);
         $this->assertStoreAccess($dataScope);
-        if (empty($this->readReadinessStatus()['ready'])) {
+        if (empty($this->readinessStatus()['ready'])) {
             throw self::failure('member_balance_provider_not_ready');
         }
         $member = $this->loadMember($memberId, false);
@@ -232,7 +215,7 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         }
         $this->assertBaseDataScope($operatorScope,$dataScope);
         $this->assertStoreAccess($dataScope);
-        if (empty($this->readReadinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
+        if (empty($this->readinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
         try {
             $rows=Db::name(self::TABLE)->whereIn('uid',$memberIds)
                 ->field('uid,now_money,ben_money,give_money,balance_version,status,is_del,delete_time,belong_store_id')
@@ -278,7 +261,7 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         foreach ($visibleStoreIds as $id) {
             if (!is_int($id) || $id <= 0) throw self::failure('member_balance_data_scope_invalid');
         }
-        if (empty($this->readReadinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
+        if (empty($this->readinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
         $rows = Db::name(self::TABLE)->alias('u')->whereIn('u.uid', $memberIds)
             ->whereIn('u.uid', static function ($query) use ($visibleStoreIds): void {
                 $query->name('store_user')->where('status', 1)

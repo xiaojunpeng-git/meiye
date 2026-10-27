@@ -74,23 +74,16 @@ final class StoreReportPaymentSaleAllocationFactServices
 
         $inserted = 0;
         $replayed = 0;
-        $remaining = array_column(array_values($weights), 'sale_amount_cents', 'fact_id');
-        if (array_sum($remaining) !== array_sum(array_column($paymentFacts, 'amount_cents'))) {
-            throw new \InvalidArgumentException('debt_repayment_payment_allocation_total_invalid');
-        }
         foreach ($paymentFacts as $payment) {
             $paymentFactId = trim((string)($payment['fact_id'] ?? ''));
             $amount = (int)($payment['amount_cents'] ?? 0);
             if ($paymentFactId === '' || $amount <= 0) {
                 throw new \InvalidArgumentException('debt_repayment_payment_allocation_payment_invalid');
             }
-            // A repayment's cash-by-item totals are already frozen. Allocate each tender against
-            // remaining whole-yuan capacity so mixed methods conserve both row and column totals.
-            $allocations = \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::allocate($amount, $remaining);
+            $allocations = self::allocatePaymentToSales($amount, array_values($weights));
             foreach ($sales as $sale) {
                 $factId = (string)$sale['fact_id'];
                 $result = $this->persistAllocation($context, $payment, $sale, (int)($allocations[$factId] ?? 0));
-                $remaining[$factId] -= (int)($allocations[$factId] ?? 0);
                 $result === 'inserted' ? $inserted++ : $replayed++;
             }
         }

@@ -32,13 +32,6 @@ final class MemberCommerceSettings extends AuthController
         $this->authorizeSettings();
         $input = $request->postMore([['purchase_primary_id',0], ['purchase_secondary_id',0],
             ['recharge_primary_id',0], ['recharge_secondary_id',0], ['version',0], ['idempotency_key','']]);
-        // New policy fields are optional for old clients, but explicit zero
-        // must reach the service unchanged. Do not invent defaults for omitted
-        // fields or drop them from the controller's write whitelist.
-        $submitted = $request->param();
-        foreach (['source_enabled', 'inherit_previous', 'repayment_primary_id', 'repayment_secondary_id'] as $field) {
-            if (array_key_exists($field, $submitted)) $input[$field] = $submitted[$field];
-        }
         return $this->success('保存成功', (new MemberCommerceSettingsServices())->save($input, (int)$this->adminId));
     }
 }

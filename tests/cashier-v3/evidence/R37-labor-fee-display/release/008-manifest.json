@@ -1,0 +1,41 @@
+{
+  "site": "008",
+  "commit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+  "sourceTree": "3c271a5c1ddca36b33d1c4e2903d52facb637507",
+  "baselineTree": "7863bee78303ea72ee77304c646d4f6ade6c1b20",
+  "targets": {
+    "app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": {
+      "before": "492b0fb8a44af2c89244ec9aff25a333d4a97313b13c22fcd99d77336d99b9dd",
+      "after": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af"
+    },
+    "app/services/cashier/v3/projection/CashierV3RootStateContract.php": {
+      "before": "07f393bdfeb1ade34ca4df4880f366f6f64e4e7ad4e3e95948a81c3a631e4cd8",
+      "after": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df"
+    },
+    "app/services/system/config/SystemConfigServices.php": {
+      "before": "51ac512d9bb28f897614df912da468245e61a268a55495ea05a52f2048a5a09c",
+      "after": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8"
+    },
+    "app/validate/admin/setting/SystemConfigValidate.php": {
+      "before": "b86abe6f70679a2016c9c2e2b899a4d5fc88b99b6ec3e7252fe72c8364197ff9",
+      "after": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213"
+    },
+    "database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": {
+      "before": null,
+      "after": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e"
+    },
+    "public/view_cashier_v3/assets/index-bfcb66d1.js": {
+      "before": null,
+      "after": "16c59d62335615778108869a8b7c247bdd8ce5b9f8e1fa3d43d274b2516fd205"
+    },
+    "public/view_cashier_v3/assets/index-d8bd54a5.css": {
+      "before": null,
+      "after": "d8bd54a553efb51abd5eb00519800b445686e48baaf99c8945efdfc8e9130287"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "3d1e680ed27bc6aea46a5b26a932b5ffde4cc3a71bf1c3cdb83b5fb14e60f515",
+      "after": "ce7c6b8dcd9558d44649f689d5e007c6f93bc326dcc9f545c7af65d7cd299793"
+    }
+  },
+  "scope": "R37 explicit display fields only; preserve all previous site features; add config default0 without changing existing config values"
+}

@@ -32,17 +32,6 @@ final class V3ReservationOrder
         return app('json')->success($this->services->detail((int)$request->uid(), (int)$id));
     }
 
-    /** Authenticated member menu; no administrative metadata is exposed. */
-    public function customServices(Request $request)
-    {
-        $storeId = (int)$request->get('store_id', 0);
-        if ((int)$request->uid() <= 0 || !\think\facade\Db::name('system_store')->where('id', $storeId)
-            ->where('is_del', 0)->where('is_show', 1)->where('business_status', 1)->find()) {
-            throw new \think\exception\ValidateException('预约门店不可用。');
-        }
-        return app('json')->success((new \app\services\store\ServiceNameSettingsServices())->reservationCatalog($storeId));
-    }
-
     public function create(Request $request, $orderId)
     {
         $data = $request->postMore([
@@ -56,7 +45,6 @@ final class V3ReservationOrder
             [['service_staff_id', 'd'], 0],
             [['service_duration_minutes', 'd'], 0],
             ['addon_items', []],
-            ['custom_services', []],
             ['sync_all', []],
             [['store_id', 'd'], 0],
             ['mark', ''],

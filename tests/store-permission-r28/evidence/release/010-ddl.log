@@ -1,3 +1,0 @@
-bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-{"site":"010","database":"mohe_010_app","port":3307,"commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","tables":{"eb_store_v3_permission_catalog":"bc0d2c6b495bfeb7aa27be3a4e56a4d01e656a76a87a65c127abbdba425ff93c","eb_store_v3_permission_audit":"81196abbdffca23e90b2b936b44a56f5341ee5cacc34c879dcd025924fb2792a"},"applicationGrants":"unchanged","businessWrites":0,"result":"PASS"}

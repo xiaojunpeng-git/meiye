@@ -1,0 +1,42 @@
+{
+  "round": 37,
+  "sourceCommit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+  "result": "PASS",
+  "instances": {
+    "rh": {
+      "site": "rh",
+      "commit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+      "sourceTree": "5e852a99b53048f990aa9cc07c16a7403ca3d7eb",
+      "result": "PASS",
+      "rollback": "/www/backups/rh/r37-labor-display-5722f99e",
+      "existingFeaturesPreserved": true,
+      "otherConfigurationsUnchanged": true,
+      "financialWrites": 0,
+      "verifiedAtUTC": "2026-10-26T19:26:55.942836+00:00"
+    },
+    "008": {
+      "site": "008",
+      "commit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+      "sourceTree": "3c271a5c1ddca36b33d1c4e2903d52facb637507",
+      "result": "PASS",
+      "rollback": "/www/backups/008/r37-labor-display-5722f99e",
+      "existingFeaturesPreserved": true,
+      "otherConfigurationsUnchanged": true,
+      "financialWrites": 0,
+      "verifiedAtUTC": "2026-10-26T19:29:45.230971+00:00"
+    },
+    "010": {
+      "site": "010",
+      "commit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+      "sourceTree": "47b8305cca1f7f0e7525a8b012617eec0b3afd43",
+      "result": "PASS",
+      "rollback": "/www/backups/010/r37-labor-display-5722f99e",
+      "existingFeaturesPreserved": true,
+      "otherConfigurationsUnchanged": true,
+      "financialWrites": 0,
+      "verifiedAtUTC": "2026-10-26T19:34:09.930486+00:00"
+    }
+  },
+  "finishedAtUTC": "2026-10-26T19:34:47.383581+00:00",
+  "configuration": "仅幂等新增本轮显示定义，默认可修改；既有值不覆盖，业务金额不变"
+}

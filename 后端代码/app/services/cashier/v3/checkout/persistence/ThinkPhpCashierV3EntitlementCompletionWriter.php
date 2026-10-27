@@ -67,16 +67,12 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context)
         );
         $serviceRows = $this->attachSameCheckoutSaleSourceInTx($serviceRows, $context);
-        $performanceRows = $plan->performanceRows();
-        [$serviceRows, $performanceRows, $lifecycleContext] = $this->attachEntitlementCheckoutSourceInTx(
-            $serviceRows, $performanceRows, $context
-        );
         $inserted = [
             'writeoff' => $this->persistRows(self::WRITEOFF_TABLE, 'writeoff', $plan->writeoffRows()),
             'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
-            'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $performanceRows),
+            'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $plan->performanceRows()),
         ];
-        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($lifecycleContext, $serviceRows);
+        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($context, $serviceRows);
 
         $result = [
             'contractVersion' => CashierV3EntitlementCompletionPlanV1::CONTRACT_VERSION,
@@ -94,8 +90,6 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             'occupation' => $occupation,
             'versions' => $versions,
             'inserted' => $inserted,
-            // Freeze post-deduction values in the receipt; replay never reads later balances.
-            'receiptEntitlements' => $this->receiptEntitlementsInTx($plan),
         ];
         $encoded = $this->encode($result);
         $affected = (int)Db::name(self::RECEIPT_TABLE)
@@ -112,44 +106,6 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             throw self::failure('completion_receipt_finalize_conflict');
         }
         return $result;
-    }
-
-    /** Read already-locked, already-deducted sources for printing only; never deduct again. */
-    private function receiptEntitlementsInTx(CashierV3EntitlementCompletionPlanV1 $plan): array
-    {
-        $deductions = $plan->deductions();
-        $remainingByDetail = Db::name(self::DETAIL_TABLE)
-            ->whereIn('id', array_column($deductions, 'source_detail_id'))
-            ->column('write_surplus_times', 'id');
-        $rulesByHolder = $this->cardRules()->authoritiesForHolders(
-            $plan->context()['tenant_id'],
-            array_values(array_unique(array_filter(array_column($deductions, 'holder_id'))))
-        );
-        return self::receiptEntitlementLines($deductions, $remainingByDetail, $rulesByHolder);
-    }
-
-    /** Shared pools and replacement details both constrain the final usable physical count. */
-    private static function receiptEntitlementLines(array $deductions, array $remainingByDetail, array $rulesByHolder): array
-    {
-        $lines = [];
-        foreach ($deductions as $deduction) {
-            $detailId = $deduction['source_detail_id'];
-            $remaining = isset($remainingByDetail[$detailId]) ? (int)$remainingByDetail[$detailId] : null;
-            $rule = $rulesByHolder[$deduction['holder_id']][$detailId] ?? null;
-            if ($remaining !== null && is_array($rule)) {
-                $remaining = min($remaining, (int)$rule['remainingTimes']);
-            }
-            foreach ($deduction['line_ids'] as $lineId) {
-                $lines[] = [
-                    'lineId' => $lineId,
-                    'entitlementInstanceType' => $deduction['entitlement_instance_type'],
-                    'entitlementInstanceId' => $deduction['entitlement_instance_id'],
-                    'entitlementSourceDetailId' => $detailId,
-                    'remainingTimesAfter' => $remaining !== null && $remaining >= 0 ? $remaining : null,
-                ];
-            }
-        }
-        return $lines;
     }
 
     private function insertProcessingReceipt(CashierV3EntitlementCompletionPlanV1 $plan): array
@@ -694,50 +650,6 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         }
         unset($row);
         return $serviceRows;
-    }
-
-    /**
-     * A pure entitlement checkout has no sale order. Copy its frozen choice to
-     * every fact created by this completion transaction; never borrow the old
-     * card sale or the member's current source. Legacy fingerprints stay based
-     * on the plan payload so a completed receipt remains replayable.
-     */
-    private function attachEntitlementCheckoutSourceInTx(array $serviceRows, array $performanceRows, array $context): array
-    {
-        if (!$serviceRows || (int)($serviceRows[0]['business_source_primary_id'] ?? 0) > 0) {
-            return [$serviceRows, $performanceRows, $context];
-        }
-        $request = Db::name('cashier_v3_checkout_request')
-            ->where('tenant_id', (string)$context['tenant_id'])
-            ->where('store_id', (int)$context['store_id'])
-            ->where('request_id', (string)$context['checkout_request_id'])
-            ->where('member_id', (int)$context['member_id'])
-            ->where('composition', 'entitlement_only')
-            ->find();
-        if (!$request) return [$serviceRows, $performanceRows, $context];
-        $selection = Db::name('cashier_v3_checkout_business_source_selection')
-            ->where('tenant_id', (string)$context['tenant_id'])
-            ->where('store_id', (int)$context['store_id'])
-            ->where('checkout_kind', 'sale')
-            ->where('checkout_request_id', (string)$context['checkout_request_id'])
-            ->lock(true)->find();
-        if (!$selection || (int)$selection['primary_source_id'] <= 0
-            || trim((string)$selection['primary_source_name_snapshot']) === ''
-            || trim((string)$selection['source_label_snapshot']) === '') {
-            return [$serviceRows, $performanceRows, $context];
-        }
-        $source = [
-            'business_source_primary_id' => (int)$selection['primary_source_id'],
-            'business_source_primary_name_snapshot' => (string)$selection['primary_source_name_snapshot'],
-            'business_source_secondary_id' => (int)$selection['secondary_source_id'],
-            'business_source_secondary_name_snapshot' => (string)$selection['secondary_source_name_snapshot'],
-            'business_source_label_snapshot' => (string)$selection['source_label_snapshot'],
-        ];
-        foreach ($serviceRows as &$row) $row = array_merge($row, $source);
-        unset($row);
-        foreach ($performanceRows as &$row) $row = array_merge($row, $source);
-        unset($row);
-        return [$serviceRows, $performanceRows, array_merge($context, $source)];
     }
 
     private function assertImmutableReplay(string $domain, array $expected, array $existing): void

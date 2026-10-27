@@ -1,5 +1,0 @@
-PASS saved category rename/order and moved fund entry reflected in fresh store bootstrap; empty finance category hidden
-PASS disabled data category removes menu and denies direct report route
-PASS disabled account category retains reachable password/logout controls
-PASS original local catalog restored after configuration test
-R28 CONFIGURED NAVIGATION PASS

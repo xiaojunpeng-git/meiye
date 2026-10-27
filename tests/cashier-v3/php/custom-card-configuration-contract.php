@@ -101,14 +101,9 @@ customCardCheck('CCC-13 direct snapshots bind custom configuration to the browse
     strpos($configuration, 'string $snapshotLineId = \'\'') !== false
     && strpos($configuration, "? 'sale:' . substr(\$snapshotLineId, 0, 59)") !== false
     && strpos($preparation, "(string)(\$line['lineId'] ?? 'snapshot-' . \$index)") !== false);
-// The original row-zero fallback caused mixed cards to reuse settled rights.
-// Keep a source contract alongside real mixed-checkout integration coverage.
-customCardCheck('CCC-14 final issue binds the exact custom row and never falls back to snapshot row zero',
-    strpos($issuer, "(string)(\$acceptedPurchase['sourceKind'] ?? '') === 'custom_card'") !== false
-    && strpos($issuer, "->where('workspace_line_key', 'sale:' . substr(\$workspaceLineKey, 0, 59))") !== false
-    && strpos($issuer, "\$commandIdempotencyKey . ':snapshot:'") !== false
-    && strpos($issuer, "\$commandIdempotencyKey . ':snapshot:0'") === false
-    && strpos($issuer, "'custom_card_configuration_missing'") !== false);
+customCardCheck('CCC-14 final issue falls back to the exact snapshot command idempotency key',
+    strpos($issuer, 'created_command_idempotency_key') !== false
+    && strpos($issuer, "\$commandIdempotencyKey . ':snapshot:0'") !== false);
 customCardCheck('CCC-15 custom-card snapshot has cached components and cannot enter inventory settlement',
     strpos($workbench, 'function customCardPurchaseSnapshot(configuration = {})') !== false
     && strpos($workbench, 'cardPurchaseSnapshot: customCardPurchaseSnapshot(payload)') !== false

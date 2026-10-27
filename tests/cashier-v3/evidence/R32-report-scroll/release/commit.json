@@ -1,9 +1,0 @@
-{
-  "commit": "f51f9f388bfe35f54640a596965bd5c1d2e6dbb5",
-  "branch": "release/r32-report-scroll-20261024",
-  "tree": "e417b1eddcbaf80a47083ec0b31faeb66a992410",
-  "baselineCommit": "de78fbd4fc189b44648b68e9235ed33de26ce9f6",
-  "candidateTree": "af3a9df80ca5cbb0535ad68a4ea072ef593211fe",
-  "sharedIndexUntouched": true,
-  "pmAccepted": true
-}

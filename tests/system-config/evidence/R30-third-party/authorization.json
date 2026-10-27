@@ -1,5 +1,0 @@
-{
-  "userAcceptance": "同意，仅修复008",
-  "scope": "Only 008, backup then insert four missing definitions; keep existing values; no customer key copied",
-  "pushAuthorized": false
-}

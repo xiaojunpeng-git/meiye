@@ -1,0 +1,10 @@
+{
+  "site": "008",
+  "result": "PASS",
+  "inserted": true,
+  "id": 839,
+  "value": 0,
+  "otherConfigurationUnchanged": true,
+  "backup": "/www/backups/008/r37-labor-display-5722f99e/config-before.json",
+  "businessWrites": 0
+}

@@ -1,7 +1,0 @@
-bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-No syntax errors detected in /www/backups/rh/20261024-r29-fund-711a7f8a/candidate.php
-bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-ruihao swoole started pid=32678 port=20800
-sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-{"site":"rh","result":"PASS","realLedgerRows":1,"xlsxSummariesReconciled":1,"existingDocumentAndReportRead":true,"businessWrites":0,"migration":"not required"}
-R29_FUND_INSTANCE_PASS

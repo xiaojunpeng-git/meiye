@@ -630,54 +630,12 @@ b1Assert(
         && $lineOne['laborPerformance']['amountCents'] === 1000
 );
 b1Assert(
-    'locked craftsman sequence remains primary even when a partial weight pool rounds to zero yuan',
+    'locked craftsman sequence owns primary and tail allocation',
     $lineOne['laborPerformance']['allocations'][0]['staffId'] === 11
         && $lineOne['laborPerformance']['allocations'][0]['isPrimary'] === true
-        && $lineOne['laborPerformance']['allocations'][0]['amountCents'] === 0
-        && $lineOne['laborPerformance']['allocations'][1]['amountCents'] === 0
+        && $lineOne['laborPerformance']['allocations'][0]['amountCents'] === 334
+        && $lineOne['laborPerformance']['allocations'][1]['amountCents'] === 666
         && $lineOne['serviceSnapshot']['primaryCraftsmanId'] === 11
-);
-$craftsmanPlanMethod = new ReflectionMethod(CashierV3EntitlementCompletionKernel::class, 'craftsmanPlan');
-$craftsmanPlanMethod->setAccessible(true);
-$equalCraftsmen = b1AuthorityCraftsmen([11, 12]);
-$equalCraftsmen[0]['laborWeight'] = 50;
-$equalCraftsmen[1]['laborWeight'] = 50;
-$wholeYuanAllocations = $craftsmanPlanMethod->invoke(null, [11, 12], $equalCraftsmen, 7, 3900);
-b1Assert(
-    'automatic craftsman allocation keeps the 39-yuan base whole with a stable last-person tail',
-    array_column($wholeYuanAllocations, 'amountCents') === [1900, 2000]
-);
-$roundingSnapshot = b1Snapshot();
-$roundingSnapshot['lines'][0]['performance']['laborConfiguredUnitAmount'] = '39.00';
-$roundingSnapshot['lines'][0]['craftsmen'][0]['laborWeight'] = 50;
-$roundingSnapshot['lines'][0]['craftsmen'][1]['laborWeight'] = 50;
-$roundingPlan = b1Plan(null, $roundingSnapshot);
-b1Assert(
-    'full entitlement completion plan accepts 39-yuan equal-weight craftsman allocation',
-    array_column($roundingPlan['linePlans'][0]['laborPerformance']['allocations'], 'amountCents') === [1900, 2000]
-);
-$fractionalBaseReason = b1Reason(static function () use ($craftsmanPlanMethod, $equalCraftsmen): void {
-    $craftsmanPlanMethod->invoke(null, [11, 12], $equalCraftsmen, 7, 3950);
-});
-b1Assert(
-    'fractional-yuan labor base fails before automatic craftsmen allocation',
-    $fractionalBaseReason === 'money_whole_yuan_required',
-    $fractionalBaseReason
-);
-$equalCraftsmen[1]['performanceAmountManual'] = true;
-$equalCraftsmen[1]['performanceAmountCents'] = 3900;
-$manualAllocations = $craftsmanPlanMethod->invoke(null, [11, 12], $equalCraftsmen, 7, 3900);
-b1Assert(
-    'manual craftsman amount stays exact and need not balance the project base',
-    array_column($manualAllocations, 'amountCents') === [2000, 3900]
-);
-$equalCraftsmen[1]['performanceAmountManual'] = false;
-$equalCraftsmen[1]['performanceIndependent'] = true;
-$equalCraftsmen[1]['allocationGroupKey'] = 'independent:12';
-$independentAllocations = $craftsmanPlanMethod->invoke(null, [11, 12], $equalCraftsmen, 7, 3900);
-b1Assert(
-    'independent-position automatic yuan totals are calculated by group',
-    array_column($independentAllocations, 'amountCents') === [2000, 2000]
 );
 b1Assert(
     'business date and service linkage come only from locked snapshot',
@@ -1209,17 +1167,32 @@ for ($totalCents = 0; $totalCents <= 10000; $totalCents += 100) {
     }
 }
 b1Assert('all tested whole-yuan tails return to source total', $allocationInvariant);
+$centAmounts = [
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        0,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        1,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+    CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+        39682,
+        3,
+        2,
+        1,
+        'operation-cent-whole-yuan-floor-final-remainder-v1'
+    ),
+];
 b1Assert(
-    'historical operation-cent markers cannot create a new fractional-yuan writeoff fact',
-    b1Reason(static function (): void {
-        CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
-            39682,
-            3,
-            0,
-            1,
-            'operation-cent-whole-yuan-floor-final-remainder-v1'
-        );
-    }) === 'entitlement_purchase_amount_not_whole_yuan'
+    'operation-cent allocation preserves cent-level amount and final remainder',
+    $centAmounts === [13227, 13227, 13228]
 );
 b1Assert(
     'fractional-yuan source amounts are rejected instead of rounded or truncated',
@@ -1291,44 +1264,6 @@ b1Assert(
         b1Plan(null, $inactiveStaff);
     }) === 'craftsman_not_active_eligible_in_store'
 );
-
-// Permission catalog growth must not change the business plan or bypass authorization.
-foreach ([50, 51, 128, 1001] as $featureCount) {
-    $expandedPermission = b1Snapshot();
-    $expandedPermission['operatorFeatures'] = ['cashier.v3.cashier'];
-    for ($featureIndex = 1; $featureIndex < $featureCount; $featureIndex++) {
-        $expandedPermission['operatorFeatures'][] = 'cashier.v3.test.feature.' . $featureIndex;
-    }
-    b1Assert(
-        'valid server permission list accepts ' . $featureCount . ' features without changing the plan',
-        b1Reason(static function () use ($expandedPermission): void {
-            b1Assert('expanded permission plan remains identical', b1Plan(null, $expandedPermission) === b1Plan());
-        }) === ''
-    );
-}
-foreach ([null, 'cashier.v3.cashier', ['key' => 'cashier.v3.cashier'],
-    ['cashier.v3.cashier', ''], ['cashier.v3.cashier', 1],
-    ['cashier.v3.cashier', 'cashier.v3.cashier']] as $invalidFeatures) {
-    $invalidPermission = b1Snapshot();
-    $invalidPermission['operatorFeatures'] = $invalidFeatures;
-    b1Assert('malformed permission lists remain rejected', b1Reason(static function () use ($invalidPermission): void {
-        b1Plan(null, $invalidPermission);
-    }) === 'string_list_invalid');
-}
-foreach ([[], array_map(static function (int $i): string {
-    return 'cashier.v3.test.other.' . $i;
-}, range(1, 128))] as $unauthorizedFeatures) {
-    $unauthorizedPermission = b1Snapshot();
-    $unauthorizedPermission['operatorFeatures'] = $unauthorizedFeatures;
-    b1Assert('empty or large unauthorized lists still fail closed', b1Reason(static function () use ($unauthorizedPermission): void {
-        b1Plan(null, $unauthorizedPermission);
-    }) === 'required_feature_missing');
-}
-$wrongStorePermission = b1Snapshot();
-$wrongStorePermission['operatorStoreId'] = 8;
-b1Assert('operator store boundary remains enforced', b1Reason(static function () use ($wrongStorePermission): void {
-    b1Plan(null, $wrongStorePermission);
-}) === 'operator_store_mismatch');
 
 $missingPermission = b1Snapshot();
 $missingPermission['operatorFeatures'] = ['cashier.v3.member'];

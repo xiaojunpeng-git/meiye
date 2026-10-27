@@ -1,9 +1,0 @@
-{
-  "result": "PASS",
-  "site": "008",
-  "commit": "5fd8225287b31944894975deacb166d230f6e71f",
-  "backup": "/www/backups/008/r53-card-balance-5fd82252",
-  "files": 35,
-  "changedPositions": 9,
-  "publicVerificationPending": true
-}

@@ -63,7 +63,7 @@ final class TargetSchemeServices
             ->whereIn('status', ['draft', 'void'])->column('id');
         $ids = array_values(array_unique(array_merge(array_map('intval', $ids), array_map('intval', $ownEmptyIds))));
         if (!$ids) return [];
-        $rows = Db::name('target_scheme')->where('tenant_id', $tenant)->whereIn('id', $ids)->where('status', '<>', 'deleted')->order('id', 'desc')->select()->toArray();
+        $rows = Db::name('target_scheme')->where('tenant_id', $tenant)->whereIn('id', $ids)->order('id', 'desc')->select()->toArray();
         $visible = [];
         foreach ($rows as $row) {
             $all = Db::name('target_scheme_line')->where('tenant_id', $tenant)->where('scheme_id', $row['id'])->column('store_id');
@@ -80,7 +80,7 @@ final class TargetSchemeServices
     {
         [$tenant, $stores, $actor] = $this->scope($context);
         $scheme = Db::name('target_scheme')->where('tenant_id', $tenant)->where('id', $schemeId)->find();
-        if (!$scheme || $scheme['status'] === 'deleted') throw new \InvalidArgumentException('目标方案不存在');
+        if (!$scheme) throw new \InvalidArgumentException('目标方案不存在');
         $lines = Db::name('target_scheme_line')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->order('store_id,month_key,metric_code,scope_type,scope_id')->select()->toArray();
         if (!$lines && (int)$scheme['created_by'] !== $actor) throw new \InvalidArgumentException('无权查看该空方案');
         foreach ($lines as $line) if (!in_array((int)$line['store_id'], $stores, true)) throw new \InvalidArgumentException('当前权限不覆盖方案的全部门店');
@@ -91,17 +91,7 @@ final class TargetSchemeServices
         foreach ($lines as &$line) if ($line['scope_type'] === 'product')
             $line['scope_name'] = (string)($productNames[$line['scope_id']] ?? ('商品#'.$line['scope_id']));
         unset($line);
-        $activeBindings = Db::name('target_report_line_binding')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)
-            ->field('line_id,report_code')->select()->toArray();
-        $bindings = array_values(array_unique(array_column($activeBindings, 'report_code')));
-        // 部分目标被替换后方案仍可生效；逐行显式返回当前引用，不能把整份历史明细说成仍在生效。
-        // 预先按行分组，避免 3000 行 × 21000 引用的嵌套扫描。
-        $reportsByLine = [];
-        foreach ($activeBindings as $binding) $reportsByLine[(int)$binding['line_id']][] = $binding['report_code'];
-        foreach ($lines as &$line) {
-            $line['active_report_codes'] = $reportsByLine[(int)$line['id']] ?? [];
-        }
-        unset($line);
+        $bindings = Db::name('target_report_binding')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->distinct(true)->column('report_code');
         $voidAudit = $scheme['status'] === 'void' ? Db::name('target_scheme_audit')->where('tenant_id', $tenant)
             ->where('scheme_id', $schemeId)->where('action', 'voided')->order('id', 'desc')->find() : null;
         $voidInfo = $voidAudit ? (json_decode((string)$voidAudit['after_json'], true) ?: []) + [
@@ -190,8 +180,8 @@ final class TargetSchemeServices
     }
 
     /**
-     * 生效唯一性是报表×门店×月份×指标×对象，不是整店。冲突预览不改变目标；
-     * 用户确认的指纹必须仍匹配当前引用，才允许原子替换相同目标，保留其他有效行。
+     * 激活与门店级报表引用在同一事务中完成。局部权限只能切换自身门店的引用；
+     * 同一目标键可由不同方案分别服务不同报表，读取时必须按报表绑定锁定方案。
      */
     public function activate(array $context, int $schemeId, array $input): array
     {
@@ -201,68 +191,62 @@ final class TargetSchemeServices
         if ($expected <= 0 || !$reports) throw new \InvalidArgumentException('请选择报表并提交当前方案版本');
         foreach ($reports as $code) if (!isset(self::REPORTS[$code])) throw new \InvalidArgumentException('报表引用无效');
         sort($reports);
-        $preview = !empty($input['conflict_preview']);
-        $confirmation = (string)($input['conflict_token'] ?? '');
-        return $this->command($tenant, $actor, $input, ['action' => 'activate', 'scheme_id' => $schemeId,
-            'version' => $expected, 'reports' => $reports, 'preview' => $preview, 'confirmation' => $confirmation,
-            'authorized_store_ids' => $stores],
-            function () use ($tenant, $stores, $actor, $schemeId, $expected, $reports, $preview, $confirmation): array {
+        return $this->command($tenant, $actor, $input, ['scheme_id' => $schemeId, 'version' => $expected, 'reports' => $reports],
+            function () use ($tenant, $stores, $actor, $schemeId, $expected, $reports): array {
                 $scheme = $this->lockedScheme($tenant, $schemeId, $stores, $actor);
                 if ((int)$scheme['version'] !== $expected) throw new \InvalidArgumentException('方案已更新，请刷新后重试');
                 if ($scheme['status'] !== 'draft') throw new \InvalidArgumentException('已生效方案不可重复启用，请建立新草稿');
                 $lines = Db::name('target_scheme_line')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->order('id')->select()->toArray();
                 if (!$lines) throw new \InvalidArgumentException('方案没有目标明细');
                 foreach ($lines as $line) if (!in_array((int)$line['store_id'], $stores, true)) throw new \InvalidArgumentException('当前权限不覆盖方案的全部门店');
-                $existing = Db::name('target_report_line_binding')->where('tenant_id', $tenant)
-                    ->whereIn('report_code', $reports)->whereIn('store_id', array_unique(array_column($lines, 'store_id')))
-                    ->whereIn('month_key', array_unique(array_column($lines, 'month_key')))->order('id')->lock(true)->select()->toArray();
-                $byKey = [];
-                foreach ($existing as $binding) $byKey[$this->bindingKey($binding)] = $binding;
-                $changes = []; $conflicts = [];
-                foreach ($reports as $code) foreach ($lines as $line) {
-                    $identity = array_intersect_key($line, array_flip(['store_id', 'month_key', 'metric_code', 'scope_type', 'scope_id']));
-                    $identity['report_code'] = $code;
-                    $old = $byKey[$this->bindingKey($identity)] ?? null;
-                    $changes[] = ['identity' => $identity, 'line_id' => (int)$line['id'], 'old' => $old];
-                    if ($old) $conflicts[] = $identity + ['binding_id' => (int)$old['id'],
-                        'binding_version' => (int)$old['version'], 'old_scheme_id' => (int)$old['scheme_id'],
-                        'old_line_id' => (int)$old['line_id'], 'new_line_id' => (int)$line['id']];
-                }
-                $token = hash('sha256', json_encode([$tenant, $schemeId, $expected, $reports, $conflicts]));
-                if ($conflicts && !hash_equals($token, $confirmation)) {
-                    if (!$preview) throw new \InvalidArgumentException('存在已生效的相同目标，请重新预览并确认替换');
-                    // 旧方案可能包含越权门店，冲突只公开当前授权目标身份和方案编号，不泄露其名称或其他明细。
-                    return ['status' => 'confirmation_required', 'conflict_token' => $token, 'conflicts' => $conflicts];
-                }
+                $affectedStores = array_values(array_unique(array_map('intval', array_column($lines, 'store_id'))));
+                // 不按目标键驱逐其他方案：同一门店月份的实际业绩目标可以被
+                // 集团目标报表与业绩对比报表分别引用，报表绑定才是生效边界。
+                // 目标键在同一方案内仍由数据库唯一约束保护。
                 $now = time();
                 $displaced = [];
-                foreach ($changes as $change) {
-                    $old = $change['old'];
-                    $value = ['scheme_id' => $schemeId, 'line_id' => $change['line_id'],
-                        'version' => $old ? (int)$old['version'] + 1 : 1, 'updated_by' => $actor, 'updated_at' => $now];
-                    if ($old) {
-                        $displaced[(int)$old['scheme_id']] = true;
-                        Db::name('target_report_line_binding')->where('id', $old['id'])->update($value);
-                    } else Db::name('target_report_line_binding')->insert($change['identity'] + $value + ['tenant_id' => $tenant]);
+                foreach ($affectedStores as $storeId) {
+                    foreach ($reports as $code) {
+                        $bound = Db::name('target_report_binding')->where('tenant_id', $tenant)
+                            ->where('report_code', $code)->where('store_id', $storeId)->lock(true)->find();
+                        if ($bound && (int)$bound['scheme_id'] !== $schemeId) $displaced[(int)$bound['scheme_id']][$storeId] = true;
+                        if ($bound) Db::name('target_report_binding')->where('id', $bound['id'])->update([
+                            'scheme_id' => $schemeId, 'version' => (int)$bound['version'] + 1,
+                            'updated_by' => $actor, 'updated_at' => $now,
+                        ]);
+                        else Db::name('target_report_binding')->insert(['tenant_id' => $tenant, 'report_code' => $code,
+                            'store_id' => $storeId, 'scheme_id' => $schemeId, 'version' => 1,
+                            'updated_by' => $actor, 'updated_at' => $now]);
+                    }
                 }
-                foreach (array_keys($displaced) as $oldId) {
-                    $remaining = Db::name('target_report_line_binding')->where('tenant_id', $tenant)->where('scheme_id', $oldId)->count();
+                foreach ($displaced as $oldId => $storeSet) {
+                    foreach (array_keys($storeSet) as $storeId) {
+                        // 只有该店再无任何报表引用旧方案时，才退役该店旧有效行；其他店不受影响。
+                        $stillBound = Db::name('target_report_binding')->where('tenant_id', $tenant)
+                            ->where('scheme_id', $oldId)->where('store_id', $storeId)->count();
+                        if (!$stillBound) Db::name('target_effective_line')->where('tenant_id', $tenant)
+                            ->where('scheme_id', $oldId)->where('store_id', $storeId)->delete();
+                    }
+                    $remaining = Db::name('target_effective_line')->where('tenant_id', $tenant)->where('scheme_id', $oldId)->count();
                     Db::name('target_scheme')->where('tenant_id', $tenant)->where('id', $oldId)->update([
-                        'status' => $remaining ? 'active' : 'draft', 'version' => Db::raw('version+1'), 'updated_at' => $now, 'updated_by' => $actor,
+                        'status' => $remaining ? 'active' : 'draft', 'version' => Db::raw('version+1'), 'updated_at' => $now,
                     ]);
-                    $this->audit($tenant, $oldId, $actor, 'targets_replaced', [], ['replacement_scheme_id' => $schemeId,
-                        'conflicts' => array_values(array_filter($conflicts, static fn($c) => $c['old_scheme_id'] === $oldId))]);
                 }
+                foreach ($lines as $line) Db::name('target_effective_line')->insert([
+                    'tenant_id' => $tenant, 'store_id' => $line['store_id'], 'month_key' => $line['month_key'],
+                    'metric_code' => $line['metric_code'], 'scope_type' => $line['scope_type'], 'scope_id' => $line['scope_id'],
+                    'scheme_id' => $schemeId, 'line_id' => $line['id'], 'activated_at' => $now,
+                ]);
                 Db::name('target_scheme')->where('id', $schemeId)->update(['status' => 'active', 'version' => $expected + 1,
                     'updated_by' => $actor, 'updated_at' => $now]);
                 $result = ['id' => $schemeId, 'version' => $expected + 1, 'status' => 'active', 'report_codes' => $reports];
-                $this->audit($tenant, $schemeId, $actor, 'activated', ['replaced_bindings' => $conflicts], $result);
+                $this->audit($tenant, $schemeId, $actor, 'activated', [], $result);
                 return $result;
             });
     }
 
     /**
-     * 作废保留方案及原始明细，只撤销该方案仍持有的逐行报表引用。
+     * 作废保留方案及原始明细，只撤销当前报表引用和可重建的有效目标投影。
      * 版本、权限、幂等和审计同事务保护；报表无其他方案接替时目标为空。
      */
     public function void(array $context, int $schemeId, array $input): array
@@ -279,10 +263,11 @@ final class TargetSchemeServices
                 if ((int)$scheme['version'] !== $expected) throw new \InvalidArgumentException('方案已更新，请刷新后重试');
                 if (!in_array($scheme['status'], ['draft', 'active'], true))
                     throw new \InvalidArgumentException('该目标方案已作废');
-                $bindings = Db::name('target_report_line_binding')->where('tenant_id', $tenant)
-                    ->where('scheme_id', $schemeId)->lock(true)->select()->toArray();
-                // 被其他方案接替的目标不撤回，也不自动恢复曾被替换的旧目标。
-                Db::name('target_report_line_binding')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->delete();
+                $bindings = Db::name('target_report_binding')->where('tenant_id', $tenant)
+                    ->where('scheme_id', $schemeId)->lock(true)->field('report_code,store_id')->select()->toArray();
+                // 报表读取只认绑定；同事务移除绑定和投影，避免留下能被再次引用的孤立有效目标。
+                Db::name('target_report_binding')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->delete();
+                Db::name('target_effective_line')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->delete();
                 $now = time();
                 Db::name('target_scheme')->where('tenant_id', $tenant)->where('id', $schemeId)->update([
                     'status' => 'void', 'version' => $expected + 1, 'updated_by' => $actor, 'updated_at' => $now,
@@ -296,37 +281,16 @@ final class TargetSchemeServices
             });
     }
 
-    /** 删除是带审计的软删除：仅作废方案可移出日常入口，历史目标及作废记录不物理抹除。 */
-    public function deleteVoided(array $context, int $schemeId, array $input): array
-    {
-        [$tenant, $stores, $actor] = $this->scope($context);
-        $expected = (int)($input['expected_version'] ?? 0);
-        if ($expected <= 0) throw new \InvalidArgumentException('请刷新目标方案后再删除');
-        return $this->command($tenant, $actor, $input, ['action' => 'delete', 'scheme_id' => $schemeId, 'version' => $expected],
-            function () use ($tenant, $stores, $actor, $schemeId, $expected): array {
-                $scheme = $this->lockedScheme($tenant, $schemeId, $stores, $actor);
-                if ((int)$scheme['version'] !== $expected) throw new \InvalidArgumentException('方案已更新，请刷新后重试');
-                if ($scheme['status'] !== 'void') throw new \InvalidArgumentException('只有已作废方案可以删除');
-                if (Db::name('target_report_line_binding')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->count())
-                    throw new \InvalidArgumentException('方案仍被报表引用，不能删除');
-                Db::name('target_scheme')->where('tenant_id', $tenant)->where('id', $schemeId)->update([
-                    'status' => 'deleted', 'version' => $expected + 1, 'updated_by' => $actor, 'updated_at' => time()]);
-                $result = ['id' => $schemeId, 'status' => 'deleted', 'version' => $expected + 1];
-                $this->audit($tenant, $schemeId, $actor, 'deleted', $scheme, $result);
-                return $result;
-            });
-    }
-
     /** 每个授权门店读取各自的报表引用，未绑定时返回空，绝不回退旧目标表。 */
     public function effective(array $context, string $reportCode, array $months = []): array
     {
         [$tenant, $stores] = $this->scope($context);
         if (!isset(self::REPORTS[$reportCode]) || !$stores) return ['scheme_id' => 0, 'scheme_ids' => [], 'lines' => []];
-        $query = Db::name('target_report_line_binding')->alias('b')
-            ->join('target_scheme_line l', 'l.id=b.line_id AND l.tenant_id=b.tenant_id AND l.scheme_id=b.scheme_id')
-            ->join('target_scheme s', 's.id=b.scheme_id AND s.tenant_id=b.tenant_id')
-            ->where('s.status', 'active')->where('b.tenant_id', $tenant)->where('b.report_code', $reportCode)->whereIn('b.store_id', $stores);
-        if ($months) $query->whereIn('b.month_key', $months);
+        $query = Db::name('target_effective_line')->alias('e')
+            ->join('target_report_binding b', 'b.tenant_id=e.tenant_id AND b.scheme_id=e.scheme_id AND b.store_id=e.store_id')
+            ->join('target_scheme_line l', 'l.id=e.line_id AND l.tenant_id=e.tenant_id')
+            ->where('e.tenant_id', $tenant)->where('b.report_code', $reportCode)->whereIn('e.store_id', $stores);
+        if ($months) $query->whereIn('e.month_key', $months);
         $lines = $query->field('l.*')->order('l.month_key,l.store_id,l.metric_code,l.scope_type,l.scope_id')->select()->toArray();
         $schemeIds = array_values(array_unique(array_map('intval', array_column($lines, 'scheme_id'))));
         return ['scheme_id' => count($schemeIds) === 1 ? $schemeIds[0] : 0, 'scheme_ids' => $schemeIds, 'lines' => $lines];
@@ -382,33 +346,19 @@ final class TargetSchemeServices
     private function lockedScheme(string $tenant, int $schemeId, array $stores, int $actor): array
     {
         $scheme = Db::name('target_scheme')->where('tenant_id', $tenant)->where('id', $schemeId)->lock(true)->find();
-        if (!$scheme || $scheme['status'] === 'deleted') throw new \InvalidArgumentException('目标方案不存在');
+        if (!$scheme) throw new \InvalidArgumentException('目标方案不存在');
         $existingStores = Db::name('target_scheme_line')->where('tenant_id', $tenant)->where('scheme_id', $schemeId)->distinct(true)->column('store_id');
         if (!$existingStores && (int)$scheme['created_by'] !== $actor) throw new \InvalidArgumentException('无权修改其他人的空方案');
         foreach ($existingStores as $id) if (!in_array((int)$id, $stores, true)) throw new \InvalidArgumentException('当前权限不覆盖方案的全部门店');
         return $scheme;
     }
 
-    /** 低频目标管理命令统一锁序；先锁方案再查命令回执，防止空回执间隙锁和交叉替换相互等待。 */
-    private function lockActivationScope(string $tenant): void
-    {
-        Db::name('target_scheme')->where('tenant_id', $tenant)->order('id')->lock(true)->column('id');
-    }
-
-    /** 数据库唯一键与预览/替换使用完全相同的目标身份。 */
-    private function bindingKey(array $line): string
-    {
-        return implode(':', [$line['report_code'], $line['store_id'], $line['month_key'], $line['metric_code'], $line['scope_type'], $line['scope_id']]);
-    }
-
     private function command(string $tenant, int $actor, array $input, array $payload, callable $write): array
     {
-        if ($actor <= 0) throw new \InvalidArgumentException('无目标方案管理权限');
         $key = trim((string)($input['idempotency_key'] ?? ''));
         if ($key === '' || strlen($key) > 128) throw new \InvalidArgumentException('操作标识无效');
         $hash = hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         return Db::transaction(function () use ($tenant, $actor, $key, $hash, $write): array {
-            $this->lockActivationScope($tenant);
             $old = Db::name('target_scheme_command')->where('tenant_id', $tenant)->where('idempotency_key', $key)->lock(true)->find();
             if ($old) {
                 if ($old['request_hash'] !== $hash || (int)$old['actor_id'] !== $actor) throw new \InvalidArgumentException('操作标识已用于其他请求');

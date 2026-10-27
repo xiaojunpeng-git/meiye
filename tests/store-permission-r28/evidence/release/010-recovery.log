@@ -1,6 +1,0 @@
-bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-{"result":"PASS","site":"010","mode":"install","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
-{"result":"PASS","site":"010","mode":"verify","commit":"18669cbf303299b217f32d1d0a99727ba13dc1be","files":1242}
-{"site":"010","catalogRows":91,"staffPermissionReads":113,"result":"PASS"}
-{"result":"PASS","site":"010","productionGraph":true,"fiveColorGuard":true,"reservationRecords":0,"calendarBlocks":0,"existingReservationProjects":0,"existingServiceAttributionContract":true,"businessWrites":0}
-R28_010_RECOVERY_PASS

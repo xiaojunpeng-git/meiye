@@ -26,13 +26,6 @@ final class CashierV3BusinessDashboardPartitionProvider implements CashierV3Root
         CashierV3DataScopeContext $dataScope,
         array $hints = []
     ): array {
-        // 初始化根投影也必须遵守独立看板权限，不能从其他入口读回经营指标。
-        if (!$dataScope->hasFeature('cashier.v3.management.dashboard')) {
-            $payload=$this->unavailablePayload();
-            $payload['availability']['status']='forbidden';
-            $payload['availability']['reasonCode']='FEATURE_PERMISSION_DENIED';
-            return ['ready'=>true,'payload'=>$payload,'public_versions'=>[]];
-        }
         try {
             return ['ready' => true, 'payload' => $this->reader->initial($operatorScope, $dataScope), 'public_versions' => []];
         } catch (\Throwable $exception) {

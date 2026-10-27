@@ -2407,9 +2407,6 @@ class StoreDebtServices extends BaseServices
             $guarded = $writer->lockDebtInTx((int)$repayHint['debt_id']);
             $token = $guarded['token'];
             $debt = $guarded['debt'];
-            // A repayment reversal must never reopen debt after the card's
-            // remaining value has already moved to gift balance atomically.
-            \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted($token->originOrderId());
             $repay = Db::name('store_debt_repay')
                 ->where('repay_order_id', $repayOrderId)
                 ->lock(true)

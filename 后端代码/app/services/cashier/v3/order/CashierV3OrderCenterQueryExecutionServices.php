@@ -2,36 +2,10 @@
 namespace app\services\cashier\v3\order;
 
 use app\services\query\UnifiedQueryExecutionServices;
-use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 
 /** 订单人员是一对多关系；隐藏身份列精确匹配 ID，不用姓名或 JSON 子串猜测。 */
 final class CashierV3OrderCenterQueryExecutionServices extends UnifiedQueryExecutionServices
 {
-    /** 查询与导出计划同时去除已隐藏来源条件；不改偏好记录、不改事实，更不扩大门店权限。 */
-    public function normalizeUiQuery(string $pageCode, array $raw, array $permissions = []): array
-    {
-        $policy = (new CashierV3BusinessSourcePolicyServices())->read();
-        if (($policy['enabled'] ?? true) === false) $raw = self::withoutBusinessSource($raw);
-        return parent::normalizeUiQuery($pageCode, $raw, $permissions);
-    }
-
-    /** 兼容旧 UI 与冻结计划字段别名；只删稳定 key=source，不能误删权益、卡号或原单追溯。 */
-    public static function withoutBusinessSource(array $query): array
-    {
-        foreach (['topFilters','topFilterConditions','filters','quickFilters','keywordFilters','sorts','summaries','groups','groupBy','visibleFields','quickFields'] as $group) {
-            if (!is_array($query[$group] ?? null)) continue;
-            $query[$group] = array_values(array_filter($query[$group], static function ($item): bool {
-                $key = is_string($item) ? $item : (is_array($item) ? ($item['field_key'] ?? $item['fieldKey'] ?? $item['field'] ?? $item['key'] ?? '') : '');
-                return $key !== 'source';
-            }));
-        }
-        if (is_array($query['querySettings'] ?? null)) $query['querySettings'] = self::withoutBusinessSource($query['querySettings']);
-        if (is_array($query['export']['fields'] ?? null)) {
-            $query['export']['fields'] = array_values(array_filter($query['export']['fields'], static function ($key): bool { return $key !== 'source'; }));
-        }
-        return $query;
-    }
-
     protected function fieldIndex(string $pageCode, array $permissions, array $definitions): array
     {
         $index = parent::fieldIndex($pageCode, $permissions, $definitions);

@@ -421,7 +421,7 @@ final class GroupManagementDashboardServices
         $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range);
         $dealCounts = [];
         foreach ($qualifiedDays as $day) {
-            // 分类筛选只显示原单首次达标时最大现金分摊分类的人数。
+            // 分类筛选只显示达标参与现金分摊最大的分类的人数。
             if ($categoryIds !== [] && !in_array((int)($day['category_id'] ?? 0), $categoryIds, true)) continue;
             $sourceId = (int)$day['business_source_primary_id'];
             $dealCounts[$sourceId] = ($dealCounts[$sourceId] ?? 0) + 1;
@@ -440,12 +440,14 @@ final class GroupManagementDashboardServices
             // 来源维度的进店数与 A 来源活客均是门店到店指标；体验服务不取得资格。
             $services = \app\services\query\metric\StoreCustomerVisitEligibility::filter($services);
             $activeMembers = []; foreach ($services as $row) if ((int)($row['member_id'] ?? 0) > 0) $activeMembers[(int)$row['member_id']] = true;
-            $code = strtoupper(substr(trim($name), 0, 1));
+            // 来源名称可用中文开头；按完整 UTF-8 字符提取展示代码，避免截断字节导致整页 JSON 编码失败。
+            // 英文字母仍转大写，保留仅 A 来源显示活客数的既有业务口径。
+            $code = mb_strtoupper(mb_substr(trim($name), 0, 1, 'UTF-8'), 'UTF-8');
             $item = ['source_id' => $sourceId, 'name' => $name, 'source_code' => $code, 'visit_count' => count($services), 'deal_count' => $dealCounts[$sourceId] ?? 0, 'deal_amount_cents' => $this->sum($matches, 'amount_cents')];
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按原销售单独立累计成功现金收款，在首次达到平台设置的来源门槛之日计一次，跨店补交归原销售门店。同一会员同日跨单跨店只计一次，多天可累计，游客不计；旧导入及旧卡录入原单补交不推动门槛，退款不改变人数资格。按商品分类筛选人数时，资格只归首次达标时该单现金分摊最多的分类。实际业绩金额仍按成功现金收款减现金退款及各自业务日期统计。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按同一会员当天新消费跨单累计成功现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，在首次达到平台设置的来源门槛之日计一次，跨店补交归原销售门店。同一会员同日跨单跨店只计一次，多天可累计，游客不计；旧导入及旧卡录入原单补交不推动门槛，退款不改变人数资格。按商品分类筛选人数时，资格只归首次达标时参与现金分摊最多的分类。实际业绩金额仍按成功现金收款减现金退款及各自业务日期统计。'];
     }
 
     private function rankings(array $stores, array $targets, array $actual, string $asOfDate): array

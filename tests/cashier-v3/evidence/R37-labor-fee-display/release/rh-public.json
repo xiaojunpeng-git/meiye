@@ -1,0 +1,53 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "checks": [
+    {
+      "path": "/view_cashier_v3/",
+      "status": 200
+    },
+    {
+      "path": "/view_cashier_v3/assets/index-938eb726.js",
+      "status": 200,
+      "sha256": "d53b529b78137ec687a3ebf40008ebc978d201a95bbad3764fad0c52a356a9c0"
+    },
+    {
+      "path": "/view_cashier_v3/assets/index-e6cd1a80.css",
+      "status": 200,
+      "sha256": "e6cd1a804e662cc3faa3627a5e6295876679347cb1cdcbae92c51c39f46a9d9a"
+    },
+    {
+      "path": "/admin/login",
+      "status": 200
+    },
+    {
+      "path": "/view_admin/css/chunk-vendors.48272356.css",
+      "status": 200,
+      "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+    },
+    {
+      "path": "/view_admin/css/app.153d9d27.css",
+      "status": 200,
+      "sha256": "e3196fac4f7768b46a24ff2ec5fb023ac3ac80b503aaa7f7b24ff1663ad3b59f"
+    },
+    {
+      "path": "/view_admin/js/chunk-vendors.33283ef6.js",
+      "status": 200,
+      "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+    },
+    {
+      "path": "/view_admin/js/app.294fa1e7.js",
+      "status": 200,
+      "sha256": "6288d38c4857f9d499263378387ca70ddc5ea33fa88107ee4457659e684545dc"
+    },
+    {
+      "path": "/preview-8080/view_cashier_v3/",
+      "status": 410
+    },
+    {
+      "path": "/store-v3/",
+      "status": 410
+    }
+  ],
+  "sourceCommit": "5722f99e0caaf5319824eea20826f374247d4ea2"
+}

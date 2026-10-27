@@ -1,5 +1,0 @@
-{
-  "result": "EXPECTED_REJECTION",
-  "message": "Member detail dependencies missing or mismatched: app/services/cashier/v3/card/CashierV3CardReadAmountServices.php, app/services/cashier/v3/card/CashierV3CardComponentPurchaseAmountAuthority.php",
-  "productionModified": false
-}

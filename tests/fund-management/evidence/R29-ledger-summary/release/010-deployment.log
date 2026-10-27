@@ -1,5 +1,0 @@
-bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-No syntax errors detected in /www/backups/010/20261024-r29-fund-711a7f8a/candidate.php
-sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-{"site":"010","result":"PASS","realLedgerRows":0,"xlsxSummariesReconciled":0,"existingDocumentAndReportRead":false,"businessWrites":0,"migration":"not required"}
-R29_FUND_INSTANCE_PASS

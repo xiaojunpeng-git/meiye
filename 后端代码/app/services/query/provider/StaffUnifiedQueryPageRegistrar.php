@@ -63,7 +63,7 @@ class StaffUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
             'staff_id',
             [
                 'keywordFields' => ['staff_name', 'nickname', 'phone'],
-                'requiredFeature' => 'cashier.v3.management.staff',
+                'requiredFeature' => 'cashier.v3.management_center',
             ]
         );
     }

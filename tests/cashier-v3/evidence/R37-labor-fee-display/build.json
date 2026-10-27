@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "source": "前端代码/cashier-v3（18091 热更新同源）",
+  "kind": "本地编译自测，非8080发布集成包",
+  "output": "/private/tmp/mohe-r37-labor-fee-smoke",
+  "files": {
+    "index.html": "ded30982ca00a276acfbbaf252f47c302cea5a442cdf216fa09887e3e2f8e0d5",
+    "assets/index-685e7a87.js": "1a2ed5889935a9e3ba635480ca01eb7721ab10d1b63fe6a7025b331ef390bc55",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "assets/index-5c648992.css": "5c648992b8014af7f52edbec9d08346478074601694f79588e301409db9742b4",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+  }
+}

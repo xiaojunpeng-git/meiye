@@ -9,7 +9,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
-use app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use think\facade\Db;
 
@@ -79,11 +79,13 @@ final class CashierV3RechargeCheckoutModule
         $balance = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx($input['memberId'], $operator, $data);
         $balanceVersion = (int)($balance['accountVersion'] ?? 0);
         if ($balanceVersion <= 0) throw self::invalid('recharge_checkout_balance_unavailable', '会员余额资料无效，请重新选择会员后重试。');
-        // Validate the source frozen with this recharge. A fixed default that
-        // changed after confirmation must not silently replace that selection.
-        $source = (new CashierV3CheckoutBusinessSourceSelectionServices())->validateConfirmedChoice(
-            'recharge', $data->tenantId(), $operator->storeId(), $input['memberId'],
-            $input['businessSource']
+        // 充值复用顶部来源选择；旧页面或挂单快照同样不得提交退款专用 K 来源。
+        $sourceConfig = new CashierV3BusinessConfigServices();
+        $sourceConfig->assertCheckoutSourceAllowed((int)$input['businessSource']['primarySourceId']);
+        $source = $sourceConfig->resolveSourceSnapshot(
+            (int)$input['businessSource']['primarySourceId'],
+            (int)$input['businessSource']['secondarySourceId'],
+            true
         );
         if ($input['creditedPrincipalCents'] === 0 && !empty($snapshot['paymentLines'])) {
             throw self::invalid('recharge_checkout_payment_total_mismatch', '全额欠款时不能再填写收款金额。');
@@ -153,17 +155,7 @@ final class CashierV3RechargeCheckoutModule
             'businessSource' => $businessSource,
             'salespersonAllocations' => array_values((array)($p['salespersonAllocations'] ?? []))];
     }
-    /** Keep the names confirmed in this recharge, not only IDs that would be
-     * re-expanded from a later renamed directory during final settlement.
-     */
-    private function businessSource($value): array
-    {
-        if (!is_array($value)) throw self::invalid('recharge_business_source_invalid', '请先选择本次客户来源。');
-        $primary = (int)($value['primarySourceId'] ?? 0);
-        $secondary = (int)($value['secondarySourceId'] ?? 0);
-        if ($primary <= 0 || $secondary < 0) throw self::invalid('recharge_business_source_invalid', '请先选择本次客户来源。');
-        return array_replace($value, ['primarySourceId' => $primary, 'secondarySourceId' => $secondary]);
-    }
+    private function businessSource($value): array { if(!is_array($value)) throw self::invalid('recharge_business_source_invalid','请先在收银页面顶部选择客户来源。');$primary=(int)($value['primarySourceId']??0);$secondary=(int)($value['secondarySourceId']??0);if($primary<=0||$secondary<0) throw self::invalid('recharge_business_source_invalid','请先在收银页面顶部选择客户来源。');return ['primarySourceId'=>$primary,'secondarySourceId'=>$secondary]; }
     private function resolveTerms(array $input,array $member): array
     {
         if ($input['mode'] === 'package') {

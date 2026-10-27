@@ -10,8 +10,9 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import { queryStoreBusinessReportScope } from '@/services/storeBusinessReportApi'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReport, saveBasicRegistration, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -59,10 +60,6 @@ const storeOptions = computed(() => {
 function openReport(report) {
   if (!report.available) return
   void router.push({ name: route.name, params: { report: report.code } })
-}
-// 跨店历史结算默认核对本年，与原报表查询区间一致；切换其他表仍回到月初。
-function resetReportDates(code) {
-  dates.value = { start_date: code === 'basic_cross_store_settlement' ? today.slice(0, 4) + '-01-01' : today.slice(0, 7) + '-01', end_date: today, as_of_date: today }
 }
 
 /** 在途旧响应不能覆盖新的组织筛选、页码或已退出的报表。 */
@@ -116,14 +113,8 @@ function applyPeriod(value) {
 }
 function selectScope(value) {
   stores.value = value.storeIds
-  // 010 平台菜单授权的空选择代表全部门店，不能继续显示旧的数据权限文案。
-  scopeLabel.value = !value.storeIds.length && scope.value.authorization_mode === 'all' ? '全部门店' : value.label
+  scopeLabel.value = value.label
   void run({ ...query.value, page: 1 })
-}
-/** 每张表独立取后端门店树；切回全部时与该表的读授权保持一致。 */
-async function refreshScope(code) {
-  scope.value = await loadBasicReportScope(code)
-  if (!stores.value.length) scopeLabel.value = scope.value.authorization_mode === 'all' ? '全部门店' : '当前权限范围'
 }
 function edit(row) {
   saveError.value = ''
@@ -168,9 +159,6 @@ async function exportRows() {
 }
 function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
-  // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
-  if (active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(row[field.key]).toFixed(2)
-  if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
   return row[field.key] ?? '-'
@@ -178,8 +166,6 @@ function display(row, field) {
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
-  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
-  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
   if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : amount
   return index === 0 ? '合计' : '-'
 }
@@ -208,29 +194,21 @@ watch(() => Boolean(editor.value || fieldGuide.value), async open => {
     document.querySelector('.basic-report-dialog button')?.focus()
   } else { await nextTick(); returnFocus?.focus() }
 })
-watch(() => route.params.report, async () => {
-  const routeRequest = ++requestId
-  controller?.abort(); editor.value = null; executedQuery.value = null
+watch(() => route.params.report, () => {
+  requestId++; controller?.abort(); editor.value = null; executedQuery.value = null
   // 切换报表立即清掉上一张表的行、合计和编辑资格，不能把旧数据短暂展示在新表名下。
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
   loading.value = false; error.value = ''
   query.value = { page: 1, limit: 20 }; fields.value = active.value?.queryFields || []
-  resetReportDates(active.value?.code)
-  if (active.value?.available) {
-    try {
-      if (platform.value) await refreshScope(active.value.code)
-      if (routeRequest === requestId) void run()
-    } catch (e) { if (routeRequest === requestId) error.value = e.message }
-  }
+  if (active.value?.available) void run()
 })
 onMounted(async () => {
   // 只在新报表路由内取消收银桌面画布的最小宽度；离开后恢复，不整改其他页面。
   document.documentElement.classList.add('basic-reports-document')
   try {
     catalog.value = await loadBasicReportCatalog(platform.value)
-    resetReportDates(active.value?.code)
     fields.value = active.value?.queryFields || []
-    if (platform.value && active.value) await refreshScope(active.value.code)
+    if (platform.value) scope.value = await queryStoreBusinessReportScope('platform')
     if (route.params.report && !active.value) throw new Error('未配置该基础报表')
     if (active.value?.available) await run()
   } catch (e) { error.value = e.message }
@@ -247,7 +225,6 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     <p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p>
     <p v-else-if="data.complete === false" class="basic-reports__error" role="status">部分计算条件缺失，待核对项目显示为“-”，不计入合计。{{ (data.data_gaps || []).map(gap => gap.label).filter(Boolean).join('；') }}</p>
     <p v-if="data.coverage_start && data.range?.start_date < data.coverage_start" class="basic-reports__error" role="status">本表仅包含 {{ data.coverage_start }} 起纳入统一数据底层的业务，更早历史尚未纳入本表。</p>
-    <p v-if="active?.code === 'basic_cross_store_settlement' && data.source_kind === 'sealed_legacy_settlement_snapshot'" class="basic-reports__snapshot" role="status">{{ data.coverage }}</p>
     <template v-if="!route.params.report">
       <section v-for="group in groups" :key="group" class="basic-reports__group">
         <h2>{{ group }}</h2><div class="basic-reports__directory">
@@ -261,7 +238,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         <template #leading-controls>
           <OrganizationStoreScopePicker v-if="platform" v-model="stores" :tree="scope.tree" :allowed-store-ids="scope.allowed_store_ids" :label="scopeLabel" @change="selectScope" />
           <label v-if="active.time_mode === 'realtime_month'" class="basic-reports__date">月份<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" aria-label="工资月份"></label>
-          <span v-else-if="!['current', 'registration_date'].includes(active.time_mode)" class="basic-reports__period"><UnifiedQueryDateRange :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" /></span>
+          <UnifiedQueryDateRange v-else-if="!['current', 'registration_date'].includes(active.time_mode)" :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" />
         </template>
         <template #primary-actions>
           <button type="button" class="basic-reports__icon" title="列名取值来源" aria-label="列名取值来源" @click="fieldGuide = true"><BookOpen :size="17" /></button>
@@ -301,11 +278,6 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 
 <style scoped>
 :global(html.basic-reports-document),:global(html.basic-reports-document body),:global(html.basic-reports-document #app){min-width:0}
-/* 21 张基础报表共用同一主筛选行；日期控件固定宽度，窄屏只横向滚动该行。 */
-.basic-reports :deep(.unified-report-query-toolbar__primary){flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;align-items:center}
-.basic-reports :deep(.unified-report-query-toolbar__leading){flex-wrap:nowrap;max-width:none;flex:none}
-.basic-reports :deep(.unified-report-query-toolbar__actions){flex-wrap:nowrap;width:auto;max-width:none;flex:none;margin-left:auto}
-.basic-reports__period{display:block;flex:none;width:326px}
 /* Keep record totals reachable on this report even when the shell hides compact pagination summaries. */
 .basic-reports :deep(.table-pagination){flex:none;flex-wrap:wrap}
 .basic-reports :deep(.table-pagination__summary){display:block;white-space:normal}
@@ -313,7 +285,6 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 .basic-reports{height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;padding:12px 16px;gap:12px;color:#35475e;font-size:13px;overflow:auto;letter-spacing:0}
 .basic-reports__header,.basic-reports__header>div{display:flex;align-items:center;gap:10px}.basic-reports__header{justify-content:space-between;flex:none}.basic-reports h1{font-size:18px;margin:0}.basic-reports h2{font-size:14px;margin:0 0 12px}.basic-reports__group{padding:12px 0;border-top:1px solid #e6ebf1}.basic-reports__directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.basic-reports__directory button{display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:74px;padding:14px;border:1px solid #dce5ed;border-radius:6px;background:#fff;text-align:left;font:inherit;color:#245e95;cursor:pointer;overflow-wrap:anywhere}.basic-reports__directory button:disabled{color:#7c8898;cursor:default;background:#fafbfd}.basic-reports__directory small{font-size:11px;color:#8c97a6}
 .basic-reports__icon{display:inline-grid;place-items:center;width:32px;height:32px;flex:none;border:1px solid #dce4ec;border-radius:4px;background:#fff;color:#49617d;cursor:pointer}.basic-reports__icon:disabled{opacity:.5;cursor:default}.basic-reports__results{display:flex;flex-direction:column;flex:1;min-height:180px;overflow:hidden;border:1px solid #e0e7ee}.basic-reports__scroll{flex:1;min-height:0;overflow:auto;position:relative}.basic-reports table{min-width:800px;width:100%;border-collapse:separate;border-spacing:0}.basic-reports th,.basic-reports td{padding:12px;text-align:left;white-space:nowrap;border-bottom:1px solid #e7edf3;height:42px;box-sizing:border-box}.basic-reports th{position:sticky;top:0;background:#f2f6fb;color:#53667f;z-index:2}.basic-reports .basic-reports__total th{top:42px;background:#eaf3fc;color:#1f5f8b}.basic-reports td.is-fixed{z-index:1;background:#fff}.basic-reports th.is-fixed{z-index:3}.basic-reports__empty{text-align:center;padding:40px 12px;color:#8491a2}.basic-reports__error{color:#ba2929;margin:0;line-height:1.6}.basic-reports__edit{border:0;background:none;color:#1675d4;cursor:pointer}
-.basic-reports__snapshot{margin:0;color:#687b92;font-size:12px;line-height:1.4}
 .basic-report-dialog{position:fixed;inset:0;z-index:2000;background:#17253e66;display:grid;place-items:center;padding:16px;color:#35475e;font-size:13px}.basic-report-dialog>form,.basic-report-dialog>section{width:min(580px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:6px;padding:20px;box-sizing:border-box}.basic-report-dialog header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.basic-report-dialog h2{font-size:16px;margin:0}.basic-report-dialog__fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.basic-report-dialog label{display:flex;flex-direction:column;gap:7px;min-width:0}.basic-report-dialog input,.basic-report-dialog select{width:100%;min-width:0;box-sizing:border-box;min-height:34px;border:1px solid #dce4ec;border-radius:4px;padding:5px 8px;background:#fff;color:inherit;font:inherit}.basic-report-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.basic-report-dialog dt{font-weight:600;margin-top:15px}.basic-report-dialog dd{margin:6px 0;line-height:1.7;color:#687b92}
 @media(max-width:600px){.basic-reports{padding:10px}.basic-report-dialog__fields{grid-template-columns:minmax(0,1fr)}}
 </style>

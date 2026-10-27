@@ -62,7 +62,6 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
                 throw new AuthException(ApiErrorCode::ERR_AUTH);
             }
             $requiredFeature = $this->directOperationFeature($path, $method);
-            // 基础报表容器只在至少拥有一张单表权限时可达，逐表查询在控制器再校验。
             if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true)) {
                 throw new AuthException('当前账号没有该功能的操作权限，请联系管理员。', 403);
             }
@@ -86,15 +85,15 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
     private function directOperationFeature(string $path, string $method): string
     {
         $path = ltrim($path, '/');
-        // 独立菜单同时约束直连接口，隐藏导航不能替代后端鉴权。
-        if (strpos($path, 'cashierapi/v3/management/store-settings') === 0) return 'cashier.v3.management.store_profile';
-        if (strpos($path, 'cashierapi/v3/customer-care/') === 0) return 'cashier.v3.care';
-        if (strpos($path, 'cashierapi/v3/report/basic/') === 0) return 'cashier.v3.basic_reports';
-        if (strpos($path, 'cashierapi/v3/report/') === 0) return 'cashier.v3.data';
-        if (strpos($path, 'cashierapi/v3/management/room-settings') === 0 || strpos($path, 'cashierapi/v3/management/service-names') === 0) return 'cashier.v3.management.rooms';
-        if (strpos($path, 'cashierapi/v3/management/staff') === 0 || $path === 'cashierapi/v3/management/file/upload') {
-            return $path === 'cashierapi/v3/management/staff/0' && $method === 'POST' ? 'cashier.v3.staff.create' : 'cashier.v3.management.staff';
+        if ($path === 'cashierapi/v3/management/staff/phone-transfer') {
+            return 'cashier.v3.management_center';
         }
-        return '';
+        if ($method !== 'POST') {
+            return '';
+        }
+        if (preg_match('#^cashierapi/v3/management/staff/([0-9]+)$#D', $path, $match) !== 1) {
+            return '';
+        }
+        return (int)$match[1] > 0 ? 'cashier.v3.management_center' : 'cashier.v3.staff.create';
     }
 }

@@ -1576,11 +1576,6 @@ final class CashierV3SaleCatalogServices
             'categoryNames' => $categoryNames,
             'unitPriceCents' => $unitPriceCents,
             'originalUnitPriceCents' => $originalUnitPriceCents,
-            // 可售价区间属于改价约束，随同一SKU展示，不生成另一份结账版本。
-            'salePriceRange' => [
-                'minimumCents' => self::moneyToCents($row['sku_price_range_min'] ?? 0, 'price_range_min'),
-                'maximumCents' => self::moneyToCents($row['sku_price_range_max'] ?? 0, 'price_range_max'),
-            ],
             'configuredCostCents' => $configuredCostCents,
             'stock' => $stock,
             'isInventory' => (int)($row['product_is_inventory'] ?? 0) === 1,
@@ -1973,11 +1968,6 @@ final class CashierV3SaleCatalogServices
 
     private function publicCatalogItem(array $item, ?array $inventory = null): array
     {
-        // Signed ordinary-card intent protects per-project floors across local carts and hangs.
-        $purchase = (array)($item['authoritySnapshot']['cardPurchase'] ?? []);
-        $purchase = \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::seal(
-            $purchase, (int)$item['storeId'], (int)$item['skuId'], (int)$item['unitPriceCents']
-        );
         $isInventoryProduct = $item['productType'] === 0 && $item['isInventory'];
         $inventoryAvailable = !$isInventoryProduct || !empty($inventory['available']);
         // 目录阶段只创建草稿，库存与可售状态统一在结账事务中判断。
@@ -2000,20 +1990,17 @@ final class CashierV3SaleCatalogServices
             'kind' => $item['kind'],
             'cardRuleType' => $item['cardRuleType'],
             'cardRuleLabel' => self::cardRuleLabel($item['cardRuleType']),
-            'ordinaryCardSaleEditable' => $item['cardRuleType'] === 'normal'
-                && \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::enabled(),
             // Display fields drive the confirmation dialog. The complete card
             // business definition is also kept in the browser cart so clicking
             // checkout can freeze the only issuance snapshot.
             'cardPreview' => self::publicCardPreview($item),
             'cardPurchaseSnapshot' => in_array($item['kindCode'], ['count_card', 'card_package'], true)
-                ? $purchase : null,
+                ? $item['authoritySnapshot']['cardPurchase'] : null,
             'name' => $item['name'],
             'specification' => $item['specification'],
             'code' => $item['code'],
             'category' => $item['categoryName'],
             'categoryId' => $item['categoryId'],
-            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
             'price' => self::centsToMoney($item['unitPriceCents']),
             'originalPrice' => self::centsToMoney($item['originalUnitPriceCents']),
             'productVersion' => $item['productVersion'],
@@ -2094,7 +2081,6 @@ final class CashierV3SaleCatalogServices
             'code' => $item['code'],
             'categoryId' => $item['categoryId'],
             'category' => $item['categoryName'],
-            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
             'unitPrice' => self::centsToMoney($item['unitPriceCents']),
             'originalUnitPrice' => self::centsToMoney($item['originalUnitPriceCents']),
             'serviceSource' => '本次购买',

@@ -1,9 +1,0 @@
-{
-  "commit": "5d51e4604eb413bb6f4b6dce79928b0eaef77726",
-  "branch": "release/r31-sale-price-range-20261024",
-  "tree": "fcf8f2bb74a4fa7cd14bbe1a44e877282aef0c5d",
-  "baselineCommit": "14c0ab60d27c085d1508591e280ffaed55e4b2f6",
-  "candidateTree": "25aa8f4af420ac3735906b436d1bce699b94151e",
-  "sharedIndexUntouched": true,
-  "pmAccepted": true
-}

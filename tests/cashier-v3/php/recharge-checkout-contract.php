@@ -36,8 +36,7 @@ $checks = [
         && !str_contains($module, 'checkoutRequestVersion')
         && !str_contains($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider'),
     '最终事务锁定权威余额来源并校验收款合计' => str_contains($module, 'lockSnapshotInTx')
-        && str_contains($module, 'validateConfirmedChoice')
-        && !str_contains($module, '->prepareChoice(')
+        && str_contains($module, 'resolveSourceSnapshot')
         && str_contains($module, 'paymentTotal($payments)')
         && str_contains($module, '(new CashierV3RechargeModule())->submitInTx('),
     '纯赠金充值无收款且保留必填备注' => str_contains($module, "\$principal + \$bonus <= 0")

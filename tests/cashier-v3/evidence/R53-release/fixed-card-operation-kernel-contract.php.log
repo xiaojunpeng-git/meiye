@@ -1,7 +1,0 @@
-
-Fatal error: Uncaught app\services\cashier\v3\CashierV3CommandException: 卡操作资料不完整或当前不可办理，请刷新后重试。 in /var/www/html/app/services/cashier/v3/card/CashierV3CardOperationKernel.php:615
-Stack trace:
-#0 /var/www/html/app/services/cashier/v3/card/CashierV3CardOperationKernel.php(408): app\services\cashier\v3\card\CashierV3CardOperationKernel::invalid('project_value_n...')
-#1 /fixed/tests/cashier-v3/php/card-operation-kernel-contract.php(220): app\services\cashier\v3\card\CashierV3CardOperationKernel::replacementAllocation(25660, 1, 1, 1, true)
-#2 {main}
-  thrown in /var/www/html/app/services/cashier/v3/card/CashierV3CardOperationKernel.php on line 615

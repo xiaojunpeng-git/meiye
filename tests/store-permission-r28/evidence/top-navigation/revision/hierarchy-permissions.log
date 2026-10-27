@@ -1,5 +1,0 @@
-PASS regrouped store tree retains exact saved IDs
-PASS all registered functions selectable; virtual group IDs never saved
-PASS category toggle grants only its actual child functions
-PASS existing platform/mobile selection behavior unchanged
-R28 GROUP PERMISSIONS PASS

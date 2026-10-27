@@ -279,7 +279,7 @@ const EMPTY_BOOTSTRAP = {
   },
   navigationRules: [],
   // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
-  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true },
+  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true },
   // Old, unmigrated servers retain their previous source behavior; current
   // servers explicitly provide false for fixed-source mode, never truthy-fallback.
   businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
@@ -297,8 +297,6 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.fund': false,
     'cashier.v3.care': false,
     'cashier.v3.data': false,
-    // 登录首屏须识别服务端已授权的基础报表容器；逐表叶权限仍由后端按实时规则校验。
-    'cashier.v3.basic_reports': false,
     'cashier.v3.targets': false,
     'cashier.v3.management.staff': false,
     'cashier.v3.management.rooms': false,
@@ -495,7 +493,6 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.fund': true,
     'cashier.v3.care': true,
     'cashier.v3.data': true,
-    'cashier.v3.basic_reports': true,
     'cashier.v3.targets': true,
     'cashier.v3.management.staff': true,
     'cashier.v3.management.rooms': true,
@@ -1952,7 +1949,9 @@ function normalizeBootstrap(rawBootstrap = {}) {
     storeDisplayOptions: {
       salesAttributionEnabled: raw.storeDisplayOptions?.salesAttributionEnabled !== false,
       experienceEnabled: raw.storeDisplayOptions?.experienceEnabled !== false,
-      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false
+      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false,
+      // 缺省兼容可修改；仅后端明确关闭展示时隐藏，金额快照不参与归一化。
+      laborFeeVisible: raw.storeDisplayOptions?.laborFeeVisible !== false
     },
     businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
       ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },

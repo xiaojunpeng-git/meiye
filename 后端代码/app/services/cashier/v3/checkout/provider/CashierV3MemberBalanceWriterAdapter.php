@@ -80,18 +80,6 @@ final class CashierV3MemberBalanceWriterAdapter
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array {
-        return $this->deductInTx($request, $operatorScope, $dataScope);
-    }
-
-    /** Sales-debt uses the same locked wallet contract but a distinct ledger purpose. */
-    public function deductSalesDebtInTx(array $request, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
-    {
-        return $this->deductInTx($request, $operatorScope, $dataScope, 'debt_repay');
-    }
-
-    /** Purpose is selected by trusted domain code, never by the browser request. */
-    private function deductInTx(array $request, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope, string $purpose = ''): array
-    {
         CashierV3TransactionGuard::assertInTransaction('memberBalanceCheckoutDeduct');
         $request = $this->normalizeRequest($request);
         if (empty($this->readinessStatus()['ready'])) {
@@ -113,9 +101,9 @@ final class CashierV3MemberBalanceWriterAdapter
             $dataScope->tenantId(),
             $request['commandIdempotencyKey']
         );
-        $billType = $purpose !== '' ? $purpose : ($request['paymentMode'] === self::PAYMENT_MODE_COMBINED
+        $billType = $request['paymentMode'] === self::PAYMENT_MODE_COMBINED
             ? 'pay_combination'
-            : 'pay_product');
+            : 'pay_product';
         try {
             $result = $this->atomicService()->deductPreferBen(
                 $request['memberId'],

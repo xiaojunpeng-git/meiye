@@ -106,11 +106,6 @@
 					<text class="fs-28">留言</text>
 					<text class="fs-28 line1 w-542 text-right">{{info.mark}}</text>
 				</view>
-				<!-- Saved display lines remain visible when the store closes its menu. -->
-				<view v-if="info.customServices && info.customServices.length" class="cell">
-					<view class="fs-28 fw-600">定制服务</view>
-					<view v-for="item in info.customServices" :key="item.id" class="acea-row row-between mt-16"><text class="fs-28">{{ item.name }}</text><text class="fs-28">× {{ item.quantity }}</text></view>
-				</view>
 			</view>
 			<view v-if="info.reservation_info && info.reservation_info.length"
 				class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32">

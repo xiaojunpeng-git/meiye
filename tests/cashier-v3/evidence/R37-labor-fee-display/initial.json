@@ -1,0 +1,56 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "remote": "不适用：仅本地开发",
+  "files": {
+    "后端代码/app/services/system/config/SystemConfigServices.php": {
+      "sha256": "51ac512d9bb28f897614df912da468245e61a268a55495ea05a52f2048a5a09c",
+      "blob": "37ac417d98cca45214d78058d8bd7c99e4f2c2bb",
+      "status": "M 后端代码/app/services/system/config/SystemConfigServices.php"
+    },
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": {
+      "sha256": "492b0fb8a44af2c89244ec9aff25a333d4a97313b13c22fcd99d77336d99b9dd",
+      "blob": "a505e111f659203e9cd84398c888cc823f1a73fd",
+      "status": "M 后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php"
+    },
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": {
+      "sha256": "07f393bdfeb1ade34ca4df4880f366f6f64e4e7ad4e3e95948a81c3a631e4cd8",
+      "blob": "3685dc6114b0fa8a84f9b0f1994812af1cb9bf29",
+      "status": "M 后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php"
+    },
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js": {
+      "sha256": "84b1ade283bcaffbe93739e9fecc1978696cbc6acc3108f80d6bff9ef9029cb7",
+      "blob": "a0320367c180fc7a8aebaae1d62e1c83dfc93d57",
+      "status": "MM 前端代码/cashier-v3/src/services/cashierV3Bridge.js"
+    },
+    "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js": {
+      "sha256": "41c27f9dc1e084bd4a0c67a28b6af1231ed687091518078a7acfd0e71c70eef3",
+      "blob": "570225d1bbec90b953989daef79e69f0b02222a3",
+      "status": ""
+    },
+    "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": {
+      "sha256": "e44522f0d666e92f084103a8d1a087a58df51607b940daba298a26d7dd325bd9",
+      "blob": "a29e2551efcb972f80357d91703fe8ee4fe40d11",
+      "status": ""
+    },
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": {
+      "sha256": "3ca2d905e03b56898eaf4c1ded6902a615bee2cf58fff99295be5eee1fd34a6c",
+      "blob": "b4f597d81bbbf1b5d6aac76701fbe0a8888f3bac",
+      "status": "MM 前端代码/cashier-v3/src/views/CashierWorkbenchView.vue"
+    },
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue": {
+      "sha256": "d4953a6b4ac4f12d820fc7fe25c19d493f3321d61f12351c34726654cf7719ad",
+      "blob": "26c03791d055f38e3863419a8dbe1c856ec1faa2",
+      "status": "M 前端代码/cashier-v3/src/views/OrderCenterView.vue"
+    },
+    "前端代码/cashier-v3/src/styles/base.css": {
+      "sha256": "fcba48defe6e15225909192e445624bedead3827197264f76c77ada3927e84e6",
+      "blob": "cf3be0cf0317c4c341aa1c5400dee548820a7e44",
+      "status": "M 前端代码/cashier-v3/src/styles/base.css"
+    },
+    "后端代码/app/validate/admin/setting/SystemConfigValidate.php": {
+      "sha256": "b86abe6f70679a2016c9c2e2b899a4d5fc88b99b6ec3e7252fe72c8364197ff9",
+      "blob": "a6ca480c1e3c4c95256ba639e82180ba2b7a5917",
+      "status": ""
+    }
+  }
+}

@@ -1,4 +1,0 @@
-PASS first-level spans full row; second-level uses three columns in configured order
-PASS three columns and viewport bounds preserved after resize
-PASS original report route; no page errors
-R28 THREE COLUMNS PASS

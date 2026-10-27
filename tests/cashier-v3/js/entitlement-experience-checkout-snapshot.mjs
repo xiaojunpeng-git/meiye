@@ -36,7 +36,6 @@ const context = vm.createContext({
   localCheckoutBusinessDate: { value: '2026-10-09' },
   localCheckoutBusinessDateReason: { value: '' },
   localCheckoutBusinessSource: { value: { primarySourceId: 1 } },
-  businessSourceEnabled: { value: true },
   cashierToday: '2026-10-09',
   localDraftBase: () => ({ lines: [] }),
   cartLineRole: (line) => line.lineRole,
@@ -55,8 +54,6 @@ const context = vm.createContext({
   isCustomCardPurchase: () => false,
   isLocalUpgradeOperationLine: () => false,
   checkoutBalancePreview: () => ({}),
-  // 本夹具只检查权益体验标记；来源默认值由独立测试覆盖，补齐快照函数所需的宿主依赖。
-  initialBusinessSource: () => ({ primarySourceId: 1 }),
   checkoutSourceSnapshot: () => ({ primarySourceId: 1 }),
   checkoutCardPurchaseSnapshot: () => ({}),
   isRecord: (value) => value !== null && typeof value === 'object' && !Array.isArray(value)

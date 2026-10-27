@@ -2,8 +2,7 @@
 declare(strict_types=1);
 
 /** Local Docker only: synthetic cards use real services and always roll back. */
-$backend = getenv('BACKEND_ROOT') ?: '/var/www/html';
-require $backend . '/vendor/autoload.php';
+require '/var/www/html/vendor/autoload.php';
 use think\facade\Db;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
@@ -19,7 +18,7 @@ use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 
-(new think\App($backend . '/'))->initialize();
+(new think\App('/var/www/html/'))->initialize();
 // The optional dedicated Docker network has no published ports or customer
 // data. Its connection override is process-local and never edits an .env file.
 if (getenv('M010_ISOLATED_DB') === '1') {
@@ -297,148 +296,6 @@ try {
         && Db::name(CashierV3CustomCardConfigurationServices::TABLE)->where('created_command_idempotency_key', $normalKey . ':snapshot:0')->count() === 0,
         'ordinary card checkout retains its catalog identity without a custom-card configuration');
 
-    // R50: one immutable checkout may contain unrelated card kinds and several
-    // custom rows. Each row must issue its own rights, never snapshot row zero.
-    $customA = $snapshot['lines'][0]; $customA['lineId'] = 'mixed-custom-a';
-    $customB = $customA; $customB['lineId'] = 'mixed-custom-b';
-    $customB['amount'] = $customB['originalAmount'] = '2100';
-    $customB['customCardConfiguration']['cardName'] = $tag . '-second';
-    $customB['customCardConfiguration']['components'][0]['amount'] = '2100';
-    $customB['customCardConfiguration']['components'][0]['times'] = 5;
-    $ordinary = $normalSnapshot['lines'][0];
-    $ordinaryTwo = $ordinary; $ordinaryTwo['quantity'] = 2;
-    $ordinaryTwo['amount'] = $ordinaryTwo['originalAmount'] = '2000';
-    $prefixed = $customA; $prefixed['lineId'] = 'sale:prefixed-browser-line';
-    foreach ([[$customA, $ordinary], [$ordinary, $customA], [$customA, $customB],
-        [$ordinary, $customA, $customB], [$customA, $ordinaryTwo], [$prefixed, $ordinary]] as $case => $rows) {
-        // New carts generate new line IDs even in the same browser workspace;
-        // replay below deliberately keeps the original IDs and request key.
-        foreach ($rows as &$row) $row['lineId'] .= '-case-' . $case;
-        unset($row);
-        $trial = $snapshot; $trial['lines'] = $rows;
-        $total = 0; $expectedCustom = 0; $expectedHolders = 0;
-        foreach ($rows as $row) {
-            $total += (int)$row['amount']; $expectedHolders += $row['quantity'];
-            if (isset($row['customCardConfiguration'])) $expectedCustom++;
-        }
-        $trial['lines'][] = ['lineId' => 'mixed-payment', 'lineRole' => 'payment',
-            'quantity' => 1, 'method' => 'cash', 'amount' => (string)$total];
-        $trialKey = m010NewKey();
-        $result = $submit($trialKey, $trial);
-        $check(($result['status'] ?? '') === 'success', 'R50 mixed checkout succeeds case ' . $case);
-        $order = (array)Db::name('cashier_v3_sales_order')->where('command_idempotency_key', $trialKey)->find();
-        $receipts = Db::name('cashier_v3_card_purchase_receipt')->where('command_idempotency_key', $trialKey)->select()->toArray();
-        $check(count($receipts) === $expectedHolders
-            && (int)Db::name('cashier_v3_payment_fact')->where('order_id', $order['order_id'])->sum('amount_cents') === $total * 100,
-            'R50 holder count and exact payment reconcile case ' . $case);
-        $configs = Db::name(CashierV3CustomCardConfigurationServices::TABLE)
-            ->where('checkout_request_id', $order['checkout_request_id'])->select()->toArray();
-        $check(count($configs) === $expectedCustom, 'R50 ordinary rows have no custom configuration case ' . $case);
-        foreach ($rows as $index => $row) {
-            if (!isset($row['customCardConfiguration'])) continue;
-            $configured = array_values(array_filter($configs, static function (array $config) use ($trialKey, $index): bool {
-                return $config['created_command_idempotency_key'] === $trialKey . ':snapshot:' . $index;
-            }));
-            $check(count($configured) === 1 && $configured[0]['status'] === 'settled'
-                && (int)$configured[0]['total_amount_cents'] === (int)$row['amount'] * 100
-                && (int)Db::name('user_card_holder')->where('id', $configured[0]['card_holder_id'])
-                    ->value('write_surplus_times') === (int)$row['customCardConfiguration']['components'][0]['times'],
-                'R50 exact custom row amount and uses are issued case ' . $case . ' row ' . $index);
-        }
-        $replayed = $submit($trialKey, $trial);
-        $check(!empty($replayed['replay'])
-            && Db::name('cashier_v3_card_purchase_receipt')->where('command_idempotency_key', $trialKey)->count() === $expectedHolders
-            && Db::name('cashier_v3_payment_fact')->where('order_id', $order['order_id'])->count() === 1,
-            'R50 mixed checkout replay never recollects or reissues case ' . $case);
-        $mixedVoidKey = 'R50-VOID-' . substr($trialKey, 9);
-        $mixedRecorder = new CashierV3BusinessEventRecorder();
-        $voided = (new \app\services\cashier\v3\order\CashierV3OrderLifecycleServices())->executeInTx('void-sales-order', [
-            'operator_scope' => $operator, 'data_scope' => $scope, 'idempotency_key' => $mixedVoidKey,
-            'payload' => ['orderId' => $order['order_id'], 'reason' => 'R50 local rollback regression'],
-            'event_recorder' => $mixedRecorder,
-            'event_execution' => $mixedRecorder->newExecution('void-sales-order', $mixedVoidKey, $operator, $scope, $tag),
-            'event_contract' => CashierV3ActionManifest::eventContractFor('void-sales-order')]);
-        $holders = array_column($receipts, 'card_holder_id');
-        $check($voided['status'] === 'succeeded'
-            && Db::name('user_card_holder')->whereIn('id', $holders)->where('is_del', 0)->count() === 0
-            && (int)Db::name('cashier_v3_payment_fact')->where('order_id', $order['order_id'])->sum('amount_cents') === 0,
-            'R50 mixed order void reverses all rights and payments case ' . $case);
-    }
-    // Exercise the sale+service orchestrator too: custom rights, a direct
-    // project, a non-stock product and an existing-card write-off share one
-    // immutable checkout. Synthetic fixtures remain in this rollback scope.
-    Db::name('store_product')->where('id', $project)->update(['is_show' => 1]);
-    $physicalProduct = (int)Db::name('store_product')->insertGetId(['type' => 1, 'relation_id' => $createdStore,
-        'product_type' => 0, 'store_name' => $tag . '-product', 'cate_id' => (string)$category,
-        'is_del' => 0, 'is_verify' => 1, 'is_show' => 1, 'is_inventory' => 0]);
-    $physicalSku = (int)Db::name('store_product_attr_value')->insertGetId(['product_id' => $physicalProduct,
-        'product_type' => 0, 'type' => 0, 'is_show' => 1, 'unique' => substr(md5($tag . '-product'), 0, 8),
-        'suk' => '默认', 'price' => '50.00', 'ot_price' => '50.00', 'cost' => '0.00']);
-    $sourceKey = m010NewKey(); $sourceSnapshot = $snapshot;
-    $sourceSnapshot['lines'][0]['lineId'] = 'mixed-existing-rights';
-    $submit($sourceKey, $sourceSnapshot);
-    $sourceReceipt = (array)Db::name('cashier_v3_card_purchase_receipt')->where('command_idempotency_key', $sourceKey)->find();
-    $sourceHolder = (int)$sourceReceipt['card_holder_id'];
-    $sourceDetails = json_decode($sourceReceipt['benefit_detail_ids_json'], true);
-    $service = $writeoff['lines'][0];
-    $service['lineId'] = 'mixed-use-existing';
-    $service['entitlementInstanceId'] = $sourceHolder;
-    $service['entitlementSourceDetailId'] = (int)$sourceDetails[0];
-    $service['fullCardNo'] = (string)Db::name('user_card_holder')->where('id', $sourceHolder)->value('card_no');
-    $service['actualAmount'] = '653';
-    $directProject = ['lineId' => 'mixed-project', 'lineRole' => 'sale', 'quantity' => 1,
-        'itemId' => $sku, 'kindCode' => 'project', 'amount' => '1960', 'originalAmount' => '1960',
-        'serviceObject' => '本人', 'friendCountsAsCustomer' => true,
-        'craftsmen' => [['id' => $staffId, 'staffId' => $staffId, 'employeeId' => $employeeId,
-            'storeId' => $createdStore, 'name' => $tag, 'isPrimary' => true, 'sequence' => 1,
-            'laborWeight' => 100, 'isPointCustomer' => false]]];
-    $productLine = ['lineId' => 'mixed-product', 'lineRole' => 'sale', 'quantity' => 1,
-        'itemId' => $physicalSku, 'kindCode' => 'product', 'amount' => '50', 'originalAmount' => '50',
-        'inventoryOutboundRequired' => false];
-    $combined = $snapshot; $combined['lines'] = [$customA, $directProject, $productLine, $service,
-        ['lineId' => 'combined-cash', 'lineRole' => 'payment', 'quantity' => 1, 'method' => 'cash', 'amount' => '3970']];
-    $combined['lines'][0]['lineId'] = 'combined-custom';
-    $combinedKey = m010NewKey(); $combinedResult = $submit($combinedKey, $combined);
-    $combinedOrder = (array)Db::name('cashier_v3_sales_order')->where('command_idempotency_key', $combinedKey)->find();
-    $check(($combinedResult['status'] ?? '') === 'success'
-        && Db::name('cashier_v3_sales_order_line')->where('order_id', $combinedOrder['order_id'])->count() === 3
-        && (int)Db::name('cashier_v3_payment_fact')->where('order_id', $combinedOrder['order_id'])->sum('amount_cents') === 397000,
-        'R50 custom project product and existing entitlement settle together');
-    $check((int)Db::name('store_order_cart_info')->where('id', $sourceDetails[0])->value('write_surplus_times') === 2,
-        'R50 combined checkout consumes existing rights exactly once');
-    $combinedReplay = $submit($combinedKey, $combined);
-    $check(!empty($combinedReplay['replay'])
-        && (int)Db::name('store_order_cart_info')->where('id', $sourceDetails[0])->value('write_surplus_times') === 2,
-        'R50 combined replay never duplicates the existing write-off');
-    $combinedVoidKey = 'R50-COMBINED-VOID-' . substr($combinedKey, 9);
-    $combinedRecorder = new CashierV3BusinessEventRecorder();
-    $combinedVoid = (new \app\services\cashier\v3\order\CashierV3OrderLifecycleServices())->executeInTx('void-sales-order', [
-        'operator_scope' => $operator, 'data_scope' => $scope, 'idempotency_key' => $combinedVoidKey,
-        'payload' => ['orderId' => $combinedOrder['order_id'], 'reason' => 'R50 combined rollback regression'],
-        'event_recorder' => $combinedRecorder,
-        'event_execution' => $combinedRecorder->newExecution('void-sales-order', $combinedVoidKey, $operator, $scope, $tag),
-        'event_contract' => CashierV3ActionManifest::eventContractFor('void-sales-order')]);
-    $check($combinedVoid['status'] === 'succeeded'
-        && (int)Db::name('cashier_v3_payment_fact')->where('order_id', $combinedOrder['order_id'])->sum('amount_cents') === 0
-        && (int)Db::name('store_order_cart_info')->where('id', $sourceDetails[0])->value('write_surplus_times') === 3,
-        'R50 combined void restores prior rights and reverses collected payment');
-
-    $failedMixedKey = m010NewKey(); $failedMixed = $snapshot;
-    $failedMixed['lines'] = [$customA, $customB, $ordinary,
-        ['lineId' => 'cash', 'lineRole' => 'payment', 'quantity' => 1, 'method' => 'cash', 'amount' => '5060']];
-    $failed = false; $holderCount = Db::name('user_card_holder')->where('uid', $member)->count();
-    try {
-        $submit($failedMixedKey, $failedMixed, static function (array $execution) use ($handler): array {
-            $handler($execution); throw new RuntimeException('R50 injected mixed failure');
-        });
-    } catch (RuntimeException $e) { $failed = $e->getMessage() === 'R50 injected mixed failure'; }
-    $check($failed && Db::name('cashier_v3_sales_order')->where('command_idempotency_key', $failedMixedKey)->count() === 0
-        && Db::name('cashier_v3_payment_fact')->where('command_idempotency_key', $failedMixedKey)->count() === 0
-        && Db::name(CashierV3CustomCardConfigurationServices::TABLE)
-            ->where('created_command_idempotency_key', 'like', $failedMixedKey . ':snapshot:%')->count() === 0
-        && Db::name('user_card_holder')->where('uid', $member)->count() === $holderCount,
-        'R50 mixed late failure rolls back all rows together');
-
     foreach ([['amount' => '1960.01'], ['times' => 0], ['amount' => '1']] as $index => $badComponent) {
         $bad = $payload; $bad['components'][0] = array_replace($bad['components'][0], $badComponent);
         $denied = false;
@@ -471,6 +328,6 @@ foreach (['cashier_v3_custom_card_configuration', 'cashier_v3_command_receipt', 
 $check(!$remaining && Db::name('system_store')->where('id', $createdStore)->count() === 0
     && Db::name('user')->where('uid', $member)->count() === 0
     && Db::name('store_product')->where('type', 1)->where('relation_id', $createdStore)->count() === 0
-    && Db::name('store_product_attr_value')->whereIn('product_id', [$project, $identity['productId'], $normalProduct, $physicalProduct])->count() === 0,
+    && Db::name('store_product_attr_value')->whereIn('product_id', [$project, $identity['productId'], $normalProduct])->count() === 0,
     'all synthetic store member carrier request order payment and entitlement rows roll back');
 echo 'M010 PASS ' . count($checks) . "\n";

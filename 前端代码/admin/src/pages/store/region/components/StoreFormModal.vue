@@ -313,8 +313,9 @@ export default {
         valid_range: 0,
         product_status: 1,
         product_verify_status: 0,
-        delivery_type: ["1", "2"],
-        default_delivery: 1,
+        // 快捷新建与完整门店表单统一默认到店，已有配置由详情读取覆盖。
+        delivery_type: ["2"],
+        default_delivery: 2,
       };
     },
     open() {

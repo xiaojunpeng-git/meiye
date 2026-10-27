@@ -323,13 +323,15 @@ final class CashierV3CardOperationKernel
                     ? $project['sharedDebtLimitedRemainingTimes']
                     : min($sharedLimit, $project['sharedDebtLimitedRemainingTimes']);
             }
-            // 替换只接受已归整的来源金额池。历史分金额仍保留原始事实，
-            // 但不能直接生成新的替换、升级或操作审计金额。
-            $allocation = self::replacementAllocation(
+            // 替换沿用来源快照的剩余金额口径，目标只接收整元；历史分角
+            // 单独记为取整扣减，不增加目标权益，也不改写原销售金额。
+            $allocation = $isUpgrade ? null : self::replacementAllocation(
                 $project['totalValueCents'], $project['totalTimes'],
                 $project['remainingTimes'], $quantity, $project['centCapable']
             );
-            $lineValue = $allocation['targetValueCents'];
+            $lineValue = $isUpgrade
+                ? self::allocateValue($project['totalValueCents'], $project['totalTimes'], $quantity)
+                : $allocation['targetValueCents'];
             $sourceValue += $lineValue;
             $totalQuantity += $quantity;
             $mutations[] = [
@@ -391,8 +393,8 @@ final class CashierV3CardOperationKernel
     }
 
     /**
-     * 来源按已冻结的整元口径扣除，末次扣清并守恒转入目标权益。
-     * 历史分金额必须先经独立归整边界，不能在卡操作中静默截断。
+     * 来源按已冻结的整元/历史分级口径扣除，末次扣清；目标截去不足一元。
+     * 同一纯函数供计划和锁内写入复核，差额必须随操作行快照保存，不能静默丢失。
      */
     public static function replacementAllocation(int $totalCents, int $totalTimes, int $remainingTimes, int $quantity, bool $centCapable = false): array
     {
@@ -400,25 +402,31 @@ final class CashierV3CardOperationKernel
             || $remainingTimes > $totalTimes || $quantity <= 0 || $quantity > $remainingTimes) {
             throw self::invalid('project_value_allocation_invalid');
         }
-        // Historical cent snapshots remain readable, but a replacement or
-        // upgrade is a new cashier write. It cannot carry the old fractional
-        // amount into a new right or audit line; such data must first pass an
-        // explicit whole-yuan normalization boundary.
-        if ($centCapable || $totalCents % 100 !== 0) {
-            throw self::invalid('project_value_not_whole_yuan');
-        }
-        $unit = intdiv(intdiv($totalCents, 100), $totalTimes) * 100;
+        $unit = $centCapable || $totalCents % 100 !== 0
+            ? intdiv($totalCents, $totalTimes)
+            : intdiv(intdiv($totalCents, 100), $totalTimes) * 100;
         $before = $totalCents - $unit * ($totalTimes - $remainingTimes);
         $debit = $quantity === $remainingTimes ? $before : $unit * $quantity;
+        $target = intdiv($debit, 100) * 100;
         return [
             'calculationVersion' => 'replacement-whole-yuan-v1',
             'sourceValueBeforeCents' => $before,
             'sourceDeductionCents' => $debit,
             'sourceValueAfterCents' => $before - $debit,
-            'targetValueCents' => $debit,
-            'roundingDeductionCents' => 0,
+            'targetValueCents' => $target,
+            'roundingDeductionCents' => $debit - $target,
             'roundingDeductionLabel' => '取整扣减',
         ];
+    }
+
+    private static function allocateValue(int $remainingValue, int $remainingTimes, int $quantity): int
+    {
+        if ($remainingTimes <= 0 || $quantity > $remainingTimes) {
+            throw self::invalid('project_value_allocation_invalid');
+        }
+        // Integer half-up; the authority writer applies the same allocation to
+        // the concrete source detail under its final row lock.
+        return (int)floor(($remainingValue * $quantity * 2 + $remainingTimes) / ($remainingTimes * 2));
     }
 
     private static function normalizeIntent(array $intent): array

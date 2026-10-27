@@ -116,8 +116,6 @@ final class CashierV3CheckoutResultQueryServices
                 'receiptId' => (string)$committed['entitlementCompletion']['receiptId'],
                 'receiptStatus' => (string)$committed['entitlementCompletion']['receiptStatus'],
                 'planFingerprint' => (string)$committed['entitlementCompletion']['planFingerprint'],
-                // Same immutable post-deduction counts as the successful submit response.
-                'receiptEntitlements' => $committed['entitlementCompletion']['receiptEntitlements'] ?? [],
             ] : null,
         ];
     }

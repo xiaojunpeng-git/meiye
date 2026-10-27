@@ -1,0 +1,7 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "url": "https://rh.cc3798.com/view_cashier_v3/#/login",
+  "visible": "门店端登录表单正常渲染",
+  "scope": "浏览器启动验证；设置及显隐以服务器只读集成核验为依据，未执行生产结账"
+}

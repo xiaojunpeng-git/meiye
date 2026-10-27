@@ -1,5 +1,0 @@
-"""Read-only verification of every installed asset against the fixed candidate manifest."""
-import sys,subprocess,json,base64
-from pathlib import Path
-s=sys.argv[1];assert s in ['rh','008','010'];r=Path('tests/cashier-v3/evidence/R32-report-scroll/release');m=json.loads((r/(s+'-manifest.json')).read_text());root='/www/wwwroot/'+('rh.cc3798.com' if s=='rh' else s+'.cc3798.com');paths=list(m['targets']);encoded=base64.b64encode(json.dumps(paths).encode()).decode();php="<?php $r='"+root+"';$p=json_decode(base64_decode('"+encoded+"'),true);$a=[];foreach($p as $f)$a[$f]=is_file($r.'/'.$f)?hash_file('sha256',$r.'/'.$f):null;echo json_encode($a);"
-v=json.loads(subprocess.check_output(['ssh','-q','-o','BatchMode=yes','rh-server' if s=='rh' else 'mohe-server','/www/server/php/74/bin/php'],input=php.encode()));assert v=={p:x['after'] for p,x in m['targets'].items()};(r/(s+'-all-artifacts.json')).write_text(json.dumps({'result':'PASS','commit':m['commit'],'count':len(v),'sha256':v},indent=2));print(s,'ALL ASSETS PASS',len(v))

@@ -1,0 +1,76 @@
+{
+  "entries": {
+    "member": {
+      "sha256": "2109e7ee9e20b75ccc77c1a905d1c30c5859e814a78f8c2e7a9ea413e16a1b5f",
+      "dependencyCount": 3
+    },
+    "admin": {
+      "sha256": "8da4d66ee6f77a0168a0d238830f9c857134fe12416152bd908abdd019542306",
+      "dependencyCount": 4
+    },
+    "cashier": {
+      "sha256": "b760ce86243477f96ddd10fedbecb01f2faafc0f31c20381d6ef8d76f5c610c4",
+      "dependencyCount": 2
+    }
+  },
+  "api": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "d37edb7ba2b2bee1f4da4d65c4e1ccc873dda9f0b202bd822b952b73664a9b66",
+      "count": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "7a6dc122e7b6e8c613d5d32319c9238669d5634ee975de626339c1e98cd9e5b3",
+      "count": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    },
+    "/api/store/list?is_select=1&page=2&limit=20": {
+      "status": 200,
+      "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "count": 0
+    },
+    "/api/store/list?is_select=1&keywords=M008_REGION_UNMATCHED_20261024": {
+      "status": 200,
+      "dataSha256": "7133e6abf05279de7948e5f58d6c2124e3f24e59fe1b27704fd21e11729d14e1",
+      "count": 1
+    }
+  },
+  "result": "PASS",
+  "configurationScalarNote": {
+    "field": "routine_contact_type",
+    "before": 0,
+    "after": "0",
+    "exactPriorHashReproduced": true,
+    "memberConsumers": "Number(...)",
+    "noConfigurationWrites": true
+  },
+  "regions": {
+    "provinces": 1,
+    "incomplete": 0,
+    "checks": [
+      {
+        "province": 15763,
+        "count": 1,
+        "idsSha256": "8eefd2920366bc3e63649af9c0f30192857c178059490e64b5e5dcd3c1edba5c"
+      },
+      {
+        "province": 15763,
+        "city": 15964,
+        "count": 1,
+        "idsSha256": "8eefd2920366bc3e63649af9c0f30192857c178059490e64b5e5dcd3c1edba5c"
+      },
+      {
+        "province": 15763,
+        "city": 15964,
+        "area": 15983,
+        "count": 1,
+        "idsSha256": "8eefd2920366bc3e63649af9c0f30192857c178059490e64b5e5dcd3c1edba5c"
+      }
+    ]
+  }
+}

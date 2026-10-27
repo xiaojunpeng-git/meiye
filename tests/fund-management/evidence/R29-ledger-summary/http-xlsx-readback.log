@@ -1,2 +1,0 @@
-PASS browser-downloaded XLSX bytes match generated file; 32 real HTTP ledger summaries reconcile exactly
-PASS isolated local session revoked; generated export and temporary business data removed

@@ -30,8 +30,6 @@ final class MobileMerchantCapabilityCatalog
     public const RULE_HOME = 401009;
     /** 工作台下的工程管理入口。 */
     public const RULE_ENGINEERING = 401010;
-    /** 成长入口独立授权；不从历史工作台授权自动继承。 */
-    public const RULE_GROWTH = 401030;
 
     // The platform tree also submits checked group nodes. They are accepted as
     // catalogue metadata only and deliberately grant no server-side action.
@@ -40,7 +38,7 @@ final class MobileMerchantCapabilityCatalog
     public const GROUP_PERSONAL_OPERATIONS = 401300;
 
     /**
-     * 岗位策略展示商家端四个底部入口；工作台子功能独立配置，新增目标权限不继承旧规则。
+     * 岗位策略展示商家端四个底部入口；工作台下的三个常用功能可独立配置。
      *
      * @return array<int, array{id:int,title:string,feature_code:string,actions:array<int,string>,children?:array}>
      */
@@ -51,7 +49,6 @@ final class MobileMerchantCapabilityCatalog
             ['id' => self::RULE_WAREHOUSE, 'title' => '数据', 'feature_code' => 'mobile.merchant.warehouse', 'actions' => ['MERCHANT_WAREHOUSE_VIEW']],
             ['id' => self::RULE_CUSTOMERS, 'title' => '客户', 'feature_code' => 'mobile.merchant.customers', 'actions' => ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_AUDIENCE_VIEW', 'CUSTOMER_AUDIENCE_MANAGE']],
             ['id' => self::RULE_WORKBENCH, 'title' => '工作台', 'feature_code' => 'mobile.merchant.workbench', 'actions' => ['mobile.merchant.workbench'], 'children' => [
-                ['id' => self::RULE_GROWTH, 'title' => '成长管理', 'feature_code' => 'mobile.merchant.growth', 'actions' => ['mobile.merchant.growth'], 'legacy_autogrant' => false],
                 ['id' => self::RULE_RESERVATIONS, 'title' => '预约管理', 'feature_code' => 'mobile.merchant.reservations', 'actions' => ['mobile.merchant.reservations', 'RESERVATION_VIEW', 'RESERVATION_CREATE', 'RESERVATION_MANAGE']],
                 ['id' => self::RULE_CUSTOMER_CARE, 'title' => '客情管理', 'feature_code' => 'mobile.merchant.customer_care', 'actions' => ['mobile.merchant.customer_care', 'CUSTOMER_CARE_VIEW', 'CUSTOMER_CARE_WRITE']],
                 ['id' => self::RULE_ENGINEERING, 'title' => '工程管理', 'feature_code' => 'mobile.merchant.engineering', 'actions' => ['mobile.merchant.engineering', 'ENGINEERING_LEDGER_VIEW']],
@@ -60,8 +57,8 @@ final class MobileMerchantCapabilityCatalog
     }
 
     /**
-     * Tree returned to the platform job editor. Workbench children are
-     * independently selectable so old grants cannot imply newly added actions.
+     * Tree returned to the platform job editor. The workbench exposes its
+     * three user-facing quick entries as independently selectable children.
      *
      * @return array<int, array{id:int,title:string,feature_code:string,actions:array<int,string>,children?:array}>
      */
@@ -141,8 +138,6 @@ final class MobileMerchantCapabilityCatalog
                 }
             }
             foreach ($children as $child) {
-                // 旧岗位只勾过工作台时不得自动获得新增目标的读写权限。
-                if (!$childSelected && ($child['legacy_autogrant'] ?? true) === false) continue;
                 if (!$childSelected || isset($selected[(int)($child['id'] ?? 0)])) {
                     $actions = array_merge($actions, (array)($child['actions'] ?? []));
                 }

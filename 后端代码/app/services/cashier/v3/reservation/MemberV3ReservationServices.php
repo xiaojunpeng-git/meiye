@@ -21,7 +21,6 @@ final class MemberV3ReservationServices
     public function create(int $uid, int $orderId, array $input): array
     {
         if ($uid <= 0 || $orderId <= 0) throw new ValidateException('缺少预约必要信息!');
-        $customInput = (new ReservationCustomServiceServices())->normalize($input['custom_services'] ?? []);
         $quantity = (int)($input['cart_num'] ?? 0);
         $date = trim((string)($input['reservation_time'] ?? ''));
         $start = trim((string)($input['reservation_start'] ?? ''));
@@ -140,7 +139,7 @@ final class MemberV3ReservationServices
             $addonIdentity, $staffIds, $duration,
         ], JSON_UNESCAPED_UNICODE));
 
-        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $mainDuration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder, $customInput): array {
+        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $mainDuration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder): array {
             $rootOperation = Db::name('cashier_v3_reservation_operation')->where('tenant_id', $tenantId)
                 ->where('command_idempotency_key', $naturalKey)->lock(true)->find();
             if ($rootOperation) {
@@ -150,11 +149,6 @@ final class MemberV3ReservationServices
                 $latest = $attempts[0] ?? $rootOperation;
                 $latestHeader = Db::name('cashier_v3_reservation')->where('id', (int)$latest['reservation_id'])->lock(true)->find();
                 if ($latestHeader && !in_array((string)$latestHeader['status'], ['CANCELLED', 'REJECTED'], true)) {
-                    // Changing optional display items must not bypass the same
-                    // appointment's idempotency and create a duplicate visit.
-                    $saved = (new ReservationCustomServiceServices())->forReservations($tenantId, $storeId, [(int)$latestHeader['id']]);
-                    $existing = array_map(static function (array $item): array { return ['id' => $item['id'], 'quantity' => $item['quantity']]; }, $saved[(int)$latestHeader['id']] ?? []);
-                    if ((new ReservationCustomServiceServices())->normalize($existing) !== $customInput) throw new ValidateException('该预约已提交，定制服务与首次提交不同，请查看预约详情。');
                     $result = json_decode((string)$latest['result_json'], true);
                     return is_array($result) ? $result : [];
                 }
@@ -167,7 +161,6 @@ final class MemberV3ReservationServices
                     $addonDetails, $appointmentStart, $mainDuration);
             }
             $lifecycle = new CashierV3ReservationLifecycleServices();
-            $customSnapshot = (new ReservationCustomServiceServices())->resolve($storeId, $customInput);
             $lifecycle->assertStaffAvailabilityInTx($storeId, 0, $staffIds, $appointmentStart, $appointmentEnd);
             $now = time();
             $identity = 'RSV-' . bin2hex(random_bytes(12));
@@ -221,7 +214,6 @@ final class MemberV3ReservationServices
                 'updated_at' => $now,
             ];
             $reservationId = (int)Db::name('cashier_v3_reservation')->insertGetId($header);
-            (new ReservationCustomServiceServices())->saveInTx($tenantId, $storeId, $reservationId, $customSnapshot, $now);
             $lineRows = [];
             $lineId = (int)Db::name('cashier_v3_reservation_line')->insertGetId([
                 'tenant_id' => $tenantId,
@@ -277,7 +269,7 @@ final class MemberV3ReservationServices
                 'store_name_snapshot' => (string)($store['name'] ?? ''),
                 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
                 'business_date' => $date,
-                'payload' => ['reservationNo' => $reservationNo, 'sourceType' => 'MEMBER', 'appointmentStartAt' => $appointmentStart, 'appointmentEndAt' => $appointmentEnd, 'customServices' => $customSnapshot],
+                'payload' => ['reservationNo' => $reservationNo, 'sourceType' => 'MEMBER', 'appointmentStartAt' => $appointmentStart, 'appointmentEndAt' => $appointmentEnd],
             ]);
             $recorder->assertRequiredPersistedInTx($execution, $contract);
             $result = ['reservationId' => $reservationId, 'reservationNo' => $reservationNo, 'status' => 'PENDING_CONFIRMATION'];
@@ -501,7 +493,6 @@ final class MemberV3ReservationServices
         $availableTimes = max(0, (int)($firstDetail['write_surplus_times'] ?? 0));
         $result = [
             'reservationId' => (int)$row['id'], 'reservationNo' => (string)$row['reservation_no'],
-            'customServices' => $context['customServices'][(int)$row['id']] ?? [],
             'status' => $status, 'statusLabel' => $this->statusLabel($status),
             'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'],
             'appointmentStartAt' => (int)$row['appointment_start_at'], 'appointmentEndAt' => (int)$row['appointment_end_at'],
@@ -563,7 +554,6 @@ final class MemberV3ReservationServices
     {
         $context = ['lines' => [], 'details' => [], 'orders' => [], 'stores' => [], 'products' => [], 'staff' => []];
         if (!$headers) return $context;
-        $context['customServices'] = (new ReservationCustomServiceServices())->forMemberReservations((int)$headers[0]['member_id'], array_column($headers, 'id'));
         $reservationIds = [];
         $storeIds = [];
         foreach ($headers as $header) {

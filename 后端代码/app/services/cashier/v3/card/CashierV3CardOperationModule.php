@@ -20,17 +20,6 @@ final class CashierV3CardOperationModule
         }
         $authority = new CashierV3CardOperationAuthorityServices();
         $handlers->registerCommand(CashierV3CardOperationKernel::ACTION, static function (array $scope) use ($authority): array {
-            // Conversion owns its full-card rights and bonus-wallet transaction;
-            // it must not use the refund writer or the versioned upgrade planner.
-            if (($scope['payload']['operationType'] ?? '') === 'card_to_balance') {
-                $result = (new CashierV3CardToBalanceServices())->submitInTx($scope);
-                return [
-                    'data' => ['cardOperation' => $result['operation'], 'cardState' => $result['state'] ?? []],
-                    'business_no' => (string)($result['operation']['operationNo'] ?? ''),
-                    'touched' => [],
-                    'message' => '卡内剩余金额已全部转入赠金，原卡已作废。',
-                ];
-            }
             $result = $authority->submitInTx($scope);
             $operation = is_array($result['operation'] ?? null) ? $result['operation'] : [];
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
@@ -101,15 +90,10 @@ final class CashierV3CardOperationModule
             static function (array $payload, array $base = []): array {
                 $type = trim((string)($payload['operationType'] ?? ''));
                 $holderId = self::positiveId($payload['sourceCardHolderId'] ?? null, 'source_card_missing');
-                if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
-                    || $type === 'card_to_balance') {
-                    // Each domain writer locks and validates the one confirmed
-                    // business intent; no browser resource versions are required.
+                if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
                     return [
                         'required' => [],
                         'allowed' => [],
-                        'forbidden' => $type === 'card_to_balance'
-                            ? ['card_holder', 'member', 'cashier_workspace'] : [],
                         'identities' => [],
                         'required_read_roles' => [],
                         'required_touched_roles' => [],

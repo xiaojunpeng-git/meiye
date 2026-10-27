@@ -450,10 +450,9 @@ final class CashierV3EntitlementCompletionKernel
 
     private static function isCentCapableAmountCalculation(string $version): bool
     {
-        // 2026-10-16 收银最高口径：历史 operation-cent 标记只用于追溯，
-        // 最终结账不能再据此保存小数元核销事实。保留方法作为旧契约边界，
-        // 固定返回 false 让所有新核销统一进入整元校验。
-        return false;
+        // 组合卡共享组延用项目实收分摊事实，可能含分尾差；仅该显式版本走分精度。
+        return str_starts_with($version, 'operation-cent-')
+            || str_starts_with($version, 'shared-card-purchase-amount-operation-cent-combination-group-');
     }
 
     /**
@@ -714,9 +713,7 @@ final class CashierV3EntitlementCompletionKernel
         if ($snapshot['operatorStoreId'] !== $snapshot['storeId']) {
             throw self::failure('operator_store_mismatch');
         }
-        // 权限来自网关事务内重建的服务端授权，不以目录项数决定能否结账。
-        // 仅移除数量上限；列表有效性、下方操作权限及门店边界仍必须校验。
-        self::assertStringList($snapshot['operatorFeatures'], 'operatorFeatures');
+        self::assertStringList($snapshot['operatorFeatures'], 'operatorFeatures', 50);
         if (!array_intersect(self::REQUIRED_FEATURES_ANY_OF, $snapshot['operatorFeatures'])) {
             throw self::failure('required_feature_missing', [
                 'requiredAnyOf' => self::REQUIRED_FEATURES_ANY_OF,
@@ -1142,7 +1139,7 @@ final class CashierV3EntitlementCompletionKernel
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw self::failure('authority_craftsman_performance_invalid', ['staffId' => $row['staffId']]);
             }
-            self::assertWholeYuanMoney(
+            self::assertNonnegativeInt(
                 $row['laborFeeCents'] ?? 0,
                 'craftsman.laborFeeCents',
                 self::MAX_MONEY_CENTS
@@ -1172,7 +1169,7 @@ final class CashierV3EntitlementCompletionKernel
                     || !is_bool($row['performanceAmountManual'])) {
                     throw self::failure('authority_craftsman_performance_amount_invalid', ['staffId' => $row['staffId']]);
                 }
-                self::assertWholeYuanMoney($row['performanceAmountCents'], 'craftsman.performanceAmountCents', self::MAX_MONEY_CENTS);
+                self::assertNonnegativeInt($row['performanceAmountCents'], 'craftsman.performanceAmountCents', self::MAX_MONEY_CENTS);
                 if ($performanceType === 'labor'
                     && ((int)$row['performanceAmountCents'] !== 0 || $row['performanceAmountManual'])) {
                     throw self::failure('authority_labor_performance_amount_invalid', ['staffId' => $row['staffId']]);
@@ -1708,7 +1705,6 @@ final class CashierV3EntitlementCompletionKernel
 
     private static function craftsmanPlan(array $staffIds, array $authorityRows, int $storeId, int $amountCents): array
     {
-        self::assertWholeYuanMoney($amountCents, 'laborPerformance.amountCents', self::MAX_MONEY_CENTS);
         $byId = [];
         $authorityIds = [];
         foreach ($authorityRows as $row) {
@@ -1729,35 +1725,12 @@ final class CashierV3EntitlementCompletionKernel
             }
         }
         $amountByStaffId = [];
-        $automaticGroups = [];
         foreach ($authorityIds as $staffId) {
             $row = $byId[$staffId];
             if (($row['craftsmanPerformanceType'] ?? 'commission_labor') === 'labor') continue;
-            if (!empty($row['performanceAmountManual'])) {
-                $amountByStaffId[$staffId] = max(0, (int)($row['performanceAmountCents'] ?? 0));
-                continue;
-            }
-            $groupKey = !empty($row['performanceIndependent'])
-                ? (string)($row['allocationGroupKey'] ?? 'normal') : 'normal';
-            $automaticGroups[$groupKey][] = $row;
-        }
-        // 先锁定每组应分整元，再把向下取整的尾差给末人；不能把 19.5 元
-        // 直接写入只接受整元的劳动事实。手填金额保持原值，不参与补差。
-        $baseYuan = intdiv($amountCents, 100);
-        foreach ($automaticGroups as $group) {
-            $weightTotal = array_sum(array_map(static function (array $row): int {
-                return max(0, (int)($row['laborWeight'] ?? 0));
-            }, $group));
-            $targetYuan = intdiv($baseYuan * $weightTotal + 50, 100);
-            $allocatedYuan = 0;
-            $lastIndex = count($group) - 1;
-            foreach ($group as $index => $row) {
-                $yuan = $index === $lastIndex
-                    ? $targetYuan - $allocatedYuan
-                    : intdiv($baseYuan * max(0, (int)($row['laborWeight'] ?? 0)), 100);
-                $amountByStaffId[(int)$row['staffId']] = $yuan * 100;
-                $allocatedYuan += $yuan;
-            }
+            $amountByStaffId[$staffId] = !empty($row['performanceAmountManual'])
+                ? max(0, (int)($row['performanceAmountCents'] ?? 0))
+                : intdiv($amountCents * max(0, (int)($row['laborWeight'] ?? 0)), 100);
         }
         $allocations = [];
         foreach ($authorityRows as $index => $row) {
@@ -2677,15 +2650,6 @@ final class CashierV3EntitlementCompletionKernel
         }
     }
 
-    /** Completion facts may store cents, but new cashier money is whole yuan. */
-    private static function assertWholeYuanMoney($value, string $field, int $max): void
-    {
-        self::assertNonnegativeInt($value, $field, $max);
-        if ($value % 100 !== 0) {
-            throw self::failure('money_whole_yuan_required', ['field' => $field]);
-        }
-    }
-
     private static function projectCount($value, string $field): string
     {
         if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
@@ -2700,10 +2664,9 @@ final class CashierV3EntitlementCompletionKernel
         return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
-    /** Null omits only the count cap; bounded lock-role lists retain their explicit cap. */
-    private static function assertStringList($value, string $field, ?int $max = null): void
+    private static function assertStringList($value, string $field, int $max): void
     {
-        if (!is_array($value) || !self::isList($value) || ($max !== null && count($value) > $max)) {
+        if (!is_array($value) || !self::isList($value) || count($value) > $max) {
             throw self::failure('string_list_invalid', ['field' => $field]);
         }
         $seen = [];

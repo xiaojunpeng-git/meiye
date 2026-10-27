@@ -474,9 +474,11 @@ final class CashierV3CheckoutPreparationServices
             $operatorScope,
             $dataScope
         );
-        // This path already consumes the browser's final sole snapshot. Do not
-        // reread a changed fixed default and create a different attribution row.
-        // Initial source defaults belong to the authenticated opening projection.
+        // The browser snapshot is the sole source for a newly opened local
+        // checkout. Persist its customer-source selection in this same
+        // preparation transaction, rather than replaying a mutable UI action
+        // after the checkout request exists. The selection is attribution
+        // metadata and deliberately does not validate the live source catalog.
         if ($checkoutSnapshot !== null) {
             (new CashierV3CheckoutOrderCouponServices())->bindPreparedInTx(
                 $orderCouponSelections, (string)$kernel['requestId'], (int)$kernel['requestVersion'],
@@ -487,10 +489,7 @@ final class CashierV3CheckoutPreparationServices
                 $dataScope->tenantId(),
                 $operatorScope->storeId(),
                 $operatorScope->operatorId(),
-                $this->businessSources->validateConfirmedChoice(
-                    'purchase', $dataScope->tenantId(), $operatorScope->storeId(),
-                    (int)($publicDraft['memberId'] ?? 0), (array)($checkoutSnapshot['source'] ?? [])
-                )
+                (array)($checkoutSnapshot['source'] ?? [])
             );
         }
         // A resumed hang is only an editable cart draft. It never enters
@@ -629,31 +628,6 @@ final class CashierV3CheckoutPreparationServices
                 );
                 $coupon = is_array($line['coupon'] ?? null) ? $line['coupon'] : [];
                 $cardPurchaseSnapshot = $this->browserCardPurchaseSnapshot($line, $server);
-                // R49: validate frozen original rows before payment facts exist. Discount coupons
-                // reduce receivable normally; they cannot disguise a manual base-price reduction.
-                $increase = \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::validate(
-                    $cardPurchaseSnapshot, (array)($server['authority_snapshot']['cardPurchase'] ?? []),
-                    $operatorScope->storeId(), $itemId
-                );
-                $discount = (int)($line['couponDiscountCents'] ?? $coupon['discountAmountCents'] ?? 0);
-                \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount(
-                    $cardPurchaseSnapshot, $increase, $quantity, $lineAmount, $discount
-                );
-                // 唯一快照可能来自浏览器本地改价，不能只校验旧工作台命令。
-                // 按手工改价后的单价约束，优惠券抵扣不改变商品售价区间，也不重写本单金额。
-                $range = (array)($server['display_snapshot']['salePriceRange'] ?? []);
-                $beforeCouponAmount = $lineAmount + $discount;
-                // 多卡升级的补差价不是目标卡售价，沿用本次已确认的目标卡总售价。
-                if (!empty($line['cardOperationUpgrade']['multiCardUpgrade'])
-                    && isset($cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'])) {
-                    $beforeCouponAmount = (int)$cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'];
-                }
-                if ($beforeCouponAmount !== $unit * $quantity) {
-                    \app\services\cashier\v3\cashier\CashierV3CashierMoreActionServices::assertSalePriceRangeCents(
-                        (int)($range['minimumCents'] ?? 0), (int)($range['maximumCents'] ?? 0),
-                        (string)($server['display_snapshot']['name'] ?? ''), $beforeCouponAmount, $quantity
-                    );
-                }
                 $isPresale = !$customCard && !empty($line['isPresale']);
                 $saleLines[] = [
                     'lineId' => (string)($line['lineId'] ?? 'snapshot-' . $index),
@@ -756,8 +730,7 @@ final class CashierV3CheckoutPreparationServices
         $workspaceMetadata = $this->workspace->checkoutDraftMetadata(
             $workspaceId,
             $stateContextId,
-            $operatorScope,
-            (int)($snapshot['memberId'] ?? 0)
+            $operatorScope
         );
         $storedDraft = [
             'order_note' => (string)($snapshot['orderNote'] ?? ''),

@@ -1,0 +1,32 @@
+{
+  "result": "PASS",
+  "cases": [
+    {
+      "historyAdjustment": false,
+      "showLaborFee": true,
+      "laborFeeCents": 2500,
+      "result": "PASS"
+    },
+    {
+      "historyAdjustment": false,
+      "showLaborFee": false,
+      "laborFeeCents": 2500,
+      "result": "PASS"
+    },
+    {
+      "historyAdjustment": true,
+      "showLaborFee": true,
+      "laborFeeCents": 2500,
+      "result": "PASS"
+    },
+    {
+      "historyAdjustment": true,
+      "showLaborFee": false,
+      "laborFeeCents": 2500,
+      "result": "PASS"
+    }
+  ],
+  "payloadParity": "PASS",
+  "summaryPurity": "PASS",
+  "sfcCompilation": "PASS"
+}

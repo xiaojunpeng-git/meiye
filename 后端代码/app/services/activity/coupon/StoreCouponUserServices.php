@@ -67,7 +67,6 @@ class StoreCouponUserServices extends BaseServices
     {
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getList($where, '*', ['issue'], $page, $limit);
-        $list = $this->withAllowanceRemaining($list);
         $count = 0;
         if ($list) {
             /** @var UserServices $userServices */
@@ -103,7 +102,6 @@ class StoreCouponUserServices extends BaseServices
         $couponIssueServices = app()->make(StoreCouponIssueServices::class);
         if ($status != -1) $where['status'] = $status;
         $list = $this->dao->getList($where, '*', ['issue'], $page, $limit);
-        $list = $this->withAllowanceRemaining($list);
         foreach ($list as &$item) {
             $item['_add_time'] = date('Y-m-d H:i:s', $item['add_time']);
             $item['_end_time'] = date('Y-m-d H:i:s', $item['end_time']);
@@ -129,9 +127,6 @@ class StoreCouponUserServices extends BaseServices
      */
     public function recoverCoupon(int $id)
     {
-        // Generic one-use recovery has no order identity and cannot safely
-        // reverse an allowance debit. Only the V3 whole-order void may do so.
-        $this->rejectLegacyAllowance($id);
         $status = $this->dao->value(['id' => $id], 'status');
         if ($status) return $this->dao->update($id, ['status' => 0, 'use_time' => 0]);
         else return true;
@@ -778,7 +773,6 @@ class StoreCouponUserServices extends BaseServices
         if (!$couponId || !$uid || !$cartInfo) {
             return true;
         }
-        $this->rejectLegacyAllowance($couponId);
         /** @var StorePromotionsServices $promotionsServices */
         $promotionsServices = app()->make(StorePromotionsServices::class);
         [$couponInfo, $couponPrice] = $promotionsServices->useCoupon($couponId, $uid, $cartInfo, $promotions, $store_id);
@@ -788,31 +782,5 @@ class StoreCouponUserServices extends BaseServices
             }
         }
         return true;
-    }
-
-    /** Fail closed on old clients: status=used is not an allowance settlement. */
-    private function rejectLegacyAllowance(int $couponId): void
-    {
-        $type = \think\facade\Db::name('store_coupon_user')->alias('cu')
-            ->join('store_coupon_issue ci', 'ci.id=cu.cid')->where('cu.id', $couponId)->value('ci.coupon_type');
-        if ((int)$type === StoreCouponAllowanceServices::TYPE) {
-            throw new ValidateException('多次抵用券请在门店收银新版中输入金额使用或作废原订单。');
-        }
-    }
-
-    /** Keep face immutable; display the independently accounted remaining amount. */
-    private function withAllowanceRemaining(array $rows): array
-    {
-        $ids = array_column(array_filter($rows, static fn(array $row): bool =>
-            (int)($row['coupon_type'] ?? 0) === StoreCouponAllowanceServices::TYPE), 'id');
-        $remaining = (new StoreCouponAllowanceServices())->remainingByCouponIds($ids);
-        foreach ($rows as &$row) {
-            if ((int)($row['coupon_type'] ?? 0) !== StoreCouponAllowanceServices::TYPE) continue;
-            $amount = (int)($remaining[(int)$row['id']] ?? StoreCouponAllowanceServices::wholeCents($row['coupon_price']));
-            $row['remaining_amount'] = (string)intdiv($amount, 100);
-            if ($row['status'] === '未使用' && (int)$row['use_time'] > 0) $row['status'] = '可继续使用';
-        }
-        unset($row);
-        return $rows;
     }
 }

@@ -1,0 +1,17 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 2042 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../candidate-cashier-v3-dist/index.html                                  0.48 kB │ gzip:   0.33 kB
+../../../candidate-cashier-v3-dist/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+../../../candidate-cashier-v3-dist/assets/index-f4d74b18.css                 706.95 kB │ gzip: 106.01 kB
+../../../candidate-cashier-v3-dist/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 271.25 kB
+../../../candidate-cashier-v3-dist/assets/index-602ce90e.js                2,194.03 kB │ gzip: 651.64 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 6.22s
+{"tree":"47b8305cca1f7f0e7525a8b012617eec0b3afd43","variant":"candidate","terminal":"cashier-v3","output":"/private/tmp/mohe-r37-labor-display-010/candidate-cashier-v3-dist","record":"/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/cashier-v3/evidence/R37-labor-fee-display/release/010/candidate-cashier-v3-build.json","result":"PASS"}

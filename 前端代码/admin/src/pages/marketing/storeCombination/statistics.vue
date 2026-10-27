@@ -46,6 +46,9 @@
               @on-search="searchList"
           />
         </FormItem>
+        <FormItem>
+          <Button @click="exportActivity" :loading="exporting">导出本活动拼团明细</Button>
+        </FormItem>
       </Form>
       <Table
           :columns="type ? thead2 : thead"
@@ -130,7 +133,9 @@ import {
   getcombinationStatisticsPeople,
   getcombinationStatisticsOrder,
   orderPinkListApi,
+  combinationActivityExportApi,
 } from '@/api/marketing';
+import exportExcel from '@/utils/newToExcel.js';
 import Setting from "@/setting";
 import {mapState} from "vuex";
 
@@ -163,6 +168,7 @@ export default {
       ],
       currentTab: 0,
       loading: false,
+      exporting: false,
       thead: [
         {
           title: '头像',
@@ -321,6 +327,14 @@ export default {
     this.getList(this.id);
   },
   methods: {
+    // Statistics and activity list use the same full-activity participant export contract.
+    exportActivity() {
+      this.exporting = true;
+      return combinationActivityExportApi(this.id).then(({ data }) => {
+        exportExcel(data.header, data.filekey, data.filename, data.export);
+      }).catch(error => this.$Message.error(error.msg || '拼团明细导出失败'))
+        .finally(() => { this.exporting = false; });
+    },
     // 统计
     getStatistics(id) {
       console.log(id);

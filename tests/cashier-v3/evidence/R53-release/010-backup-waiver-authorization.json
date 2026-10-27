@@ -1,8 +1,0 @@
-{
-  "site": "010",
-  "database": "mohe_010_app",
-  "commit": "5fd8225287b31944894975deacb166d230f6e71f",
-  "explicitUserWaiver": true,
-  "userInstruction": "010不需要备份，还没有正式使用",
-  "scope": "仅本轮010测试库不要求全库备份；固定业务包、权限及索引迁移范围不变；不修改其他实例备份要求"
-}

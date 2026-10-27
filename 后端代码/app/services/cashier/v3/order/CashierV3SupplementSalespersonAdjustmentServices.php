@@ -191,10 +191,7 @@ final class CashierV3SupplementSalespersonAdjustmentServices
                 $repaymentNo = trim((string)($row['repayment_no'] ?? ''));
                 if ($repaymentNo === '') $repaymentNo = trim((string)($row[$definition[4]] ?? ''));
                 if ($repaymentNo === '') $repaymentNo = $id;
-                // Editing personnel must retain the same new-cash base as initial settlement.
-                $balanceCents = $definition[5] === 'debt_repayment'
-                    ? \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::balanceCents($id) : 0;
-                return ['repaymentId' => $id, 'repaymentNo' => $repaymentNo, 'repaymentAmountCents' => max(0, (int)($row[$definition[1]] ?? 0) - $balanceCents), 'memberId' => (int)$row['member_id'], 'storeName' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'sourceDocumentType' => $definition[5]];
+                return ['repaymentId' => $id, 'repaymentNo' => $repaymentNo, 'repaymentAmountCents' => max(0, (int)($row[$definition[1]] ?? 0)), 'memberId' => (int)$row['member_id'], 'storeName' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'sourceDocumentType' => $definition[5]];
             }
         }
         throw self::failure('supplement_personnel_record_invalid');

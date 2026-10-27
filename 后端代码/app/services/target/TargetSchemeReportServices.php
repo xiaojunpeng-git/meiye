@@ -189,21 +189,6 @@ final class TargetSchemeReportServices
                 }
             }
         }
-        // 没有目标行时仍展示授权门店的真实完成业绩；只在整个比较期缺少分母时
-        // 才使用完整范围，不能将无目标门店混入已有目标的达成率分子。
-        if (!$monthTargets || !$yearTargets) {
-            $fallbackStart = !$yearTargets ? sprintf('%04d-01-01', $year) : $current . '-01';
-            foreach ($this->metrics->dailyStoreTotals('actual_performance', (string)($context['tenant_id'] ?? '0'),
-                (array)($context['store_ids'] ?? []), ['start' => $fallbackStart, 'end' => $asOfDate]) as $row) {
-                $value = (int)$row['amount_cents'];
-                if (!$yearTargets) $yearActual += $value;
-                if (!$monthTargets && substr((string)$row['business_date'], 0, 7) === $current) {
-                    $monthActual += $value;
-                    $storeId = (int)$row['store_id'];
-                    $monthStoreActuals[$storeId] = ($monthStoreActuals[$storeId] ?? 0) + $value;
-                }
-            }
-        }
         return ['scheme_id' => (int)$bound['scheme_id'], 'scheme_ids' => $bound['scheme_ids'], 'month_targets' => $monthTargets,
             'year_targets' => $yearTargets, 'month_actual' => $monthActual, 'year_actual' => $yearActual,
             'month_store_actuals' => $monthStoreActuals];

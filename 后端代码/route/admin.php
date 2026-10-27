@@ -101,8 +101,6 @@ Route::group('adminapi', function () {
 		Route::get('setting/admin/logout', 'v1.system.admin.SystemAdmin/logout')->name('SystemAdminLogout')->option(['real_name' => '退出登录']);
 		//获取当前管理员信息
 		Route::get('setting/info', 'v1.system.admin.SystemAdmin/info')->name('SystemAdminInfo')->option(['real_name' => '获取当前管理员信息']);
-		// 平台当前员工进入门店：只签发短时一次性身份票据，不代入门店管理员。
-		Route::post('store-entry/ticket', 'v1.store.PlatformStoreEntry/ticket')->option(['real_name' => '签发门店端进入票据']);
 		//修改当前管理员信息
 		Route::put('setting/update_admin', 'v1.system.admin.SystemAdmin/update_admin')->name('SystemAdminUpdateAdmin')->option(['real_name' => '修改当前管理员信息']);
 
@@ -936,11 +934,6 @@ Route::group('adminapi', function () {
         Route::put('combination/set_status/:id/:status', 'v1.marketing.combination.StoreCombination/set_status')->option(['real_name' => '修改拼团商品状态']);
         //参与拼团列表
         Route::get('combination/combine/list', 'v1.marketing.combination.StoreCombination/combine_list')->option(['real_name' => '参与拼团列表']);
-        Route::get('combination/order_pink/:id/export', 'v1.marketing.combination.StoreCombination/exportGroup')->option(['real_name' => '单团记录导出']);
-        Route::get('combination/activity/:id/export', 'v1.marketing.combination.StoreCombination/exportActivity')->option(['real_name' => '拼团活动明细导出']);
-        Route::post('combination/order_pink/:id/complete', 'v1.marketing.combination.StoreCombination/completeGroup')->option(['real_name' => '拼团补齐虚拟名额成团']);
-        // Uses the existing authenticated group-record access, without a separate refund capability.
-        Route::post('combination/order_pink/:id/refund', 'v1.marketing.combination.StoreCombination/refundParticipant')->option(['real_name' => '拼团参与订单退款']);
         //拼团人列表
         Route::get('combination/order_pink/:id', 'v1.marketing.combination.StoreCombination/order_pink')->option(['real_name' => '拼团人列表']);
         //拼团统计
@@ -1637,93 +1630,6 @@ Route::group('adminapi', function () {
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class
     ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
 
-    // MYDX：成长API由控制器按业务菜单授权，通用动作不建立按钮权限。
-    Route::group('growth', function () {
-        Route::get('overview', 'v1.growth.Growth/overview');
-        Route::get('review/catalog','v1.growth.Growth/reviewCatalog');
-        Route::get('reviews', 'v1.growth.Growth/reviews');
-        Route::post('review/save', 'v1.growth.Growth/saveReview');
-        Route::get('report/filters', 'v1.growth.Growth/reportFilters');
-        Route::get('report', 'v1.growth.Growth/report');
-        Route::get('report/drill', 'v1.growth.Growth/reportDrill');
-        Route::post('report/export', 'v1.growth.Growth/reportExport');
-        Route::get('report/file', 'v1.growth.Growth/reportFile');
-        Route::get('business', 'v1.growth.Growth/business');
-        Route::get('catalog', 'v1.growth.Growth/catalog');
-        Route::get('rewards', 'v1.growth.Growth/rewardSettings');
-        Route::post('reward/rule', 'v1.growth.Growth/saveRewardRule');
-        Route::post('reward/levels', 'v1.growth.Growth/saveLevels');
-        Route::post('points/adjust', 'v1.growth.Growth/adjustPoints');
-        Route::post('certificate/register', 'v1.growth.Growth/registerCertificate');
-        Route::post('certificate/action', 'v1.growth.Growth/certificateAction');
-        Route::get('profile/people', 'v1.growth.Growth/profilePeople');
-        Route::get('profile/history','v1.growth.Growth/profileHistory');
-        Route::get('profile', 'v1.growth.Growth/profile');
-        Route::get('appraisal/catalog', 'v1.growth.Growth/appraisalCatalog');
-        Route::get('appraisals', 'v1.growth.Growth/appraisals');
-        Route::post('appraisal/create', 'v1.growth.Growth/createAppraisal');
-        Route::get('appraisal', 'v1.growth.Growth/appraisal');
-        Route::post('appraisal/confirm', 'v1.growth.Growth/confirmAppraisal');
-        Route::post('objection/resolve', 'v1.growth.Growth/resolveObjection');
-        Route::get('capabilities', 'v1.growth.Growth/capabilities');
-        Route::post('mentor/save', 'v1.growth.Growth/saveMentor');
-        Route::post('issue/train', 'v1.growth.Growth/trainIssue');
-        Route::post('capability/save', 'v1.growth.Growth/saveCapability');
-        Route::get('inspections', 'v1.growth.Growth/inspections');
-        Route::get('inspection', 'v1.growth.Growth/inspection');
-        Route::post('inspection/create', 'v1.growth.Growth/createInspection');
-        Route::post('inspection/submit', 'v1.growth.Growth/submitInspection');
-        Route::post('inspection/handover', 'v1.growth.Growth/handoverInspection');
-        Route::post('inspection/confirm', 'v1.growth.Growth/confirmInspection');
-        Route::get('issue', 'v1.growth.Growth/issue');
-        Route::post('issue/rectify', 'v1.growth.Growth/rectifyIssue');
-        Route::post('issue/review', 'v1.growth.Growth/reviewIssue');
-        Route::post('issue/action', 'v1.growth.Growth/issueAction');
-        Route::get('help', 'v1.growth.Growth/help');
-        Route::post('help/reply', 'v1.growth.Growth/replyHelp');
-        Route::post('help/promote', 'v1.growth.Growth/promoteHelp');
-        Route::get('practice', 'v1.growth.Growth/practice');
-        Route::post('activity/create', 'v1.growth.Growth/createActivity');
-        Route::post('standard/publish', 'v1.growth.Growth/publishStandard');
-        Route::get('work', 'v1.growth.Growth/workDetail');
-        Route::post('work/review', 'v1.growth.Growth/reviewWork');
-        Route::post('activity/confirm', 'v1.growth.Growth/confirmActivity');
-        Route::get('onboarding', 'v1.growth.Growth/onboarding');
-        Route::post('onboarding/save', 'v1.growth.Growth/saveOnboarding');
-        Route::get('plans', 'v1.growth.Growth/plans');
-        Route::post('map/publish', 'v1.growth.Growth/publishMap');
-        Route::post('plan/publish', 'v1.growth.Growth/publishPlan');
-        Route::post('plan/people', 'v1.growth.Growth/planPeople');
-        Route::get('question/feedback', 'v1.growth.Growth/questionFeedback');
-        Route::post('question/feedback/resolve', 'v1.growth.Growth/resolveQuestionFeedback');
-        Route::get('questions', 'v1.growth.Growth/questions');
-        Route::post('question/save', 'v1.growth.Growth/saveQuestion');
-        Route::post('question/import', 'v1.growth.Growth/importQuestions');
-        Route::post('paper/publish', 'v1.growth.Growth/publishPaper');
-        Route::get('exams', 'v1.growth.Growth/exams');
-        Route::post('exam/create', 'v1.growth.Growth/createExam');
-        Route::get('attempt', 'v1.growth.Growth/attempt');
-        Route::post('attempt/grade', 'v1.growth.Growth/grade');
-        Route::post('attempt/correct', 'v1.growth.Growth/correctGrade');
-        Route::get('settings', 'v1.growth.Growth/settings');
-        Route::get('process/status','v1.growth.Growth/processStatus');
-        Route::post('process/retry','v1.growth.Growth/retryProcess');
-        Route::get('contents', 'v1.growth.Growth/contents');
-        Route::get('content', 'v1.growth.Growth/content');
-        Route::get('tasks', 'v1.growth.Growth/tasks');
-        Route::get('task', 'v1.growth.Growth/task');
-        Route::get('asset', 'v1.growth.Growth/asset');
-        Route::post('settings', 'v1.growth.Growth/saveSettings');
-        Route::post('content/save', 'v1.growth.Growth/saveContent');
-        Route::post('content/publish', 'v1.growth.Growth/publishContent');
-        Route::post('content/confirm', 'v1.growth.Growth/confirmContent');
-        Route::post('content/stop', 'v1.growth.Growth/stopContent');
-        Route::post('task/assign', 'v1.growth.Growth/assignTasks');
-        Route::post('task/action', 'v1.growth.Growth/taskAction');
-        Route::post('asset/upload', 'v1.growth.Growth/upload');
-        Route::post('asset/retry', 'v1.growth.Growth/retryAsset');
-    })->middleware([\app\http\middleware\admin\AdminAuthTokenMiddleware::class]);
-
     /**
      * 门店目标
      */
@@ -1755,10 +1661,6 @@ Route::group('adminapi', function () {
      * 报表
      */
     Route::group('report', function () {
-        Route::get('basic/catalog', 'v1.report.UnifiedReport/basicCatalog')->option(['real_name' => '基础报表目录']);
-        Route::get('basic/scope', 'v1.report.UnifiedReport/basicScope')->option(['real_name' => '基础报表门店范围']);
-        Route::get('basic/query', 'v1.report.UnifiedReport/basicQuery')->option(['real_name' => '基础报表统一查询']);
-        Route::post('basic/save', 'v1.report.UnifiedReport/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);
         Route::get('unified/catalog', 'v1.report.UnifiedReport/catalog')->option(['real_name' => '门店业务报表目录']);
         Route::get('unified/scope', 'v1.report.UnifiedReport/scope')->option(['real_name' => '门店业务报表权限范围']);
@@ -2729,9 +2631,6 @@ Route::group('adminapi', function () {
             'update' => '修改系统配置',
             'delete' => '删除系统配置'
         ]]);
-        // 独立门店端目录；控制器显式复核平台权限，不能沿用未知路由默认放行。
-        Route::get('store-permissions', 'v1.system.StorePermissions/index')->option(['real_name'=>'门店端权限规则']);
-        Route::post('store-permissions', 'v1.system.StorePermissions/save')->option(['real_name'=>'保存门店端权限规则']);
         //权限菜单资源路由
         Route::resource('menus', 'v1.system.SystemMenus')->option(['real_name' => [
             'index' => '获取权限菜单列表',

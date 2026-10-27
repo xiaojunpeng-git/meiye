@@ -26,11 +26,9 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $storeId = $operatorScope->storeId();
         $now = time();
         $workflow = strtolower(trim((string)($hints['workflow'] ?? '')));
+        // 仅服务页可跨日期查看；桌面日历与预约确认继续按显式日期或默认当天取数。
+        $allDates = $workflow === 'service' && !empty($hints['allDates']);
         $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
-        // “全部待确认”只放开默认日期，仍强制当前租户/门店与待确认状态；
-        // 不让任意 allDates 参数改变普通日历，显式提交的列表筛选继续生效。
-        $allDates = ($workflow === 'service' && !empty($hints['allDates']))
-            || $quickFilter === 'all_pending_confirmation';
         $page = max(1, (int)($hints['page'] ?? 1));
         $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));
         $topFilters = (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []);
@@ -52,7 +50,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             ->where('tenant_id', $tenantId)->where('store_id', $storeId)
             ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
             ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
-        if (in_array($quickFilter, ['pending_confirmation', 'all_pending_confirmation'], true)) {
+        if ($quickFilter === 'pending_confirmation') {
             $recordsQuery->where('status', 'PENDING_CONFIRMATION');
         } elseif ($quickFilter === 'service') {
             $recordsQuery->whereIn('status', ['UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
@@ -73,13 +71,10 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         self::applyListTopFilters($recordsQuery, $topFilters);
         if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($recordsQuery, $calendarDate);
         $total = (int)(clone $recordsQuery)->count();
-        // 待确认状态被其他设备处理后，保留筛选并收回到有效页，避免末页假空白。
-        $page = min($page, max(1, (int)ceil($total / $pageSize)));
         $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
         $ids = [];
         foreach ($rows as $row) $ids[] = (int)($row['id'] ?? 0);
-        $customServices = (new ReservationCustomServiceServices())->forReservations($tenantId, $storeId, $ids);
         $serviceOrderIds = [];
         foreach ($rows as $row) {
             $serviceOrderId = (int)($row['service_order_id'] ?? 0);
@@ -176,11 +171,6 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             'serving' => (int)(clone $countBase)->where('status', 'IN_SERVICE')->count(),
             'ended' => (int)(clone $countBase)->where('status', 'COMPLETED')->count(),
             'dueNotArrived' => $dueNotArrivedCount,
-            // 入口数字不受当前日历日期、姓名或分页影响，和点击后的无筛选列表同源。
-            'allPendingConfirmation' => (int)Db::name('cashier_v3_reservation')
-                ->where('tenant_id', $tenantId)->where('store_id', $storeId)
-                ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
-                ->where('status', 'PENDING_CONFIRMATION')->count(),
         ];
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
@@ -220,7 +210,6 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'craftsmanSummary' => $reservationArtisans ? implode('、', array_values($reservationArtisans)) : '待分配手艺人',
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ((int)($row['room_id'] ?? 0) > 0 ? '房间 ' . (int)$row['room_id'] : ''),
                 'remark' => (string)($row['remark_snapshot'] ?? ''),
-                'customServices' => $customServices[$id] ?? [],
                 'source' => '收银 V3',
                 'creator' => (string)($row['creator_name_snapshot'] ?? ''),
                 'status' => $status,
@@ -243,7 +232,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         // 日历只有一个时间轴；当顶部使用日期范围时，按起始日渲染，确保
         // 操作员修改日期后日历与当前查询处在同一个业务日，而不再依赖已移除的
         // “上一天 / 今天 / 下一天”按钮。
-        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames, $customServices);
+        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames);
         return ['ready' => true, 'payload' => [
             'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
             'quickCounts' => $counts, 'records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize,
@@ -256,7 +245,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
      * Calendar is a read model over V3 reservations only.  It deliberately
      * does not try to infer availability from legacy reservation tables.
      */
-    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames, array $customServices = []): array
+    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->field('day_start,day_end')->find();
         $start = self::timeOfDay((string)($store['day_start'] ?? ''));
@@ -335,10 +324,6 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'start' => self::businessTimeFromTimestamp($at, 'H:i'),
                 'end' => self::businessTimeFromTimestamp(max($at + 60, (int)($row['appointment_end_at'] ?? 0)), 'H:i'),
                 'projectCount' => $projectCount,
-                // 使用已按预约/门店批量读取的历史快照，停用服务菜单也不抹掉提示。
-                'hasCustomServices' => !empty($customServices[$reservationId]),
-                // 同一预约在手艺人、房间日历中的副本读取同一个持久化颜色。
-                'colorMark' => (string)($row['calendar_color'] ?? ''),
                 'status' => self::statusLabel((string)($row['status'] ?? '')),
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ($roomId > 0 ? ('房间 ' . $roomId) : '待分配房间'),
             ];
@@ -463,7 +448,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $value = trim((string)$value);
         if ($workflow === 'confirmation') return 'pending_confirmation';
         if ($workflow === 'service' && $value === '') return 'service';
-        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'all_pending_confirmation', 'service'], true) ? $value : 'all';
+        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'service'], true) ? $value : 'all';
     }
 
     private static function timeOfDay(string $value): string
