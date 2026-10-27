@@ -8591,6 +8591,7 @@ onBeforeUnmount(() => {
       <PersonnelPerformanceOverlay
         v-if="personnelOverlay"
         :initial-tab="personnelOverlay.initialTab"
+        :show-labor-fee="state.storeDisplayOptions?.laborFeeVisible !== false"
         :show-craftsmen="personnelOverlay.showCraftsmen"
         :show-salespeople="personnelOverlay.showSalespeople"
         :show-guides="personnelOverlay.showGuides"

@@ -223,6 +223,8 @@ import { positionList } from '@/api/position';
 
 const STAFF_LIST_LINK_ID = 'staff_list';
 const STAFF_LIST_PATH = '/pages/activity/therapist_list/index';
+const MEMBER_COMBINATION_RECORDS_LINK_ID = 'member_combination_records';
+const MEMBER_COMBINATION_RECORDS_PATH = '/pages/activity/user_combination_records/index';
 
 export default {
   name: 'linkaddress',
@@ -744,6 +746,14 @@ export default {
                 id: STAFF_LIST_LINK_ID,
                 name: '人员列表',
                 url: STAFF_LIST_PATH
+              });
+            }
+            // “我的拼团”是系统稳定页面，直接注入装修选择器，避免每个客户库重复维护同一条 page_link 数据。
+            if (this.currenType === 'link' && !userList.some((item) => item.id === MEMBER_COMBINATION_RECORDS_LINK_ID)) {
+              userList.push({
+                id: MEMBER_COMBINATION_RECORDS_LINK_ID,
+                name: '我的拼团',
+                url: MEMBER_COMBINATION_RECORDS_PATH
               });
             }
             this.basicsList = basicsList;

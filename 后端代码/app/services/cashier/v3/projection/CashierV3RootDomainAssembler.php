@@ -150,6 +150,8 @@ class CashierV3RootDomainAssembler
                 'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
                 'experienceEnabled' => (int)sys_config('cashier_experience_switch', 1) === 1,
                 'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
+                // 计算法仅是显隐选项名称；缺失定义/null 均保持现有金额与入口。
+                'laborFeeVisible' => (int)sys_config('cashier_labor_fee_mode', 0) !== 1,
             ],
             'featurePermissions' => $features ?: new \stdClass(),
             'operationPermissions' => $operationFeatures ?: new \stdClass(),
