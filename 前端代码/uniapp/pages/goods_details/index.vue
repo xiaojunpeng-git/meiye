@@ -513,7 +513,7 @@
 									<view class="flex-col flex-center mr-38 animated relative"
 										:class="m36f2e == true ? 'bounceIn' : ''"
 										@tap="goPage(2,'/pages/order_addcart/order_addcart')"
-										v-if="diyProduct.menuList.includes(2)">
+										v-if="$memberCartEntryEnabled && diyProduct.menuList.includes(2)">
 										<text class="iconfont icon-ic_ShoppingCart fs-40"></text>
 										<text class="num-badge bg-color" v-if="parseFloat(CartCount) > 0">{{ CartCount || 0 }}</text>
 										<text class="fs-18">购物车</text>
@@ -523,7 +523,7 @@
 									<view @tap="memberPurchase" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">立即购买</view>
 								</view>
 								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx"
-									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && diyProduct.showCart">
+									v-else-if="$memberCartEntryEnabled && attr.productSelect.stock <= 0 && storeInfo.cart_button && diyProduct.showCart">
 										<!-- 无库存允许加入购物车并且可视化开启了购物车 -->
 									<view class="w-full h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="joinCart">加入购物车</view>
 									<!-- 平台没有可以从门店购买 -->
@@ -531,14 +531,14 @@
 									<view v-else class="w-full h-72 flex-center bg-hui rd-36px text--w111-fff fs-26">已售罄</view>
 								</view>
 								<view class="flex-1 flex-y-center"
-									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && !diyProduct.showCart">
+									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && (!diyProduct.showCart || !$memberCartEntryEnabled)">
 										<!-- 无库存允许加入购物车并且可视化关闭了购物车 -->
 										<!-- 平台没有可以从门店购买 -->
 									<view v-if="is_store_buy || delivery_type == 2 || delivery_type == 3" @tap="goBuy" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">门店购买</view>
 									<view v-else class="w-full h-72 flex-center bg-hui rd-36px text--w111-fff fs-26">已售罄</view>
 								</view>
 								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx"
-									v-else-if="attr.productSelect.stock >0 && storeInfo.cart_button && diyProduct.showCart">
+									v-else-if="$memberCartEntryEnabled && attr.productSelect.stock >0 && storeInfo.cart_button && diyProduct.showCart">
 									<!-- 有库存允许加入购物车并且可视化开启了购物车 -->
 									<view class="w-full h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="joinCart">加入购物车</view>
 									<view class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26"
@@ -1743,9 +1743,7 @@
 					})
 					return false
 				}
-				if((this.storeInfo.delivery_type[0] == 2 || this.storeInfo.delivery_type[0] == 3) && !uni.getStorageSync('refuseLocation')){
-					this.$refs.productWindow.showLocation();
-				}
+				// 会员直接购买仅选择门店，不再要求配送定位。
 				this.currentPage = false;
 				this.$set(this.attr, 'cartAttr', true);
 				this.$set(this, 'isOpen', true);
@@ -1789,9 +1787,7 @@
 			 * 加入购物车
 			 */
 			goCat: function(news,cartType) {
-				if((this.storeInfo.delivery_type[0] == 2 || this.storeInfo.delivery_type[0] == 3) && !uni.getStorageSync('refuseLocation')){
-				   this.$refs.productWindow.showLocation();
-				}
+				// 下单门店决定订单归属，不读取配送类型。
 				let that = this,productSelect = that.productValue[this.attrValue];
 				this.cartType = cartType;
 				//打开属性
@@ -1821,15 +1817,16 @@
 					new: news === undefined ? 0 : 1,
 					uniqueId: that.attr.productSelect !== undefined ? that.attr.productSelect.unique : '',
 					store_id: this.store_id,
-					addressId: this.addressId,
-					delivery_type: this.delivery_type,
+					addressId: 0,
+					delivery_type: 2,
 				};
 				if(that.is_store_buy || this.delivery_type == 2 || this.delivery_type == 3){
 					q.productId = that.storeInfo.id; //重新调用门店详情后的赋值id
 				} else {
 					q.productId = that.id;
 				}
-				let delivery_type = that.delivery_type
+				// 后端兼容值 2 仅表达门店归属；会员页面不显示“自提”。
+				let delivery_type = 2
 				if (that.storeInfo.product_type == 5 && !that.cardRelated.length) {
 					return that.$util.Tips({
 						title: '该商品无有效的卡项权益',
@@ -1840,7 +1837,7 @@
 						that.isOpen = false;
 						that.attr.cartAttr = false;
 						let url = '/pages/goods/order_confirm/index?new=1&cartId=' + res.data.cartId +
-									'&delivery_type=' + delivery_type + '&addressId=' + that.addressId +
+									'&delivery_type=' + delivery_type + '&addressId=0' +
 									'&store_id=' + that.store_id + '&store_name=' + that.store_name +
 									'&product_id=' + that.storeInfo.id + '&is_store=' + (that.store_id ? 1 : 0)
 						if (news) {

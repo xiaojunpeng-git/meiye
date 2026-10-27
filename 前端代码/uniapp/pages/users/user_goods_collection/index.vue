@@ -44,7 +44,7 @@
 										</view>
 									</view>
 								</view>
-								<view class="icon acea-row row-center-wrapper">
+								<view v-if="$memberCartEntryEnabled" class="icon acea-row row-center-wrapper">
 									<text class="iconfont icon-ic_ShoppingCart1"></text>
 								</view>
 							</view>

@@ -42,7 +42,8 @@
 			headerNav(){
 				let arr = [];
 				this.selectNavList.forEach((item,index)=>{
-					if(this.openNavList.includes(index)){
+				if(this.openNavList.includes(index) &&
+					(this.$memberCartEntryEnabled || item.url !== '/pages/order_addcart/order_addcart')){
 						arr.push(item);
 					}
 				})

@@ -25,7 +25,7 @@
 		<view class="store-address">
 			<view class="address acea-row row-middle">
 				<view class="name line1">{{info.name || '暂无门店'}}</view>
-				<view class="tips">本单{{info.delivery_type == 2 ? '到店核销' : '门店配送'}}</view>
+				<view class="tips">购买门店</view>
 			</view>
 			<view class="distance acea-row">
 				<text class="iconfont icon-ic_location51"></text>

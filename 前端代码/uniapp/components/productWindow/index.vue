@@ -113,7 +113,7 @@
 				v-if="iSbnt && attr.productSelect.stock>0 &&attr.productSelect.quota>0" @click="goCat">我要参团
 			</view>
 			<view class="joinBnt on"
-				v-else-if="(iSbnt && attr.productSelect.quota<=0)||(iSbnt &&attr.productSelect.product_stock<=0)">已售罄
+				v-else-if="iSbnt && (attr.productSelect.stock<=0 || attr.productSelect.quota<=0)">已售罄
 			</view>
 			<view class="joinBnt bg-color" v-if="iScart && attr.productSelect.stock" @click="goCat">确定</view>
 			<view class="joinBnt on" v-else-if="iScart && !attr.productSelect.stock">已售罄</view>
@@ -141,15 +141,11 @@
 				</view>
 			</view>
 		</view>
-		<addressWindow ref="addressWindow" :pagesUrl="pagesUrl" :fromType="1" :address="address" :zIndex="iScart?1000:990" @changeClose="changeClose" @OnChangeAddress="OnChangeAddress">
-		</addressWindow>
 	</view>
 </template>
 
 <script>
 	let windowHeight = (uni.getSystemInfoSync().windowHeight*(3/4)-238)*2;
-	import addressWindow from '@/components/addressWindow';
-	import {getAddressDefault} from '@/api/user.js'
 	import {storeListApi} from '@/api/store.js'
 	import {
 		mapGetters,
@@ -161,26 +157,6 @@
 				nearbyStore: state => state.app.nearbyStore
 			}),
 			...mapGetters(['isLogin']),
-			selfPickup(){
-				let deliveryType = this.attr.deliveryType;
-				let obj = deliveryType && deliveryType.includes('2') && this.selfStoreList.length
-				return obj
-			},
-			deliveryType(){
-				let deliveryType = this.attr.deliveryType;
-				let on = ''
-				if(deliveryType && deliveryType.includes('1') && this.selfPickup){
-					on = 'on2'
-				}else if((deliveryType && !deliveryType.includes('1') && this.selfPickup) || (deliveryType && deliveryType.includes('1') && !this.selfPickup)){
-					on = 'on3'
-				}else{
-					on = 'on1'
-				}
-				return on
-			}
-		},
-		components:{
-		  addressWindow
 		},
 		props: {
 			isStoreBuy: {
@@ -240,50 +216,35 @@
 		data() {
 			return {
 				flag:1,
-				nameInfo:'', //地址用户信息
-				addressInfo:'', // 商城快递
-				deliveryName:'', // 门店配送
+				deliveryName:'', // 当前选中门店名称
 				distance:'',
 				deliveryAddress:'',
-				address: {
-					address: false
-				},
-				pagesUrl:'',
 				user_latitude: 0,
 				user_longitude: 0,
-				isDelivery: false,
 				storeList: [],
-				deliveryStoreList: [],
-				selfStoreList: [],
 				active:0,
 				isStore: false,
 				windowHeight:windowHeight,
-				isAddress:false,
 				shopType: uni.getStorageSync('shop_operation_type'), //1：多门店+平台；2：单门店+平台；3、单门店
 				belongShow: uni.getStorageSync('belongShow'),
 				gridShow: true,
 			};
 		},
 		watch: {
-			'attr.deliveryType'(newValue, oldValue) {
-				if (JSON.stringify(newValue) != JSON.stringify(oldValue)) {
-					if (newValue.length) {
-						if(this.active<1){
-							this.getList();
-						}
-						let num = 1;
-						if(newValue[0] == 1 && this.isStoreBuy){
-							num = newValue[1];
-						}else{
-							num = newValue[0];
-						}
-						this.flag = num
-						this.$emit('deliveryFun',num);
-					}
+			productId(newValue, oldValue) {
+			// 商品 ID 就绪后读取适用门店，任何商品均不依赖配送类型。
+			if (Number(newValue) > 0 && String(newValue) !== String(oldValue)) {
+					this.getList();
 				}
+			},
+			'attr.deliveryType'(newValue, oldValue) {
+				// 老商品仍可能携带配送配置；会员端仅据此刷新适用门店，不再选履约方式。
+				if (JSON.stringify(newValue) !== JSON.stringify(oldValue) && this.active < 1) this.getList();
 			},
 			'storeId':{
 				handler(){
+					// 会员归属门店可能先于适用门店列表返回，等待列表后再选择。
+					if (!this.storeList.length) return;
 					this.defaultStore();
 					this.$emit('onstoreId',this.storeList[this.active],this.flag);
 				},
@@ -295,10 +256,6 @@
 				this.user_latitude = uni.getStorageSync('user_latitude');
 				this.user_longitude = uni.getStorageSync('user_longitude');
 			} catch (e) {}
-			uni.$off('activeAddress');
-			uni.$on('activeAddress', data => {
-				this.getAddressDefault();
-			})
 		},
 		methods: {
 			closeStore(){
@@ -317,48 +274,6 @@
 				this.distance = '距您'+item.range+'km';
 				this.isStore = false;
 				this.$emit('onstoreId',item,this.flag);
-			},
-			// 切换地址
-			OnChangeAddress: function(e,row) {
-			  this.address.address = false;
-			    this.nameInfo = row.real_name+'\xa0\xa0'+row.phone
-				this.addressInfo = row.province+'省'+row.city+row.district+row.street+row.detail
-				this.$emit('onAddressId',row)
-			},
-			// 打开地址弹窗
-			openAddress(){
-				let pagesUrl = '/pages/users/user_address/index?fromType=1';
-				if(!this.isAddress){
-					this.$refs.addressWindow.getAddressList();
-					this.address.address = true;
-					this.pagesUrl = pagesUrl
-				}else{
-					uni.navigateTo({
-						url: pagesUrl
-					});
-				}
-			},
-			// 关闭地址弹窗；
-			changeClose: function() {
-			  this.$set(this.address, 'address', false);
-			},
-			// 配送地址
-			getAddressDefault() {
-				getAddressDefault().then(res=>{
-					let data = res.data;
-					this.isAddress = Array.isArray(data);
-					if(!Array.isArray(data)){
-						this.nameInfo = data.real_name+'\xa0\xa0'+data.phone
-						this.addressInfo = data.province+'省'+data.city+data.district+data.street+data.detail
-						this.$emit('onAddressId',data)
-					}else{
-						this.addressInfo = '点击添加地址'
-					}
-				}).catch(err=>{
-				   this.$util.Tips({
-					   title: err
-				   })
-				})
 			},
 			selfLocation() {
 				let self = this
@@ -418,35 +333,13 @@
 				storeListApi(data)
 					.then(res => {
 						let list = res.data.list.list;
-						// if(!id && list.length && this.attr && (this.attr.deliveryType.indexOf('2') != -1 || this.attr.deliveryType.indexOf('3') != -1)){
-						// 	this.isDelivery = true;
-						// 	if(this.$store.getters.isLogin){
-						// 		this.getAddressDefault()
-						// 	}
-						// }
-						if(!id && list.length){
-							this.isDelivery = true;
-							if(this.$store.getters.isLogin){
-								this.getAddressDefault()
-							}
+						// 会员选择购买门店，不按商品或门店的配送配置过滤。
+						this.storeList = list;
+						// 活动商品没有适用门店时不能把空门店回传为购买门店。
+						if (!this.storeList.length) {
+							this.$emit('storeCount', 0);
+							return;
 						}
-						// selfStoreList拆分核销门店列表和deliveryStoreList配送门店列表
-						let selfStoreList = [],deliveryStoreList = [];
-						list.forEach(function(item,index){
-							// 门店配置里面 3是同城配送 2是到店自提（后端定义）1是快递发货
-							// if(item.delivery_type != 2) selfStoreList.push(item);
-							// if(item.delivery_type != 3) deliveryStoreList.push(item);
-							if (item.delivery_type.includes('2')) {
-								selfStoreList.push(item);
-							}
-							if (item.delivery_type.includes('1') || item.delivery_type.includes('3')) {
-								deliveryStoreList.push(item);
-							}
-						});
-						// 商品里面 3是门店配送 2是到店核销（后端定义）
-						this.storeList = this.flag==2?selfStoreList:this.flag==3?deliveryStoreList:list;
-						this.selfStoreList = selfStoreList;//到店核销
-						this.deliveryStoreList = deliveryStoreList;//门店配送
 						this.defaultStore();
 						this.$emit('onstoreId',this.storeList[this.active],this.flag);
 						this.$emit('storeCount',res.data.list.count);
@@ -469,23 +362,6 @@
 				this.deliveryName = this.storeList[storeIndex].name;
 				this.deliveryAddress = this.storeList[storeIndex].detailed_address+'\xa0';
 				this.distance = '距您'+this.storeList[storeIndex].range+'km';
-			},
-			// 选择配送方式
-			getstoreInfo(index) {
-				// if(index == 1 && this.isStoreBuy){
-				// 	return false
-				// }
-				if(index === '2' || index === '3'){
-					if ((!this.user_latitude || !this.user_longitude) && !uni.getStorageSync('refuseLocation')) {
-						this.selfLocation();
-					}
-				}
-				if(index === '2') this.storeList = this.selfStoreList; //到店核销
-				if(index === '3') this.storeList = this.deliveryStoreList; //门店配送
-				this.flag = index;
-				this.defaultStore();
-				this.$emit('deliveryFun',index);
-				this.$emit('onstoreId',this.storeList[this.active],index);
 			},
 			showLocation(){
 				if ((!this.user_latitude || !this.user_longitude) && !uni.getStorageSync('refuseLocation')) {

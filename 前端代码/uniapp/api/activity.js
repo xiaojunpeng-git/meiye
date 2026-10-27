@@ -41,6 +41,14 @@ export function getCombinationPink(id) {
 }
 
 /**
+ * 当前登录会员的拼团记录。
+ * 会员身份由后端令牌确定，前端不传 UID，避免越权读取其他会员数据。
+ */
+export function getMemberCombinationRecords(data) {
+	return request.get("combination/member/records", data);
+}
+
+/**
  * 拼团 取消开团
  */
 export function postCombinationRemove(data) {
