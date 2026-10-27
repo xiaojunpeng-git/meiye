@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "authenticated_browser": true,
+  "checks": {
+    "month": true,
+    "store": true,
+    "savedNotice": true,
+    "summary": true,
+    "editHidden": true,
+    "freezeHidden": true
+  }
+}

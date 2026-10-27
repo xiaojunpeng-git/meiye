@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+  "files": 9,
+  "cutover": "",
+  "mode": 0,
+  "position_model": "legacy",
+  "business_write": false,
+  "backup": "/www/backups/rh/round9-5cd3f53c3efb-20261028015959",
+  "public_status": "200",
+  "public_assets_verified": [
+    "assets/index-1b47e224.js",
+    "assets/index-553f822f.css"
+  ],
+  "business_unchanged": true,
+  "real_service_query": "PASS"
+}

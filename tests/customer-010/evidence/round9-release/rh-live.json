@@ -1,0 +1,24 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "salary": {
+    "rows": 12,
+    "export_rows": 12,
+    "source": "unified_business_facts",
+    "can_edit": true,
+    "can_freeze": true,
+    "summary_sha256": "02ba836cc3e52ad16d2b4cbe70e0aad07a02891f966ba6a218664e7b974f27f6"
+  },
+  "other_reports": {
+    "basic_employee_summary": {
+      "rows": 10,
+      "total": 10
+    },
+    "basic_cross_store_settlement": {
+      "rows": 0,
+      "total": 0
+    }
+  },
+  "remote_business_writes": 0,
+  "authenticated_http_session": false
+}
