@@ -24,7 +24,8 @@ const inventoryStatusLabels = {
 export function inventoryStatusLabel(value, fallback = '-') {
   if (value === null || value === undefined || value === '') return fallback
   const raw = String(value).trim()
-  return inventoryStatusLabels[raw.toUpperCase()] || raw
+  // 内部枚举未知时给中文提示，原状态值仍留在接口及动作判断中供追溯。
+  return inventoryStatusLabels[raw.toUpperCase()] || (/^[A-Za-z_][A-Za-z0-9_:-]*$/.test(raw) ? '未知状态' : raw)
 }
 
 export { inventoryStatusLabels }

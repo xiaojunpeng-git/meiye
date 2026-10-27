@@ -1,0 +1,14 @@
+[
+  {
+    "test": "tests/inventory/js/r38-statistics-scope-pagination.mjs",
+    "exit_code": 0,
+    "output": "PASS headquarters all/single scope, submitted filters, page 2, clamp, stale-response rejection, store isolation, empty state, return entry\n",
+    "error": ""
+  },
+  {
+    "test": "tests/inventory/js/platform-statistics-frontend-contract.mjs",
+    "exit_code": 0,
+    "output": "PASS statistics select the platform authority for platform inventory\nPASS platform statistics explicitly request the headquarters subject and selected headquarters location\nPASS expiry results render the authoritative batch balance without browser aggregation\nPASS expiry table presents current remaining stock as its own column\nINVENTORY_PLATFORM_STATISTICS_FRONTEND_RESULT passed=4 failed=0\n",
+    "error": ""
+  }
+]

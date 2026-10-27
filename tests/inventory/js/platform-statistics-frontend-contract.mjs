@@ -19,7 +19,7 @@ function check(name, condition) {
   console.log(`FAIL ${name}`)
 }
 
-const statisticsStart = source.indexOf('async function queryStatisticsPage(query)')
+const statisticsStart = source.indexOf('async function queryStatisticsPage(query, requestedPage = 1)')
 const statisticsEnd = source.indexOf('\nasync function loadDashboard()', statisticsStart)
 const statisticsSource = source.slice(statisticsStart, statisticsEnd)
 
@@ -28,7 +28,7 @@ check('statistics select the platform authority for platform inventory',
     && statisticsSource.includes('await client.unifiedOperationalQuery('))
 check('platform statistics explicitly request the headquarters subject and selected headquarters location',
   statisticsSource.includes("subject: 'HQ'")
-    && statisticsSource.includes("hq_location_id: Number(platformHqLocationId.value)"))
+    && statisticsSource.includes("hq_location_id: Number(dashboardWarehouseId.value)"))
 check('expiry results render the authoritative batch balance without browser aggregation',
   source.includes("['batch_balance_quantity', '当前剩余库存', 'decimal']")
     && statisticsSource.includes('batchAnalysis.value = { list: records')

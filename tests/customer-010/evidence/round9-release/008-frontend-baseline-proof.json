@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "differences": [],
+  "live": {
+    "public/view_cashier_v3/index.html": "5c4805698952265225184d05abb38d24a1e131e15b12c978254e5e65db17e5bc",
+    "public/view_cashier_v3/assets/index-adaa367c.js": "c163ec918ba8a4747c4d71d8a2a14a2bd8b183148dfb1774d71cde7ae17e1d51",
+    "public/view_cashier_v3/assets/index-bd1ae8c0.css": "bd1ae8c0784a1b06dd80edaee0b42e74bc85e997ee284403f5d3632f3f6e44df"
+  }
+}

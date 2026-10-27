@@ -1,0 +1,132 @@
+{
+  "base_commit": "59f7cdc82440851ddc750be363846e8b70a69964",
+  "patch_fingerprint": "3f06df7475adeccb07219935535acf4d198efdf307222c7f94e5d324f77097ea",
+  "files_sha256": {
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue": "086f5dc0001d0bb32ae3b550d8a21460abe24e4996aa8a4228073610d42afeb1",
+    "后端代码/config/payroll.php": "99e87458bf9b6b058ccbd25f4e2e882ee40fcb3e16606451d929a9b638ced19a",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php": "3f432d71c07b67e9ca194a95abac05ba8256dfe5dd958b233a061d3ef80a9114",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php": "439e0d26813584512a3542bc034983d42ab088e17a262e9cca83d312cd2ded0b",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "c5ebd758c4367b6d649c621d11efc9bb4b069a1cf6bef48b230201fefec712f1",
+    "后端代码/app/services/report/BasicSalaryManualServices.php": "2fabbc4d57a53f8300b14dc1c9d725a9ec0a5e2b6a33b8d8ffc51a67d62e83d8",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "999a85de09d78304bf7e48bee01146e94ecc9d6e24b97c410ae996d3f1a024c6",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php": "bff28028cb931899fd74f6d5aa55335fd51a92daba0246e907a45b86164d48af",
+    "scripts/payroll/round9_test_runtime.py": "2a8fa4302a739830c2257642cd27e23a7aa75baf214e27e820ea4512eb2a4494",
+    "scripts/payroll/run-round9-cutover-tests.py": "bb35e9d7f29069bfaf3cbf5b0059b12761d8c8c69132e9dfe12b88e450e5cc2f",
+    "tests/customer-010/round9-salary-cutover.php": "4663cb1f579c35e0b01a7f7a34cdec9d30a1790fc0c011362311b0efe98ba8c8",
+    "tests/customer-010/round9-salary-browser.mjs": "79e608713443d3ddcffc2e01a39b85ac8ffe8d5eddd51496e6866a882bc2cbf9",
+    "前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue": "1193eaf8bc6d7af8274a1d47bbffcfdccc742e5854ea23d8731e8f97e19b71b4",
+    "前端代码/cashier-v3/src/views/ProductDashboardView.vue": "53495a197cbf7197a52fa4cc024cab19c229867b6677b6d9e8fe8b90b8c7b460",
+    "前端代码/inventory-vue3/src/App.vue": "5e514e10e8228fbce9c9697b36a64944c3a53a30987fc5030bae246782e367e6",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue": "5bbd5bd5bfc542d7c26ebd2b562e99fb4fa134134ed686fdb5ca380002bc2eff",
+    "前端代码/inventory-vue3/src/services/inventoryApi.js": "d45bbf09884a9a04eb6fb9f544c268078d073fdcaa9f95c0d2685ba206a4e166",
+    "前端代码/inventory-vue3/src/statusLabels.js": "94ff298f042ef0b3f4e70d080d1a7e9a6835a1518fe1914d901ccb99436f7c74",
+    "前端代码/inventory-vue3/src/styles.css": "c032c5016b803505d7a864ca752be3d22e73693a38900fcc8223f0b260871a12"
+  },
+  "business_change": "本轮R9工资来源切换代码与已验收候选逐字一致",
+  "preserved_baseline": "从既有已验收625a0280/b1cd302c源码补齐7个R38前端文件；不是本轮新增业务",
+  "frontend_baseline_reproduction": {
+    "rh": "PASS",
+    "008": "PASS",
+    "010": "PASS"
+  },
+  "real_database_readonly_candidate_parity": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "store_id": 1,
+      "checks": [
+        {
+          "month": "2026-09",
+          "rows": 12,
+          "same_snapshot": true,
+          "sha256": "862136b8f064450109e11ce45ec0981b45e6c9e55b452fe7493563ce99613d67"
+        },
+        {
+          "month": "2026-10",
+          "rows": 12,
+          "same_snapshot": true,
+          "sha256": "f46066a07008ed9cbc210888c38daebbc39db337c69a22df92698454bea6008b"
+        }
+      ],
+      "remote_writes": 0,
+      "configuration_file_changed": false
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "store_id": 108,
+      "checks": [
+        {
+          "month": "2026-09",
+          "rows": 6,
+          "same_snapshot": true,
+          "sha256": "d4b56b5fc0bb3cbc9283a4737e29d92c05cb4904715deccf77dd5aa31ec5de00"
+        },
+        {
+          "month": "2026-10",
+          "rows": 6,
+          "same_snapshot": true,
+          "sha256": "5a5287da3e833102d0a6de4820674c21ac2b1e612e2fd71506b9179161b51a05"
+        }
+      ],
+      "remote_writes": 0,
+      "configuration_file_changed": false
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "store_id": 1,
+      "checks": [
+        {
+          "month": "2026-11",
+          "rows": 12,
+          "same_snapshot": true,
+          "sha256": "ddf8a96b0be1a67f656138a7f6d500c360de7379a656828fe21be4d2967f9075"
+        },
+        {
+          "month": "2026-09",
+          "rows": 9,
+          "payable": 27752,
+          "actual": 27752,
+          "historical_readonly": true
+        }
+      ],
+      "remote_writes": 0,
+      "configuration_file_changed": false
+    }
+  },
+  "selftest": "316项本地后端检查、5项真实Vue页面验证、R38仓库继承/单位/返回/分页回归及基线/候选构建通过",
+  "candidate_build": "candidate-build.json",
+  "deployment_plan": {
+    "order": [
+      "rh deploy and verify",
+      "push origin 010/basic-report-menu",
+      "008 deploy and verify",
+      "010 deploy and verify"
+    ],
+    "source": "same unified worktree fixed source",
+    "rh": {
+      "realtime_start_date": "keep blank",
+      "MetricReadTransaction.php": "preserve current live file"
+    },
+    "008": {
+      "realtime_start_date": "keep blank",
+      "MetricReadTransaction.php": "preserve current live R57 file; candidate salary uses same one-argument API, avoids enabling unrelated reader mode"
+    },
+    "010": {
+      "realtime_start_date": "2026-11-01",
+      "MetricReadTransaction.php": "deploy accepted R9 extended readonly-table method"
+    },
+    "migrations": null,
+    "data_import": false,
+    "business_rows_rewritten": false,
+    "mobile_upload": false
+  },
+  "gates": {
+    "pm_supplement_required": "AGENTS 跨任务已上线功能防回退最高规则第5项：合并保留全部已上线功能，重新构建、回归，并就发生实质变化的候选取得产品经理补验",
+    "supplement_accepted": false,
+    "deployed_sites": [],
+    "push": false
+  },
+  "remote_operations_so_far": "只读文件指纹、数据库身份与同事务候选比较；未写配置、业务表或线上代码"
+}
