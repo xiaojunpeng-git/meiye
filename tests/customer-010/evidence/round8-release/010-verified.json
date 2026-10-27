@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "source_commit": "872b22e34fa73973be6cb39d81ab5d97cf3a1899",
+  "files": 49,
+  "database_write": false,
+  "backup": "/www/backups/010/round8-872b22e34fa7-20261027224735",
+  "mode": 1,
+  "position_model": "independent",
+  "existing_business_unchanged": true,
+  "public_assets_verified": [
+    "assets/uni.ff98ee44.css",
+    "assets/index-hQROm1TD.js",
+    "assets/index-CQXQ6p9m.css"
+  ],
+  "real_mobile_projection": "PASS"
+}

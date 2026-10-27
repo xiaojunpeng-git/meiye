@@ -3,7 +3,10 @@ const fs=require('fs'),path=require('path');
 const input=process.env.PAYROLL_MINI_INPUT,appid=process.env.PAYROLL_MINI_APPID;
 if(!input||!['wx29d9b63c92555701','wx14666197911d052b','wxd92c6d010bd6bf01'].includes(appid))throw Error('Explicit approved merchant identity required');
 const target=path.join(input,'manifest.json'),read=fs.readFileSync.bind(fs),manifest=JSON.parse(read(target,'utf8'));
-manifest['mp-weixin'].appid=appid;manifest.versionName='0.66.0';manifest.versionCode='66';
+// 历史构建保持原默认版本；新发布须显式传入版本及整数版本码。
+const version=process.env.PAYROLL_MINI_VERSION||'0.66.0',code=process.env.PAYROLL_MINI_VERSION_CODE||'66';
+if(!/^\d+\.\d+\.\d+$/.test(version)||!/^\d+$/.test(code))throw Error('Invalid explicit mini version');
+manifest['mp-weixin'].appid=appid;manifest.versionName=version;manifest.versionCode=code;
 const bytes=Buffer.from(JSON.stringify(manifest));const match=f=>typeof f==='string'&&path.resolve(f)===target;
 const convert=o=>(typeof o==='string'||o?.encoding)?bytes.toString(typeof o==='string'?o:o.encoding):Buffer.from(bytes);
 fs.readFileSync=(f,o)=>match(f)?convert(o):read(f,o);

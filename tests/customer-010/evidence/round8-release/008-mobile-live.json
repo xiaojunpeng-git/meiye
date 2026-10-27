@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "phase": "live",
+  "authenticated_http_session": false,
+  "real_scope_resolver": true,
+  "persistent_business_writes": false,
+  "checks": [
+    {
+      "detail_mode": "labor",
+      "algorithm": "existing",
+      "rows": 2,
+      "total": 2,
+      "existing_projection_sha256": "6147197869d9df6ea40970ac6509ec58d14199eeb3d1e37cf19e85bf4335ece0",
+      "project_values_sha256": "fb233926a7e7bfa21b5bb1a6d1f789cd3f67a5a67c1e8605f1f372a0c0c7bd82"
+    },
+    {
+      "detail_mode": "cash",
+      "algorithm": "existing",
+      "rows": 0,
+      "total": 0,
+      "existing_projection_sha256": "a9fa157a8c2a924f3d17b6bfded53794df77898bae283041f08cb30a2619f4f2",
+      "project_values_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}
