@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "businessWrites": 0,
+  "currentNonrootRole": true,
+  "originalSchemaMarker": "<id>",
+  "read": true,
+  "stores": 130,
+  "create": true,
+  "edit": true,
+  "ungrantedDeletionStillDenied": true
+}

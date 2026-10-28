@@ -28,6 +28,8 @@ class PlatformMemberScopeServices
             $method = ['read' => 'get', 'create' => 'post', 'edit' => 'put', 'deactivate' => 'delete'][$key];
             foreach ($rules as $rule) {
                 $path = trim(strtolower((string)($rule['api_url'] ?? '')), '/');
+                // 权限正本历史使用 <id>，路由定义使用 :id；统一同一参数占位符，不接受额外资源前缀。
+                $path = str_replace('<id>', ':id', $path);
                 // 仅资源本身授权生效，不能把 user/user_label 或调店等旁路接口当作会员编辑权。
                 $paths = $key === 'read' ? ['user/user'] : ($key === 'create' ? ['user/user', 'user/user/save'] : ['user/user/:id']);
                 if (in_array($path, $paths, true) && strtolower((string)($rule['methods'] ?? '')) === $method) $grants[$key] = true;

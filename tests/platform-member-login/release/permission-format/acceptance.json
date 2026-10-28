@@ -1,0 +1,6 @@
+{
+  "answer": "确认兼容补丁，继续执行",
+  "date": "2026-10-28",
+  "patchSHA256": "08255dcb17fe6455d52994a190b3886403ea7d123e6c6666bbf23a8b357ca987",
+  "scope": "one PHP file, preserve existing permission semantics; RH ->push->008->010"
+}
