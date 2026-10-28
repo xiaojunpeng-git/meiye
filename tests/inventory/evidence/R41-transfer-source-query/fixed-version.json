@@ -1,0 +1,27 @@
+{
+  "head": "038ccffa5c6ad6112858ac23a132450a6e498fe2",
+  "files": {
+    "前端代码/inventory-vue3/src/App.vue": "6fc47c7dcb1114162dd71157c6ea4bd06bec548d643ef2fa86d06b2e00969737",
+    "前端代码/inventory-vue3/src/transferQueryScope.js": "e5a75290bf0a0d0bfeb6b493c3bbc74f41159e5928eac1d4b4d16bb857d67d37",
+    "tests/inventory/js/r41-transfer-source-query.mjs": "3c3eb16068d6d8d2944fe26003df896c4e0f4a7eedefd786962e24679343efcc"
+  },
+  "frontend": [
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/inventory-vue3/src/transferQueryScope.js"
+  ],
+  "backend": [],
+  "migrations": [],
+  "tests": [
+    "tests/inventory/js/r41-transfer-source-query.mjs"
+  ],
+  "build": "PASS inventory dev-source Vite build /tmp/r41-inventory-build, mohe-inventory-v3-src; not an 8080 release package",
+  "behavioralTest": "PASS actual App loadCurrentList + onModalSaved executed in isolated VM with directory refresh to old HQ; draft returned under selected source",
+  "apiTest": "PASS final query params, source switching, destination independence and pagination snapshot",
+  "existingTestLimitation": "cross-transfer-draft-edit-contract.mjs has one pre-existing regex failure for target selector disabling in unchanged InventoryBusinessModal.vue; 7 other assertions pass. Not modified by R41.",
+  "pageVerification": "Pending: local admin 18081 uses platform backend18093 but inventory18086 uses cashier backend18092; after user login iframe request invalidates session. No environment changes made.",
+  "onlineStatus": "not deployed; DB2610280004 and source query read-only diagnosis confirmed; no DB writes",
+  "comments": [
+    "transferQueryScope.js scope/permission/receiver boundary",
+    "App.vue save-refresh hidden-warehouse reason"
+  ]
+}

@@ -34,7 +34,10 @@ const editor = new Editor({ propsData: {
       { id: 2142, title: 'Finance', children: [{ id: 2143, title: 'Ledger' }] },
       { id: 2000, title: 'Targets', children: [{ id: 2001, title: 'Analysis' }, { id: 2531, title: 'Schemes' }] },
     ] }],
-    store_v3_menus: [{ id: 7, title: 'Store' }], mobile_menus: [],
+    store_v3_menus: [
+      { id: -2803, title: '财务管理', grantable: false, children: [] },
+      { id: 7, title: 'Store' },
+    ], mobile_menus: [],
   },
 } });
 const tick = async () => { for (let i = 0; i < 5; i++) await Vue.nextTick(); };
@@ -63,6 +66,7 @@ tree.handleCheck({ nodeKey: tree.flatState.find(x => x.node.id === 2142).node.no
 await tick();
 assert.deepEqual(rules(), [1986, 2000, 2001, 2142, 2143]);
 assert.equal(editor.getRules().store_v3[0], 7);
+assert.deepEqual(editor.trees.store_v3.map((node) => node.id), [7]);
 assert.ok(!rules().includes(2531));
 
 // Clearing a searched subtree keeps the unrelated granted target leaf.
@@ -80,4 +84,4 @@ await tick();
 assert.deepEqual(rules(), []);
 editor.$destroy();
 dom.window.close();
-console.log('PASS real iView hydration, exact saved IDs, partial directories, search, explicit cascade, hidden grants, channel isolation, select/clear all');
+console.log('PASS real iView hydration, retired empty store group removal, exact saved IDs, partial directories, search, explicit cascade, hidden grants, channel isolation, select/clear all');

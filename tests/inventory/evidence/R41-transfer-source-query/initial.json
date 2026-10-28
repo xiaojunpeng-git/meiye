@@ -1,0 +1,18 @@
+{
+  "head": "038ccffa5c6ad6112858ac23a132450a6e498fe2",
+  "source": "前端代码/inventory-vue3/src/App.vue",
+  "beforeSHA256": "5e514e10e8228fbce9c9697b36a64944c3a53a30987fc5030bae246782e367e6",
+  "existingWorktreeDiffAgainstHEAD": "",
+  "stagedAndUnstagedPreserved": true,
+  "remoteScope": "rh read-only diagnosis; no deployment authorized",
+  "confirmedDocument": {
+    "no": "DB2610280004",
+    "status": "DRAFT",
+    "business_date": "2026-10-28",
+    "from_location_id": 129
+  },
+  "reproduction": {
+    "hq128_from129": 0,
+    "hq129_from129": 1
+  }
+}

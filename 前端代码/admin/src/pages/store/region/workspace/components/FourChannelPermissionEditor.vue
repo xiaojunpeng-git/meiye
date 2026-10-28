@@ -100,6 +100,14 @@ function cloneMenus(list) {
   return JSON.parse(JSON.stringify(list || []));
 }
 
+/**
+ * -2803 是历史空“财务管理”展示分组，从未承载可授权能力。
+ * 岗位编辑器只移除该稳定虚拟编号，不按文案猜测，也不改动任何正编号岗位授权。
+ */
+function withoutRetiredStorePermissionGroups(list) {
+  return (list || []).filter((node) => Number(node && node.id) !== -2803);
+}
+
 function setExpand(nodes, expand) {
   (nodes || []).forEach((n) => {
     n.expand = !!expand;
@@ -359,7 +367,9 @@ export default {
     cloneChannelMenus(key, menus) {
       const m = menus || this.menus || {};
       if (key === 'platform') return cloneMenus(m.platform_menus || m.platform || []);
-      if (key === 'store_v3') return cloneMenus(m.store_v3_menus || m.store_v3 || []);
+      if (key === 'store_v3') {
+        return cloneMenus(withoutRetiredStorePermissionGroups(m.store_v3_menus || m.store_v3 || []));
+      }
       // 手机端岗位权限必须由后端返回当前 Vue 3 商家端能力目录。
       // 不回退旧 mall_menus，避免旧菜单重新出现在岗位“全选”里。
       return cloneMenus(m.mobile_menus || []);
