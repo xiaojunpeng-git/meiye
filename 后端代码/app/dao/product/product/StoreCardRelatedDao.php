@@ -66,6 +66,13 @@ class StoreCardRelatedDao extends BaseDao
             })->select()->toArray();
     }
 
+    /** 编辑卡项时读取完整配置，包括因项目下架停用的关联；销售查询仍只读取启用关联。 */
+    public function getListForCardEdit(int $cardProductId): array
+    {
+        return parent::search(['card_product_id' => $cardProductId])
+            ->with(['productInfo', 'attrInfo'])->select()->toArray();
+    }
+
     /**
      * 设置
      * @param array $ids

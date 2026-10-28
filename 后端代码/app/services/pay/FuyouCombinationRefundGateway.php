@@ -56,8 +56,18 @@ class FuyouCombinationRefundGateway extends HwcPayService
                 $state = 'confirmed';
             } elseif (($response['trans_stat'] ?? '') === 'PAYERROR') $state = 'failed';
         }
+        // Only a verified, known code becomes an operator hint. It never changes refund state
+        // or releases rights: the provider's 1051 terminal semantics remain unconfirmed.
+        $channelHint = '';
+        if ($state === 'pending') {
+            $code = (string)($response['result_code'] ?? '');
+            if ($code === '1051') $channelHint = '富友反馈余额不足，请核对退款账户余额并联系富友确认原退款状态，勿重复退款';
+            elseif ($code === '000000') $channelHint = '富友反馈退款处理中，请稍后查询，勿重复退款';
+            else $channelHint = '富友暂未确认退款结果，请联系富友核对原退款单，勿重复退款';
+        }
         return ['state' => $state, 'channel_refund_id' => (string)($response['refund_id'] ?? ''),
-            'fuyou_refund_trace_no' => (string)($response['reserved_fy_trace_no'] ?? '')];
+            'fuyou_refund_trace_no' => (string)($response['reserved_fy_trace_no'] ?? ''),
+            'channel_hint' => $channelHint];
     }
 
     /** Merchant affinity is persisted; a later settings change may not reroute old money. */
