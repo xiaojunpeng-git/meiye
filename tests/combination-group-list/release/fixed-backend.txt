@@ -1,0 +1,30 @@
+PASS group grain page one has 20 of 25
+PASS page two keeps complete filtered count
+PASS stable group IDs do not overlap pages
+PASS removed member number is absent while imported identity is retained
+PASS original item, group name and expiry snapshots visible
+PASS self-registered H5 source is proven from creation evidence, not current spending status
+PASS export covers all matching groups with member-number column removed
+PASS no employee scope cannot expand to all stores
+PASS store filtering is authoritative and narrows count with rows
+PASS keyword empty result is an explicit zero
+PASS malformed narrowing is rejected, never broadened
+PASS opening-time filter executes in SQL
+PASS actual filtered MySQL query has an executable plan
+PASS one used member prevents EVERY channel request
+PASS failed whole preflight rolls back earlier member receipts
+PASS failed whole preflight restores both order eligibility states
+PASS leader-store access cannot refund an unauthorized member store
+PASS all real orders frozen before first channel application
+PASS mixed success and pending are never reported as whole success
+PASS virtual seats are excluded from refund money
+PASS query closes the remaining original receipt
+PASS query and replay never apply a second channel refund
+PASS whole success replay is idempotent
+PASS all real original rights revoked through terminal refund
+PASS query cannot start an unrequested refund
+PASS all real orders frozen before first channel application
+PASS signed definitive failure remains separate from succeeded member
+PASS all real orders frozen before first channel application
+PASS explicit retry only replaces definitively failed receipt, preserving prior success
+COMBINATION_GROUP_LIST_BACKEND_PASS

@@ -1,0 +1,40 @@
+{
+  "site": "rh",
+  "commit": "625a0280d01af6adbc2f0348e5cb9cb860d8d1cc",
+  "sourceTree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+  "releaseScriptSHA256": "de2bfa67f0670c0a39bae0e315b0e81192a82d00600f4ae8457844f42a98a8e1",
+  "installerSHA256": "0248ee1af8f2a06e270c12cf304bf66f18654e3caaca97b545cf8ddb1d6fed0c",
+  "targets": {
+    "app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php": {
+      "before": "fefed831670225e3e5c8b710d4ca39fa5d3eb588ee18df29f7aa38bb70798621",
+      "after": "04ddb1560a598170aa8f2fe312d6457a2927e60ec792dd63dd4644b3eb9725c3"
+    },
+    "public/view_cashier_v3/assets/index-adaa367c.js": {
+      "before": null,
+      "after": "c163ec918ba8a4747c4d71d8a2a14a2bd8b183148dfb1774d71cde7ae17e1d51"
+    },
+    "public/view_cashier_v3/assets/index-bd1ae8c0.css": {
+      "before": null,
+      "after": "bd1ae8c0784a1b06dd80edaee0b42e74bc85e997ee284403f5d3632f3f6e44df"
+    },
+    "public/view_inventory_v3/assets/index-28787f85.js": {
+      "before": null,
+      "after": "b8e03a1dd92f18ef3aed20029aa68d47e8910b0d89ed93b27efcbb689327102a"
+    },
+    "public/view_inventory_v3/assets/index-386008fe.css": {
+      "before": null,
+      "after": "386008fe6e9ed957916ca79eb4fdbcd81c777d84118b612280f0dd456e896595"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "5e05e5738a863ce8f81e3c0187672e31986aaf1837185b98641a69f56f605fce",
+      "after": "5c4805698952265225184d05abb38d24a1e131e15b12c978254e5e65db17e5bc"
+    },
+    "public/view_inventory_v3/index.html": {
+      "before": "34ac7e096da3ec8f6e438de690e178058598bc21f24fc28af0cb53b1d7bbcac1",
+      "after": "0d053ba0e8eed169013855dfd6ded2af8cda49e7fbd0384322a02a35abe5f729"
+    }
+  },
+  "noDBWrites": true,
+  "attempt": 1,
+  "backup": "/www/backups/rh/r38-inventory-625a0280"
+}

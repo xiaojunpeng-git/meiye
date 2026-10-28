@@ -1,0 +1,11 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "sharedIndexSHA256": "6e9f50ecfd17740bd0140554d441786eb0f392ac19ebbf81d1b3f93100b27bcf",
+  "acceptedPriorRelease": "12ba0fd27d218d21d3db3ae71f7d20b06682faaa",
+  "files": {
+    "后端代码/app/services/activity/combination/CombinationGroupListServices.php": "c4a4e501193739dd1654bb26c0a5989a8a538defdeacb0c387c7bb35b935d561",
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue": "c583dc3d348fe229c641c6354b99dfe9c0c759358aa93428b4e28f05cf05f530"
+  },
+  "remote": "不适用：仅本地开发与验收",
+  "scope": "搜索团长或真实团员姓名/昵称及手机号，按团返回；保留门店权限与导出口径"
+}

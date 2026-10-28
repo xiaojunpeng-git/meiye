@@ -20,7 +20,7 @@
 							<text class="px-8 fs-22 SemiBold">¥{{item.vip_price}}</text>
 						</view>
 					</view>
-					<template v-if="item.stock>0">
+					<template v-if="$memberCartEntryEnabled && item.stock>0">
 						<view class="btn-box"
 							v-if="(item.activity && (item.activity.type === '1' || item.activity.type === '2' || item.activity.type === '3')) || item.product_type!=0 || item.custom_form.length || item.is_presale_product">
 							<text class="iconfont icon-ic_ShoppingCart1"></text>
@@ -57,7 +57,8 @@
 							</template>
 						</template>
 					</template>
-					<view class="bnt acea-row row-center-wrapper end" v-else>已售罄</view>
+					<view class="bnt acea-row row-center-wrapper end" v-else-if="item.stock<=0">已售罄</view>
+					<view class="bnt acea-row row-center-wrapper" v-else>查看</view>
 				</view>
 			</view>
 		</view>

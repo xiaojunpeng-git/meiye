@@ -58,7 +58,7 @@ class StorePinkServices extends BaseServices
         $list = $this->dao->getList($where, $page, $limit);
         $time = time();
         foreach ($list as &$item) {
-            $item['count_people'] = $this->dao->count(['k_id' => $item['id']]) + 1;
+            $item['count_people'] = $this->dao->count(['k_id' => $item['id'], 'is_refund' => 0]) + ((int)$item['is_refund'] === 0 ? 1 : 0);
             //状态为进行中，实际已经结束的
             if ($item['status'] == 1 && $item['stop_time'] < $time) {
                 $item['status'] = $item['count_people'] >= $item['people'] ? 2 : 3;
@@ -77,7 +77,7 @@ class StorePinkServices extends BaseServices
     public function getStatistics()
     {
         $res = [
-            ['col' => 6, 'count' => $this->dao->count(), 'name' => '参与人数(人)', 'className' => 'ios-speedometer-outline'],
+            ['col' => 6, 'count' => $this->dao->getCount([['uid', '>', 0]]), 'name' => '参与人数(人)', 'className' => 'ios-speedometer-outline'],
             ['col' => 6, 'count' => $this->dao->count(['k_id' => 0, 'status' => 2]), 'name' => '成团数量(个)', 'className' => 'md-rose'],
         ];
         return compact('res');
@@ -90,7 +90,7 @@ class StorePinkServices extends BaseServices
      */
     public function getPinkMember(int $id)
     {
-        return $this->dao->getList(['k_id' => $id]);
+        return (new CombinationRecordServices())->rows($id);
     }
 
     /**
@@ -100,40 +100,34 @@ class StorePinkServices extends BaseServices
      */
     public function setRefundPink($order)
     {
-        $res = true;
-        if ($order['pink_id']) {
-            $id = $order['pink_id'];
-        } else {
+        // Use the participant's order identity, not uid: the same member can join different groups.
+        $row = $this->dao->getOne(['order_id_key' => (int)$order['id']]);
+        if (!$row || (int)$row['is_refund'] !== 0) return true;
+        $id = (int)$row['id'];
+        if ((int)$row['status'] === 2) {
+            // A completed group remains completed for everyone else, including its leader.
+            $this->dao->update($id, ['is_refund' => 1]);
             return true;
         }
-        //正在拼团 团长
-        $count = $this->dao->getOne(['id' => $id, 'uid' => $order['uid']]);
-        //正在拼团 团员
-        $countY = $this->dao->getOne(['k_id' => $id, 'uid' => $order['uid']]);
-        if (!$count && !$countY) {
-            return $res;
-        }
-        if ($count) {//团长
-            //判断团内是否还有其他人  如果有  团长为第二个进团的人
-            $kCount = $this->dao->getPinking(['k_id' => $id]);
-            if ($kCount) {
-                $res11 = $this->dao->update($id, ['k_id' => $kCount['id']], 'k_id');
-                $res12 = $this->dao->update($kCount['id'], ['stop_time' => $count['add_time'] + 86400]);
-                $res1 = $res11 && $res12;
-                $res2 = $this->dao->update($id, ['stop_time' => time() - 1, 'is_refund' => $kCount['id']]);
-            } else {
-                $res1 = true;
-                $res2 = $this->dao->update($id, ['stop_time' => time() - 1, 'is_refund' => $id, 'status' => 3]);
+        $root = (int)$row['k_id'] ?: $id;
+        if ((int)$row['k_id'] === 0) {
+            $next = $this->dao->getOne(['k_id' => $id, 'is_refund' => 0]);
+            if ($next) {
+                $nextId = (int)$next['id'];
+                $this->dao->update(['k_id' => $id], ['k_id' => $nextId]);
+                $this->dao->update($nextId, ['k_id' => 0, 'stop_time' => (int)$row['stop_time']]);
+                $origin = \think\facade\Db::name('combination_group_origin')->where('group_id', $id)->find();
+                if ($origin && !\think\facade\Db::name('combination_group_origin')->where('group_id', $nextId)->count()) {
+                    $origin['group_id'] = $nextId;
+                    \think\facade\Db::name('combination_group_origin')->insert($origin);
+                }
+                $this->dao->update($id, ['k_id' => $nextId]);
+                \think\facade\Db::name('store_order')->where('pink_id', $root)->update(['pink_id' => $nextId]);
             }
-            //修改结束时间为前一秒
-            $res = $res1 && $res2;
-        } else if ($countY) {//团员
-            $res = $this->dao->update($countY['id'], ['stop_time' => time() - 1, 'is_refund' => $id, 'status' => 3]);
         }
-        if ($res) {
-            CacheService::setStock(md5((string)$id), 1, 3, false);
-        }
-        return $res;
+        $this->dao->update($id, ['is_refund' => 1, 'status' => 3]);
+        CacheService::setStock(md5((string)$root), 1, 3, false);
+        return true;
     }
 
     /**
@@ -210,6 +204,10 @@ class StorePinkServices extends BaseServices
 		$pinkAll = $this->dao->getPinkUserList(['k_id' => $pinkT['id'], 'is_refund' => 0]);
         $count = count($pinkAll) + 1;
         $count = $pinkT['people'] - $count;
+        $pinkAll = array_values(array_filter($pinkAll, static function ($row) {
+            return (int)\think\facade\Db::name('store_order')->where('id', (int)$row['order_id_key'])->value('refund_status') === 0;
+        }));
+        $count = (int)$pinkT['people'] - count($pinkAll) - 1;
 		//收集拼团用户id和拼团id
 		$idAll = $uidAll = [];
 		if ($pinkAll) {
@@ -243,47 +241,11 @@ class StorePinkServices extends BaseServices
 				/** @var StoreOrderServices $orderService */
 				$orderService = app()->make(StoreOrderServices::class);
                 $orders = $orderService->getColumn([['id', 'in', $oids]], '*', 'id');
-                $refundData = [
-                    'refund_reason' => '拼团时间超时',
-                    'refund_explain' => '拼团时间超时',
-                    'refund_img' => json_encode([]),
-                ];
-				/** @var StoreOrderRefundServices $orderRefundService */
-				$orderRefundService = app()->make(StoreOrderRefundServices::class);
-                $refundeOrder = $orderRefundService->getColumn([
-                    ['store_order_id', 'IN', $oids],
-                    ['refund_type', 'in', [0, 1, 2, 4, 5]],
-                    ['is_cancel', '=', 0],
-                    ['is_del', '=', 0]
-                ], 'id,store_order_id', 'store_order_id');
                 foreach ($pinkAll as $v) {
-                    if (isset($orders[$v['order_id_key']]) && $order = $orders[$v['order_id_key']]) {
-                        if (in_array($v['order_id_key'], $refundeOrder)) {
-                            continue;
-                        }
-                        $res1 = $res2 = true;
-                        try {
-							//申请退款
-                            $refundId = $orderRefundService->applyRefund((int)$order['id'], (int)$order['uid'], $order, [], 1, (float)$order['pay_price'], $refundData);
-							if ($refundId) {//申请退款成功，自动退款
-								$refund_data = ['pay_price' => $order['pay_price'], 'refund_price' => $order['pay_price']];
-								$res1 = $orderRefundService->agreeRefund((int)$refundId, $refund_data);
-								//修改退款单状态
-								$res1 = $res1 && $orderRefundService->update((int)$refundId, ['refund_type' => 6, 'refunded_price' => $order['pay_price'], 'refunded_time' => time()]);
-								//修改订单状态
-								$res1 = $res1 && $orderService->update((int)$order['id'], ['refund_status' => 2, 'refund_type' => 6]);
-							}
-                        } catch (\Throwable $e) {
-							$res1 = false;
-                        }
-                        $res2 = $this->dao->getCount([['uid', '=', $v['uid']], ['is_tpl', '=', 0], ['k_id|id', '=', $pinkT['id']]]);
-                        if ($res1 && $res2) {
-                            if ($isIds) array_push($pinkIds, $v['id']);
-                            $this->orderPinkAfterNo($pinkT['uid'], $pinkT['id'], false, $orders[$v['order_id_key']]['is_channel']);
-                        } else {
-                            if ($isRunErr) return $pinkBool;
-                        }
-                    }
+                    if (!isset($orders[$v['order_id_key']])) continue;
+                    $result = (new CombinationRefundServices())->refundOrder((int)$v['order_id_key'], '拼团时间超时', 0, false);
+                    // An accepted external application is not success. Recovery continues querying the same receipt.
+                    if ($result['state'] === 'success' && $isIds) $pinkIds[] = $v['id'];
                 }
             }
             if ($isIds) return $pinkIds;
@@ -355,7 +317,9 @@ class StorePinkServices extends BaseServices
     {
         $pinkBool = 6;
         try {
-            if (!$this->dao->getCount([['id', 'in', $idAll], ['is_refund', '=', 1]])) {
+            $orderIds = $this->dao->getColumn([['id', 'in', $idAll]], 'order_id_key');
+            if (\think\facade\Db::name('store_order')->whereIn('id', $orderIds)->where('refund_status', '<>', 0)->count()) return $pinkBool;
+            if (!$this->dao->getCount([['id', 'in', $idAll], ['is_refund', '<>', 0]])) {
                 $this->dao->update([['id', 'in', $idAll]], ['stop_time' => time(), 'status' => 2]);
                 if (in_array($uid, $uidAll)) {
                     if ($this->dao->getCount([['uid', 'in', $uidAll], ['is_tpl', '=', 0], ['k_id|id', '=', $pinkT['id']]]))
@@ -398,7 +362,9 @@ class StorePinkServices extends BaseServices
         $storeOrder=StoreOrder::whereIn('order_id',$order_ids)->select();
         foreach ($storeOrder as $k=>$v){
             $order_channels[$v['order_id']]=$v['is_channel'];
-            $storeOrderCreateServices->changeOrder($v['product_type'],$v['id']);
+            $fulfillment = new CombinationFulfillmentServices();
+            if ($fulfillment->managed((int)$v['id'])) $fulfillment->issue((int)$v['id']);
+            else $storeOrderCreateServices->changeOrder($v['product_type'],$v['id']);
         }
         if (!$pinkList) return false;
         foreach ($pinkList as $item) {
@@ -421,6 +387,34 @@ class StorePinkServices extends BaseServices
      * @return mixed
      */
     public function createPink(array $orderInfo)
+    {
+        $late = false;
+        $result = \think\facade\Db::transaction(function () use ($orderInfo, &$late) {
+            $order = \think\facade\Db::name('store_order')->where('id', (int)$orderInfo['id'])->lock(true)->find();
+            if (!$order || !(int)$order['paid'] || (int)$order['refund_status'] !== 0) return false;
+            if ($this->dao->getOne(['order_id_key' => (int)$orderInfo['id']])) return true;
+            if ((int)$order['pink_id'] > 0) {
+                $root = \think\facade\Db::name('store_pink')->where('id', (int)$order['pink_id'])->lock(true)->find();
+                if (!$root || (int)$root['status'] !== 1 || (int)$root['is_refund'] !== 0 || (int)$root['stop_time'] < time()) {
+                    $late = true;
+                    // Keep late payment auditable; recovery refunds this order, never issues free rights.
+                    $this->dao->save(['uid' => $order['uid'], 'nickname' => '', 'avatar' => '',
+                        'order_id' => $order['order_id'], 'order_id_key' => $order['id'],
+                        'total_num' => $order['total_num'], 'total_price' => $order['pay_price'],
+                        'k_id' => $order['pink_id'], 'cid' => $order['activity_id'],
+                        'pid' => 0, 'people' => 0, 'price' => $order['pay_price'],
+                        'stop_time' => time(), 'add_time' => time(), 'status' => 3]);
+                    return false;
+                }
+            }
+            return $this->createPinkLocked($orderInfo);
+        });
+        if ($late) (new CombinationRefundServices())->refundOrder((int)$orderInfo['id'], '支付完成时拼团已结束', 0, false);
+        return $result;
+    }
+
+    /** Root/order locks serialize payment callback replay and concurrent final participants. */
+    private function createPinkLocked(array $orderInfo)
     {
         /** @var StoreCombinationServices $services */
         $services = app()->make(StoreCombinationServices::class);
@@ -486,6 +480,9 @@ class StorePinkServices extends BaseServices
                 $pink['stop_time'] = time() + $product->effective_time * 3600;//结束时间
                 $pink['add_time'] = time();//开团时间
                 $res1 = $this->dao->save($pink);
+                // Snapshot the original deadline before completion changes stop_time into completion time.
+                \think\facade\Db::name('combination_group_origin')->insert(['group_id' => (int)$res1['id'],
+                    'expires_at' => (int)$pink['stop_time'], 'activity_name' => (string)$product['title']]);
                 $res2 = $orderServices->update($orderInfo['id'], ['pink_id' => $res1['id']]);
                 $res = $res1 && $res2;
                 $pink['id'] = $res1['id'];
@@ -552,41 +549,8 @@ class StorePinkServices extends BaseServices
                 throw new ValidateException('拼团已完成，无法取消');
             }
         }
-        /** @var StoreOrderServices $orderService */
-        $orderService = app()->make(StoreOrderServices::class);
-        /** @var StoreOrderRefundServices $orderRefundService */
-        $orderRefundService = app()->make(StoreOrderRefundServices::class);
-        //取消开团
-        $order = $orderService->get($pinkT['order_id_key']);
-        $refundData = [
-            'refund_reason' => '用户手动取消拼团',
-            'refund_explain' => '用户手动取消拼团',
-            'refund_img' => json_encode([]),
-        ];
-        try {
-			//申请退款
-			$refundId = $orderRefundService->applyRefund((int)$order['id'], (int)$order['uid'], $order, [], 1, (float)$order['pay_price'], $refundData);
-			if ($refundId) {//申请退款成功，自动退款
-				$refund_data = ['pay_price' => $order['pay_price'], 'refund_price' => $order['pay_price']];
-				$res1 = $orderRefundService->agreeRefund((int)$refundId, $refund_data);
-				//修改退款单状态
-				$res1 = $res1 && $orderRefundService->update((int)$refundId, ['refund_type' => 6, 'refunded_price' => $order['pay_price'], 'refunded_time' => time()]);
-				//修改订单状态
-				$res1 = $res1 && $orderService->update((int)$order['id'], ['refund_status' => 2, 'refund_type' => 6]);
-			}
-        } catch (\Throwable $e) {
-            $res1 = true;
-        }
-        $res2 = $this->dao->getCount([['uid', '=', $pinkT['uid']], ['k_id|id', '=', $pinkT['id']]]);
-        if ($res1 && $res2) {
-            $this->orderPinkAfterNo($pinkT['uid'], $pinkT['id'], true, $order->is_channel);
-        }
-        //当前团有人的时候
-        if (is_array($nextPinkT)) {
-            $this->dao->update($nextPinkT['id'], ['k_id' => 0, 'status' => 1, 'stop_time' => $pinkT['stop_time']]);
-            $this->dao->update($pinkT['id'], ['k_id' => $nextPinkT['id']], 'k_id');
-            $orderService->update($nextPinkT['order_id'], ['pink_id' => $nextPinkT['id']], 'order_id');
-        }
+        $result = (new CombinationRefundServices())->refundOrder((int)$pinkT['order_id_key'], '用户手动取消拼团', 0);
+        if ($result['state'] !== 'success') throw new ValidateException($result['message']);
         return true;
     }
 
@@ -612,6 +576,8 @@ class StorePinkServices extends BaseServices
      */
     public function useStatusPink()
     {
+        // Reuse the existing periodic group scheduler; no new customer cron or external trigger required.
+        \app\jobs\activity\pink\CombinationRecoveryJob::dispatch([]);
         $pinkEndCount = $this->dao->pinkListEnd()->count();
         if (!$pinkEndCount) {
             return true;
@@ -633,53 +599,13 @@ class StorePinkServices extends BaseServices
      */
     public function virtualCombination($pinkId)
     {
-        $pinkInfo = $this->dao->get($pinkId);
-        $people = $pinkInfo['people'];
-        $count = $this->dao->count(['k_id' => $pinkId]) + 1;
-        $percent1 = bcdiv((string)$count, (string)$people, 2) * 100;
-        /** @var StoreCombinationServices $services */
-        $services = app()->make(StoreCombinationServices::class);
-        $percent2 = $services->value(['id' => $pinkInfo['cid']], 'virtual');
-        if ($percent1 >= $percent2) {
-            $time = time();
-            $num = $people - $count;
-            $data = [];
-			$defaultData = [
-				'uid' => 0,
-				'avatar' => sys_config('h5_avatar'),
-				'order_id' => 0,
-				'order_id_key' => 0,
-				'total_num' => 0,
-				'total_price' => 0,
-				'cid' => $pinkInfo['cid'],
-				'pid' => $pinkInfo['pid'],
-				'people' => $people,
-				'price' => 0,
-				'add_time' => $time,
-				'stop_time' => $time,
-				'k_id' => $pinkInfo['id'],
-				'is_tpl' => 1,
-				'is_refund' => 0,
-				'status' => 2,
-				'is_virtual' => 1
-			];
-            mt_srand();
-            for ($i = 0; $i < $num; $i++) {
-				$defaultData['nickname'] = substr(md5(time() . rand(1000, 9999)), 0, 12);
-				$data[$i] = $defaultData;
-            }
-            //添加虚拟团员
-            $this->dao->saveAll($data);
-            //更改团员状态为拼团成功
-            $this->dao->update($pinkId, ['stop_time' => $time, 'status' => 2], 'k_id');
-            //更改团长为拼团成功
-            $this->dao->update($pinkId, ['stop_time' => $time, 'status' => 2]);
-            $uidAll = $this->dao->getColumn([['id|k_id', '=', $pinkId]], 'uid');
-            $this->orderPinkAfter($uidAll, $pinkId);
-            return true;
-        } else {
-            return false;
-        }
+        $root = $this->dao->get((int)$pinkId);
+        if (!$root || (int)$root['status'] !== 1 || (int)$root['people'] < 2) return false;
+        $count = $this->dao->count(['k_id' => (int)$pinkId, 'is_refund' => 0]) + 1;
+        $threshold = app()->make(StoreCombinationServices::class)->value(['id' => $root['cid']], 'virtual');
+        if ($count * 100 < (int)$root['people'] * (float)$threshold) return false;
+        (new CombinationGroupManagementServices())->complete((int)$pinkId, 0, true);
+        return true;
     }
 
     /**

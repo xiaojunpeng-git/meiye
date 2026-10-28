@@ -1,0 +1,28 @@
+{
+  "result": "PASS",
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "parent": "4f63da06527987786ff0f2a54c4ecd9afd8276ef",
+  "sourceTree": "5600ab0d451a0f9e1ba4d9f48f8389bae995607c",
+  "patchSHA256": "9f520b496aed4b74f2941062ddf57046cce16e39a37a82ca4b83e89e07e54f71",
+  "databaseChecks": 40,
+  "previousPhoneResetChecks": 33,
+  "httpAuthChecks": 3,
+  "concurrency": "commit/rollback passed",
+  "frontendCompilation": "admin and cashier-v3 passed; not an 8080 release package",
+  "ui": [
+    "platform user list uses member module",
+    "binding column immediately after creation date",
+    "original transfer modal opened and cancelled",
+    "login tab after basic tab",
+    "read-only phone account",
+    "new password input type=text; no credential entered through UI"
+  ],
+  "unchangedSharedIndex": true,
+  "remoteOperations": false,
+  "productAcceptance": "pending",
+  "commit": "not created",
+  "knownLimitations": [
+    "No real WeChat provider authorization performed; no production member changed",
+    "Fixed candidate retains accepted basic-report routes/permission behavior; unrelated shared experiments excluded"
+  ]
+}

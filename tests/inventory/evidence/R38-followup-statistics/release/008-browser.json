@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "authenticatedPlatform": true,
+  "inventoryTotal": 0,
+  "statisticsTotal": 0,
+  "emptyPagination": "1 / 1",
+  "returnHome": true,
+  "stockUnitContract": "verified via production readonly runtime",
+  "businessWrites": 0
+}

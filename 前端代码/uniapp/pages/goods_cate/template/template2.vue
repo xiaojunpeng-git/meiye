@@ -118,11 +118,11 @@
 												</view>
 												<view
 													class="w-172 h-58 rd-30rpx bg-color flex-center fs-24 text--w111-fff relative"
-													v-if="item.spec_type" @tap.stop="goCartDuo(item)">
+													v-if="$memberCartEntryEnabled && item.spec_type" @tap.stop="goCartDuo(item)">
 													<text>{{item.cart_button == 0 ? '立即购买' : '加入购物车'}}</text>
 													<uni-badge class="badge-style" :custom-style="{background: 'var(--view-theme)'}" v-if="item.cart_num > 0" :text="item.cart_num"></uni-badge>
 												</view>
-												<view v-if="!item.spec_type">
+												<view v-if="$memberCartEntryEnabled && !item.spec_type">
 													<view class="flex-center w-48 h-48 rd-30rpx bg-color text--w111-fff"
 														@tap.stop="goCartDuo(item,index)">
 														<text class="iconfont icon-ic_ShoppingCart1 fs-30"></text>
@@ -197,10 +197,10 @@
 													</view>
 												</view>
 												<view class="flex-center w-48 h-48 rd-30rpx bg-color text--w111-fff"
-													@tap.stop="goCartDuo(item)" v-if="item.spec_type">
+													@tap.stop="goCartDuo(item)" v-if="$memberCartEntryEnabled && item.spec_type">
 													<text class="iconfont icon-ic_ShoppingCart1 fs-30"></text>
 												</view>
-												<view v-if="!item.spec_type">
+												<view v-if="$memberCartEntryEnabled && !item.spec_type">
 													<view
 														class="flex-center w-48 h-48 rd-30rpx bg-color text--w111-fff"
 														@tap.stop="goCartDuo(item,index)">
@@ -239,7 +239,7 @@
 					</view>
 				</view>
 			</view>
-			<view class="h-96 footer" :class="isFooter == 1 ? 'show-footer' : ''">
+			<view v-if="$memberCartEntryEnabled" class="h-96 footer" :class="isFooter == 1 ? 'show-footer' : ''">
 				<view class="w-96 h-96 rd-50rpx bg-gradient flex-center abs-lt" @tap="toggleCart">
 					<image src="@/static/img/cart_pic.png" class="w-54 h-54"></image>
 					<uni-badge class="badge-style" :custom-style="{background: 'var(--view-theme)'}" v-if="cartNum > 0" :text="cartNum"></uni-badge>
@@ -308,7 +308,7 @@
 				</view>
 			</view>
 			<view class="mask" v-show="showCateDrawer" @tap="closeCateDrawer" @touchmove.stop.prevent="moveHandle"></view>
-			<cartList ref="cartList" :cartData="cartData" :isFooter='isFooter' :storeChecked="storeChecked" @closeList="closeList"
+			<cartList v-if="$memberCartEntryEnabled" ref="cartList" :cartData="cartData" :isFooter='isFooter' :storeChecked="storeChecked" @closeList="closeList"
 				@ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel" @deliveryFromChange="deliveryFromChange" @storeCheckedChange="storeCheckedChange">
 			</cartList>
 			<productWindow

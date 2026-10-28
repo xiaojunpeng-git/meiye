@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "path": "public/view_cashier_v3/assets/index-44ebd33b.js",
+      "sha256": "86ac953204489be856c474f2b52b68af78c5f0ea2c8eb87a94b1cd68d4ea36f1"
+    },
+    {
+      "path": "public/view_cashier_v3/assets/index-e596d498.css",
+      "sha256": "e596d49804bc015acdcc42734210e5dcca33e645137399353bcd39375d5c294a"
+    },
+    {
+      "path": "public/view_cashier_v3/index.html",
+      "sha256": "64ad1697b29631997b1d1c95e7b69e824bbdb84aa8100e1342be6d1c7d3a6a7e"
+    }
+  ]
+}

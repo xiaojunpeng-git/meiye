@@ -1,0 +1,15 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "acceptedRelease": "9ab7ade9279b646da5e7baa2f4e1f3cd39833e81",
+  "remote": "not applicable; local development only",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/CanonicalUserIdentityServices.php": "d29c7749daab31674c48296d9cf8d2d4265586930ed74aabd10dc5402a329544",
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/UserAuthServices.php": "98e10536c7c2c5e0731f7eb2a9e5dec4244c96f6a97749b4828289a74ad475e2",
+    "\u540e\u7aef\u4ee3\u7801/app/services/BaseServices.php": "206232dee4b22eb53e77463874ca64533edc4cbcf64085da4d6ac19fba9341bc",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/WechatUserServices.php": "c35429f3cd08697c341fe038c98728048ee7b978ade80b1ca215fc78586ce1ff",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/RoutineServices.php": "5cdd6254fa70cadf85c382461cf9e0f531ddd7b3e4c79c191665d33a29212235",
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/WechatServices.php": "c4b20f2058921e9605af229f5768f7f29842f3edec82066931003b4c0fb85d54",
+    "\u540e\u7aef\u4ee3\u7801/mohe/utils/JwtAuth.php": "3a14a69512670845782edabfd4c0c0ed3c1fae15ff3ffe54154ced66a7ff48fe"
+  },
+  "indexSHA256": "6e9f50ecfd17740bd0140554d441786eb0f392ac19ebbf81d1b3f93100b27bcf"
+}

@@ -1,0 +1,28 @@
+{
+  "baseline_head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "remote": "不适用：本轮尚未授权部署",
+  "files": {
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue": "c583dc3d348fe229c641c6354b99dfe9c0c759358aa93428b4e28f05cf05f530",
+    "前端代码/admin/src/api/marketing.js": "a0c02ea27ea6d286c9ad2e096071c2b90831390b602e6fa7e5536fc64e223616",
+    "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php": "b1c6f496f2f52c0346a769fa93172b7f944b9ec34e022782e08c52a6efc230af",
+    "后端代码/app/services/activity/combination/CombinationRefundServices.php": "46c116efa38a77c59b09219d70affce25f0d03d6499004f2afeaf10c8215300d",
+    "后端代码/route/admin.php": "390784479f63f12b42a7afe80ef319bae4be66755ca0d93fbfb5c9d4c02a2b63",
+    "后端代码/app/services/activity/combination/CombinationGroupListServices.php": "c4a4e501193739dd1654bb26c0a5989a8a538defdeacb0c387c7bb35b935d561",
+    "tests/combination-r61/local-acceptance.php": "660ff8c4026209bed968ef57cb1243d0a440496c5f3f2ec22c1bc8a3de56ad29",
+    "tests/combination-group-list/backend.php": "c8300bc04a7fa8232684c47498c19c6c291a7b0fbd06c9e6db2a0dcae19b2414",
+    "tests/combination-group-list/frontend.cjs": "be19c39bf6260c0bb923667c6a99f81501f184d6411311f784c61fe28179110b"
+  },
+  "provenance": {
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue": "25672c155f91cc334693c3754baf5b47f2b82a25",
+    "前端代码/admin/src/api/marketing.js": "25672c155f91cc334693c3754baf5b47f2b82a25",
+    "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php": "3c1302f3f75162cdab42fff8d7399221c58c5cdb",
+    "后端代码/app/services/activity/combination/CombinationRefundServices.php": "166f095fbd112159b2ffd005d74680c179e0a00e",
+    "后端代码/route/admin.php": "5f95204d3efec7e1ee9ce45479a6fdf0c5f5cda2",
+    "后端代码/app/services/activity/combination/CombinationGroupListServices.php": "本轮新增",
+    "tests/combination-r61/local-acceptance.php": "166f095fbd112159b2ffd005d74680c179e0a00e",
+    "tests/combination-group-list/backend.php": "本轮新增",
+    "tests/combination-group-list/frontend.cjs": "本轮新增"
+  },
+  "patch_sha256": "c4831c71798daba4dcf4287cc0a58f192e94617dcaf5b5980c2c807015520b33",
+  "verified_head": "b09b887ed04ee455479749db6811ec9b95fffe73"
+}

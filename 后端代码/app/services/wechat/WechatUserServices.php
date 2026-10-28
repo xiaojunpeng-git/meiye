@@ -382,6 +382,13 @@ class WechatUserServices extends BaseServices
 				/** @var UserServices $userServices */
 				$userServices = app()->make(UserServices::class);
 				$user = $userServices->getUserInfo($uid);
+
+                // 改号期间即使有旧授权缓存也不能静默进入；proof 只在内存传给签发边界。
+                if ($user) {
+                    $proof = app()->make(\app\services\user\MemberPhoneResetServices::class)->silentProof((int)$uid);
+                    if ($proof === null) return [];
+                    $user['_member_login_proof'] = $proof;
+                }
 				if (isset($user['status']) && !$user['status'])
 					throw new AuthException('您已被禁止登录，请联系管理员', 410020);
 			}
@@ -482,6 +489,9 @@ class WechatUserServices extends BaseServices
         $wechatInfo['user_type'] = $userType;
         //user表存在和wechat_user表同时存在
         return $this->transaction(function () use ($openid, $uid, $userInfo, $wechatInfo, $userServices, $spread_uid, $userType) {
+            $security = app()->make(\app\services\user\MemberPhoneResetServices::class);
+            // 选择账号后在写入前加锁重验，不能信任事务外查到的旧手机号/微信关系。
+            $proof = $uid ? $security->authorizeWechatLocked($uid, trim((string)($wechatInfo['phone'] ?? ''))) : '';
             $wechatInfo['spread_uid'] = $spread_uid;
             $wechatInfo['uid'] = $uid;
             if ($userInfo) {
@@ -516,6 +526,9 @@ class WechatUserServices extends BaseServices
                 $wechatUser = $this->dao->getOne(['openid' => $openid, 'is_del' => 0]);
             }
             if ($wechatUser) {
+				// 微信在静默授权时可能不返回头像；更新老账号时必须保留原头像，
+				// 不能把缺失值写成 NULL，也不能用空值覆盖会员已有资料。
+				$wechatInfo = $this->normalizeWechatAvatarForPersistence($wechatInfo, true);
 				//更换微信登录情况
 //                if (isset($wechatInfo['phone']) && $wechatInfo['phone'] && $wechatUser['openid'] != $openid) {
 //                    throw new ValidateException('该手机号已被注册');
@@ -524,12 +537,38 @@ class WechatUserServices extends BaseServices
                     throw new ValidateException('更新数据失败');
                 }
             } else {
+				// 新微信账号必须满足数据库非空约束；微信未给头像时保存空字符串，
+				// 后续仍由会员资料完善流程补充真实头像。
+				$wechatInfo = $this->normalizeWechatAvatarForPersistence($wechatInfo, false);
                 if (!$this->dao->save($wechatInfo)) {
                     throw new AuthException('生成微信用户失败!');
                 }
             }
+            $userInfo['_member_login_proof'] = $proof;
             return $userInfo;
         });
+    }
+
+    /**
+     * 规范化微信头像的持久化边界。
+     *
+     * @param array $wechatInfo 微信授权资料
+     * @param bool $preserveExisting 是否正在更新已有微信账号
+     * @return array 可安全写入 wechat_user 的资料
+     */
+    private function normalizeWechatAvatarForPersistence(array $wechatInfo, bool $preserveExisting): array
+    {
+        $avatar = trim((string)($wechatInfo['headimgurl'] ?? ''));
+        if ($avatar !== '') {
+            $wechatInfo['headimgurl'] = $avatar;
+            return $wechatInfo;
+        }
+        if ($preserveExisting) {
+            unset($wechatInfo['headimgurl']);
+            return $wechatInfo;
+        }
+        $wechatInfo['headimgurl'] = '';
+        return $wechatInfo;
     }
 
     /**

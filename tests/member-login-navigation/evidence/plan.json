@@ -1,0 +1,23 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "parentCommit": "207c0c77ccfdb51ca1eba6220a5f5d6282cf8789",
+  "candidateTree": "16a3b51a6468a3059c1c2ce9525edce7e195a4e9",
+  "files": {
+    "\u524d\u7aef\u4ee3\u7801/uniapp/pages/users/wechat_login/index.vue": "1bcce9f7b9c7123b1da886d446826afdfc8b30139f719af5960a95a257248a41",
+    "\u524d\u7aef\u4ee3\u7801/uniapp/components/eidtUserModal/index.vue": "c665d46fb20267594c7fe6d61b39b7a707fe47cf56ef391fa83949919a9bc1ca"
+  },
+  "patchSHA256": "66160ff5a1db2d91c52e56fea56b6459d7ffc25824b2932572b94f59d5450988",
+  "sharedIndexSHA256": "6e9f50ecfd17740bd0140554d441786eb0f392ac19ebbf81d1b3f93100b27bcf",
+  "version": "3.0.69.1",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "status": "PM_ACCEPTED; COMMITTED; UPLOAD_SUCCESS_3.0.69.1",
+  "mpOnlyNavigationChange": true,
+  "acceptedByUser": true,
+  "authorizedActions": [
+    "commit",
+    "push",
+    "upload 008 member 3.0.69.1"
+  ],
+  "otherTerminalsUpdated": false
+}

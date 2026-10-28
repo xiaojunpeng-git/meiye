@@ -1,0 +1,20 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "ee9eb76ef36b9aaafd38fec6b65345480c300263",
+  "baselineCommit": "b1cd302cc27e6914bbfc25dc2fb4fee0b053b730",
+  "baselineTree": "c80887b5e26dbb77a361208069e945f892e2d35d",
+  "candidateTree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+  "paths": [
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/inventory-vue3/src/styles.css",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue",
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php",
+    "tests/inventory/js/platform-statistics-frontend-contract.mjs",
+    "tests/inventory/js/r38-statistics-scope-pagination.mjs",
+    "tests/inventory/php/r38-statistics-readonly.php"
+  ],
+  "backendPaths": [
+    "后端代码/app/services/product/inventory/query/InventoryStatisticsUnifiedQueryContract.php"
+  ],
+  "existingBranch": "release/store-cashier-c14-main"
+}

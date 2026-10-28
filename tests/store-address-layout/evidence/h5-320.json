@@ -1,0 +1,34 @@
+{
+  "actions": {
+    "bottom": 130.5,
+    "height": 31,
+    "right": 299,
+    "width": 49,
+    "x": 250,
+    "y": 99.5
+  },
+  "address": {
+    "bottom": 130.5,
+    "height": 30,
+    "right": 250,
+    "width": 229,
+    "x": 21,
+    "y": 100.5
+  },
+  "clientHeight": 30,
+  "clientWidth": 229,
+  "lineHeight": "15px",
+  "panel": {
+    "bottom": 147.5,
+    "height": 106.5,
+    "right": 312,
+    "width": 304,
+    "x": 8,
+    "y": 41
+  },
+  "scrollHeight": 30,
+  "scrollWidth": 229,
+  "text": "距您0km 安徽省六安市霍山县衡山镇嘉利星城女人街D区2幢6-7#",
+  "viewport": 320,
+  "whiteSpace": "normal"
+}

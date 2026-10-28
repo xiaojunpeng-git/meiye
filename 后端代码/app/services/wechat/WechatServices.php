@@ -122,7 +122,10 @@ class WechatServices extends BaseServices
             throw new ValidateException('获取用户信息失败');
         }
 		$uid = (int)$user['uid'];
-        $token = $this->createToken($uid, $userType, $user['pwd'] ?? '');
+        // 与小程序共用会员改号撤销证明，内存字段不暴露在会员资料中。
+        $proof = $user['_member_login_proof'] ?? '';
+        unset($user['_member_login_proof']);
+        $token = $this->createToken($uid, $userType, $user['pwd'] ?? '', $proof);
         if (!$token) {
             throw new ValidateException('登录失败!');
         }

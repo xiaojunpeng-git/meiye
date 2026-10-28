@@ -1,0 +1,498 @@
+{
+  "site": "010",
+  "commit": "12ba0fd27d218d21d3db3ae71f7d20b06682faaa",
+  "sourceTree": "4c26e0dd734e7e63e45562c5714e10151cfeec7d",
+  "environment": "0c95c8233380b636353e3200b858fcb24ad94722736b325582e1c79dc9d1a25c",
+  "backendAllowlist": [
+    "app/controller/admin/v1/user/MemberCenter.php",
+    "app/controller/cashier/v3/MemberLogin.php",
+    "app/services/BaseServices.php",
+    "app/services/cashier/v3/card/CashierV3HistoricalEntitlementReadServices.php",
+    "app/services/cashier/v3/card/CashierV3HistoricalEntitlementScopePolicy.php",
+    "app/services/cashier/v3/member/CashierV3MemberModule.php",
+    "app/services/query/provider/MemberUnifiedQueryPageRegistrar.php",
+    "app/services/query/provider/MemberUnifiedQueryProvider.php",
+    "app/services/query/provider/PlatformMemberUnifiedQueryProvider.php",
+    "app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php",
+    "app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php",
+    "app/services/user/CanonicalUserIdentityServices.php",
+    "app/services/user/MemberLoginManagementServices.php",
+    "app/services/user/MemberManagementCommandServices.php",
+    "app/services/user/MemberPhoneResetServices.php",
+    "app/services/user/MemberWechatBindingReadServices.php",
+    "app/services/user/PlatformMemberCenterServices.php",
+    "app/services/user/PlatformMemberScopeServices.php",
+    "app/services/user/UserAuthServices.php",
+    "app/services/wechat/RoutineServices.php",
+    "app/services/wechat/WechatServices.php",
+    "app/services/wechat/WechatUserServices.php",
+    "config/unified_query.php",
+    "mohe/utils/JwtAuth.php",
+    "route/admin.php",
+    "route/cashier-v3.php"
+  ],
+  "protected": {
+    "public/index.html": "4dc2576cd693def8f8264eef59a3caacd2dba265387ad52ac6ce451bc88565e7",
+    "public/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+    "public/static/js/chunk-vendors.6ad2b1b8.js": "d9200f89173dd25a5640a528e8378305fc7ae09f45c5ec5a6669967c32586140",
+    "public/static/js/index.5ec55a37.js": "8c5d471652c5b28d09c5c480a5f4adbd2dce62275e787877d2c91b6c882dc71a",
+    "app/services/cashier/v3/card/CashierV3HistoricalEntitlementReadServices.php": "a39365ded92d6c17c6b515d425e5c6b301156c9b428e63843be185df5f2589d6",
+    "app/services/cashier/v3/card/CashierV3HistoricalEntitlementScopePolicy.php": "a2318573761ca916541607787d17db4856b15a85ca6c7a83eefa8fd24b277a74",
+    "app/services/mobile/warehouse/MobileWarehouseServices.php": "331183fc4c29f612f4de435d6d9826a373f404d1ae767013b1428c0f0dcebf07",
+    "app/services/payroll/SalaryStatisticsSourcePolicy.php": "3f432d71c07b67e9ca194a95abac05ba8256dfe5dd958b233a061d3ef80a9114",
+    "app/services/query/metric/MetricReadTransaction.php": "c5ebd758c4367b6d649c621d11efc9bb4b069a1cf6bef48b230201fefec712f1",
+    "app/services/query/metric/RegisteredMetricReadServices.php": "313e8a61178f189e3f368f9ccd62c3ba4025c6a985fd685e0ca8c0022b4917c7",
+    "app/services/report/BasicSalaryManualServices.php": "2fabbc4d57a53f8300b14dc1c9d725a9ec0a5e2b6a33b8d8ffc51a67d62e83d8",
+    "app/services/report/BasicSalaryReportServices.php": "999a85de09d78304bf7e48bee01146e94ecc9d6e24b97c410ae996d3f1a024c6",
+    "app/services/report/SavedSalaryReportReadServices.php": "439e0d26813584512a3542bc034983d42ab088e17a262e9cca83d312cd2ded0b",
+    "app/services/report/query/BasicBusinessQueryProvider.php": "bff28028cb931899fd74f6d5aa55335fd51a92daba0246e907a45b86164d48af",
+    "config/payroll.php": "99e87458bf9b6b058ccbd25f4e2e882ee40fcb3e16606451d929a9b638ced19a",
+    "public/basic-report-menu.css": "fe77aa3a7a1e87db095fda5665b77f398be96938e53322b937d6597ee0bd5c9f",
+    "public/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+    "public/view_admin/css/app.153d9d27.css": "e3196fac4f7768b46a24ff2ec5fb023ac3ac80b503aaa7f7b24ff1663ad3b59f",
+    "public/view_admin/js/chunk-vendors.33283ef6.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+    "public/view_admin/js/app.2baaf85d.js": "6dde5f12a8b94b033e81fcaf4b9a7f060a11ca2bb333ead83747814d1a294f22",
+    "public/view_cashier_v3/assets/index-1b47e224.js": "ceb25b146a75b0e37e39eae1c52650f9a7e0c44d664fe6bce44464f24f951be7",
+    "public/view_cashier_v3/assets/index-553f822f.css": "553f822f802cc35ab8a7d98d169cc3946c29ddfe4e55eefe5123709e6d9892d4"
+  },
+  "files": {
+    "app/controller/admin/v1/user/MemberCenter.php": {
+      "before": null,
+      "after": "51b38c2a9aa0250ad1f99eadadb4afe260684dcf42424a7f7185c88f5f6dc764"
+    },
+    "app/controller/cashier/v3/MemberLogin.php": {
+      "before": null,
+      "after": "c7028e0debf0a2805a0da5e7d42f8947e108174ac06eaefaff381982b78a1348"
+    },
+    "app/services/BaseServices.php": {
+      "before": "206232dee4b22eb53e77463874ca64533edc4cbcf64085da4d6ac19fba9341bc",
+      "after": "09d6847737582e85c35ec0a74892fe986ff7a7d8649f9d3bb55c3980badd7c8a"
+    },
+    "app/services/cashier/v3/member/CashierV3MemberModule.php": {
+      "before": "d1f6f7d8569f93df5242fc57bc7b549dded8d98926a8696335ab5330310b93d8",
+      "after": "45f42d643be67eb2eb4769ce9acef000d614915ec9b6d674a6ef9e0e9f839ccc"
+    },
+    "app/services/query/provider/MemberUnifiedQueryPageRegistrar.php": {
+      "before": "47c53ef0e7cbdfa1959fec98ffe01b43a1b5ae7774e11831e5f739cc737421c6",
+      "after": "d10351789f0f18a476d5cd26784d17824bcbd5922fbb9ca12a22a96781931db0"
+    },
+    "app/services/query/provider/MemberUnifiedQueryProvider.php": {
+      "before": "f34b196b880eb62bebe4163a76fb9f6ce775f9141327eb18fd089abd15beab32",
+      "after": "0cc8dabca80469261c749f88882d6c9da017517bcbad059d0065827fe062256f"
+    },
+    "app/services/query/provider/PlatformMemberUnifiedQueryProvider.php": {
+      "before": null,
+      "after": "5fb6ce47daeb86744189c68b46f9fe56046c823eb2fbbf8ae0ee1c662c269e21"
+    },
+    "app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php": {
+      "before": null,
+      "after": "291102f0e0f87c6920a54bc3356cf576706667f5b3d5189a7da43d30c58733ca"
+    },
+    "app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php": {
+      "before": null,
+      "after": "7f2ea0c491856bb2765220e18f3c333fed1358ad0a5d8565ef9bd392ac5ab4c6"
+    },
+    "app/services/user/CanonicalUserIdentityServices.php": {
+      "before": "d29c7749daab31674c48296d9cf8d2d4265586930ed74aabd10dc5402a329544",
+      "after": "c1463ed416ec7cc6759d9ce8d552248c5962d058737cd0f5571ecfc9571894ef"
+    },
+    "app/services/user/MemberLoginManagementServices.php": {
+      "before": null,
+      "after": "47a9d91c170b5e7470f1d05330e55ded99abd570f8beff1a89cf04b63ad96d35"
+    },
+    "app/services/user/MemberManagementCommandServices.php": {
+      "before": null,
+      "after": "93b4b3b6d738b5acc3a42091e20f984bfcd24fbc3bf515c25d555116a0a0f4ea"
+    },
+    "app/services/user/MemberPhoneResetServices.php": {
+      "before": null,
+      "after": "98089ecf5bba3623d4113c690317bf0e5972cec19466709de31a39f28df817c5"
+    },
+    "app/services/user/MemberWechatBindingReadServices.php": {
+      "before": null,
+      "after": "16a29c8ff717b3346459f2e702cd003965acef18d88952c36d6f5ab00cefec2d"
+    },
+    "app/services/user/PlatformMemberCenterServices.php": {
+      "before": null,
+      "after": "b4c8113647df6f1e4e73df803addc96caea5f074483508a2b1f16b7068176adb"
+    },
+    "app/services/user/PlatformMemberScopeServices.php": {
+      "before": null,
+      "after": "4b10ba9d16128eb3e02182705dabb2a901a795a717057ef434a9d28679f1821e"
+    },
+    "app/services/user/UserAuthServices.php": {
+      "before": "98e10536c7c2c5e0731f7eb2a9e5dec4244c96f6a97749b4828289a74ad475e2",
+      "after": "db4435232e913aefdbdcc64a9370734a88d06c97e70784a6c91cdaea16f49197"
+    },
+    "app/services/wechat/RoutineServices.php": {
+      "before": "5cdd6254fa70cadf85c382461cf9e0f531ddd7b3e4c79c191665d33a29212235",
+      "after": "16a27ca3c3ad5d01040a94aedef77cc32e686e582b9b76a405217107eefe5398"
+    },
+    "app/services/wechat/WechatServices.php": {
+      "before": "c4b20f2058921e9605af229f5768f7f29842f3edec82066931003b4c0fb85d54",
+      "after": "a6138742440d759b2d2119ef5f9a2f6b51dcc3656b6f9c5ee97191cba5b7f60f"
+    },
+    "app/services/wechat/WechatUserServices.php": {
+      "before": "cebc2908227059a7cffd8f54de88e9d67241d6591d93eedaeb55cc872cb75b55",
+      "after": "519c53e5c30a75417276181342a6329b34ad869a49f7f4b3b334e1ec860942d6"
+    },
+    "config/unified_query.php": {
+      "before": "086bcd9f3a9fbd4913e37fd4c67f9879d5e33b25293009f2d8d20195de2edd29",
+      "after": "8d912641ea99c154e1e748a1878e280ed317a884b0150f51246dfb4f42aed853"
+    },
+    "mohe/utils/JwtAuth.php": {
+      "before": "3a14a69512670845782edabfd4c0c0ed3c1fae15ff3ffe54154ced66a7ff48fe",
+      "after": "f15c921e6193eeff001124c7a06e1a43398fc21afcfcf06d124b13890dd490bb"
+    },
+    "route/admin.php": {
+      "before": "792bce08c6d9c9f33c6a701d2902ad5e1024998f2eac2c85fb25814a045d1eeb",
+      "after": "d112638016229f1d27758198a2fd4237600127a97cf15eb8873878a54acd9829"
+    },
+    "route/cashier-v3.php": {
+      "before": "e0f09b8b5557da8a650a5ae3fb3370bd2b76f8e08005330505e279942c6e47cc",
+      "after": "916099993ccd3e68462f97f51b917a2079956805bbd8bcb6dcd38b1f36a2b841"
+    },
+    "public/view_admin/css/chunk-6bcb3576.fbe41f70.css": {
+      "before": null,
+      "after": "432bbb22d2b78b2d92ff861e65fcb7f5309bbc2ac7a0c8a1d45595347b4f5478"
+    },
+    "public/view_admin/js/app.b2279514.js": {
+      "before": null,
+      "after": "0e76904c8d01a2eaa9f96c0b5cc28a4dfe8d0cb1b3598fd28f01dfc0261b87a3"
+    },
+    "public/view_admin/js/app.b2279514.js.gz": {
+      "before": null,
+      "after": "21399f29e6d9b13583ed4cf647449df45892b5a30b715113193d6b45ea721b00"
+    },
+    "public/view_admin/js/chunk-06066eda.52280437.js": {
+      "before": null,
+      "after": "4bed5c42fb33d5943f1c2f4ca9122115e176370487e1813307895820ac88a960"
+    },
+    "public/view_admin/js/chunk-06066eda.52280437.js.gz": {
+      "before": null,
+      "after": "0bb5dc22439636311e2e9fa2c5963ed1f185fe33d19480e69a64dfecb5a99fc8"
+    },
+    "public/view_admin/js/chunk-084cbb9e.a9a8426f.js": {
+      "before": null,
+      "after": "59ac56e07672f2f9443d5083adcd818340582cd765364a94cf465833497e8668"
+    },
+    "public/view_admin/js/chunk-084cbb9e.a9a8426f.js.gz": {
+      "before": null,
+      "after": "fd516069505a569a08847fabac5978091460c22c0863d9ab723c588444ff8c63"
+    },
+    "public/view_admin/js/chunk-0f56252a.055bcfe1.js": {
+      "before": null,
+      "after": "109635e61441932e40f37abfb0d151efc6cdc1052b69c3e19208601e91d67ca8"
+    },
+    "public/view_admin/js/chunk-0f56252a.055bcfe1.js.gz": {
+      "before": null,
+      "after": "43ed65f88dc3dbb7b0dc303e218573fe2a49f5ade62d891c9636282d60f08e32"
+    },
+    "public/view_admin/js/chunk-0fd1b258.d534b611.js": {
+      "before": null,
+      "after": "25b62d3fe1172bb6d4bb1ae353ecef1b176730e63fbee65d76c8a9c706ed257a"
+    },
+    "public/view_admin/js/chunk-0fd1b258.d534b611.js.gz": {
+      "before": null,
+      "after": "98e55cb0ee6705eb783950a67c544700f49bc44b9ae086d71fae3d4b76f087a8"
+    },
+    "public/view_admin/js/chunk-156cd32a.2e19c517.js": {
+      "before": null,
+      "after": "3407b40c17c4f6611f1a90a3f5af5eca7dae2938daf020918fea0fcc4784cf6f"
+    },
+    "public/view_admin/js/chunk-156cd32a.2e19c517.js.gz": {
+      "before": null,
+      "after": "aac3ff0f8d03638e351a8461334db1bc659035c7400d2aad3ccd95d45d64bd03"
+    },
+    "public/view_admin/js/chunk-163b7a4e.34bb5ff8.js": {
+      "before": null,
+      "after": "3b2a342d1ef27d9bbba06923e56cc7cf5776666675e589f05d70bb715aa6c4bb"
+    },
+    "public/view_admin/js/chunk-163b7a4e.34bb5ff8.js.gz": {
+      "before": null,
+      "after": "13328396d65e48dc2f8114607a98e3be0b706afe2dc0b78327cb4d8c3dfb5330"
+    },
+    "public/view_admin/js/chunk-1b1bc932.070d7fb2.js": {
+      "before": null,
+      "after": "d8635962bd9fb27c90b805ab5b581e19ac67b0d9ff837ddcebb11b3cecc84a0d"
+    },
+    "public/view_admin/js/chunk-1b1bc932.070d7fb2.js.gz": {
+      "before": null,
+      "after": "d2cfe6600f36b037c3bb2c95e0371c56c7967b6278aadb0079e008a6741436c0"
+    },
+    "public/view_admin/js/chunk-1c763311.4c92f236.js": {
+      "before": null,
+      "after": "c1752512d98c2eb82d1e597ac1adf345f506c5014b27eac0ff07c5d6fb11f0ac"
+    },
+    "public/view_admin/js/chunk-1c763311.4c92f236.js.gz": {
+      "before": null,
+      "after": "3625a1d299a9c19f1192faf26aba063b447710f2e3e4442717c3dc2bada09ca8"
+    },
+    "public/view_admin/js/chunk-2889d26e.263c9fff.js": {
+      "before": null,
+      "after": "b23fabe33693cafa58b0edbd73b8541d618b8e3832d239432935f9b0f6bf53ad"
+    },
+    "public/view_admin/js/chunk-2889d26e.263c9fff.js.gz": {
+      "before": null,
+      "after": "f0bb4729c78f30fba14bb917c9f4b707a2064ae780a9b13468e79c9ff4aa2423"
+    },
+    "public/view_admin/js/chunk-3306ce49.c96e97b4.js": {
+      "before": null,
+      "after": "5cd04612be438e3b21e71fb225dc809c69f688dee5061c1185796073ddf2caef"
+    },
+    "public/view_admin/js/chunk-3306ce49.c96e97b4.js.gz": {
+      "before": null,
+      "after": "6a3af8ca989888286a820da539bc7324cfe45908716ee9a80ff18f30d815c33e"
+    },
+    "public/view_admin/js/chunk-349276fa.636ff2f6.js": {
+      "before": null,
+      "after": "acbb825303ea8b299838ad55eb36eb884fa183e527014833d63d94f4886e5050"
+    },
+    "public/view_admin/js/chunk-349276fa.636ff2f6.js.gz": {
+      "before": null,
+      "after": "9b999e00a4793a72a78a49c2370f6d3e9236f9a090881279a5167db0e2d1ff91"
+    },
+    "public/view_admin/js/chunk-3ac32482.257fe50f.js": {
+      "before": null,
+      "after": "df49d8e876d5dc46d79db0e5564ef38b1cad8d090ab3a5a56ffe9e62520d6e49"
+    },
+    "public/view_admin/js/chunk-3ac32482.257fe50f.js.gz": {
+      "before": null,
+      "after": "76ce429a1adce462ff2f25b45feeedc3b34d1f53532546e07ec354ccf96cafe9"
+    },
+    "public/view_admin/js/chunk-406c84ef.97a64848.js": {
+      "before": null,
+      "after": "b5c3daddc879beeeab340f1f69bbe5c4fd03e3b46a9469e392c80c3ec0683e59"
+    },
+    "public/view_admin/js/chunk-406c84ef.97a64848.js.gz": {
+      "before": null,
+      "after": "8b0716c1c495d5aa45a7f81e0f805212e8828e38ed86e156cc2da28d1fcba2eb"
+    },
+    "public/view_admin/js/chunk-47f8dd32.72d29100.js": {
+      "before": null,
+      "after": "58aaf9dd2417d91707cd673bbaf1f5fbe9a8b6118b29f289943a84ddf55f0899"
+    },
+    "public/view_admin/js/chunk-4fb190be.b8ec0e30.js": {
+      "before": null,
+      "after": "67a00a4dda54a18f8ad78bd216a5afe3406ae743403cd38a21cbceba3125b11c"
+    },
+    "public/view_admin/js/chunk-4fb190be.b8ec0e30.js.gz": {
+      "before": null,
+      "after": "bbe9d46b12fdfb9945cabc9a6423343349c0bbfd61ff7a5b00b6570e470b0569"
+    },
+    "public/view_admin/js/chunk-4fb20cac.a1a6dbda.js": {
+      "before": null,
+      "after": "28196ff247f8d459efc302e9f4758c5bcd9c0a37c6bbabc1f20ea94556218eb6"
+    },
+    "public/view_admin/js/chunk-4fb20cac.a1a6dbda.js.gz": {
+      "before": null,
+      "after": "d307d22b20879ed84248fed1e7dcd7ed71e53c5d83c09c6f4f56a694f46b8487"
+    },
+    "public/view_admin/js/chunk-531d67ba.884ef8ea.js": {
+      "before": null,
+      "after": "8c99d942bab0a887c04f4577e3da693ae801d374cdda1afaabc3ff763f6e3d2d"
+    },
+    "public/view_admin/js/chunk-531d67ba.884ef8ea.js.gz": {
+      "before": null,
+      "after": "2655939eeb61d3799ac48d6d69e5ca8eb8fd2494e546ecc8955e09241e310a75"
+    },
+    "public/view_admin/js/chunk-58ca3f42.a07a65b1.js": {
+      "before": null,
+      "after": "592b558d93043b13cf3101ea5ae3f2f89a8525e286a8bb7769e08ae058d8598e"
+    },
+    "public/view_admin/js/chunk-58ca3f42.a07a65b1.js.gz": {
+      "before": null,
+      "after": "b6fc3fa65dcf121bc4b6f7d25e9e184a23515379ac8ab68c7da87c5251b36fe8"
+    },
+    "public/view_admin/js/chunk-5c392af4.d76543af.js": {
+      "before": null,
+      "after": "5c3d3de42a3bad265286b3c8d28533bc518ef48d6722d459d680a72ca48f173d"
+    },
+    "public/view_admin/js/chunk-5c392af4.d76543af.js.gz": {
+      "before": null,
+      "after": "96d47d743fba3c9d5419a30958f99239297fc5f0962fb46e7d753f70897670ff"
+    },
+    "public/view_admin/js/chunk-64899966.41eda31b.js": {
+      "before": null,
+      "after": "d65b9461dea1dde8c863dd33f9e3f687c745383489584e29eb277d83300228f2"
+    },
+    "public/view_admin/js/chunk-64899966.41eda31b.js.gz": {
+      "before": null,
+      "after": "f4051623e879404cdc0ff4ef81a16fecfa1ae606edf5840497c02baae62e7e7a"
+    },
+    "public/view_admin/js/chunk-6a4f588a.d48cbef0.js": {
+      "before": null,
+      "after": "6a118a8113a2725d7bf4eabfa718966426d45359166cae86dbe41eae070a23ae"
+    },
+    "public/view_admin/js/chunk-6a4f588a.d48cbef0.js.gz": {
+      "before": null,
+      "after": "9a4dc04a98fb4ac90fd40fc8a775bbff0bcc61e568d71ea69894c4fcbade1a98"
+    },
+    "public/view_admin/js/chunk-6b1dc82c.2dd45e4e.js": {
+      "before": null,
+      "after": "22cfacf8ef31773632568fd13e8d6409cf2c04212bf79c05695480a0063c1d10"
+    },
+    "public/view_admin/js/chunk-6b1dc82c.2dd45e4e.js.gz": {
+      "before": null,
+      "after": "a9875f39e6dc4c202f51731673772dcda8c16ef4df1fff02f63d1e8a6d6224b3"
+    },
+    "public/view_admin/js/chunk-6bcb3576.3606d590.js": {
+      "before": null,
+      "after": "e9b4705af579fcc08cdcf34b27bf98b1b881c1fc033cc8f7d399f4bcfc1d7567"
+    },
+    "public/view_admin/js/chunk-6bcb3576.3606d590.js.gz": {
+      "before": null,
+      "after": "fc298db6293070c65412f0c8a1106b9617981a9acfd7df4e84111693450a8108"
+    },
+    "public/view_admin/js/chunk-7214469c.b006eaae.js": {
+      "before": null,
+      "after": "5b7b037139c1e1b3275fcf1622f662bcbd87c50da743106433a61450d0206812"
+    },
+    "public/view_admin/js/chunk-7214469c.b006eaae.js.gz": {
+      "before": null,
+      "after": "0bb4d308ecdd5ce18d648b7a030cf2b954949897d69423781ff8c6e24bbf0f75"
+    },
+    "public/view_admin/js/chunk-74ff0f16.63668a01.js": {
+      "before": null,
+      "after": "550186ff7e9a9509d2cfb238528e9030ced5a5bcbd5322e80522c114f4f5f2fe"
+    },
+    "public/view_admin/js/chunk-74ff0f16.63668a01.js.gz": {
+      "before": null,
+      "after": "778950da3c44f0b38dcbd1ec23cbfb41dda5801c63ebb2a03225e9550381478a"
+    },
+    "public/view_admin/js/chunk-779d9084.d01049ee.js": {
+      "before": null,
+      "after": "afce0e2fc57cc3376306f19be8edcd913228945aace45ec21a803a1cf64b15c9"
+    },
+    "public/view_admin/js/chunk-779d9084.d01049ee.js.gz": {
+      "before": null,
+      "after": "fba18ba970b5949984a9eaf0794335696a06ab37b610efc64d92293e3a85f60a"
+    },
+    "public/view_admin/js/chunk-78136a33.7dc7b915.js": {
+      "before": null,
+      "after": "4b7cdf5dd9e16c86dbe5463f42dc9ce30d251840c18eecbf62b68f85c23119d8"
+    },
+    "public/view_admin/js/chunk-78136a33.7dc7b915.js.gz": {
+      "before": null,
+      "after": "37729591863767ea97c559ca506bb358d33761bbf06225c2c8cc29078f1b0069"
+    },
+    "public/view_admin/js/chunk-7b047038.2d3d84c1.js": {
+      "before": null,
+      "after": "59c3e3634d80c71d97ce54a40b99c00417f495b362fdd4bc5db7a63fbc402d3a"
+    },
+    "public/view_admin/js/chunk-7b047038.2d3d84c1.js.gz": {
+      "before": null,
+      "after": "f29af8714e169515e0da4b6a6ddbe88b37e251db52b8c1ad0ca71ce2ada9874d"
+    },
+    "public/view_admin/js/chunk-8d8c90d8.abf2939d.js": {
+      "before": null,
+      "after": "8a22a89635b21927e6a385847e955085645b3e4d4d10dc02ba00b4f09a9bfc26"
+    },
+    "public/view_admin/js/chunk-93d6477c.660fdced.js": {
+      "before": null,
+      "after": "6d55b1970221a7219b7d52a5691f9955ec4226b37dbb12c85ecf723db99882c8"
+    },
+    "public/view_admin/js/chunk-93d6477c.660fdced.js.gz": {
+      "before": null,
+      "after": "6e23d5716e40084e4f92b99e06a035c15ade81efedbe0d96909d619bfe93c197"
+    },
+    "public/view_admin/js/chunk-9e754c52.476a5d8e.js": {
+      "before": null,
+      "after": "3fd58cfcbb37005348b3108e0e52315448e4d0106e86b238e830c86f1ec8e4cb"
+    },
+    "public/view_admin/js/chunk-9e754c52.476a5d8e.js.gz": {
+      "before": null,
+      "after": "fca90d4ef818ba1338a46bbc2ff784b79925a47c0ef58418525928fa14f215f1"
+    },
+    "public/view_admin/js/chunk-9e9c1a80.046fce64.js": {
+      "before": null,
+      "after": "49a7f66c46bf262dab3074603127b8e42db1fb3d739876aade8713ef5632cf58"
+    },
+    "public/view_admin/js/chunk-9e9c1a80.046fce64.js.gz": {
+      "before": null,
+      "after": "f392393e34ffbac94fa2bdeb05bdd773f6a0618188969df994fc01088d939c61"
+    },
+    "public/view_admin/js/chunk-aa18606c.8a5f3a84.js": {
+      "before": null,
+      "after": "65a9cf96efd59879e83e1080c54fbcf161f265e21c2df331c797d71ede5e3402"
+    },
+    "public/view_admin/js/chunk-aa18606c.8a5f3a84.js.gz": {
+      "before": null,
+      "after": "713ec022844cdf284b4de519d9d0138e5b3fe5928a15aa9d63dbd6db238f15c6"
+    },
+    "public/view_admin/js/chunk-cc7b2532.7b332f30.js": {
+      "before": null,
+      "after": "56148aa6554f3b81951b004b69a617e7a77566ce23871e739b8bbb3bdca21040"
+    },
+    "public/view_admin/js/chunk-cc7b2532.7b332f30.js.gz": {
+      "before": null,
+      "after": "78b18e084cefc45f6b55be7de241ab12a02879fd58992bd62b612c43610086bb"
+    },
+    "public/view_admin/js/chunk-eab414e0.bf219827.js": {
+      "before": null,
+      "after": "8b8404932a7f5a575b13f94dd4340ef87c915ed5433be687edc04903e1483767"
+    },
+    "public/view_admin/js/chunk-eab414e0.bf219827.js.gz": {
+      "before": null,
+      "after": "32a123f4ed0d0baade9c065d3484d3edc592d798090b6ea609ec13ac3207a89b"
+    },
+    "public/view_cashier_v3/assets/index-13a4a26a.js": {
+      "before": null,
+      "after": "bd65d67e84a1f95d6a9e84cf75ab07555691f75e1af177100ce01fa0e69bae6c"
+    },
+    "public/view_cashier_v3/assets/index-95b0b53f.css": {
+      "before": null,
+      "after": "95b0b53f05239805dc5989e96a2b80f1402a4d86382a03c84cfb16223f4402c8"
+    },
+    "public/system.html": {
+      "before": "d75f434c0773706da66cc56340398a3dd82722593b379f5af524912a45e2cf82",
+      "after": "36a217020a0e593bdf1e22d645cc20dce4b6760251372b03bfc0f431d1e603e7"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "e167dc571fc74e1721de84c867ec712ed6e03b02902d7ee45b9651f519171168",
+      "after": "42e0a17c3a72014d12e33443c70d12d6763837dd6c6662f77e8b070a2c0264df"
+    }
+  },
+  "migrations": [
+    {
+      "file": "2026-10-28-member-phone-login-reset.sql",
+      "table": "eb_member_phone_login_reset",
+      "key": "2026-10-28-member-phone-login-reset",
+      "title": "会员改号撤销登录",
+      "source": "后端代码/database/upgrades/2026-10-28-会员改号撤销登录/02-正式升级.sql",
+      "sha256": "b7db8d113882d8114cff434c4a56ee14c8785d37f2efcf082ac82e49a59bb462",
+      "columns": [
+        "id",
+        "uid",
+        "nonce",
+        "phone_verified",
+        "binding_ids",
+        "operator_id",
+        "source",
+        "created_at"
+      ],
+      "existedBefore": false
+    },
+    {
+      "file": "2026-10-28-member-management-receipt.sql",
+      "table": "eb_member_management_receipt",
+      "key": "2026-10-28-member-management-receipt",
+      "title": "平台门店会员管理回执",
+      "source": "后端代码/database/upgrades/2026-10-28-平台门店会员管理/02-正式升级.sql",
+      "sha256": "500a6fd7a5c07c6394ab9336c2ad002246283bca699ea38ce593d5e6bbaba4c4",
+      "columns": [
+        "id",
+        "actor_type",
+        "actor_id",
+        "request_key",
+        "request_hmac",
+        "action",
+        "member_id",
+        "response_json",
+        "created_at"
+      ],
+      "existedBefore": false
+    }
+  ],
+  "retiredPreviewAuthorized": false
+}

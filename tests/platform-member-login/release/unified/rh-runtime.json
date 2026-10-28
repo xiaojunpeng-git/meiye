@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "serverReadOnly": true,
+  "businessWrites": 0,
+  "allowedStores": 102,
+  "memberTotal": 151821,
+  "pageRows": 20,
+  "bindingField": true,
+  "loginInfoRead": true,
+  "emptyQuery": true,
+  "financialCommandDenied": true,
+  "existingOperatorEditPermission": true,
+  "existingSalaryRead": true,
+  "existingCombinationClasses": true
+}

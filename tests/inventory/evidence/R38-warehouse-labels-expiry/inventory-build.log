@@ -1,0 +1,19 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 1839 modules transformed.
+
+(!) outDir /private/tmp/r38-inventory-final is not inside project root and will not be emptied.
+Use --emptyOutDir to override.
+
+rendering chunks...
+computing gzip size...
+../../../../../../../../private/tmp/r38-inventory-final/index.html                        1.07 kB │ gzip:   0.73 kB
+../../../../../../../../private/tmp/r38-inventory-final/assets/index-dc3907fc.css       118.16 kB │ gzip:  19.57 kB
+../../../../../../../../private/tmp/r38-inventory-final/assets/index-7dba964c.js        509.21 kB │ gzip: 155.42 kB
+../../../../../../../../private/tmp/r38-inventory-final/assets/exceljs.min-a0d233a6.js  939.05 kB │ gzip: 269.76 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 2.48s

@@ -1,0 +1,24 @@
+{
+  "baselineHead": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "developmentBaseline": "4e355afec2b5a122215a5215d29783c3a6052560",
+  "sourceTree": "820074e9bda65238109d06adc4aac29575e49752",
+  "patchSHA256": "3ef65d46ee3ed2c1ee301dbac57d6e1cc2781c75e517dea9e06a43a3dc011ae3",
+  "files": {
+    "后端代码/app/services/activity/combination/CombinationGroupListServices.php": "cd069e476b13b86701df3bdfae79afae8def3480ba76955187acee5d7cc5f020",
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue": "d034bd13713910e19a894bb263344e876a735e8fa4ebcbb8073e5e95494822dc",
+    "tests/combination-member-search/backend.php": "3b0a06bbc960b939c774364e7c686d9078b8c3cab24b6aeb420a2bfb4dbc96dc",
+    "tests/combination-member-search/frontend.cjs": "b5cd156858caff10ee9e3445e856229c5ab9cd631232ad23a187d76ca3f2e182"
+  },
+  "sharedIndexUnchanged": true,
+  "acceptedByProductManager": true,
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "tests": {
+    "database": "32 checks, production query/page/export against local MySQL, all test facts rolled back",
+    "frontend": "real Vue2 SFC compile + submitted search/pagination/export/reset + prior group UI regression",
+    "compatibility": "PHP 7.4 syntax PASS; database service execution uses local PHP 8.5 ORM",
+    "page": "Full browser/API integration not verified: Docker source bind mounts return EMFILE; existing source/containers not reset"
+  },
+  "acceptance": "2026-10-28 用户测试通过并授权本轮commit及三站发布"
+}

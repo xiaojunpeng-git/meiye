@@ -8,7 +8,7 @@
 					'page-footer3': newData.navStyleConfig.tabVal == 2,
 					'page-footer--docked': !isFloating,
 				}" id="target" :style="[componentStyle, footerToneStyle]">
-					<view class="foot-item flex-1 flex-col flex-center h-96 relative" :class="{ 'is-active': isActive(item) }" v-for="(item,index) in newData.menuList" :key="index" @click="goRouter(item)">
+					<view class="foot-item flex-1 flex-col flex-center h-96 relative" :class="{ 'is-active': isActive(item) }" v-for="(item,index) in visibleMenuList" :key="index" @click="goRouter(item)">
 						<template v-if="isActive(item)">
 							<text v-if="item.icon && newData.navStyleConfig.tabVal != 1" class="iconfont nav-icon" :class="item.icon"></text>
 							<image v-else-if="newData.navStyleConfig.tabVal != 1" :src="item.imgList[0]"></image>
@@ -49,6 +49,11 @@
 		},
 		computed: {
 			...mapGetters(['isLogin', 'cartNum']),
+			visibleMenuList() {
+				// Server-managed DIY navigation can still contain an old cart item.
+				return (this.newData.menuList || []).filter(item =>
+					this.$memberCartEntryEnabled || (item.link || '').split('?')[0] !== '/pages/order_addcart/order_addcart');
+			},
 			isFloating() {
 				return !!(this.newData.navConfig && this.newData.navConfig.tabVal);
 			},

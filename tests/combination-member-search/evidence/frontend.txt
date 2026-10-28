@@ -1,0 +1,1 @@
+MEMBER_SEARCH_FRONTEND_PASS compilation, submitted member search, page reset, retained filters, pagination, export and reset

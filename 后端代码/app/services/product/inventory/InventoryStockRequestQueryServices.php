@@ -306,8 +306,9 @@ final class InventoryStockRequestQueryServices
         return $sign . substr($digits, 0, -$scale) . ($fraction === '' ? '' : '.' . $fraction);
     }
 
+    /** 状态值用于业务判断，展示层未知枚举不能直接漏出内部代码。 */
     private function statusName(string $status): string
     {
-        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status;
+        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? '未知状态';
     }
 }

@@ -1,0 +1,25 @@
+{
+  "commit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+  "tree": "fde1cdb5b58b6f09fdb352029fa0cd32a747d9b8",
+  "branch": "release/store-cashier-c14-main",
+  "paths": [
+    "scripts/r39-release-build.cjs",
+    "scripts/r39-release-install.php",
+    "scripts/r39-release.py",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/behavior-check.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/build-check.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/delta.diff",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/fixed-version.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/initial.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/local-recovery-plan.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/local-recovery-result.json",
+    "tests/report-group-dashboard/evidence/R39-rank-scroll-toggle/pause-preview.png",
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+  ],
+  "businessPaths": [
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+  ],
+  "preservedBaseline": "50b8356528acb36ff251f350f2b0137cd8304787",
+  "newBranch": false,
+  "sharedIndexUntouched": true
+}

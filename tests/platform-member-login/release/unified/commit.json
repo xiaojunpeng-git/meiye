@@ -1,0 +1,13 @@
+{
+  "commit": "12ba0fd27d218d21d3db3ae71f7d20b06682faaa",
+  "branch": "release/008-round5-platform-member-20261028",
+  "sourceTree": "4c26e0dd734e7e63e45562c5714e10151cfeec7d",
+  "tree": "64cc0fd62a9e9f21f083e5a21a1493ecb6ff5be5",
+  "parents": [
+    "c3a69f96a34bd3f66090c6a6c4bab63bcf077ec8"
+  ],
+  "originalBusinessCommit": "a04265794299152f083c1d84ca3db825ffe7d70a",
+  "sharedIndexUnchanged": true,
+  "sharedHead": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "permissionPatchSHA256": "08255dcb17fe6455d52994a190b3886403ea7d123e6c6666bbf23a8b357ca987"
+}

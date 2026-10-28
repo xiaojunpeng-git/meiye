@@ -234,15 +234,10 @@ final class InventoryMovementQueryServices
         return ['count' => $count, 'list' => $rows];
     }
 
+    /** 与统计、批次明细共用同一中文名称；原来源键继续负责筛选和追溯。 */
     private function movementLabel(string $sourceType): string
     {
-        return [
-            'manual_inbound' => '手工入库', 'manual_outbound' => '手工出库',
-            'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
-            'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
-            'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
-            'completion_batch' => '项目耗材核销', 'presale_claim_outbound' => '预售领用出库',
-        ][$sourceType] ?? $sourceType;
+        return InventoryMovementDisplayServices::typeName($sourceType);
     }
 
     private function outboundTypeName(string $sourceType): string

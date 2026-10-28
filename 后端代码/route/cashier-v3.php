@@ -87,6 +87,9 @@ Route::group('cashierapi/v3', function () {
         // 统一命令网关：白名单 action + 幂等键 + 多对象 contexts 严格校验
         Route::post('workbenches/actions', 'Command/dispatchAction')
             ->option(['real_name' => '收银V3命令网关']);
+        Route::get('member-login/:id', 'MemberLogin/read')->option(['real_name' => '读取会员登录信息']);
+        Route::post('member-login/:id/password', 'MemberLogin/password')->option(['real_name' => '修改会员登录密码']);
+        Route::post('member-login/:id/clear-wechat', 'MemberLogin/clear')->option(['real_name' => '清除会员微信绑定']);
         Route::post('hang-drafts/delete', 'HangDraft/delete')
             ->option(['real_name' => '挂单草稿直接删除']);
         Route::post('hang-drafts/save', 'HangDraft/save')

@@ -23,7 +23,7 @@
 					<view class="seller">
 						<view class="head acea-row">
 							<view class="headCon">
-								<text class="tag acea-row row-center-wrapper">{{delivery_type == 3 ? '配送' : '到店'}}</text>
+								<text class="tag acea-row row-center-wrapper">购买门店</text>
 								{{storeInfo.name || ''}}
 							</view>
 							<view>距您{{ storeInfo.range || 0 }}km</view>
@@ -333,14 +333,13 @@
 					collage_id: this.collage_id
 				}).then(res => {
 					const {
-						shipping_type,
-						address_id,
 						status,
 						uid,
 						store_id
 					} = res.data.collage;
-					this.delivery_type = shipping_type;
-					this.address_id = address_id;
+					// 会员端拼单只关联购买门店；历史配送字段不再决定新订单履约。
+					this.delivery_type = 2;
+					this.address_id = 0;
 					this.status = status;
 					this.collage_uid = uid;
 					this.where.store_id = store_id;

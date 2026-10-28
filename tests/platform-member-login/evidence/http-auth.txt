@@ -1,0 +1,3 @@
+PASS unauthenticated adminapi/user/member-center/login/1/password rejected without password/debug leakage
+PASS unauthenticated cashierapi/v3/member-login/1/password rejected without password/debug leakage
+PASS unauthenticated adminapi/user/member-center/action rejected without password/debug leakage

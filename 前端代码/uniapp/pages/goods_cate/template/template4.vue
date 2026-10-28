@@ -4,8 +4,8 @@
 			<view class="px-20 h-80 flex mt-12 text--w111-999">
 				<view class="w-162 h-58 rd-30rpx bg--w111-f5f5f5 flex-center fs-32">
 					<view class="iconfont icon-ic_menu3 fs-32 text-w111-000" @tap="openDrower()"></view>
-					<text class="text--w111-b3b3b3 px-16">|</text>
-					<view class="iconfont icon-a-ic_ShoppingCart23 fs-32 text-w111-000" @tap="goCart()"></view>
+					<text v-if="$memberCartEntryEnabled" class="text--w111-b3b3b3 px-16">|</text>
+					<view v-if="$memberCartEntryEnabled" class="iconfont icon-a-ic_ShoppingCart23 fs-32 text-w111-000" @tap="goCart()"></view>
 				</view>
 				<view class="flex-1 h-58 rd-30rpx bg--w111-f5f5f5 ml-14 px-32 flex-y-center" @tap="goSearch">
 					<text class="iconfont icon-ic_search fs-28"></text>
@@ -49,7 +49,7 @@
 								<view class="w-422 lh-40rpx fs-28 text--w111-333 fw-500 line2">
 									<text v-if="item.brand_name" class="brand-tag">{{ item.brand_name }}</text>{{item.store_name}}
 								</view>
-								<view class="flex" v-if="item.cart_button">
+								<view class="flex" v-if="$memberCartEntryEnabled && item.cart_button">
 									<view class="w-88 h-64 rd-l-32rpx bg-primary-light flex-center"
 										@click.stop="goCartDuo(item)" v-if="item.spec_type">
 										<text class="iconfont icon-ic_ShoppingCart1 fs-40 text-primary-con"></text>

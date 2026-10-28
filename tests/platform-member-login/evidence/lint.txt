@@ -1,0 +1,17 @@
+No syntax errors detected in 后端代码/app/services/cashier/v3/member/CashierV3MemberModule.php
+No syntax errors detected in 后端代码/app/services/query/provider/MemberUnifiedQueryProvider.php
+No syntax errors detected in 后端代码/app/services/query/provider/MemberUnifiedQueryPageRegistrar.php
+No syntax errors detected in 后端代码/app/services/user/MemberPhoneResetServices.php
+No syntax errors detected in 后端代码/route/admin.php
+No syntax errors detected in 后端代码/route/cashier-v3.php
+No syntax errors detected in 后端代码/config/unified_query.php
+No syntax errors detected in 后端代码/app/services/user/MemberWechatBindingReadServices.php
+No syntax errors detected in 后端代码/app/services/user/MemberManagementCommandServices.php
+No syntax errors detected in 后端代码/app/services/user/MemberLoginManagementServices.php
+No syntax errors detected in 后端代码/app/services/user/PlatformMemberScopeServices.php
+No syntax errors detected in 后端代码/app/services/user/PlatformMemberCenterServices.php
+No syntax errors detected in 后端代码/app/controller/admin/v1/user/MemberCenter.php
+No syntax errors detected in 后端代码/app/controller/cashier/v3/MemberLogin.php
+No syntax errors detected in 后端代码/app/services/query/provider/PlatformMemberUnifiedQueryProvider.php
+No syntax errors detected in 后端代码/app/services/query/provider/PlatformMemberUnifiedQueryRegistrar.php
+No syntax errors detected in 后端代码/app/services/query/provider/PlatformMemberUnifiedQueryWorkerContextResolver.php

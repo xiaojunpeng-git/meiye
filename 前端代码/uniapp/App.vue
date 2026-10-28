@@ -11,6 +11,7 @@
 	import { silenceBindingSpread } from "@/utils/index.js";
 	// #ifdef MP-WEIXIN
 	import { loadMemberIconFont } from '@/utils/memberIconFont';
+	import { enforceMemberPhoneGate, installMemberPhoneGate } from '@/utils/memberPhoneGate';
 	// #endif
 	// #ifdef MP
 	// let livePlayer = requirePlugin('live-player-plugin')
@@ -72,6 +73,8 @@
 		onLaunch: async function(option) {
 			uni.hideTabBar()
 			// #ifdef MP-WEIXIN
+			// 手机号授权是会员端全局入口条件，必须在任何业务页面发起跳转前安装拦截器。
+			installMemberPhoneGate(this.$store);
 			// Start the global font without blocking business startup or waiting
 			// for simulator callbacks; the rendered glyphs are verified separately.
 			loadMemberIconFont(wx.loadFontFace && wx.loadFontFace.bind(wx), HTTP_REQUEST_URL);
@@ -336,7 +339,7 @@
 				}).catch(res => {
 					uni.hideLoading();
 				});
-			}else if(this.$store.getters.isLogin && this.getExpired()){
+			}else if(this.$store.getters.isLogin && await this.getExpired()){
 				//处理小程序有token情况下但是静默授权失败
 				this.$Cache.clear(LOGIN_STATUS);
 				Routine.getCode().then(code => {
@@ -347,6 +350,10 @@
 		},
 		onShow(options) {
 			let that = this;
+			// #ifdef MP-WEIXIN
+			// 冷启动、分享卡片和从后台恢复都重新校验，避免直接落到业务深链。
+			enforceMemberPhoneGate(this.$store);
+			// #endif
 			const enterOptions = uni.getEnterOptionsSync();
 			if (enterOptions.query && enterOptions.query.spid) {
 				this.$Cache.set('spid', enterOptions.query.spid);
@@ -397,6 +404,9 @@
 							});
 							that.$store.commit('SETUID', res.data.userInfo.uid);
 							that.$store.commit('UPDATE_USERINFO', res.data.userInfo);
+							// #ifdef MP-WEIXIN
+							enforceMemberPhoneGate(that.$store);
+							// #endif
 						}
 					}).catch(err => {
 						return that.$util.Tips({
@@ -451,7 +461,10 @@
 			async getExpired(){
 				// 通过一个个人中心的接口判断token是否生效，catch捕获到就证明token过期，返回true
 				try {
-					await getUserInfo();
+					const response = await getUserInfo();
+					// 使用服务端最新会员资料覆盖缓存，手机号门禁不能依赖过期的本地快照。
+					this.$store.commit('SETUID', response.data.uid);
+					this.$store.commit('UPDATE_USERINFO', response.data);
 					return false; // token有效
 				} catch (err) {
 					return true; // token过期

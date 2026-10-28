@@ -1,0 +1,3 @@
+{"result":"PASS","site":"rh","serverReadOnly":true,"businessWrites":0,"allowedStores":102,"memberTotal":151818,"pageRows":20,"bindingField":true,"loginInfoRead":true,"emptyQuery":true,"financialCommandDenied":true,"existingSalaryRead":true,"existingCombinationClasses":true}
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)

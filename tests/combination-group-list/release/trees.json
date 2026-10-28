@@ -1,0 +1,139 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "baselineTree": "83952189194eb81ae75ddb8459b11c1eeb5388b9",
+  "candidateTree": "4a20c5f72e8707589f7456ca15e6d0dd76faf266",
+  "acceptedPatch": "c4831c71798daba4dcf4287cc0a58f192e94617dcaf5b5980c2c807015520b33",
+  "routePreservation": "HEAD现网三条工资接口保留，只增加已验收的整团退款路由",
+  "prerequisiteTree": "225900b3dd568a6b9d94df74b8394a6eb693f3f6",
+  "prerequisiteFiles": [
+    {
+      "path": "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php",
+      "source": "3c1302f3f75162cdab42fff8d7399221c58c5cdb",
+      "sha256": "544130aac7f62a70173aee7d22e0eaba3f8288bfd7cdbbbf2b439234ea835468"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StoreCombinationServices.php",
+      "source": "3c1302f3f75162cdab42fff8d7399221c58c5cdb",
+      "sha256": "71fd4ca1c3086d5c08e1d8b7e25f3b9ece953eabd9686a586c3b7c21d11a97e7"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/MemberCombinationRecordServices.php",
+      "source": "939a09786284bb3eb42c0739d589bc5778a59f41",
+      "sha256": "eececcc48282d765c3b70a86444f5eebc762bde28ba93f855166d887583d18f5"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationFulfillmentServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "508bb7392769ad72d03af149665112d7ba2568194783376d06f7c57f905e40c5"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationConsumptionVisibilityServices.php",
+      "source": "cc31149de80b276c6a0f2ab1ff7dc3d397c2919a",
+      "sha256": "d14baef96c2eeeecfa5801fec9ff61fbc9df47fe870e14ec9631e6550a77ea54"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationRefundServices.php",
+      "source": "166f095fbd112159b2ffd005d74680c179e0a00e",
+      "sha256": "902db241193f7e9865dfad2f59f78e466199f21e1421c9de143365c0ecf3951c"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StorePinkServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "449c1e6e563935289884381b39480e13b86d9a2f7baebe28d19fe5de92fc120c"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationGroupManagementServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "2f2f2d908382b208a9dcc2bc344c114e2c73dbcc686763688764a00a650196fe"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationRecordServices.php",
+      "source": "3c1302f3f75162cdab42fff8d7399221c58c5cdb",
+      "sha256": "5a7e552651108bafcc557097a41f8b5bb8725cc1ab94e39d2416ec355796ce1c"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundDomainServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "43d86dbf75f3b8dd3744859f5807a6b1e27a275c2a893c9aa5eae78f3210967f"
+    },
+    {
+      "path": "后端代码/app/services/pay/FuyouCombinationRefundGateway.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "9224cd4d5526f8612559d96d9ffce395e3722ce7047bcade3963ae0719bef868"
+    },
+    {
+      "path": "后端代码/app/jobs/order/OrderPayHandelJob.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "8fcd2c225966ccaf51c4a5f899b91742445f37725fde3843ba1cdd326bac9763"
+    },
+    {
+      "path": "后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "5b4de8bb82e65262866c9175bab6aa3dad161e10214d9dcf6a151505244dc9dd"
+    },
+    {
+      "path": "后端代码/app/listener/order/Pay.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "3820e7b84af3d8269e67e9b0c44389cf1bf9cde82486bd9ff8b9eaf9157935e6"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderDeliveryServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "78ea9c4df723e13dbdb5fb8ec9ef46a54ff2f79ce1a2b3d0b3ccd88511fb6106"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundServices.php",
+      "source": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+      "sha256": "1e132e9817a243203e332a329099d80675eddfe36e9492376518864396fe71ed"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderCreateServices.php",
+      "source": "d8cb007223f5b7bb703683146806349b42f6089c",
+      "sha256": "c8f31900b52d6588e3f573240bf7d48b0379d5f617f68d2b5c25ae5d3dda85de"
+    },
+    {
+      "path": "后端代码/mohe/services/wechat/HwcPayService.php",
+      "source": "9c3bd6debe5586f4368014909ec02188fbbadc70",
+      "sha256": "9570ea4762daeb36e1cbffd9dc555b591dd04495c24d821ff2f8c5136dc12838"
+    }
+  ],
+  "liveExcelChunk": "Identical bytes; filename hash differs only, no missing page source",
+  "sharedIndexBefore": "6e9f50ecfd17740bd0140554d441786eb0f392ac19ebbf81d1b3f93100b27bcf",
+  "buildInputTree": "7129f12fd7188245c849d6438013f8d67fcc67ca",
+  "prerequisiteArchiveFiles": [
+    "后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql",
+    "tests/combination-r61/README.md"
+  ],
+  "deliveryFiles": [
+    "scripts/combination-group-release-build.cjs",
+    "scripts/combination-group-release-probe.php",
+    "scripts/combination-group-release-install.php",
+    "scripts/combination-group-release-publish.cjs",
+    "tests/combination-group-list/evidence/existing-r61.txt",
+    "tests/combination-group-list/evidence/export-browser.json",
+    "tests/combination-group-list/evidence/fixed-version.json",
+    "tests/combination-group-list/evidence/layout-browser.json",
+    "tests/combination-group-list/evidence/README.md",
+    "tests/combination-group-list/evidence/prior-candidate-272c1684.json",
+    "tests/combination-group-list/evidence/baseline.json",
+    "tests/combination-group-list/evidence/backend.txt",
+    "tests/combination-group-list/evidence/round4.patch",
+    "tests/combination-group-list/evidence/frontend.txt",
+    "tests/combination-group-list/evidence/prior-candidate-17ae4943.json",
+    "tests/combination-group-list/evidence/prior-candidate-13ff5085.json",
+    "tests/combination-group-list/release/008-candidate-runtime.json",
+    "tests/combination-group-list/release/rh-before.json",
+    "tests/combination-group-list/release/010-before.json",
+    "tests/combination-group-list/release/baseline-admin-build.json",
+    "tests/combination-group-list/release/live-admin-map-diff.json",
+    "tests/combination-group-list/release/frontend-baseline-comparison.json",
+    "tests/combination-group-list/release/README.md",
+    "tests/combination-group-list/release/fixed-backend.txt",
+    "tests/combination-group-list/release/rh-candidate-runtime.json",
+    "tests/combination-group-list/release/candidate-admin-build.json",
+    "tests/combination-group-list/release/fixed-r61.txt",
+    "tests/combination-group-list/release/008-before.json",
+    "tests/combination-group-list/release/010-candidate-runtime.json"
+  ]
+}

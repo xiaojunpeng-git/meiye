@@ -9,7 +9,13 @@ class MemberUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
 {
     public function register(UnifiedQueryPageRegistry $registry): void
     {
-        $registry->registerPage(MemberUnifiedQueryProvider::PAGE_CODE, '会员列表', [
+        $this->registerPage($registry, MemberUnifiedQueryProvider::PAGE_CODE);
+    }
+
+    /** Same field/metric contract, separate page identity prevents platform/store account-ID collisions. */
+    protected function registerPage(UnifiedQueryPageRegistry $registry, string $pageCode): void
+    {
+        $registry->registerPage($pageCode, '会员列表', [
             UnifiedQueryPageRegistry::field('member_name', '会员姓名', 'text', true, true),
             UnifiedQueryPageRegistry::field('phone', '完整手机号', 'text', true, true),
             UnifiedQueryPageRegistry::field('member_no', '会员编号', 'text', true, true),
@@ -31,6 +37,7 @@ class MemberUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
             UnifiedQueryPageRegistry::field('last_service_staff', '上次服务人员', 'text', true, false),
             UnifiedQueryPageRegistry::field('latest_visit_date', '最近到店日期', 'date', true, false),
             UnifiedQueryPageRegistry::field('created_at', '建档时间', 'datetime', true, false),
+            UnifiedQueryPageRegistry::field('wechat_binding', '微信绑定信息', 'text', true, false),
         ], 'member_id', [
             'keywordFields' => ['member_name', 'phone', 'member_no'],
             'requiredFeature' => 'cashier.v3.member',

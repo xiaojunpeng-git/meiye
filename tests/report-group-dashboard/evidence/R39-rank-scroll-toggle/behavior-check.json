@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "checks": [
+    "默认三个榜单滚动",
+    "独立暂停不影响其他榜单",
+    "从暂停期间手动查看的位置继续",
+    "三榜全暂停时位置不变"
+  ],
+  "backendOrDataChanges": false
+}

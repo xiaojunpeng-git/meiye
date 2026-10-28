@@ -46,9 +46,15 @@ import { validAllowanceCents } from '@/services/couponAllowance'
 import { cardToBalancePayload } from '@/services/cardToBalance'
 import { ordinaryCardRows, applyOrdinaryCardRows, validateOrdinaryCardSale } from '@/services/ordinaryCardSaleAdjustment'
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
+import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
 import { automaticCraftsmanAmounts, defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
+import {
+  REQUIRED_FIELD_GUIDANCE_DURATION_MS,
+  REQUIRED_FIELD_GUIDANCE_EVENT,
+  guideRequiredField
+} from '@/services/requiredFieldGuidance'
 
 const state = useCashierV3State()
 const route = useRoute()
@@ -63,6 +69,10 @@ const selectedType = ref('项目')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
 const activeCartLineId = ref(null)
+// 结账校验只引导第一条缺少手艺人的项目；提示不弹阻断框，也不改变人员业务值。
+const craftsmanGuidanceLineId = ref(null)
+const craftsmanGuidanceMessage = ref('')
+let craftsmanGuidanceTimer = null
 // 保留最近一次数量校验失败，避免后端拒绝超量后输入框被恢复为权威数量，
 // 但结账按钮仍沿用旧购物车继续进入结账向导。
 const cartQuantityValidationError = ref('')
@@ -2199,10 +2209,27 @@ function reportHangOrderFailure(result, fallback) {
 function reportCheckoutEntryFailure(result, fallback = '结账资料保存失败，请重试。') {
   const status = resultStatus(result)
   if (!['failed', 'conflict'].includes(status)) return result
+  const code = String(result?.result?.code || result?.code || '')
+  // 必填缺失直接定位页面中的第一个目标，避免用户先关闭一层无意义的错误弹窗。
+  // 其它接口或业务错误仍走原反馈通道，不能被必填提示吞掉。
+  if (code === 'CASHIER_CRAFTSMAN_REQUIRED') {
+    guideRequiredField({
+      target: 'first-missing-craftsman',
+      message: '请在这里选择手艺人'
+    })
+    return result
+  }
+  if (code === 'CASHIER_BUSINESS_SOURCE_REQUIRED') {
+    guideRequiredField({
+      target: 'checkout-business-source',
+      message: '请在这里选择客户来源'
+    })
+    return result
+  }
   window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
     detail: {
       status: status === 'conflict' ? 'conflict' : 'failed',
-      code: result?.result?.code || result?.code || '',
+      code,
       message: resultMessage(result, fallback)
     }
   }))
@@ -3971,6 +3998,37 @@ function firstCartLineMissingCraftsmen() {
     : null
 }
 
+function clearCraftsmanGuidance() {
+  craftsmanGuidanceLineId.value = null
+  craftsmanGuidanceMessage.value = ''
+  if (craftsmanGuidanceTimer) {
+    window.clearTimeout(craftsmanGuidanceTimer)
+    craftsmanGuidanceTimer = null
+  }
+}
+
+async function focusRequiredFieldGuidance(event = {}) {
+  if (event?.detail?.target !== 'first-missing-craftsman') return
+  clearCraftsmanGuidance()
+  await nextTick()
+  const row = firstCartLineMissingCraftsmen()
+  if (!(row instanceof HTMLElement)) return
+  const lineId = String(row.dataset.cartLineId || '')
+  if (!lineId) return
+  craftsmanGuidanceLineId.value = lineId
+  craftsmanGuidanceMessage.value = String(event?.detail?.message || '请完成此必填项')
+  await nextTick()
+  // 原节点在这里只切换引导样式，不会被列表重建；直接复用可避免依赖 CSS.escape 的兼容性差异。
+  const guidedRow = row.isConnected ? row : firstCartLineMissingCraftsmen()
+  const target = guidedRow?.querySelector('.cart-line__meta-action--craftsmen')
+  guidedRow?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  target?.focus({ preventScroll: true })
+  craftsmanGuidanceTimer = window.setTimeout(
+    clearCraftsmanGuidance,
+    REQUIRED_FIELD_GUIDANCE_DURATION_MS
+  )
+}
+
 function cartLineServiceObject(line = {}) {
   const local = localLineServiceSettings.value[line.id]
   if (local?.serviceObject) return local.serviceObject
@@ -4158,6 +4216,7 @@ async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
 
 async function openCartLineCraftsmen(line) {
   if (!isProjectLine(line) || cardOperationUpgradeBinding(line)) return
+  clearCraftsmanGuidance()
   activeCartLineId.value = line.id
   await loadPersonnelOverlay(line, 'craftsmen')
 }
@@ -7900,6 +7959,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:open-toolbar-business-source', handleToolbarBusinessSourceOpen)
   window.addEventListener('cashier-v3:clear-toolbar-business-source', handleToolbarBusinessSourceClear)
   window.addEventListener('cashier-v3:update-toolbar-business-date', handleToolbarBusinessDateChange)
+  window.addEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusRequiredFieldGuidance)
   publishToolbarCheckoutContext()
   if (window.__cashierV3PendingHangDraft) {
     const pending = window.__cashierV3PendingHangDraft
@@ -7929,6 +7989,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-toolbar-business-source', handleToolbarBusinessSourceOpen)
   window.removeEventListener('cashier-v3:clear-toolbar-business-source', handleToolbarBusinessSourceClear)
   window.removeEventListener('cashier-v3:update-toolbar-business-date', handleToolbarBusinessDateChange)
+  window.removeEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusRequiredFieldGuidance)
+  clearCraftsmanGuidance()
 })
 </script>
 
@@ -8201,6 +8263,7 @@ onBeforeUnmount(() => {
               <article
                 v-for="line in group.lines"
                 :key="line.id"
+                :data-cart-line-id="String(line.id)"
                 class="cart-line"
                 :class="{
                   'cart-line--active': activeCartLineId === line.id,
@@ -8339,7 +8402,10 @@ onBeforeUnmount(() => {
                       优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
                     </button>
                   </div>
-                  <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">
+                  <div
+                    class="cart-line__meta-slot cart-line__meta-slot--craftsmen"
+                    :class="{ 'is-guided': String(craftsmanGuidanceLineId) === String(line.id) }"
+                  >
                     <button
                       v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
                       type="button"
@@ -8351,6 +8417,10 @@ onBeforeUnmount(() => {
                       <template v-if="craftsmenDisplayValue(line)">手艺人:<span class="cart-line__meta-value">{{ craftsmenDisplayValue(line) }}</span></template>
                       <template v-else>{{ craftsmenDisplaySummary(line) }}</template>
                     </button>
+                    <RequiredFieldGuidance
+                      v-if="String(craftsmanGuidanceLineId) === String(line.id)"
+                      :message="craftsmanGuidanceMessage"
+                    />
                   </div>
                   <div
                     v-if="isInventoryManagedProductLine(line) || (experienceEnabled && isProjectLine(line) && !cardOperationUpgradeBinding(line))"
@@ -8850,4 +8920,16 @@ onBeforeUnmount(() => {
 }
 .ordinary-card-sale-editor__error { margin: 0; color: #c62828; }
 .cashier-card-purchase-preview--editable footer { flex-wrap: wrap; }
+
+/* 必填目标用轮廓和底色共同提示，不能只依赖颜色表达缺失状态。 */
+.cart-line__meta-slot--craftsmen.is-guided {
+  position: relative;
+  z-index: 4;
+}
+.cart-line__meta-slot--craftsmen.is-guided .cart-line__meta-action--craftsmen {
+  border-radius: 6px;
+  outline: 3px solid rgba(245, 158, 11, .32);
+  background: #fff7e6;
+  box-shadow: 0 0 0 1px #f59e0b;
+}
 </style>

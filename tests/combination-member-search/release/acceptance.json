@@ -1,0 +1,12 @@
+{
+  "answer": "我测试没有问题,本次修复commit,部署瑞昊,push;然后部署渼约008和渼约010",
+  "acceptedPatch": "3ef65d46ee3ed2c1ee301dbac57d6e1cc2781c75e517dea9e06a43a3dc011ae3",
+  "scope": "团长/团员搜索",
+  "customerOrder": [
+    "rh",
+    "push",
+    "008",
+    "010"
+  ],
+  "miniUpload": false
+}

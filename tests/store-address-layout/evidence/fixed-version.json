@@ -1,0 +1,16 @@
+{
+  "baselineHead": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "files": {
+    "前端代码/uniapp/pages/store/home/store_cate1.vue": "b7edb9c7d1fa7bb1ab9aa32070708c248929f1f715365ab30ee33e9959cfefce",
+    "前端代码/uniapp/pages/store/home/store_cate2.vue": "923f117ca236580819017b4e6922a6c609c7226c5e03eb63cbb97760abd5cd46"
+  },
+  "remote": "不适用；本次只在本机验证",
+  "scriptUnchanged": true,
+  "h5": "HBuilderX传统uni-app编译链 / 127.0.0.1:8081",
+  "validation": [
+    "真实会员端门店首页：375及320视口地址完整、无横向溢出、按钮在卡片内且底部对齐",
+    "两种原布局均由实际H5编译覆盖；本地数据库没有样式2门店，未伪称样式2真人路径或小程序真机验收"
+  ],
+  "status": "开发与本地自测完成，待产品经理确认验收；未提交、未部署",
+  "patchSHA256": "76c81fe12a1d3b40f1a67c73662acdf99a19069cf1b363a7ffe52cb2bf87fc72"
+}

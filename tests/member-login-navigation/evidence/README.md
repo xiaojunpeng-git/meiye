@@ -1,0 +1,17 @@
+# 008会员端：授权后资料保存成功未进入会员端
+
+用户确认头像空值后端修复后授权已成功，但仍停在会员登录页。本任务对运行中008会员端只读取登录/手机号存在布尔值、弹窗状态和页面路由，没有采集token、真实手机号或个人资料。已有会话的token与手机号均就绪；原editSuccess只关闭弹窗，子资料弹窗又默认返回上一页，登录为首屏时没有可返回页面。直接调用原finishLogin可进入会员中心，确认授权状态与原跳转函数正常。
+
+固定补丁66160ff5，完整指纹及文件SHA见plan.json。两源码文件：登录页wechat_login/index.vue、共享资料弹窗eidtUserModal/index.vue。登录页仅在MP保存成功后调用原finishLogin，继续执行原手机号门禁、返回来源页及失败兜底；MP登录场景关闭资料弹窗自身的默认返回，保证一个跳转负责人。共享弹窗新增默认true的非视觉导航参数，其他编辑入口保留原返回逻辑；H5保持原行为。没有页面改版、取消手机号门禁、后端或数据库变更。
+
+永久测试success-flow.cjs直接执行实际Vue2父子组件方法、实际Tips帮助函数和实际手机号拦截器，API/导航/缓存均为本地受控替身。修改前首屏保存后导航次数为0，真实复现失败；修改后8项通过：首屏进入会员中心、深链只返回一次、返回失败兜底、其他编辑入口保留原行为、H5不变、保存失败不跳、缺手机号仍拦截、关闭资料弹窗原路径保留。
+
+从唯一正本固定Git树16a3b51a构建只读008会员端候选，AppID wx85d4bfd0b4b6aafb，接口https://008.cc3798.com，计划版本3.0.69.1。原地址修复、已验收会员功能和008空头像后端修复保留。Native WXML已绑定新增参数，编译JS包含成功收尾调用。新包打开登录页后，已有授权会话正常进入会员中心；再次通过真实父子组件事件回放editSuccess，确认profileAutoBack=false且实际已进入pages/user/index。未调用资料保存API或伪造手机号授权，此证据不是重新授权新账号或重写资料的真人验收。
+
+当前状态：实现与本地/模拟器自测通过，等待产品经理验收固定补丁后提交、push及上传008修正版；当前已上传体验版仍为3.0.69，不把模拟器候选冒称线上已更新。不部署H5、后端或其他客户小程序。现有隐私协议及授权流程保持。
+
+文件分组：前端源码2个；永久流程测试1个；工程构建适配器scripts/member-login-navigation-mini-build.cjs；后端与迁移无。生成物/private/tmp/member-login-navigation-mini-008-20261028为派生只读构建与程序包，不作为可编辑源码。业务边界注释已补到两处修改文件。固定版本父链来自已验收并仅008发布的头像修复归档207c0c77，未覆盖共享暂存区或其他任务改动。
+
+## Accepted release update 2026-10-28
+
+PM accepted fixed patch 66160ff5 and authorized commit/push/008 member upload. Business commit 13e60da90e3a28157e6d4c345ebfad8cc14122fb. Official upload task confirmation_upload_8d26a730-f96c-4dfc-bcb6-87844c31e6ca returned success for 3.0.69.1. Earlier pending statements above are historical preparation notes. No H5/backend/other customer deployment in this correction. Remote push is verified separately after this receipt archive.

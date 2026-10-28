@@ -1,0 +1,10 @@
+{
+  "parentCommit": "c3a69f96a34bd3f66090c6a6c4bab63bcf077ec8",
+  "baselineTree": "1e98488cb7ac81f30b40df573ba8555c56d69c0a",
+  "sourceTree": "4c26e0dd734e7e63e45562c5714e10151cfeec7d",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/user/PlatformMemberScopeServices.php": "4b10ba9d16128eb3e02182705dabb2a901a795a717057ef434a9d28679f1821e"
+  },
+  "patchSHA256": "08255dcb17fe6455d52994a190b3886403ea7d123e6c6666bbf23a8b357ca987",
+  "acceptedByUser": true
+}

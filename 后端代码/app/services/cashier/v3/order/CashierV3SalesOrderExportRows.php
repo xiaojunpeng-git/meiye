@@ -4,15 +4,17 @@ namespace app\services\cashier\v3\order;
 
 /**
  * 把已授权、已筛选的销售订单投影为与订单中心表格一致的商品明细行。
- * 明细只读订单 Reader 的历史快照；整单可合计字段仅放首行，避免 Excel 汇总重复计入。
+ * 明细金额只读订单 Reader 的历史快照；分类取商品当前归属，整单金额仅放首行。
  */
 final class CashierV3SalesOrderExportRows
 {
     private const LINE_FIELDS = [
-        'item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson',
+        'item_name', 'product_category', 'unit_price', 'quantity', 'craftsman', 'salesperson',
         'sales_manager', 'guide', 'line_amount',
     ];
     private const REPEATED_CONTEXT_FIELDS = [
+        // 同一销售单拆成商品明细时，每行都需保留单据识别列和办理时间；整单金额仍只在首行。
+        'business_type', 'order_no', 'event_completed_at',
         'sales_order_no', 'business_date', 'member_name', 'phone', 'store',
         'occurred_at', 'cashier', 'source', 'payment_status', 'order_status',
         'supplement', 'payment_completed_at',
@@ -57,12 +59,13 @@ final class CashierV3SalesOrderExportRows
     {
         switch ($field) {
             case 'item_name': return self::itemText($item);
+            case 'product_category': return $item['category'] ?? '未分类';
             case 'unit_price': return $item['unitPrice'] ?? null;
             case 'quantity': return $item['quantity'] ?? null;
             case 'craftsman': return self::craftsmenText($item);
-            case 'salesperson': return self::salespeopleText($item['salespeople'] ?? []);
-            case 'sales_manager': return self::names($item['salesManagers'] ?? []);
-            case 'guide': return self::guidesText($item['guides'] ?? []);
+            case 'salesperson': return self::salespeopleText($item);
+            case 'sales_manager': return self::names($item, 'salesManagers');
+            case 'guide': return self::guidesText($item);
             case 'line_amount': return $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'amountBeforeCoupon'] ?? null;
         }
         return null;
@@ -89,8 +92,8 @@ final class CashierV3SalesOrderExportRows
     private static function craftsmenText(array $item): string
     {
         $allocations = $item['craftsmenListAllocations'] ?? $item['laborPerformanceAllocations'] ?? null;
-        if (!is_array($allocations)) return self::names($item['craftsmen'] ?? []);
-        if (!$allocations) return (string)(($item['craftsmenSummary'] ?? '') ?: '—');
+        if (!is_array($allocations)) return self::names($item, 'craftsmen');
+        if (!$allocations) return (string)(($item['craftsmenSummary'] ?? '') ?: self::emptyPersonnelText($item, 'craftsmen'));
         $parts = [];
         foreach ($allocations as $person) {
             $person = (array)$person;
@@ -102,13 +105,13 @@ final class CashierV3SalesOrderExportRows
                 . '、' . self::wholeYuan($person['laborFeeAmount'] ?? null)
                 . '、' . ($count === null || $count === '' ? '—' : (string)$count) . '）';
         }
-        return $parts ? implode('，', $parts) : '—';
+        return $parts ? implode('，', $parts) : self::emptyPersonnelText($item, 'craftsmen');
     }
 
-    private static function salespeopleText($people): string
+    private static function salespeopleText(array $item): string
     {
         $parts = [];
-        foreach (is_array($people) ? $people : [] as $person) {
+        foreach (is_array($item['salespeople'] ?? null) ? $item['salespeople'] : [] as $person) {
             $person = (array)$person;
             $name = self::personName($person);
             if ($name === '') continue;
@@ -118,30 +121,36 @@ final class CashierV3SalesOrderExportRows
             $parts[] = $name . '（' . ($presale ? '售前、' : '')
                 . self::wholeYuan($person['salesPerformanceAmount'] ?? $person['performanceAmount'] ?? null) . '）';
         }
-        return $parts ? implode('，', $parts) : '—';
+        return $parts ? implode('，', $parts) : self::emptyPersonnelText($item, 'salespeople');
     }
 
-    private static function guidesText($people): string
+    private static function guidesText(array $item): string
     {
         $parts = [];
-        foreach (is_array($people) ? $people : [] as $person) {
+        foreach (is_array($item['guides'] ?? null) ? $item['guides'] : [] as $person) {
             $person = (array)$person;
             $name = self::personName($person);
             if ($name === '') continue;
             $round = (int)($person['guideRoundNo'] ?? $person['guide_round_no'] ?? 0);
             $parts[] = $name . '（' . ($round >= 1 && $round <= 3 ? '第' . $round . '轮' : '无') . '）';
         }
-        return $parts ? implode('、', $parts) : '—';
+        return $parts ? implode('、', $parts) : self::emptyPersonnelText($item, 'guides');
     }
 
-    private static function names($people): string
+    private static function names(array $item, string $role): string
     {
         $names = [];
-        foreach (is_array($people) ? $people : [] as $person) {
+        foreach (is_array($item[$role] ?? null) ? $item[$role] : [] as $person) {
             $name = self::personName((array)$person);
             if ($name !== '') $names[] = $name;
         }
-        return $names ? implode('、', $names) : '—';
+        return $names ? implode('、', $names) : self::emptyPersonnelText($item, $role);
+    }
+
+    /** 列表和导出共用服务端岗位能力；未知旧数据保持“—”，不得猜成未分配。 */
+    private static function emptyPersonnelText(array $item, string $role): string
+    {
+        return (($item['assignmentAvailability'][$role] ?? false) === true) ? '未分配' : '—';
     }
 
     private static function personName(array $person): string

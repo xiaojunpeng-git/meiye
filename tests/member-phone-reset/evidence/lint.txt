@@ -1,0 +1,10 @@
+No syntax errors detected in 后端代码/app/services/BaseServices.php
+No syntax errors detected in 后端代码/app/services/user/CanonicalUserIdentityServices.php
+No syntax errors detected in 后端代码/app/services/user/UserAuthServices.php
+No syntax errors detected in 后端代码/app/services/user/MemberPhoneResetServices.php
+No syntax errors detected in 后端代码/app/services/wechat/WechatUserServices.php
+No syntax errors detected in 后端代码/app/services/wechat/RoutineServices.php
+No syntax errors detected in 后端代码/app/services/wechat/WechatServices.php
+No syntax errors detected in 后端代码/mohe/utils/JwtAuth.php
+No syntax errors detected in tests/member-phone-reset/local-database.php
+No syntax errors detected in tests/member-phone-reset/concurrency.php

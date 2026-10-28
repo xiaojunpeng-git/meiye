@@ -20,6 +20,12 @@ class StoreOrderRefundDomainServices extends BaseServices
 {
     public function refundWholeOrder(array $input): array
     {
+        // All group refund entry points share the original-payment receipt, including automatic jobs.
+        $groupId = (int)($input['store_order_id'] ?? 0);
+        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder($groupId)) {
+            return (new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
+                $groupId, (string)($input['refund_reason'] ?? '拼团整单退款'), (int)($input['operator_id'] ?? 0));
+        }
         /** @var StoreOrderTerminalOperationServices $terminal */
         $terminal = app()->make(StoreOrderTerminalOperationServices::class);
         $terminal->assertWholeOrderOnly($input);
@@ -34,6 +40,21 @@ class StoreOrderRefundDomainServices extends BaseServices
             return $this->parkBookkeepingNeedManual($order, $money, $plan, $input, 0);
         }
 
+        return $this->executeWholeRefund($order, $money, $plan, $input, 0);
+    }
+
+    /** Only server-persisted original-channel confirmation may enter local financial closing. */
+    public function refundConfirmedCombination(int $orderId, array $input): array
+    {
+        $order = $this->loadSalesOrder($orderId);
+        \app\services\activity\combination\CombinationRefundServices::assertChannelConfirmed($order);
+        $input['refund_amount'] = (string)$order['pay_price'];
+        $input['refund_amount_provided'] = true;
+        $money = $this->resolveAndValidateRefundMoney($order, $input, false);
+        $plan = $this->buildPaymentPlan($order, $money, $input);
+        $money['refund_ben'] = $plan['refund_ben'];
+        $money['refund_give'] = $plan['refund_give'];
+        $money['balance_total'] = $plan['balance_total'];
         return $this->executeWholeRefund($order, $money, $plan, $input, 0);
     }
 
@@ -823,7 +844,9 @@ class StoreOrderRefundDomainServices extends BaseServices
             }
         }
 
-        if (!$parkNeedManual && bccomp($balanceTotal, '0', 2) > 0) {
+        // Group refunds return previously spent balance, so today's remaining wallet is not a credit ceiling.
+        if (!$parkNeedManual && bccomp($balanceTotal, '0', 2) > 0
+            && !\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
             $this->assertAvailableBalanceLimits((int)$order['uid'], $refundBen, $refundGive);
         }
 
@@ -1001,7 +1024,11 @@ class StoreOrderRefundDomainServices extends BaseServices
 
             // —— 2) 余额退回（幂等键=操作号+业务类型；锁行再验当前上限）——
             if (bccomp((string)$money['balance_total'], '0', 2) > 0 && !$balanceDone) {
+                // A group purchase refund CREDITS the original balance parts; it does not withdraw today's balance.
+                // Original paid-part caps remain validated above; the atomic balance writer locks and deduplicates the credit.
+                if (!\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
                 $this->assertAvailableBalanceLimits((int)$order['uid'], $money['refund_ben'], $money['refund_give']);
+                }
                 $idemKey = $opNo . ':pay_product_refund';
                 $refundServices->setItem('terminal_authorized', 1)
                     ->setItem('terminal_balance_idempotency_key', $idemKey);

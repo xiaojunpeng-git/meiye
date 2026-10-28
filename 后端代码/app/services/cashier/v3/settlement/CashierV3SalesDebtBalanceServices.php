@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
+use app\services\report\StoreReportPartnerCategorySnapshotServices;
 use think\facade\Db;
 
 /** Immutable sales-debt tender shares. No wallet writes or cash facts are inferred here. */
@@ -51,7 +53,7 @@ final class CashierV3SalesDebtBalanceServices
     }
 
     /** Freeze the exact increment per debt item; future void never reapportions other repayments. */
-    public static function freezeInTx(string $tenantId, string $repaymentId, array $debt, array $items, array $targets, array $personnel, int $balanceCents): array
+    public static function freezeInTx(string $tenantId, string $repaymentId, array $debt, array $items, array $targets, array $personnel, int $balanceCents, int $frozenAt = 0): array
     {
         CashierV3TransactionGuard::assertInTransaction('salesDebtBalance.freeze');
         $weights = [];
@@ -62,8 +64,20 @@ final class CashierV3SalesDebtBalanceServices
             $weights[(int)$item['id']] = $delta;
         }
         $balances = self::allocate($balanceCents, $weights);
-        $issuedComponents = (new \app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices())
-            ->issuedCardComponentsForDebtItems($items);
+        $debtProjection = new CashierV3MemberDebtProjectionServices();
+        $issuedComponents = $debtProjection->issuedCardComponentsForDebtItems($items);
+        // A repayment share may only be frozen when the complete debt resolves to one
+        // verified current platform category. Mixed/ambiguous debts stay unclassified;
+        // the report must never guess a category or apply a mutable ratio later.
+        $categories = array_values(array_filter(
+            (array)($debtProjection->currentCategoriesForDebts([(int)$debt['id']])[(int)$debt['id']] ?? []),
+            static fn(array $category): bool => (int)($category['id'] ?? 0) > 0
+        ));
+        $categoryIds = array_values(array_unique(array_map(
+            static fn(array $category): int => (int)$category['id'], $categories
+        )));
+        $exactCategory = count($categoryIds) === 1 ? $categories[0] : null;
+        $partnerResolver = new StoreReportPartnerCategorySnapshotServices();
         $cashAmounts = [];
         foreach ($items as $item) {
             $id = (int)$item['id'];
@@ -77,16 +91,65 @@ final class CashierV3SalesDebtBalanceServices
                 if (count($orders) !== 1 || (int)$orders[0] <= 0) throw new \RuntimeException('sales_debt_balance_card_origin_unresolved');
                 $legacyOrderId = (int)$orders[0];
             }
-            $inserted = Db::name(self::TABLE)->insert([
+            $cashAmount = $weights[$id] - $balances[$id];
+            $partner = $exactCategory === null ? [
+                'partner_category_id_snapshot' => 0, 'partner_category_name_snapshot' => '',
+                'partner_category_path_snapshot' => '', 'partner_default_ratio_snapshot' => 0,
+                'partner_config_version_snapshot' => 0, 'partner_share_amount_cents' => 0,
+            ] : $partnerResolver->resolveInTx($tenantId, (int)$exactCategory['id'], $cashAmount);
+            $inserted = Db::name(self::TABLE)->insert(array_merge([
                 'tenant_id' => $tenantId, 'repayment_id' => $repaymentId, 'debt_item_id' => $id,
                 'order_line_id' => $lineId,
                 'legacy_order_id' => $legacyOrderId, 'cart_info_id' => (int)($item['cart_info_id'] ?? 0),
                 'amount_cents' => $weights[$id], 'balance_amount_cents' => $balances[$id],
-            ]);
+                'cash_performance_amount_cents' => $cashAmount,
+                'category_id_snapshot' => (int)($exactCategory['id'] ?? 0),
+                'category_path_snapshot' => (string)($exactCategory['path'] ?? ''),
+                'partner_snapshot_frozen_at' => $frozenAt > 0 ? $frozenAt : time(),
+            ], $partner));
             if ((int)$inserted !== 1) throw new \RuntimeException('sales_debt_item_settlement_write_failed');
-            $cashAmounts[$id] = $weights[$id] - $balances[$id];
+            $cashAmounts[$id] = $cashAmount;
         }
         return $cashAmounts;
+    }
+
+    /**
+     * Rebuild a missing historical snapshot only when one cash-only repayment maps
+     * to exactly one debt item. Multi-item or balance-backed history is skipped:
+     * its item allocation/origin cannot be reconstructed without guessing.
+     */
+    public static function rebuildHistoricalCashOnlySingleItemInTx(array $repayment): bool
+    {
+        CashierV3TransactionGuard::assertInTransaction('salesDebtBalance.rebuildHistorical');
+        $repaymentId = (string)($repayment['repayment_id'] ?? '');
+        $tenantId = (string)($repayment['tenant_id'] ?? '');
+        $amountCents = (int)($repayment['repayment_amount_cents'] ?? 0);
+        if ($repaymentId === '' || (string)($repayment['status'] ?? '') !== 'succeeded'
+            || $amountCents <= 0 || $amountCents % 100 !== 0
+            || Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('repayment_id', $repaymentId)->count()) {
+            return false;
+        }
+        if (self::balanceCents($repaymentId) !== 0) return false;
+        $debt = (array)Db::name('store_debt')->where('id', (int)($repayment['debt_id'] ?? 0))->lock(true)->find();
+        $items = Db::name('store_debt_item')->where('debt_id', (int)($repayment['debt_id'] ?? 0))
+            ->order('id')->lock(true)->select()->toArray();
+        if ($debt === [] || count($items) !== 1) return false;
+        $itemId = (int)$items[0]['id'];
+        $currentCents = (int)bcmul((string)$items[0]['repaid_debt'], '100', 0);
+        if ($currentCents < $amountCents || $currentCents % 100 !== 0) return false;
+        $lineIds = Db::name('cashier_v3_payment_fact')->alias('payment')
+            ->join('cashier_v3_payment_sale_allocation_fact allocation',
+                "allocation.payment_fact_id=payment.fact_id AND allocation.status='effective'")
+            ->join('cashier_v3_sale_fact sale', 'sale.fact_id=allocation.sale_fact_id')
+            ->where('payment.order_id', $repaymentId)->where('payment.source_document_type', 'debt_repayment')
+            ->where('payment.status', 'effective')->column('sale.source_line_id');
+        $lineIds = array_values(array_unique(array_filter(array_map('strval', $lineIds))));
+        $personnel = count($lineIds) === 1 ? [$itemId => ['authority' => ['order_line_id' => $lineIds[0]]]] : [];
+        // freezeInTx expects the pre-repayment value and an authoritative target.
+        $items[0]['repaid_debt'] = bcdiv((string)($currentCents - $amountCents), '100', 2);
+        self::freezeInTx($tenantId, $repaymentId, $debt, $items, [$itemId => $currentCents], $personnel, 0,
+            max(1, (int)($repayment['settled_at'] ?? 0)));
+        return true;
     }
 
     /** Only active repayments reduce cash refundability; voided rows stay immutable audit evidence. */

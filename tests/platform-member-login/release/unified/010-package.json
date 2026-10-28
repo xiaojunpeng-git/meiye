@@ -1,0 +1,12 @@
+{
+  "sha256": "f20637a11e3a2c55a9c1673f1159e0f00973f3106850219e2af6888be85281ac",
+  "manifestSHA256": "2d45196ff234ad5699f708430e30e9501bcaaad7385c87c259d18b2114bcdc18",
+  "files": 99,
+  "commit": "12ba0fd27d218d21d3db3ae71f7d20b06682faaa",
+  "controls": {
+    "scripts/platform-member-install.php": "c21cdd8b94b76cccc48135b813641fef69e11e6c006042950d0c368ef1236eca",
+    "scripts/platform-member-live.php": "acc1746924a93c5ecabaeb734f6766683bdc828e702c088a5c5048aad1909670",
+    "scripts/platform-member-publish.py": "61136db526655327b3eb63bf59b76b9f18f0911714d810e6218ed7d19b35a06c",
+    "scripts/platform-member-release-probe.php": "6db2341f10f926487bbb4c3f8098af2a3b6e26c4f1df5f0c3cf55ab94208cd4f"
+  }
+}

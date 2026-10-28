@@ -1,0 +1,17 @@
+{
+  "result": "PM_ACCEPTED_LOCAL_PASS",
+  "sourceTree": "5c4e506b2c8d2d33f8ace53bde3860ef068f9d7f",
+  "patchSHA256": "857aedc9283b73e11ba00b0f185bdd5262e75387d89bc21d32cf3038cbf682e3",
+  "exactCandidateDatabaseChecks": 33,
+  "exactPHPClassProvenanceChecks": 8,
+  "concurrency": "real independent MySQL connections: commit denied; rollback allowed; fixtures cleaned",
+  "clientExpiry": "existing actual MP request -> 410001 -> LOGOUT -> authorization page",
+  "preserved": "canonical identity contract 8 checks; avatar MySQL; login navigation 8 checks",
+  "migration": "local precheck + apply twice + postcheck PASS; latest state query uses idx_uid_id",
+  "productionConnections": false,
+  "productionUserChanges": false,
+  "commitPushDeploy": false,
+  "sharedHeadAndIndexPreserved": true,
+  "localSchema": "new additive reset event table only; no historical user writes",
+  "remaining": "Create precise local commit only. Deployment/push/upload not authorized."
+}

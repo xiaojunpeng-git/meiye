@@ -58,8 +58,6 @@
 	import zbCode from '@/components/zb-code/zb-code.vue'
 	import {
 		getUserInfo,
-		spreadBanner,
-		userShare,
 		routineCode,
 		spreadMsg,
 	} from '@/api/user.js';
@@ -74,6 +72,7 @@
 		TOKENNAME,
 		HTTP_REQUEST_URL
 	} from '@/config/app.js';
+	import { resolveServerAssetUrl } from '@/utils/memberAssetUrl.js';
 	import colors from '@/mixins/color.js';
 	export default {
 		components: {
@@ -91,12 +90,11 @@
 				interval: 3000,
 				duration: 500,
 				swiperIndex: 0,
-				spreadList: [],
 				userInfo: {},
 				poster: '',
 				isAuto: false, //没有授权的不会自动授权
 				isShowAuth: false, //是否隐藏授权
-				spreadData: [{}], //新海报数据
+				spreadData: [], // Only configured templates create canvas nodes.
 				nickName: "",
 				siteName: "",
 				mpUrl: "",
@@ -134,7 +132,7 @@
 			isLogin: {
 				handler: function(newV, oldV) {
 					if (newV) {
-						this.userSpreadBannerList();
+						if (this._pageReady) this.spreadMsg();
 					}
 				},
 				deep: true
@@ -148,29 +146,18 @@
 				deep: true
 			}
 		},
-		async onReady() {
-			if (this.isLogin) {
-				this.val = `${HTTP_REQUEST_URL}?spid=${this.uid}`
-				// #ifdef MP
-				await this.spreadMsg()
-				// #endif
-				this.getUser();
-			} else {
-				this.getIsLogin();
-			}
+		onReady() {
+			this._pageReady = true;
+			if (this.isLogin) this.onLoadFun();
+			else this.getIsLogin();
+		},
+		onUnload() {
+			// Reject pending generation and invalidate late native callbacks.
+			this._pageReady = false;
+			if (this._cancelSpread) this._cancelSpread(new Error('海报生成已取消'));
 		},
 		onShow() {
 			uni.removeStorageSync('form_type_cart');
-			this.$nextTick(() => {
-				let selector = uni.createSelectorQuery().select('.aaa');
-				selector.fields({
-					size: true
-				}, data => {
-					console.log(data)
-					this.wd = data.width
-					// this.hg = data.height
-				}).exec();
-			})
 		},
 		/**
 		 * 用户点击右上角分享
@@ -179,7 +166,7 @@
 		onShareAppMessage() {
 			return {
 				title: this.userInfo.nickname + '-分销海报',
-				imageUrl: this.spreadList[0],
+				imageUrl: (this.spreadData[this.swiperIndex] || {}).pic,
 				path: '/pages/index/index?spid=' + this.userInfo.uid,
 			};
 		},
@@ -191,141 +178,114 @@
 			getIsLogin(){
 				toLogin()
 			},
-			onLoadFun(){
-				this.spreadMsg();
+			onLoadFun() {
+				this.val = `${HTTP_REQUEST_URL}?spid=${this.uid}`;
 				this.getUser();
-				this.userSpreadBannerList();
+				// Native mini-program QR is authoritative; H5/app wait for qrR.
+				// #ifdef MP
+				this.spreadMsg();
+				// #endif
 				this.isShowAuth = false;
 			},
-			getUser(){
-				getUserInfo().then(res=>{
-					this.userInfo = res.data
-				})
+			getUser() {
+				getUserInfo().then(res => { this.userInfo = res.data; }).catch(() => {});
 			},
-			async qrR(res) {
-				this.codeSrc = await res
+			qrR(res) {
+				this.codeSrc = res;
 				// #ifdef H5 || APP-PLUS
-				this.spreadMsg()
+				if (this.isLogin) this.spreadMsg();
 				// #endif
 			},
-			//获取图片
-			async spreadMsg() {
-				let res = await spreadMsg();
-				this.spreadData = res.data.spread;
-				this.nickName = res.data.nickname;
-				this.siteName = res.data.site_name;
-				uni.showLoading({
-					title: '海报生成中',
-					mask: true
+			// One generation owns its templates, loading indicator and native draw.
+			// Failure or timeout always settles; leaving the page forbids late writes.
+			spreadMsg() {
+				if (this._spreadPromise) return this._spreadPromise;
+				let timer;
+				const ensureActive = () => {
+					if (this._cancelSpread !== cancel) throw new Error('海报生成已取消');
+				};
+				let cancel;
+				const deadline = new Promise((resolve, reject) => {
+					cancel = reject;
+					timer = setTimeout(() => reject(new Error('海报生成超时，请重试')), 20000);
 				});
-				const avatar = await this.downloadFilestoreImage(res.data.avatar);
-				const followCode = res.data.qrcode ? await this.downloadFilestoreImage(res.data.qrcode) : '';
-				for (let i = 0; i < res.data.spread.length; i++) {
-					let img = await this.downloadFilestoreImage(res.data.spread[i].pic);
-					let arr = [];
+				this._cancelSpread = cancel;
+				uni.showLoading({ title: '海报生成中', mask: false });
+				const generate = async () => {
+					const { data } = await spreadMsg();
+					ensureActive();
+					if (!data || !Array.isArray(data.spread) || !data.spread.length) throw new Error('暂未配置分享海报');
+					this.spreadData = data.spread;
+					this.posterImage = [];
+					this.swiperIndex = Math.min(this.swiperIndex, data.spread.length - 1);
+					this.nickName = data.nickname;
+					this.siteName = data.site_name;
 					// #ifdef H5
-					arr = [followCode || this.codeSrc, img, avatar];
+					this.setShareInfoStatus();
 					// #endif
+					await new Promise(resolve => this.$nextTick(resolve));
+					// Measure after the asynchronous template list creates swiper items.
+					await new Promise(resolve => uni.createSelectorQuery().in(this).select('.aaa').fields({ size: true }, rect => {
+						if (rect && rect.width > 0) this.wd = rect.width;
+						resolve();
+					}).exec());
+					ensureActive();
+					const avatar = await this.downloadFilestoreImage(data.avatar || '/static/images/def_avatar.png');
+					let code = data.qrcode || this.codeSrc;
+					// Fetch mini-program QR once per generation, never a web QR substitute.
 					// #ifdef MP
-					await this.routineCode();
-					arr = [this.mpUrl, img, avatar];
+					const response = await routineCode();
+					code = response.data && response.data.url;
 					// #endif
-					// #ifdef APP-PLUS
-					arr = [this.codeSrc, img, avatar];
-					// #endif
-					this.$nextTick(() => {
-						this.$util.userPosterCanvas(arr, res.data.nickname, res.data.site_name, i, this.wd, this.hg, (
-							tempFilePath) => {
-							this.$set(this.posterImage, i, tempFilePath);
-							// #ifdef MP
-							if (!this.posterImage.length) {
-								return this.$util.Tips({
-									title: '小程序二维码需要发布正式版后才能获取到'
-								});
-							}
-							// #endif
-						});
-					});
-				}
-				uni.hideLoading();
+					if (!code) throw new Error('海报二维码暂不可用，请稍后重试');
+					const qr = await this.downloadFilestoreImage(code);
+					for (let i = 0; i < data.spread.length; i++) {
+						ensureActive();
+						const image = await this.downloadFilestoreImage(data.spread[i].pic);
+						ensureActive();
+						const path = await new Promise((resolve, reject) => this.$util.userPosterCanvas(
+							[qr, image, avatar], data.nickname, data.site_name, i, this.wd, this.hg, resolve, reject, this));
+						ensureActive();
+						this.$set(this.posterImage, i, path);
+					}
+					return this.posterImage;
+				};
+				this._spreadPromise = Promise.race([generate(), deadline]).catch(error => {
+					if (this._pageReady) this.$util.Tips({ title: error.message || '海报生成失败，请重试' });
+					return [];
+				}).finally(() => {
+					clearTimeout(timer);
+					this._cancelSpread = null;
+					this._spreadPromise = null;
+					uni.hideLoading();
+				});
+				return this._spreadPromise;
 			},
-			// #ifdef MP
-			async routineCode() {
-				let res = await routineCode()
-				this.mpUrl = await this.downloadFilestoreImage(res.data.url);
-			},
-			// #endif
 			// 授权关闭
 			authColse: function(e) {
 				this.isShowAuth = e
 			},
 			bindchange(e) {
-				let spreadList = this.spreadList;
 				this.swiperIndex = e.detail.current;
 			},
-			// #ifdef MP
-			savePosterPathMp(url) {
-				let that = this;
-				uni.getSetting({
-					success(res) {
-						if (!res.authSetting['scope.writePhotosAlbum']) {
-							uni.authorize({
-								scope: 'scope.writePhotosAlbum',
-								success() {
-									uni.saveImageToPhotosAlbum({
-										filePath: url,
-										success: function(res) {
-											that.$util.Tips({
-												title: '保存成功',
-												icon: 'success'
-											});
-										},
-										fail: function(res) {
-											that.$util.Tips({
-												title: '保存失败'
-											});
-										}
-									});
-								}
-							});
-						} else {
-							uni.saveImageToPhotosAlbum({
-								filePath: url,
-								success: function(res) {
-									that.$util.Tips({
-										title: '保存成功',
-										icon: 'success'
-									});
-								},
-								fail: function(res) {
-									that.$util.Tips({
-										title: '保存失败'
-									});
-								}
-							});
-						}
-					}
-				});
-			},
-			// #endif
-			// #ifdef APP-PLUS
-			savePosterPathMp(url) {
-				let that = this;
+			// Save waits for the same generation; no empty-path native call or
+			// silent authorization failure may leave the action without feedback.
+			savePosterPathMp: async function() {
+				if (!this.posterImage[this.swiperIndex]) await this.spreadMsg();
+				const path = this.posterImage[this.swiperIndex];
+				if (!this._pageReady || !path) return;
 				uni.saveImageToPhotosAlbum({
-					filePath: url,
-					success: function(res) {
-						that.$util.Tips({
-							title: '保存成功',
-							icon: 'success'
-						});
-					},
-					fail: function(res) {
-						that.$util.Tips({
-							title: '保存失败'
-						});
+					filePath: path,
+					success: () => this.$util.Tips({ title: '保存成功', icon: 'success' }),
+					fail: error => {
+						if (/auth|denied|deny/i.test(error.errMsg || '')) {
+							uni.showModal({ title: '需要相册权限', content: '请在设置中允许保存到相册。', confirmText: '去设置',
+								success: result => { if (result.confirm) uni.openSetting({}); } });
+						} else this.$util.Tips({ title: '保存失败，请重试' });
 					}
 				});
 			},
+			// #ifdef APP-PLUS
 			appShare(scene) {
 				let that = this
 				uni.share({
@@ -334,7 +294,7 @@
 					type: 0,
 					href: HTTP_REQUEST_URL+'/pages/index/index?spid=' + this.userInfo.uid,
 					title: this.userInfo.nickname + '-分销海报',
-					imageUrl: this.spreadList[0],
+					imageUrl: (this.spreadData[this.swiperIndex] || {}).pic,
 					success: function(res) {},
 					fail: function(err) {
 						uni.showToast({
@@ -346,65 +306,42 @@
 				});
 			},
 			// #endif
-			//替换安全域名
-			setDomain: function(url) {
-				url = url ? url.toString() : '';
-				//本地调试打开,生产请注销
-				if (url.indexOf('https://') > -1) return url;
-				else return url.replace('http://', 'https://');
+			// H5 retains WeChat's home referral metadata independently of canvas.
+			// #ifdef H5
+			setShareInfoStatus() {
+				if (this.$wechat.isWeixin() && this.isLogin) {
+					this.$wechat.wechatEvevt(['updateAppMessageShareData', 'updateTimelineShareData'], {
+						desc: '分销海报', title: this.nickName + '-分销海报',
+						link: '/pages/index/index?spid=' + this.uid,
+						imgUrl: (this.spreadData[0] || {}).pic
+					});
+				}
+			},
+			// #endif
+			// Imported server media, bundled assets and native temp paths retain
+			// their distinct origins; image failures must reject generation.
+			setDomain(url) {
+				url = resolveServerAssetUrl(url ? String(url) : '', HTTP_REQUEST_URL);
+				if (/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i.test(url)) return url;
+				return url.replace(/^http:\/\//, 'https://');
 			},
 			//图片转符合安全域名路径
 			downloadFilestoreImage(url) {
-				return new Promise((resolve, reject) => {
-					let that = this;
-					uni.downloadFile({
-						url: that.setDomain(url),
-						success: function(res) {
-							resolve(res.tempFilePath);
-						},
-						fail: function() {
-							return that.$util.Tips({
-								title: ''
-							});
-						}
-					});
-				})
-			},
-			setShareInfoStatus: function() {
-				if (this.$wechat.isWeixin()) {
-					if (this.isLogin) {
-						getUserInfo().then(res => {
-							let configAppMessage = {
-								desc: '分销海报',
-								title: res.data.nickname + '-分销海报',
-								link: '/pages/index/index?spid=' + res.data.uid,
-								imgUrl: this.spreadList[0]
-							};
-							this.$wechat.wechatEvevt(["updateAppMessageShareData", "updateTimelineShareData"],
-								configAppMessage)
-						});
-					} else {
-						this.getIsLogin();
-					}
-
-				}
-			},
-			userSpreadBannerList: function() {
-				let that = this;
-				uni.showLoading({
-					title: '获取中',
-					mask: true,
-				})
-				spreadBanner().then(res => {
-					uni.hideLoading();
-					that.$set(that, 'spreadList', res.data);
-					that.$set(that, 'poster', res.data[0].poster);
-					// #ifdef H5
-					that.setShareInfoStatus();
-					// #endif
-				}).catch(err => {
-					uni.hideLoading();
-				});
+				// getImageInfo accepts both packaged fallback avatars and HTTPS assets;
+				// every failure must reject so the loading state cannot hang forever.
+				if (!url) return Promise.reject(new Error('海报图片地址为空'));
+				return new Promise((resolve, reject) => uni.getImageInfo({
+					src: this.setDomain(url),
+					success: result => {
+						if (!result.path) return reject(new Error('海报图片下载失败'));
+						// WeChat strips the leading slash from packaged image paths.
+						// The canvas performs another image read from this nested page,
+						// so restore app-root paths while preserving native temp files.
+						const path = result.path;
+						resolve(/^(?:pages|static)\//.test(path) ? '/' + path : path);
+					},
+					fail: () => reject(new Error('海报图片加载失败，请稍后重试'))
+				}));
 			},
       onhomehide() {
 				this.homeHide = false;

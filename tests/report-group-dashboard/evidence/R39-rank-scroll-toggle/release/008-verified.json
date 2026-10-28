@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+  "rollback": "/www/backups/008/r39-rank-scroll-2f3dad0f",
+  "backendAndConfigurationUnchanged": true,
+  "databaseWrites": 0,
+  "timeUTC": "2026-10-28T05:47:07.808843+00:00",
+  "browserValidation": {
+    "result": "PASS",
+    "site": "008",
+    "authenticated": true,
+    "threeButtons": true,
+    "defaultRolling": true,
+    "pauseStable": true,
+    "resumeRestored": true,
+    "businessWrites": 0
+  }
+}

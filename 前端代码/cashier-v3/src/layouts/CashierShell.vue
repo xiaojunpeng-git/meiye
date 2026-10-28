@@ -20,6 +20,7 @@ import MemberDebtReminderOverlay from '@/components/member/MemberDebtReminderOve
 import DirectGiftOverlay from '@/components/member/DirectGiftOverlay.vue'
 import RechargeOverlay from '@/components/member/RechargeOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
+import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import QueryEntitySelectorOverlay from '@/components/query/QueryEntitySelectorOverlay.vue'
 import RoomAssignmentOverlay from '@/components/room/RoomAssignmentOverlay.vue'
@@ -48,6 +49,10 @@ import {
 } from '@/services/cashierV3OrderProjectionContract'
 import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
 import { recentCashierMemberKey } from '@/services/recentCashierMembers'
+import {
+  REQUIRED_FIELD_GUIDANCE_DURATION_MS,
+  REQUIRED_FIELD_GUIDANCE_EVENT
+} from '@/services/requiredFieldGuidance'
 
 const route = useRoute()
 const router = useRouter()
@@ -67,6 +72,8 @@ const isOperationHelpOpen = ref(false)
 const toolbarBusinessDate = ref(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()))
 const toolbarBusinessDateReason = ref('')
 const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 })
+const toolbarBusinessSourceButtonRef = ref(null)
+const toolbarBusinessSourceGuidanceMessage = ref('')
 const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
 // 只在收银选客入口启用本机最近会员；账号或门店身份缺失时不共用缓存。
@@ -146,6 +153,7 @@ const isStoreSwitchOpen = ref(false)
 const isStoreSwitchLoading = ref(false)
 const storeSwitchError = ref('')
 let feedbackTimeoutId = null
+let toolbarBusinessSourceGuidanceTimer = null
 
 const canSwitchStores = computed(() => switchableStores.value.length > 1)
 const switchableStoreIds = computed(() => switchableStores.value.map((store) => Number(store.store_id || 0)).filter(Boolean))
@@ -251,7 +259,31 @@ async function selectSwitchStore(payload) {
 }
 
 function openToolbarBusinessSource() {
+  clearToolbarBusinessSourceGuidance()
   window.dispatchEvent(new CustomEvent('cashier-v3:open-toolbar-business-source'))
+}
+
+function clearToolbarBusinessSourceGuidance() {
+  toolbarBusinessSourceGuidanceMessage.value = ''
+  if (toolbarBusinessSourceGuidanceTimer) {
+    window.clearTimeout(toolbarBusinessSourceGuidanceTimer)
+    toolbarBusinessSourceGuidanceTimer = null
+  }
+}
+
+async function focusToolbarRequiredFieldGuidance(event = {}) {
+  if (event?.detail?.target !== 'checkout-business-source') return
+  clearToolbarBusinessSourceGuidance()
+  toolbarBusinessSourceGuidanceMessage.value = String(event?.detail?.message || '请完成此必填项')
+  await nextTick()
+  // 来源控件属于壳层；由壳层聚焦自身节点，避免业务页跨组件查询或重建工具栏。
+  const target = toolbarBusinessSourceButtonRef.value
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  target?.focus({ preventScroll: true })
+  toolbarBusinessSourceGuidanceTimer = window.setTimeout(
+    clearToolbarBusinessSourceGuidance,
+    REQUIRED_FIELD_GUIDANCE_DURATION_MS
+  )
 }
 
 function updateToolbarBusinessDate(event) {
@@ -2718,6 +2750,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:checkout-business-source-cancelled', handleCheckoutBusinessSourceCancelled)
   window.addEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
   window.addEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
+  window.addEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusToolbarRequiredFieldGuidance)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:ui-result', handleUiResult)
@@ -2737,6 +2770,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:checkout-business-source-cancelled', handleCheckoutBusinessSourceCancelled)
   window.removeEventListener('cashier-v3:checkout-business-source-confirmed', handleCheckoutBusinessSourceSettled)
   window.removeEventListener('cashier-v3:checkout-business-source-closed', handleCheckoutBusinessSourceSettled)
+  window.removeEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusToolbarRequiredFieldGuidance)
+  clearToolbarBusinessSourceGuidance()
   closeQueryEntitySelector({ reason: 'shell-unmounted' })
   closeServiceCompletion()
   closeRoomAssignment()
@@ -2915,13 +2950,19 @@ onBeforeUnmount(() => {
               </label>
               <button
                 v-if="businessSourceEnabled"
+                ref="toolbarBusinessSourceButtonRef"
                 type="button"
                 class="cashier-workflow-context-source"
+                :class="{ 'cashier-workflow-context-source--required': toolbarBusinessSourceGuidanceMessage }"
                 aria-label="选择客户来源"
                 @click="openToolbarBusinessSource"
               >
                 <span class="cashier-workflow-context-source__label">来源</span>
                 <strong>{{ toolbarBusinessSource.displayNameSnapshot || '未选择' }}</strong>
+                <RequiredFieldGuidance
+                  v-if="toolbarBusinessSourceGuidanceMessage"
+                  :message="toolbarBusinessSourceGuidanceMessage"
+                />
               </button>
             </div>
             <div class="cashier-workflow-toolbar__operation-actions">

@@ -1,0 +1,1071 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "commit": "3f5e2bd89124ee4feb82989662d8b2d5d15dbdc6",
+  "backup": "/www/backups/008/store-address-3f5e2bd8",
+  "manifestSHA256": "5ea1d2b792fa43356f392bd133a0d5e039807a800314483e81dd32cc79aacd24",
+  "files": {
+    "public/static/js/chunk-vendors.6ad2b1b8.js": {
+      "before": null,
+      "after": "d9200f89173dd25a5640a528e8378305fc7ae09f45c5ec5a6669967c32586140"
+    },
+    "public/static/js/index.5ec55a37.js": {
+      "before": null,
+      "after": "8c5d471652c5b28d09c5c480a5f4adbd2dce62275e787877d2c91b6c882dc71a"
+    },
+    "public/static/js/pages-activity-bargain-index.06b2d50d.js": {
+      "before": null,
+      "after": "6a89c6c8c3e6cd8b6aae989c42aa3ab114176bc027a71b8075a9e63f6eff6c99"
+    },
+    "public/static/js/pages-activity-coupon-index.a316ab43.js": {
+      "before": null,
+      "after": "10f3f95d56f7864fa064f427f8e71b223b5b51853864bc8c2320b2e85c768e51"
+    },
+    "public/static/js/pages-activity-coupon_details-index.d193a47c.js": {
+      "before": null,
+      "after": "7bc2ec6044082e743902da4aa43db93d48e682edb8cbdae610ec210260571f64"
+    },
+    "public/static/js/pages-activity-goods_bargain-index.efd4150c.js": {
+      "before": null,
+      "after": "34e0b9f482d0223ab7a6dbca802671d113bed9092deb583aa7deb12e3d356561"
+    },
+    "public/static/js/pages-activity-goods_bargain_details-index.1aeefbd9.js": {
+      "before": null,
+      "after": "86a28ed95f3d37a99b67195f65730defd48da3e9613fb4a28057b8b76c10c8a7"
+    },
+    "public/static/js/pages-activity-goods_bargain_details-index~pages-activity-goods_combination_status-index~pages-activ~5702c2ce.6e757bb1.js": {
+      "before": null,
+      "after": "7fda4eba7a67e857d876d732d539f7ecfba4c3acb0f62a4c36e0ae84fc8d3913"
+    },
+    "public/static/js/pages-activity-goods_bargain_details-index~pages-goods-lottery-grids-index.ea8ad04c.js": {
+      "before": null,
+      "after": "2fb98e94ab09c46a8480274859208cbd445213c8be758b2505dba03313f620df"
+    },
+    "public/static/js/pages-activity-goods_combination-index.482b15dd.js": {
+      "before": null,
+      "after": "6b4fc70f9b7af32e3a7cf74cd7c4c27ce94e58ae5062c205e31906dd3d330e51"
+    },
+    "public/static/js/pages-activity-goods_combination_status-index.1de56b77.js": {
+      "before": null,
+      "after": "a27e465225d1ec17c9ee58198d3e49b82fb19a47c4a8779ab11e5cc99859e922"
+    },
+    "public/static/js/pages-activity-goods_combination_status-index~pages-activity-goods_details-index~pages-annex-special~6e5088d1.543c20e4.js": {
+      "before": null,
+      "after": "2aa8ed5714fd2ea82790e14f9ec035792974d1130e50a3d3fd342515022c232a"
+    },
+    "public/static/js/pages-activity-goods_details-index.1673886f.js": {
+      "before": null,
+      "after": "509dae01b8bdca30ad8291a287736e39f117bc1ef4619bed069def441580ff4d"
+    },
+    "public/static/js/pages-activity-goods_details-index~pages-goods_details-index.53906794.js": {
+      "before": null,
+      "after": "d9c773ab67c163dc9c00decc749325ce7ce47f8bf4c623fb879f8098aa38a418"
+    },
+    "public/static/js/pages-activity-goods_seckill-index.62686b82.js": {
+      "before": null,
+      "after": "166f3f767423840cd38f5ab713dd1f1ab986e1d54ebe8285167e9505b6b94df8"
+    },
+    "public/static/js/pages-activity-new_customer-index.4af7097a.js": {
+      "before": null,
+      "after": "cd28c2d931618ec6d90b993e0a618643e4f38af1b59be2ef79d79c941b2ea3ee"
+    },
+    "public/static/js/pages-activity-points_mall-index.c6b17e7c.js": {
+      "before": null,
+      "after": "68096ba1599c7bf695535e8095a97b2520a23a9a3bd6f5199280b064872ca598"
+    },
+    "public/static/js/pages-activity-presell-index.017ef550.js": {
+      "before": null,
+      "after": "f01274eca3a5ec3f762c369c81700810f6622a1bf036bd1d496fec1140c5d4b5"
+    },
+    "public/static/js/pages-activity-reservation-index.08a7af55.js": {
+      "before": null,
+      "after": "ab82a7e91de7cbc704c3408963d46182f1208667ac6c31a825e929698ad4d537"
+    },
+    "public/static/js/pages-activity-reservation-index~pages-activity-therapist_list-index.21a97437.js": {
+      "before": null,
+      "after": "d72faa4f157afd29935b96d27f0b9dfd83345159d5bcfd58dbf67fcbb2896ea6"
+    },
+    "public/static/js/pages-activity-reservation-index~pages-admin-agent-index~pages-admin-target-allocate-index~pages-adm~8106a162.ddc464bc.js": {
+      "before": null,
+      "after": "9f51f1ab331b18c9c83e69bde2e58005314beb53e582d10dff9cda72852325a1"
+    },
+    "public/static/js/pages-activity-reservation-index~pages-admin-agent-index~pages-admin-user-index~pages-admin-yeji-sta~7d099914.454a644e.js": {
+      "before": null,
+      "after": "3ac39cad4b586d60a5e3b0d98f842b3a21d0b8b68ef3031ef7e1c8eaa6165dc7"
+    },
+    "public/static/js/pages-activity-reservation_custom_services-index.94666831.js": {
+      "before": null,
+      "after": "b50ec9733f845e5a7fa5834e6cb2e611a43ade506d53fe2a34d244e6e997ad34"
+    },
+    "public/static/js/pages-activity-therapist_list-index.c2867243.js": {
+      "before": null,
+      "after": "7dc3ceeece1232c84aa7d4e609525a267af7f4c8d1816de17c1d858e3450c27a"
+    },
+    "public/static/js/pages-activity-therapist_list-index~pages-annex-special-index~pages-goods-reservation_list-index~pag~4cfe731d.3a9029ae.js": {
+      "before": null,
+      "after": "4e21d6ee1cff2c762125791dbd73794f60094ea9a2ac8f768bce585d8df65eb0"
+    },
+    "public/static/js/pages-activity-user_combination_records-index.645e9af0.js": {
+      "before": null,
+      "after": "84fbca364d177e1f38ef46a292c845ef6127bf08feceec3675244c07b442ff0b"
+    },
+    "public/static/js/pages-admin-agent-index.232192a3.js": {
+      "before": null,
+      "after": "506a43eab4584bd2b563395c795c6d34d5ae529435358e2b151422935f30c3fe"
+    },
+    "public/static/js/pages-admin-agent-index~pages-admin-target-allocate-index~pages-admin-target-analysis-index~pages-ad~0103208a.92b59bd6.js": {
+      "before": null,
+      "after": "53c792b04c99d97e4da84c09c3cb07e66297b7131170e9b8987590b2b6d0c8fc"
+    },
+    "public/static/js/pages-admin-agent-index~pages-admin-yeji-staff~pages-admin-yeji-store.3d90efd3.js": {
+      "before": null,
+      "after": "3b24c69ffcf56fb71b0489afacf8e2500c170ce1ffe634ca3edf8ab9fe20bdb9"
+    },
+    "public/static/js/pages-admin-agent-shou_detail.4a928591.js": {
+      "before": null,
+      "after": "ac25e96978bd32cfcda51b47479f5896cb6c87fc100ff3e0aab3b61fdc017923"
+    },
+    "public/static/js/pages-admin-delivery-index.92ec498c.js": {
+      "before": null,
+      "after": "91521da40166bbe9b4ace006ba0cb8d21251140354778496c8af5abe45c27549"
+    },
+    "public/static/js/pages-admin-delivery_confirm-index.093f553f.js": {
+      "before": null,
+      "after": "1d92f83f9d44942a87a747503cb5037d4b3c6a794d2a95895dc02447d9939211"
+    },
+    "public/static/js/pages-admin-distribution-index.31a72685.js": {
+      "before": null,
+      "after": "0b62b06faccdabdfe22b4d179d18b2411ca25c3f69e13454bb0f8823bf342136"
+    },
+    "public/static/js/pages-admin-distribution-orderDetail-index.7f54864f.js": {
+      "before": null,
+      "after": "2c54a6ff6f37f9adbbf0cc6cc8f5e1e590ba70f034a1552a4fef0c7fed4be92f"
+    },
+    "public/static/js/pages-admin-distribution-orderDetail-index~pages-admin-logistics-index~pages-admin-orderDetail-index~028e79f3.fc9eb46f.js": {
+      "before": null,
+      "after": "dc67f8e6ffc8ae6ed34025fad2dd327cf1483a54ba3040d0181e8d6b2df74086"
+    },
+    "public/static/js/pages-admin-distribution-scanning-detail-card.3f680cb9.js": {
+      "before": null,
+      "after": "db3d886c07cef94ab1a934623e4911e34257bea53ca5c936b625483ce3dae684"
+    },
+    "public/static/js/pages-admin-distribution-scanning-detail-card~pages-admin-distribution-scanning-detail-index.2010971e.js": {
+      "before": null,
+      "after": "a72689425d2df57bc78401b2a64a356b8fa90203fad6231671d510c916da3524"
+    },
+    "public/static/js/pages-admin-distribution-scanning-detail-index.d4ea1ae4.js": {
+      "before": null,
+      "after": "dc5f186ef7067d1a13d244fa838e1ce7dba710f2636f42a288b0cf69e78c2607"
+    },
+    "public/static/js/pages-admin-distribution-scanning-index.b7e62759.js": {
+      "before": null,
+      "after": "81dc5ed151a67c3f5a957b45d441130de366eb964fbc5a618450e7ae22766ebb"
+    },
+    "public/static/js/pages-admin-goods-index.763f9b3a.js": {
+      "before": null,
+      "after": "7493ed747188d09e82222964b80f39a1db4db451f70a8965e986a000a3e1c539"
+    },
+    "public/static/js/pages-admin-goods-index~pages-admin-orderList-index~pages-admin-work-index~pages-admin-work-store.874cc933.js": {
+      "before": null,
+      "after": "49f207262fea8b806c8f4f9ac63f02437a649d20833c05058128bbb05ff04d2f"
+    },
+    "public/static/js/pages-admin-goods-specs.d4d570bb.js": {
+      "before": null,
+      "after": "ec30c8418e62e2e17f40379b91f297c31e95795a82818586f6a3b8cfaa529999"
+    },
+    "public/static/js/pages-admin-goods-specsStock.2b3412e0.js": {
+      "before": null,
+      "after": "1d4e29285d11c9f98af8422ee1b05ce639db6086ad98e2d6ec50939e54ced392"
+    },
+    "public/static/js/pages-admin-logistics-index.5dfa7f56.js": {
+      "before": null,
+      "after": "cc361abd7f3ba4cfedaa4a88fb31408255e157f7877425288151720f1e0b365e"
+    },
+    "public/static/js/pages-admin-offOrderResult-index.b81ad48d.js": {
+      "before": null,
+      "after": "688e338ca9aee3f6dfd6ee2832a48204a37bd349a122c69f26a6691b6c325268"
+    },
+    "public/static/js/pages-admin-order-index.d01b0fe3.js": {
+      "before": null,
+      "after": "83bec36f3607bea45624dc59e494c46ef11894b309cb8391cfae9fbbfa1e594b"
+    },
+    "public/static/js/pages-admin-order-index~pages-admin-order-store.fd12a838.js": {
+      "before": null,
+      "after": "6992dd6232b2d00d4ffd924645e2147711bdbcc63a592d8b05050b6e09053b94"
+    },
+    "public/static/js/pages-admin-order-store.4b1a9567.js": {
+      "before": null,
+      "after": "d0fb4b0b9677a2f70abb6f7649428b5ffc5d06c3aca636a9963ac2f5f93e8ab3"
+    },
+    "public/static/js/pages-admin-orderDetail-index.51782099.js": {
+      "before": null,
+      "after": "b64e08d656fbc6563e94a6958d87db7085d2836155d2c08bdd7b80fc1ada9ed7"
+    },
+    "public/static/js/pages-admin-orderDetail-index~pages-admin-order_cancellation-index~pages-admin-refundOrderList-index.5513d859.js": {
+      "before": null,
+      "after": "a3e91eb76e30a2f8bf8662c068a3e2f3117f3005cb70bad2360d16b253f98a03"
+    },
+    "public/static/js/pages-admin-orderList-index.3ea3d6fe.js": {
+      "before": null,
+      "after": "00aaec38d1c2a872e9cb90af3c0201838ba92089ac06dc96e3f102f7611925a7"
+    },
+    "public/static/js/pages-admin-order_cancellation-index.37735c7f.js": {
+      "before": null,
+      "after": "14d715553f775a0769f35e86cb8d782695eab3c4fc35d7a4e90e10b797cb9315"
+    },
+    "public/static/js/pages-admin-organization-store-select.52e869b9.js": {
+      "before": null,
+      "after": "5c3a72aa06fe4e4b72b78c426c88c05e4d83a9d0b5d60b12cd40c48885480e16"
+    },
+    "public/static/js/pages-admin-refund-index.3d8685c6.js": {
+      "before": null,
+      "after": "b49f446e54347e79ef8db79bcc086c60250e1e61954a20fe6699ae5bf68c14d4"
+    },
+    "public/static/js/pages-admin-refundOrderDetail-index.e294f8e5.js": {
+      "before": null,
+      "after": "c5798d3a9b0c59f6249608bd5b262d822b22ce88e43f0c0bf35f92c04ef297b9"
+    },
+    "public/static/js/pages-admin-refundOrderList-index.6675eb78.js": {
+      "before": null,
+      "after": "05cb351cbeaf36e66f327f928e1322d84910f044f2e16a06d4b1307722ce9100"
+    },
+    "public/static/js/pages-admin-reservation_details-index.fa22c453.js": {
+      "before": null,
+      "after": "2199729f8fdc77bce178bc5db462a73c69b756ccd1568edf93f63b7e825b957d"
+    },
+    "public/static/js/pages-admin-reservation_list-index.33477f33.js": {
+      "before": null,
+      "after": "e614b39574556293a13b2e36e22ef0045cb81a11d77734683c2a4e17419b488c"
+    },
+    "public/static/js/pages-admin-reservation_list-index~pages-admin-staff_center-order-index~pages-admin-staff_center-res~0d3c58dc.a446440b.js": {
+      "before": null,
+      "after": "552bfec1b3947a626ae672ffe6de9a2ec02a691438a7d1c12168af3ee2cba4b2"
+    },
+    "public/static/js/pages-admin-reservation_write-index.2c554ba2.js": {
+      "before": null,
+      "after": "c56ad4237b92e7b7fffe6e630f72056d1dcd4a66fdede25394aa189750b57f91"
+    },
+    "public/static/js/pages-admin-spread-index.a9bffe23.js": {
+      "before": null,
+      "after": "9850699476f9efcadfe80c4c544ab5c5cc580bd0a3de0ca882e24933d08a90a3"
+    },
+    "public/static/js/pages-admin-staff_center-index.db07c4f9.js": {
+      "before": null,
+      "after": "b38e6b1c23469f85cd1994d475585a8b1393b71d2a56ea58204ba988c7b716bf"
+    },
+    "public/static/js/pages-admin-staff_center-index~pages-admin-staff_center-order-index.7493442a.js": {
+      "before": null,
+      "after": "27ce89911e7a5f83583fbf28edde88913d3369be53cb5f1722962b78d2e9763b"
+    },
+    "public/static/js/pages-admin-staff_center-introduction-index.80452fdd.js": {
+      "before": null,
+      "after": "94481ac4377898a7f1a5ecbecac8a2c772b837e1d10ac0e218567a74d76037bc"
+    },
+    "public/static/js/pages-admin-staff_center-order-index.a7f7340c.js": {
+      "before": null,
+      "after": "86f956b5462074cb77f5d9312bbb4d3e091b69c9be919e82ff929405787266d6"
+    },
+    "public/static/js/pages-admin-staff_center-rest-add.0826d22d.js": {
+      "before": null,
+      "after": "9618d5d61337deeb9c6e34752667b70860a9aefd5e89b90d121c061a18785898"
+    },
+    "public/static/js/pages-admin-staff_center-rest-index.229d9354.js": {
+      "before": null,
+      "after": "163194dc8bb0fc214db84eebdb1838ff4be199a5807382cedafee00747bcd56f"
+    },
+    "public/static/js/pages-admin-target-allocate-index.ee09f224.js": {
+      "before": null,
+      "after": "51ef0543bae8eeb6249e12b177bf02b30fda5c19bab7413f8571c41d9f477eca"
+    },
+    "public/static/js/pages-admin-target-analysis-index.6f4b2193.js": {
+      "before": null,
+      "after": "6edad6d2babecf30eb18d37399b35962c39e6b5a93a8188f97b3b08beffb7d19"
+    },
+    "public/static/js/pages-admin-target-analysis-index~pages-admin-target-detail-month~pages-admin-target-detail-period~p~8ac404bb.b65bb595.js": {
+      "before": null,
+      "after": "b3ce1439074c8b8230450c4d38c10627b869a3ce53d3a62e3246151b9d4689ae"
+    },
+    "public/static/js/pages-admin-target-analysis-index~pages-admin-target-management-index.58b223f0.js": {
+      "before": null,
+      "after": "a2a1e42c47f2a6997c8e311154df675721d9d7b9f6e6139a42c2e8e6693c6022"
+    },
+    "public/static/js/pages-admin-target-detail-month.1326cc5f.js": {
+      "before": null,
+      "after": "1786f5b66527ab2562ae983654c139d15a845e39d7757b16e5db275fdd211220"
+    },
+    "public/static/js/pages-admin-target-detail-period.3eb5fa72.js": {
+      "before": null,
+      "after": "7cb4efdb1e290be589b93edb752aed835bfe0d654ec6138f06852634d1360dfd"
+    },
+    "public/static/js/pages-admin-target-management-index.23bf4292.js": {
+      "before": null,
+      "after": "b211e95ff23a228b7990ddcb83bd2751d8a6937973e66466ce127df2931c19e5"
+    },
+    "public/static/js/pages-admin-target-select-metric.deb26529.js": {
+      "before": null,
+      "after": "7ba396e442a5659486b36c68cded93a7c072504a83b57fa1f50020706db74777"
+    },
+    "public/static/js/pages-admin-target-select-object.5077053e.js": {
+      "before": null,
+      "after": "eca1c1df991d595476c7d6f151c946078f29deb95218c92e00a5fe8069181f27"
+    },
+    "public/static/js/pages-admin-target-select-product.6bd53ffa.js": {
+      "before": null,
+      "after": "1b76f90d1cc42bd2e61b44b23cae7f6331d45dae79637d1ccef98f301b55c1e2"
+    },
+    "public/static/js/pages-admin-target-setting-index.0a4bdbb2.js": {
+      "before": null,
+      "after": "e6c48828d8b7aab722d74e4b0615ae2b38bb936cd64758ce2f480cdbe04cd911"
+    },
+    "public/static/js/pages-admin-user-index.a6c97a4b.js": {
+      "before": null,
+      "after": "2a6ac8ac534076d81a0ac603b0df5246f0421c2afc0271dfd4007b55b762c558"
+    },
+    "public/static/js/pages-admin-user-index~pages-admin-user-list.8732ff0e.js": {
+      "before": null,
+      "after": "70b97194bd72415b0f1215371a1d58c29537f341eb7cfc5774ac3aec79cf4c91"
+    },
+    "public/static/js/pages-admin-user-list.d4ebdc73.js": {
+      "before": null,
+      "after": "a06b51ca010811b751cdef8c9d2f007284dba75a551e3f3c880d98d480330fbe"
+    },
+    "public/static/js/pages-admin-work-index.d694c71d.js": {
+      "before": null,
+      "after": "d825ded3e0ddc7b362104933dfcfbd590bb3eda1e9ef0189be0e27e23740228f"
+    },
+    "public/static/js/pages-admin-work-store.beb31fe3.js": {
+      "before": null,
+      "after": "804fde1dcc31fb49bbf3c0e0034d2e3747dc403f16d8c35f1628c8a095dda1d2"
+    },
+    "public/static/js/pages-admin-writeOffCard-index.69bc08c9.js": {
+      "before": null,
+      "after": "49dff8ca2dbfe34747aad3c3c08d5932254fb2ad23f6742aa9590249270c4c9c"
+    },
+    "public/static/js/pages-admin-writeRecordList-index.81f822d2.js": {
+      "before": null,
+      "after": "ecae63e0fe581d7f38cf7a50bf06769047f76fca6481f5e397afb6b328a1d19d"
+    },
+    "public/static/js/pages-admin-yeji-staff.86bd8226.js": {
+      "before": null,
+      "after": "3f1bdfa2fea29302f4d69c0730e1b8d3c1abf92f27e818e15bc36385ff1cdf17"
+    },
+    "public/static/js/pages-admin-yeji-staff_detail.a2036bd7.js": {
+      "before": null,
+      "after": "2cef1b3cd4ddfac75706be919765e196dded1a8297256a6fe79837e0f83e9613"
+    },
+    "public/static/js/pages-admin-yeji-store.9aba5e92.js": {
+      "before": null,
+      "after": "15020a201c4b89c80fa8f267c948a496a5e12ef27bbc23525190994d259dcb6c"
+    },
+    "public/static/js/pages-admin-yeji-store_detail.4e077ad6.js": {
+      "before": null,
+      "after": "60af29d6e5e36dc4397c698ee7ebf0bfd9e9715aad0497aee2590bd8728d3a46"
+    },
+    "public/static/js/pages-annex-offline_pay-index.eca29506.js": {
+      "before": null,
+      "after": "1e2fddd95876afcd2dc3125fe37578f009d95f47cad2f2b7447a7a226187f0f5"
+    },
+    "public/static/js/pages-annex-offline_result-index.47d1726d.js": {
+      "before": null,
+      "after": "b058a77918bfa1d31d20580803548c2d87b9e256b0df2d6b01f916165ffbaa0b"
+    },
+    "public/static/js/pages-annex-record_list-index.020d3a87.js": {
+      "before": null,
+      "after": "7721f3ab1933033c2a05b999622f7743906baaad5e20be857dae3c9af2f0c27a"
+    },
+    "public/static/js/pages-annex-record_list-index~pages-users-promoter-list-index~pages-users-promoter-order-index~pages~174492c1.4debdb36.js": {
+      "before": null,
+      "after": "cf254ac9368a0a75811674cfd3899b8f057ca29592a463a180a49c8056655901"
+    },
+    "public/static/js/pages-annex-special-index.ba304825.js": {
+      "before": null,
+      "after": "5091421da5ed2e7189ac0bd1c97b4e7821dd961eef83c59af0c677a29c0423a9"
+    },
+    "public/static/js/pages-annex-special-index~pages-annex-vip_paid-index~pages-goods-goods_list-index~pages-goods-goods_~c04ff611.6be92ca6.js": {
+      "before": null,
+      "after": "b97fa55aa2260d3472f5d600f69889c4503d5a8529bf9f2582a4993823671442"
+    },
+    "public/static/js/pages-annex-special-index~pages-index-index.a894d8b0.js": {
+      "before": null,
+      "after": "995b3a2085ab096e718c62d6d9e6d3c90992549910bf85f82490362c1237a2a8"
+    },
+    "public/static/js/pages-annex-vip_active-index.31240884.js": {
+      "before": null,
+      "after": "fce7897d5b31a0e9f91909c8fab50f47b13a7d2b18731c27a81f9ee5c6347f73"
+    },
+    "public/static/js/pages-annex-vip_agreement-index.8ca1920e.js": {
+      "before": null,
+      "after": "37393a6128b90e7899cee9c64077afbc2ded0749475ee5df0fd3f98361d3df00"
+    },
+    "public/static/js/pages-annex-vip_clause-index.4336d48b.js": {
+      "before": null,
+      "after": "53d73c0c6fe76ba46313b64a1381ad9bb6123d1664991008c81669b9d4cfcba2"
+    },
+    "public/static/js/pages-annex-vip_coupon-index.28353b88.js": {
+      "before": null,
+      "after": "d440393c296f354a7b4c6140f833149a3e1d78232203a296132adfd6d82e1a8e"
+    },
+    "public/static/js/pages-annex-vip_grade_active-index.e5ec823e.js": {
+      "before": null,
+      "after": "5bd3ad83464e5fed231bee86b364065bffd25ae5984bdb8c6c71444f5dca7667"
+    },
+    "public/static/js/pages-annex-vip_paid-index.268ad6bd.js": {
+      "before": null,
+      "after": "a4844ad8464055c99094f4441df1b8514cc0253235a23977841efa65ca737477"
+    },
+    "public/static/js/pages-annex-vip_paid_active-index.925f992d.js": {
+      "before": null,
+      "after": "0431d9199c500ad418bd3f0fbba3b523475c72f9e23039f737c75b7a1bc53e3f"
+    },
+    "public/static/js/pages-annex-vip_paid_rights-index.6718a2d8.js": {
+      "before": null,
+      "after": "329723d4365b51a1bc3e1b940037bc68bd6ea1dbac762295d831c5e8f93e9027"
+    },
+    "public/static/js/pages-annex-web_view-index.6f714956.js": {
+      "before": null,
+      "after": "447566b5ca191662e5d210244a24c36c562f0c123c40cfcdc32f5c18179383d8"
+    },
+    "public/static/js/pages-app_pay-index.7fd8f810.js": {
+      "before": null,
+      "after": "6e308cf60f15beb476aed2ff2f80948f3aae7fc8cd32c08e9261e3d97e25445a"
+    },
+    "public/static/js/pages-behalf-cashier-index.30cf909c.js": {
+      "before": null,
+      "after": "bfce2579243f89f36025caf53c332ce935419d0206ec99b74b2827700f9ff3f1"
+    },
+    "public/static/js/pages-behalf-cashier-index~pages-goods-order_details-index~pages-store-info-index~pages-user-index~p~2b6f4ef9.3936bbba.js": {
+      "before": null,
+      "after": "d626b88d9c204577faadd5f51bf7bc30e281c4f4841e11c08157863adc33257d"
+    },
+    "public/static/js/pages-behalf-goods_list-index.b02be4e8.js": {
+      "before": null,
+      "after": "ba170d60f23ae25290a1d0b75f1c52af64d8f134e5134cdfa767ade490ce8717"
+    },
+    "public/static/js/pages-behalf-goods_list-index~pages-behalf-order_confirm-index.64cdd42c.js": {
+      "before": null,
+      "after": "66c1dbd2517f7de704c27f5cf391d02a050ea98b5ff73e905fa27219f3aafec9"
+    },
+    "public/static/js/pages-behalf-order_confirm-index.268f52bc.js": {
+      "before": null,
+      "after": "14d6553a7179a1e2f717c7b0805d88c895786702caf8107c19fd23a11197eead"
+    },
+    "public/static/js/pages-behalf-order_confirm-index~pages-goods-order_confirm-index~pages-order_addcart-order_addcart~p~f8a96568.e38efd64.js": {
+      "before": null,
+      "after": "d9894a857069cdddde4e793f42b5e196ca9194488ed8dfb4d7d0118e19c0b129"
+    },
+    "public/static/js/pages-behalf-record-index.2d4e8ac0.js": {
+      "before": null,
+      "after": "81ec5f21cb8d175a20b30cb1849a0d41e8fdb25091af6502d505d9f40b8b6198"
+    },
+    "public/static/js/pages-behalf-user_list-index.e355bdc3.js": {
+      "before": null,
+      "after": "c89f18446837d908f41aa1495a4b2cfd50b505696ca10615402c3f4d6b705d17"
+    },
+    "public/static/js/pages-columnGoods-live_list-index.de92da19.js": {
+      "before": null,
+      "after": "61e1e6e400c768ef5083754d20814064c6eede1f73ccf3b08ef8d4256f37b825"
+    },
+    "public/static/js/pages-columnGoods-rank-index.feecfa1f.js": {
+      "before": null,
+      "after": "64cd89ef381f67c003dede5f529dcf451dfe67a49bca9084d96d25206ebe13cd"
+    },
+    "public/static/js/pages-design_preview-index.b408a6f0.js": {
+      "before": null,
+      "after": "f742d04673f4227a9bef71693a25caefb6e784d4dfc2840b9603ecaa1d32c15a"
+    },
+    "public/static/js/pages-discover-discoverCreate-index.986041ba.js": {
+      "before": null,
+      "after": "7694546a43fd3ecc0c5f5d55304317a5865dae16f104773b59fbd1f3e97148f0"
+    },
+    "public/static/js/pages-discover-discoverCreate-index~pages-short_video-nvueSwiper-index~pages-users-user_sgin-index.5df8b533.js": {
+      "before": null,
+      "after": "c9b16fd2ab5b8c2b3dfc63097744dadbeb5e04947b1264d6d47493684a840d73"
+    },
+    "public/static/js/pages-discover-discoverCreate-topic.ba3c9518.js": {
+      "before": null,
+      "after": "86381a21309bba8c9e31683190c44bc915424b0cd64f2e5b96fd311dbb00ed33"
+    },
+    "public/static/js/pages-discover-discoverDesc-index.f478aec6.js": {
+      "before": null,
+      "after": "b61cd984f159a2cb0fce1d581bb6a8d5cf2a60f4730c2f6ad6c2f8b17dc856be"
+    },
+    "public/static/js/pages-discover-discoverDetails-index.aec9f69f.js": {
+      "before": null,
+      "after": "04a292c7cbb4c9f1e7cefff24e2171b15effa69a7e890bda8a4973b5f418c284"
+    },
+    "public/static/js/pages-discover-discoverFollow-index.f3998d82.js": {
+      "before": null,
+      "after": "8e46402df2b2f0b08bc1158e004364de2444495927d226621ad9e5dd8f49239f"
+    },
+    "public/static/js/pages-discover-discoverIndex-index.eb026fc7.js": {
+      "before": null,
+      "after": "f6c81cff49eeefbccf908f1f4022e393a7d038db194e5582e32e4cef0f4196fa"
+    },
+    "public/static/js/pages-discover-discoverIndex-index~pages-discover-discoverSearch-index~pages-discover-discoverTopic-~7f5d8c83.8daa636b.js": {
+      "before": null,
+      "after": "192ee991e16bd24a8712b902e5574aeed90b329dec2a2c44fee75777aaee2109"
+    },
+    "public/static/js/pages-discover-discoverIndex-index~pages-discover-discoverVideo-index.490741d3.js": {
+      "before": null,
+      "after": "55a85162f40405a9e4d7fd9f1743a70b0b0eb823287645838d2d4a832c0eed04"
+    },
+    "public/static/js/pages-discover-discoverMessage-index.f39e91d2.js": {
+      "before": null,
+      "after": "93bc5248f563b77b83003601e779a1636428a451c49b23449af92e781fab71a3"
+    },
+    "public/static/js/pages-discover-discoverSearch-index.89eafd95.js": {
+      "before": null,
+      "after": "e4ee834ccc428eae0c55f900c431145f6e176aeff6a50a39b96fe028ea211a51"
+    },
+    "public/static/js/pages-discover-discoverTopic-index.074a625f.js": {
+      "before": null,
+      "after": "60b368f3c0eccfcb6c69b3a92e9fd127a33c301b718ff0a3813c9fd4c24e0be1"
+    },
+    "public/static/js/pages-discover-discoverUser-index.f3823b45.js": {
+      "before": null,
+      "after": "301dedc8141ba733f206d7bd1f9806237a818cb573358ded5b22477ae80fb04a"
+    },
+    "public/static/js/pages-discover-discoverVideo-index.a7c1f3f9.js": {
+      "before": null,
+      "after": "f020941e57ac1a8c54bb8363f0f9345364657bb5fd9cc03cb2357655398fd830"
+    },
+    "public/static/js/pages-discover-goodsDiscover-index.411de5a4.js": {
+      "before": null,
+      "after": "cccb36ee51244a4976c30ab04512c71e0da23d1492eb4b36581910d591b8f22a"
+    },
+    "public/static/js/pages-extension-customer_list-chat.1cd1d395.js": {
+      "before": null,
+      "after": "44d7892dff9d7daf61124fd112b8384245af4079bb0cbb201845dd45a153a325"
+    },
+    "public/static/js/pages-extension-customer_list-feedback.87cfae21.js": {
+      "before": null,
+      "after": "0e86fa8c0c34315dd976ce189d272509045fe51c1c4f14ffc15646a6adaf9ea6"
+    },
+    "public/static/js/pages-extension-invite_friend-index.a7977efc.js": {
+      "before": null,
+      "after": "deed6a000eb84e6d7ee1f5c2944a622fac53712afdb0a636c3b82a7e0083eccf"
+    },
+    "public/static/js/pages-extension-news_details-index.29327ae7.js": {
+      "before": null,
+      "after": "c7b911f8c198da1b25a6bf1bf862b1b2f2514f7229c6ee9ee33d52d28e129ea2"
+    },
+    "public/static/js/pages-extension-news_list-index.add5950c.js": {
+      "before": null,
+      "after": "db657187ca5be7f82d9d699b7898adf92f341d9393b4bf87df371c729679434f"
+    },
+    "public/static/js/pages-goods-cashier-index.b0844daf.js": {
+      "before": null,
+      "after": "8d2bac636287b3279a01a144b4db01b91f3e042eb6cfda21202201a9171f466d"
+    },
+    "public/static/js/pages-goods-goods_comment_con-comment_con.55bcfbbd.js": {
+      "before": null,
+      "after": "0929876863d756e7ea99980e0b1deac36ec96614a45bc1deac80857b84725499"
+    },
+    "public/static/js/pages-goods-goods_comment_con-index.54bd371f.js": {
+      "before": null,
+      "after": "b46348b2ecd70e260522eb527e394421627e61b2152fd8ceef0f3fb2a272e673"
+    },
+    "public/static/js/pages-goods-goods_comment_con-lottery_comment.8971d19a.js": {
+      "before": null,
+      "after": "4891ca7025b1b1981418ed86497721e77cb8aa7e66bd2c08948274c3d88cb498"
+    },
+    "public/static/js/pages-goods-goods_comment_con-lottery_comment~pages-goods-lottery-grids-index~pages-goods-lottery-wh~d276ce8c.01e8c661.js": {
+      "before": null,
+      "after": "60b2fdc6e10d9acc84f74388e52373ad45654631efda1cb925041620e4e26765"
+    },
+    "public/static/js/pages-goods-goods_comment_list-index.de644cdc.js": {
+      "before": null,
+      "after": "8cb3443e1f69774227fb797b2da79088041ebbd6013c11215eb41541bbc9259e"
+    },
+    "public/static/js/pages-goods-goods_list-index.bb4c4ef6.js": {
+      "before": null,
+      "after": "d511187d29f394aeba6ad8a61fd25179b1f72d6eb77763fec2903c4fbe61d35f"
+    },
+    "public/static/js/pages-goods-goods_logistics-index.86e6f371.js": {
+      "before": null,
+      "after": "d3a442569d00409d226044943d195addac3d31dba763b4dfe17218e8eb1b811a"
+    },
+    "public/static/js/pages-goods-goods_return-index.e018d30a.js": {
+      "before": null,
+      "after": "54d11a5c04e131efb2f67fe4923750fccb0af25948c8d396c887e075f9cd727a"
+    },
+    "public/static/js/pages-goods-goods_return_list-index.56957850.js": {
+      "before": null,
+      "after": "5a9f6574f776c090ed7d3931989734b41cbf5cdee069a0533bb201dc374f8834"
+    },
+    "public/static/js/pages-goods-goods_search-index.d979971e.js": {
+      "before": null,
+      "after": "83386ec3314420e02518549507276561d0f7f80a3183f9bba94e1dbbd50707ab"
+    },
+    "public/static/js/pages-goods-lottery-grids-index.740e4a4d.js": {
+      "before": null,
+      "after": "6ae2ae25451d0eaa13d2f43d4ff07320a7c8cbdbaefbf55a82d67dcd8b67744c"
+    },
+    "public/static/js/pages-goods-lottery-grids-record.f2588842.js": {
+      "before": null,
+      "after": "8c9c0bff13b65d558a3016d9a76c033c35e9b83b5d01d5b273232963185d49c6"
+    },
+    "public/static/js/pages-goods-lottery-wheel-index.572de0ac.js": {
+      "before": null,
+      "after": "8d2ce334690b9a7fd59a0c42558b0f133931692bed8d19ef57ff2ef16111e672"
+    },
+    "public/static/js/pages-goods-match_pay-index.8000814f.js": {
+      "before": null,
+      "after": "bb64914024a988aac83aa2b7ddba5f82e015c2dd71ad448e436c6ffeff1e3d18"
+    },
+    "public/static/js/pages-goods-member_checkout-index.daf265dd.js": {
+      "before": null,
+      "after": "48fa022a8e60e32de0f46e453c599342eebdca591cd8cfc8de30812ea00dc6bd"
+    },
+    "public/static/js/pages-goods-order_after_details-index.83db4961.js": {
+      "before": null,
+      "after": "b6f1df7119528de3fe582f7f4f1de5bdc64cf22548500139496a02ff7d092708"
+    },
+    "public/static/js/pages-goods-order_confirm-index.f54b43c2.js": {
+      "before": null,
+      "after": "7cb3dc82bc2d95851c0d28e1d89c5353e4d3670ef6211572f6a45e836406a4a4"
+    },
+    "public/static/js/pages-goods-order_details-index.6d719031.js": {
+      "before": null,
+      "after": "7d24e6ebcbb97e7428ab779b3a03f6602d9f31385dc8e72dc7690f0b0027552d"
+    },
+    "public/static/js/pages-goods-order_list-index.6bea51f3.js": {
+      "before": null,
+      "after": "1efeabe00a304d78d3123d7b17106f5f2f6a34a88072ddb0194997f5495c871e"
+    },
+    "public/static/js/pages-goods-order_pay_status-index.77f4da12.js": {
+      "before": null,
+      "after": "2acd1aecfc9c082096bd96c6ddd4553bbbded0971b200b205254dbd712b7ca6e"
+    },
+    "public/static/js/pages-goods-order_refund_goods-index.ae4e688c.js": {
+      "before": null,
+      "after": "7c88b5db86428feeb3947f416c3939d817906100c69e3fa6e1d4066b70f487ee"
+    },
+    "public/static/js/pages-goods-reservation_details-index.27579c20.js": {
+      "before": null,
+      "after": "f0f8361bd07dc4f2976dd8d2ca3603a12be289815fbaeb070650e35fd79d302e"
+    },
+    "public/static/js/pages-goods-reservation_list-index.635f94ba.js": {
+      "before": null,
+      "after": "2d8e1eebd1066be8c2ab7f50da1648af25c45b6edd42d090e893cb9aa5c0c338"
+    },
+    "public/static/js/pages-goods-reservation_status-index.7e3fa0bd.js": {
+      "before": null,
+      "after": "33b186e5cd0089134d77df29179434fd5a0a112705d3b6b3eb5e5317c1142760"
+    },
+    "public/static/js/pages-goods_cate-goods_cate.47550740.js": {
+      "before": null,
+      "after": "6b6f17fe45718bb0b9ee994e7b498622375fac0438ed30efad2c3ecac0dda2a7"
+    },
+    "public/static/js/pages-goods_details-index.e0b9637b.js": {
+      "before": null,
+      "after": "7f8b01b64c72fccd910e4fd2b4d52018f4221da84ca621ff98c0a10c5f565ff1"
+    },
+    "public/static/js/pages-guide-index.9cc909bd.js": {
+      "before": null,
+      "after": "736bc3b2ff539d2b3e9be44c2844ced2e9b523c20dbb0e0020878726f919b25c"
+    },
+    "public/static/js/pages-index-index.af91c67f.js": {
+      "before": null,
+      "after": "23a838e63d075800c7d0ae67c7d71ab879e163411a30d17943722814f56a4bc1"
+    },
+    "public/static/js/pages-merchant-care-index.90b47b99.js": {
+      "before": null,
+      "after": "9ead5c3aa5b84e44c6601ee8f14c048f1bd93047852ef624f893dfbbda4a3e89"
+    },
+    "public/static/js/pages-merchant-customer-detail.de8b98ea.js": {
+      "before": null,
+      "after": "4926ce37dfb7e769e3e0a5e619f9bf5db04fb63b8bbcc45000a7b37556679eaa"
+    },
+    "public/static/js/pages-merchant-customer-index.2af2e603.js": {
+      "before": null,
+      "after": "8f1f221f00386cd942d88ca339b4635ea94a2a052422bffbfd1e1dda4db89731"
+    },
+    "public/static/js/pages-merchant-data-index.805c8686.js": {
+      "before": null,
+      "after": "d41e28eda88497bbc7be8afb866dd235dea60c67210cfff24b88412ad47e9a8c"
+    },
+    "public/static/js/pages-merchant-debt-index.66955b98.js": {
+      "before": null,
+      "after": "f11963e0477e560c56ffb7c098843df21de40ec670049db3b54950d1f5ce6c50"
+    },
+    "public/static/js/pages-merchant-home-index.6d8a555d.js": {
+      "before": null,
+      "after": "b985fd5b332fce613d08255da56a52706d8c9141003753d24b428cb2d67a4513"
+    },
+    "public/static/js/pages-merchant-metric-actual.7734e3bb.js": {
+      "before": null,
+      "after": "c4b84ab739273a1c50c3d4f42ff5aa45470f73aff9fbe20982b1eb2500096257"
+    },
+    "public/static/js/pages-merchant-metric-cash.5438b915.js": {
+      "before": null,
+      "after": "300e6c914d095eabefad7b1ce38722e0ab04d729723048c177b849ce4c13a3c2"
+    },
+    "public/static/js/pages-merchant-metric-consume.aebc739b.js": {
+      "before": null,
+      "after": "2068a18b98b3da1fbf51fbb431c588c6454cdc969227a8707ef2e975e5133302"
+    },
+    "public/static/js/pages-merchant-profile-index.b6ca53ba.js": {
+      "before": null,
+      "after": "6da2310bb1a22de962c6356ea58ae10cd1c3176821cc0d5da07e2b170038b887"
+    },
+    "public/static/js/pages-merchant-target-index.9ceff5af.js": {
+      "before": null,
+      "after": "f010e60d1100146b0125f9e50319ea2a721a7cb99950de0f1d3674b2aa3190cd"
+    },
+    "public/static/js/pages-merchant-training-index.c0a10f70.js": {
+      "before": null,
+      "after": "1addcc074f57c6c119e09b69b756f467a802c09a5d170a2ac4bc7544a3f1fe8b"
+    },
+    "public/static/js/pages-merchant-workbench-index.a856ec9e.js": {
+      "before": null,
+      "after": "ad78f36ccf6d37cdba7d8ee0ac0536bb3eed2dd2942a391388e7f04c4241c609"
+    },
+    "public/static/js/pages-merchant-yeji-self.8da54bd2.js": {
+      "before": null,
+      "after": "5fa73e08d03fc15df07df808efe96810eb4bb2a9a2b322e81b99bb374cc001c1"
+    },
+    "public/static/js/pages-order_addcart-order_addcart.d7cd7ee5.js": {
+      "before": null,
+      "after": "bef2b8770e187f69c94c5f9e088bf6e7599e7a62a7c48a3e4d0dd0c6efa182c0"
+    },
+    "public/static/js/pages-short_video-nvueSwiper-index.866109a2.js": {
+      "before": null,
+      "after": "3af257a1029247cb9fb5c59d76549fb271650088d78d43d93312004fca8dbd0d"
+    },
+    "public/static/js/pages-store-group_buy-index.373ed77f.js": {
+      "before": null,
+      "after": "abd8e77864fcc4ad26f1512d46441235bd1316fd9910f62847f71a548b661d12"
+    },
+    "public/static/js/pages-store-group_cart-index.a2003e17.js": {
+      "before": null,
+      "after": "6853a50ae4c721e0e4047e81dccc8b5fadd0af0e754c1ed63a81ed0308acd678"
+    },
+    "public/static/js/pages-store-group_cart-index~pages-store-home-index~pages-store-table_code-index.20a894ba.js": {
+      "before": null,
+      "after": "f1f98e83fe0866d689439350ad9da62a002d13c002d7ac938edc583d69250890"
+    },
+    "public/static/js/pages-store-group_goods-index.cde81f01.js": {
+      "before": null,
+      "after": "c561a2235b59a937c1a2d6bc67006d962ecf47aee02432626857234f4a3cef9e"
+    },
+    "public/static/js/pages-store-home-index.5b29584e.js": {
+      "before": null,
+      "after": "8d71e5ad1ca024be6e2f9ef29e28998e6cdfd7526030b5bda0493503b810c88b"
+    },
+    "public/static/js/pages-store-info-index.f13bacf9.js": {
+      "before": null,
+      "after": "020e5663a6a1b629d21b4392c8f39563064ba26d18306c3465dd0237ccf6b7d3"
+    },
+    "public/static/js/pages-store-list-index.b75be172.js": {
+      "before": null,
+      "after": "d58cbc8310940e2d829d3817a880d0b4ed10f0064b49f8060193b3e839f1f922"
+    },
+    "public/static/js/pages-store-map-index.aad63f7b.js": {
+      "before": null,
+      "after": "0f165b4be90379003c5fffccc47327ce978cbe3d4cb0f56b9d5c5457aa861026"
+    },
+    "public/static/js/pages-store-service-index.d4e7d107.js": {
+      "before": null,
+      "after": "bbb0a626b32efcc3063080f443005b66f38bfb4e73c63dd199c74647274e0c26"
+    },
+    "public/static/js/pages-store-table_code-index.db7ebb49.js": {
+      "before": null,
+      "after": "b870e7c71bb618a77e2b5025b775a8f16e973d53cb239984c82b2639815f7b4a"
+    },
+    "public/static/js/pages-store-table_confirm-index.18f9590b.js": {
+      "before": null,
+      "after": "1f8f44b92528f61e835fee73302311fc31f48575204daaa04e10d1e9e20cc53f"
+    },
+    "public/static/js/pages-store_list-index.61009e35.js": {
+      "before": null,
+      "after": "625d07146c2a93aacbaea76c7e1551911322884855f184f896aa3766278611be"
+    },
+    "public/static/js/pages-user-index.c82d1999.js": {
+      "before": null,
+      "after": "6e47c70639585e564ff63a89caf6fb5528ca25571b639d12e3ff8297a9e66e60"
+    },
+    "public/static/js/pages-users-agent-state.b2a4adae.js": {
+      "before": null,
+      "after": "0ae975402dd2e83e5e2f56ccafc1e5e691385a5919b144c817675b646e3de845"
+    },
+    "public/static/js/pages-users-alipay_invoke-index.c1267bcf.js": {
+      "before": null,
+      "after": "463e7acbff670efe2e5a16f742710d0193d51ecf9b9ed84d8f9b04cdb8ac5ded"
+    },
+    "public/static/js/pages-users-binding_phone-index.f420f25c.js": {
+      "before": null,
+      "after": "1c87275d20911370d92657091bff92fe3107f98c6fbaa5179d99296880e1df8b"
+    },
+    "public/static/js/pages-users-binding_phone-index~pages-users-distributor-apply~pages-users-franchisees-index~pages-us~2d5eb401.6892b22c.js": {
+      "before": null,
+      "after": "291bd07869ca0692cd95de735361dc8f5202146909eecc79cff742203e12f6c8"
+    },
+    "public/static/js/pages-users-binding_phone-index~pages-users-wechat_login-index.295b0c33.js": {
+      "before": null,
+      "after": "a2d7d2b03c09cb15a4e65de4c5c1551651f6693aca81777011aa129976ebc1b8"
+    },
+    "public/static/js/pages-users-commission_rank-index.f38825bd.js": {
+      "before": null,
+      "after": "1fc8eca8d7094319b9369c6af49f3995db6d0f474281c25f65afbbacf8ceb663"
+    },
+    "public/static/js/pages-users-coupon_transfer-index.17c1bdb8.js": {
+      "before": null,
+      "after": "ea6773b027855aa9fc67817e1bf19e37716a299fea803153cb4e6c6dc3707dd4"
+    },
+    "public/static/js/pages-users-debt-index.b5525d61.js": {
+      "before": null,
+      "after": "6a659aa93ab1842323501cedb03ea2831f3a878e14dbef79bbe589a85ef312b0"
+    },
+    "public/static/js/pages-users-distributor-apply.d36add44.js": {
+      "before": null,
+      "after": "6c5b4625fd36e5469620e638f35551defb2f3fa47a0872519d95f4c3b888f9b6"
+    },
+    "public/static/js/pages-users-distributor-index.3cca0d9d.js": {
+      "before": null,
+      "after": "730578c9181eb00e42caf6a0f57f280d71529231ab4453e2fb236893ace812f1"
+    },
+    "public/static/js/pages-users-franchisees-index.0a0ec419.js": {
+      "before": null,
+      "after": "d5f1acb706475da34478ce66bba934c22ef8c22b4cc48200559b330cfdd9549e"
+    },
+    "public/static/js/pages-users-franchisees-record.c51b91f2.js": {
+      "before": null,
+      "after": "e05628aa20b9a9a80ccaa2cc55a762de8af0758e57344ac09b490f00e37f5b32"
+    },
+    "public/static/js/pages-users-franchisees-state.62e0d8d6.js": {
+      "before": null,
+      "after": "2701efd75f6aad136ed0acc02b03b11fd752a6bebbfebfee2a6688afee98002e"
+    },
+    "public/static/js/pages-users-login-index.e63d4237.js": {
+      "before": null,
+      "after": "fd1807df738257bbef153b65b905463d5d52e9b1f158c6acd27a3fa53e857b51"
+    },
+    "public/static/js/pages-users-message_center-index.0bbe0ab2.js": {
+      "before": null,
+      "after": "004bfad73d05c90a605da191f6e3e693130c81c2113831fc815f7e29dc0e40d8"
+    },
+    "public/static/js/pages-users-message_center-messageDetail.121ad5a3.js": {
+      "before": null,
+      "after": "86d7fc6d2d08ae19dfde0cf47f9b9411c23654451eb91132d2effa76392a4ad8"
+    },
+    "public/static/js/pages-users-privacy-index.7a4c39bb.js": {
+      "before": null,
+      "after": "c0abab8bdd74ba936e502e89b8c36d343bdb1b4d27b7ea3515bd1f4db5e1bc19"
+    },
+    "public/static/js/pages-users-promoter-list-index.eeb73962.js": {
+      "before": null,
+      "after": "4def507c2f3f49e5e7da64297820a8eeb45cc230633e7b31df02166dc408c844"
+    },
+    "public/static/js/pages-users-promoter-order-index.7b3ad03a.js": {
+      "before": null,
+      "after": "95edc88dcd601ceea9317f4cd8cc1bf767da99638662bc54c6306678fd69bb76"
+    },
+    "public/static/js/pages-users-promoter_rank-index.95fc1db9.js": {
+      "before": null,
+      "after": "da98281775236268200938ac051dfd2495170f89998ccddf182e3a026f4c74cd"
+    },
+    "public/static/js/pages-users-retrievePassword-index.dffb66f2.js": {
+      "before": null,
+      "after": "8604d89c08f7a3b7fcb78490a73fa7215f3db392349fbca03c71f551355ef09c"
+    },
+    "public/static/js/pages-users-scan_login-index.02445a14.js": {
+      "before": null,
+      "after": "ca3b2fccbe2fef4fe12a0ecbf533e4bb20024296730c4c58d0b843422078f3a7"
+    },
+    "public/static/js/pages-users-supplier-index.81345e3e.js": {
+      "before": null,
+      "after": "2996eb0a6fae82b83bdb068992ab961a1f1e968c114c476459ed899f0b680b41"
+    },
+    "public/static/js/pages-users-supplier-record.7ef2a930.js": {
+      "before": null,
+      "after": "3e3b79db4c966e0f13e6592eaa6d78316068f73bcb326c87615b8185ed43bc58"
+    },
+    "public/static/js/pages-users-supplier-state.1675288d.js": {
+      "before": null,
+      "after": "d178e3550b3d91ad75e45fdefe68f0bad16f949339f9b8e18572345c103b002b"
+    },
+    "public/static/js/pages-users-system_changelog-index.2195a7ee.js": {
+      "before": null,
+      "after": "9f39d417cf307bc1040d51d118d430de341275b145cb0dd6ef279c6f32608d38"
+    },
+    "public/static/js/pages-users-user_address-addClient.aa779ae8.js": {
+      "before": null,
+      "after": "f4c093f6c0f86a33f69630111803c55d30d69c7a15f4dbd3f56c3ab17a5ab710"
+    },
+    "public/static/js/pages-users-user_address-index.8599a569.js": {
+      "before": null,
+      "after": "411d1240258bdf11c3cf8e999f4ea15bcba177e51fa449bf7bda7bba9b8f4f85"
+    },
+    "public/static/js/pages-users-user_address_list-index.40857b52.js": {
+      "before": null,
+      "after": "2183285c8ce96d4da7f575c073c2a74094847d87561648db6dcfd5d256a1bcc4"
+    },
+    "public/static/js/pages-users-user_agreement_list-index.44c51138.js": {
+      "before": null,
+      "after": "d21feea37e32c974e3a6115cfe612be6a1a66b256be3e98b16db9b002b622227"
+    },
+    "public/static/js/pages-users-user_bill-index.b19f8746.js": {
+      "before": null,
+      "after": "635031be0f54597fd694fdb7a1005e1ee4d2a51ec748588bf73448c3326ab438"
+    },
+    "public/static/js/pages-users-user_cancellation-index.29ef2168.js": {
+      "before": null,
+      "after": "3efdf1f726235cc229e9cb3eea45dc279e99e72d9594758f25205e9aae1ddd16"
+    },
+    "public/static/js/pages-users-user_card-index.87d24bb9.js": {
+      "before": null,
+      "after": "e562c1527f77c449b202bae136e7f998c2de1a25bfaff50ae24b0c3c0addc963"
+    },
+    "public/static/js/pages-users-user_card_list-index.0fa22512.js": {
+      "before": null,
+      "after": "8998c2979adb89678b6f206015b5baa54fb4187c22d86eeb0a97e907c9179a6e"
+    },
+    "public/static/js/pages-users-user_cash-index.b6d8690d.js": {
+      "before": null,
+      "after": "7686e11016e08609aae81c1b44270d01d9e4fc917f0a3a4c023f0a22bcff779f"
+    },
+    "public/static/js/pages-users-user_cash-status.1f2f2ca6.js": {
+      "before": null,
+      "after": "daaa307cd0e850e435658773b6e18b0c53f689f1d524c83b4523aed6f919b7d2"
+    },
+    "public/static/js/pages-users-user_coupon-index.2ec64520.js": {
+      "before": null,
+      "after": "754ad3c7b24e202cd4efc80c772469eb77237422ce38109fe6b7a46d026f001b"
+    },
+    "public/static/js/pages-users-user_distribution_info-index.aed24ed5.js": {
+      "before": null,
+      "after": "83191664db9dd581c5c1f4cb76934e5fe9ea683260c7c829cf16c35b42408a62"
+    },
+    "public/static/js/pages-users-user_distribution_level-index.39542758.js": {
+      "before": null,
+      "after": "5f87514a52f7b99fb91f34d10d81e291d0749ccfad02fa01e64b4ce4ed7f855f"
+    },
+    "public/static/js/pages-users-user_goods_collection-index.5b953777.js": {
+      "before": null,
+      "after": "3f225e58ee6e966bd7625418f79f454c979ebb8fdff13c099698d9d4c354ffe6"
+    },
+    "public/static/js/pages-users-user_info-index.4a9468d2.js": {
+      "before": null,
+      "after": "6bfa1e69b841878422124b437876678ce8ad6b0f833fca7449421db7f1b28ddf"
+    },
+    "public/static/js/pages-users-user_integral-index.ce71a415.js": {
+      "before": null,
+      "after": "8325c60090d8e680b4d68ba788db1d050077610a3f9e26055db7fcffef52877a"
+    },
+    "public/static/js/pages-users-user_integral_detail-index.b8697089.js": {
+      "before": null,
+      "after": "c03cd9b6835b4e03996aa80b991d77f2666fd2068154eb0cd5ae3b504e9f4e25"
+    },
+    "public/static/js/pages-users-user_invoice_form-index.9e199f72.js": {
+      "before": null,
+      "after": "68875d415de0dbe375a51f87e5083467823f1894991a7a1bff2d7a6ffc2b8a12"
+    },
+    "public/static/js/pages-users-user_invoice_list-index.2eff93d3.js": {
+      "before": null,
+      "after": "ffee56354ea247b64c98398d04ca3025818dd74c241799208d0e41ed4202d4e0"
+    },
+    "public/static/js/pages-users-user_invoice_order-index.686afe87.js": {
+      "before": null,
+      "after": "75b0f1c7a9eae64d75c9be60f722b83af1f71a8620b6fe0c6db4836bfcd91a71"
+    },
+    "public/static/js/pages-users-user_member_code-index.f37f9d02.js": {
+      "before": null,
+      "after": "3e7649c3677c48d5706c0aa13bcf85d8642b66a013cec9aa5bc3c77233d22a07"
+    },
+    "public/static/js/pages-users-user_money-index.88e453f6.js": {
+      "before": null,
+      "after": "5a493c277cd74ae370b6cf132904fc73ef7199f70ee80bd53d8307f831819d1c"
+    },
+    "public/static/js/pages-users-user_payment-index.904e377a.js": {
+      "before": null,
+      "after": "1d8c56b532bb79d62f2c1c5aa45e8af57ff88c0b1e341ad9f0622b7717a1722b"
+    },
+    "public/static/js/pages-users-user_phone-index.5ba2f91a.js": {
+      "before": null,
+      "after": "ba2009435e8fc83324d1cdf1eb74a4ec6af17b499305c7067108754aeeb1dd06"
+    },
+    "public/static/js/pages-users-user_pwd_edit-index.74ba637b.js": {
+      "before": null,
+      "after": "4a26c44cd07dd901347730e076ef182119931b127b19a41aa66352ef5c0a00e5"
+    },
+    "public/static/js/pages-users-user_return_list-index.fc2d1406.js": {
+      "before": null,
+      "after": "ac32e41aed031db1ad4b759fc913da809b14ee7890b601a37fed013656157f2b"
+    },
+    "public/static/js/pages-users-user_set-index.ee2aeda3.js": {
+      "before": null,
+      "after": "92c1046839dbb482a344dc0a0e91e567c183450d88271a2872b98cd6e1bbd360"
+    },
+    "public/static/js/pages-users-user_sgin-index.02088c11.js": {
+      "before": null,
+      "after": "fd66837752f894269997fb53a6a4d7612836f6e5c7d75e149ce659b7342ab949"
+    },
+    "public/static/js/pages-users-user_sgin_list-index.9e33e7a8.js": {
+      "before": null,
+      "after": "b929e66fddd34530f00b82688a13e453c15ebf8e9fd4a8e18723e0ac26fe82af"
+    },
+    "public/static/js/pages-users-user_spread_code-index.e75a6113.js": {
+      "before": null,
+      "after": "4eb0a6e665ec9f9700a426249802b421c6cd96856139658848013a6b9da0ef20"
+    },
+    "public/static/js/pages-users-user_spread_money-index.b67ef58e.js": {
+      "before": null,
+      "after": "e6171179cd9a6ee88e00e47769d2115285b5371faeef6ab4f4fba51af67b7189"
+    },
+    "public/static/js/pages-users-user_spread_user-index.3cd8f446.js": {
+      "before": null,
+      "after": "300c95813f4eaffe0b3744bf5980538ac24e4344a06bbc6aae4471835cf6ee8e"
+    },
+    "public/static/js/pages-users-user_vip-index.c29e2e0f.js": {
+      "before": null,
+      "after": "b0f667bdacbf08943bad3290dd4db97d76e056def2b68b73f80f1b66a79e43f6"
+    },
+    "public/static/js/pages-users-user_vip_areer-index.f2df4fc1.js": {
+      "before": null,
+      "after": "2098fcc87807dc8712cca55642fdf780c478da03a3775d5b7e0587da27d65f73"
+    },
+    "public/static/js/pages-users-user_withdrawal-index.eabc4e82.js": {
+      "before": null,
+      "after": "de5e1691a7ee24043923a4d25933dd53bce8465ecc81d3493c3862a471434dd5"
+    },
+    "public/static/js/pages-users-user_withdrawal-receiving.196afb26.js": {
+      "before": null,
+      "after": "f8b74a1012175591bd1d4fbcb86bf4df40437ad12f80e3e5d4392361f2b71d80"
+    },
+    "public/static/js/pages-users-visit_list-index.9bb4a192.js": {
+      "before": null,
+      "after": "fcd0c306340811a5ce16025b02e2ee312be8018b912e2d028eb04d5930698b94"
+    },
+    "public/static/js/pages-users-wechat_login-index.458139e9.js": {
+      "before": null,
+      "after": "662123ae4d87ea66498e8b7518dc8a8be95a4fe50f56f7dc3437b8e910f3cb0c"
+    },
+    "public/static/js/pages-work-groupInfo-index.a2109aee.js": {
+      "before": null,
+      "after": "91422c9ae3c2fcd7bcc430f068bcbe9623288e2c51b919e488f8d0db3c1a5764"
+    },
+    "public/static/js/pages-work-orderDetail-index.1140d8d3.js": {
+      "before": null,
+      "after": "7f561d5d96b8bb71a401c17b47a6b6a900bf66259c235303a8bd2366041dbd45"
+    },
+    "public/static/js/pages-work-orderList-index.efe33429.js": {
+      "before": null,
+      "after": "6697f0c89b5052eeded6296f14f8ccd7f7b45b674cff1df58fda317e497a2cd9"
+    },
+    "public/static/js/pages-work-record-index.1a454d4a.js": {
+      "before": null,
+      "after": "9ab207a8bdf3ea6996d4fdf16cbff7e17502bdd31243371095d022331368bba8"
+    },
+    "public/static/js/pages-work-userInfo-index.4190e534.js": {
+      "before": null,
+      "after": "308ad504c2d797c7943fd2b6ba57ed8515386806a1a7d9b420a7430e2b26abe2"
+    },
+    "public/index.html": {
+      "before": "fabbcb4722a271f4038dd0deffef624131fbc62a87712edcc69b0d15b105afb8",
+      "after": "4dc2576cd693def8f8264eef59a3caacd2dba265387ad52ac6ce451bc88565e7"
+    }
+  },
+  "businessWrites": 0,
+  "backendUnchanged": true
+}

@@ -1,0 +1,89 @@
+{
+  "round": 38,
+  "closure": "R38-00001",
+  "fixedPatch": "e2783ded821922a45ecd17dd3c8a4b15144703df56506c20133746a28da59a11",
+  "state": "开发与自测完成，待产品经理验收；未提交、未部署、未push",
+  "changes": [
+    "库存首页仓库选择器：图标、边框、留白、箭头、焦点态，同排按钮对齐；保留原仓库范围与切换",
+    "库存实际19种来源统一中文字典；统计、流水、详情共享；未知状态/内部错误中文兜底，不改变code/data",
+    "商品看板临期批次可查看按门店+批次精确定位的已结算出入库流水，20条分页，完整合计和成本权限由后端控制",
+    "明确卡片为全范围库存数量，下表为每档前10条，不把前10条相加冒充总数"
+  ],
+  "findings": {
+    "rhSample": "CB359326门店6批次10831，库存24，到期日2025-04-12，单位成本0；同批号在门店5/8/12是其他批次，部分到期日2027-04-12，不能混用",
+    "scopeDifference": "库存首页默认总部仓范围，商品看板默认授权门店库存范围；两个页面不应直接对比总数",
+    "historicalValues": "未修改生产日期、到期日、成本或历史库存事实；若原入库信息有误，需要单独的业务更正授权"
+  },
+  "architecture": {
+    "authority": "已结算库存批次正反事实+原批次元数据",
+    "grain": "门店+批次；明细每条库存事实",
+    "time": "库存为当前截止日快照，经营日期不改变库存口径；明细继承服务端截止日",
+    "permissions": "原商品看板菜单、scopedStoreIds和成本权限；后端再次交集，批次/门店身份不可由名称替代",
+    "consistency": "同一只读事务返回余额、完整累计和分页；作废/冲销仍按方向参与守恒",
+    "performance": "本地EXPLAIN使用idx_batch_time，39条样本；列表20条，完整总数独立查询",
+    "writes": "无迁移、无配置更改、无业务写入、无远程部署"
+  },
+  "validation": [
+    "19种来源×3个实际服务入口中文一致",
+    "7701批次原余额、成本、六档合计、前10排行完全不变",
+    "39条真实批次分页20/19，无重复，越界页修正，累计入库减出库等于库存",
+    "无成本权限隐藏、无权限/错门店/不存在批次/未来截止日拒绝",
+    "浏览器实际打开CB359326并核对24-0=24，关闭及Escape正常；窄屏实际487px弹窗471.5px且底部分页可达",
+    "仓库下拉实际切换总部仓后恢复全部授权总部仓，样式截图",
+    "inventory-vue3/cashier-v3本地Vite编译通过，PHP语法和相称契约通过",
+    "浏览器真实入库/出库统计均显示中文，调拨出库无cross_transfer_out泄漏"
+  ],
+  "knownTestLimitation": "旧inventory-api-contract.mjs调用已删除cancelCrossTransfer方法；已对开工API Git对象复跑，确认同样失败，未以本轮为由修改原接口。相关真实传输中文错误契约和既有状态测试通过。",
+  "files": {
+    "frontend": [
+      "前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue",
+      "前端代码/cashier-v3/src/views/ProductDashboardView.vue",
+      "前端代码/inventory-vue3/src/App.vue",
+      "前端代码/inventory-vue3/src/services/inventoryApi.js",
+      "前端代码/inventory-vue3/src/statusLabels.js",
+      "前端代码/inventory-vue3/src/styles.css"
+    ],
+    "backend": [
+      "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+      "后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php",
+      "后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php",
+      "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php",
+      "后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php",
+      "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+      "后端代码/app/services/report/ProductManagementDashboardServices.php"
+    ],
+    "migration": [],
+    "tests": [
+      "tests/inventory/js/r38-error-labels.mjs",
+      "tests/inventory/js/status-label-contract.mjs",
+      "tests/inventory/php/inventory-movement-source-name-contract.php",
+      "tests/inventory/php/r38-dashboard-parity-readonly.php",
+      "tests/inventory/php/r38-expiry-detail-readonly.php",
+      "tests/inventory/php/r38-movement-labels.php"
+    ],
+    "scripts": [
+      "scripts/r38-inventory-readonly-audit.php"
+    ],
+    "generated": [
+      "/private/tmp/r38-inventory-final",
+      "/private/tmp/r38-cashier-final"
+    ],
+    "evidence": "tests/inventory/evidence/R38-warehouse-labels-expiry"
+  },
+  "commentsUpdated": [
+    "前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue",
+    "前端代码/cashier-v3/src/views/ProductDashboardView.vue",
+    "前端代码/inventory-vue3/src/App.vue",
+    "前端代码/inventory-vue3/src/services/inventoryApi.js",
+    "前端代码/inventory-vue3/src/statusLabels.js",
+    "前端代码/inventory-vue3/src/styles.css",
+    "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+    "后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php",
+    "后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php",
+    "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php",
+    "后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php",
+    "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+    "后端代码/app/services/report/ProductManagementDashboardServices.php"
+  ],
+  "preservation": "App.vue、styles.css、inventoryApi.js、UnifiedReport.php开工前已有其他改动；initial.json记录原对象，本轮scope.patch只含本次差异。未修改共享HEAD或索引。此前已上线功能未作为本轮新增。若发布须单独重新核对目标线上包和完整构建来源。"
+}

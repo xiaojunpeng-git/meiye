@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "readOnly": true,
+  "businessWrites": 0,
+  "allowedStores": 10,
+  "fields": 22,
+  "total": 12264,
+  "pageRows": 20,
+  "emptyQuery": "PASS",
+  "unrelatedMoneyCommandDenied": true
+}

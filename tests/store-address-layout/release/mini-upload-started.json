@@ -1,0 +1,12 @@
+{
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "apiOrigin": "https://008.cc3798.com",
+  "version": "3.0.69",
+  "project": "/private/tmp/store-address-mini-008-20261027/008-member",
+  "commit": "3f5e2bd89124ee4feb82989662d8b2d5d15dbdc6",
+  "sourceTree": "bc59cf356ae88233faafb0affcd5fa071f049bcf",
+  "startedAt": "2026-10-27T16:15:41.482Z",
+  "inputSHA256": "2e679405318a1cf28c9864ec1cde49218332abc98fd4f74465dfdf3b05a3cb53"
+}

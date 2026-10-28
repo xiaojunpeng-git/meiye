@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import Info from '@lucide/vue/dist/esm/icons/info.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import {
@@ -14,22 +14,23 @@ import {
 const state = useCashierV3State()
 
 const METRIC_ORDER = [
-  'sales_amount',
   'cash_performance',
+  'refund_performance',
   'actual_performance',
-  'balance_deduction',
   'recharge_amount',
+  'sales_amount',
   'debt_amount',
   'service_count',
   'consumption_performance',
-  'labor_performance'
+  'labor_performance',
+  'balance_deduction'
 ]
-
 const DEFAULT_METRIC_CODE = 'cash_performance'
 
 const METRIC_LABELS = {
   sales_amount: '销售额',
   cash_performance: '现金业绩',
+  refund_performance: '退款金额',
   actual_performance: '实际业绩',
   balance_deduction: '余额扣款',
   recharge_amount: '充值',
@@ -41,6 +42,7 @@ const METRIC_LABELS = {
 
 const dashboardSnapshot = ref(null)
 const detail = ref(null)
+const detailPanel = ref(null)
 const descriptionMetricCode = ref('')
 const dashboard = computed(() => dashboardSnapshot.value || state.businessDashboard || {})
 const scope = computed(() => dashboard.value.scope || {})
@@ -48,8 +50,14 @@ const trend = computed(() => dashboard.value.trend || {})
 const ranking = computed(() => dashboard.value.ranking || {})
 const isPlatform = computed(() => dashboard.value.mode === 'platform')
 const dashboardTitle = computed(() => isPlatform.value ? '运营概况' : '运营概况')
-const rankingTitle = computed(() => ranking.value.dimension === 'store' ? '门店排行' : '员工排行')
-const rankEntityLabel = computed(() => ranking.value.dimension === 'store' ? '门店' : '员工')
+const rankingTitle = computed(() => ranking.value.title || '人员排行')
+const rankingRole = computed(() => ranking.value.role || 'sales')
+const rankingRoleOptions = computed(() => Array.isArray(ranking.value.roleOptions) ? ranking.value.roleOptions : [])
+const rankEntityLabel = computed(() => rankingRole.value === 'craftsman' ? '手艺人' : '销售人')
+const rankingBusy = ref(false)
+// 日期、角色快速切换只接受最后一份查询；关闭详情后也不能被迟到响应重新打开。
+let dashboardRequestId = 0
+let detailRequestId = 0
 
 const localScope = ref({
   start: '',
@@ -90,10 +98,6 @@ function normalizeMetricCode(code) {
   return isSupportedMetricCode(code) ? code : DEFAULT_METRIC_CODE
 }
 
-function rankingOptionMetricCode(option = {}) {
-  return option.value || metricCode(option)
-}
-
 const cards = computed(() => {
   const cardsByMetric = new Map()
   const dashboardCards = Array.isArray(dashboard.value.cards) ? dashboard.value.cards : []
@@ -120,30 +124,6 @@ const trendPeak = computed(() => {
 })
 const rankingColumns = computed(() => Array.isArray(ranking.value.columns) ? ranking.value.columns : [])
 const rankingRecords = computed(() => Array.isArray(ranking.value.records) ? ranking.value.records : [])
-const rankingSortBy = computed(() => normalizeMetricCode(ranking.value.sortBy || ranking.value.sort_by))
-const rankingSortOptions = computed(() => {
-  const optionsByMetric = new Map()
-  const rawOptions = Array.isArray(ranking.value.sortOptions) ? ranking.value.sortOptions : []
-  rawOptions.forEach((option) => {
-    const code = rankingOptionMetricCode(option)
-    if (!isSupportedMetricCode(code) || optionsByMetric.has(code)) return
-    optionsByMetric.set(code, {
-      ...option,
-      value: code,
-      label: option.label || option.name || METRIC_LABELS[code]
-    })
-  })
-
-  const requiredMetricCodes = [DEFAULT_METRIC_CODE, rankingSortBy.value]
-  requiredMetricCodes.forEach((code) => {
-    if (!optionsByMetric.has(code)) {
-      optionsByMetric.set(code, { value: code, label: METRIC_LABELS[code] })
-    }
-  })
-
-  return METRIC_ORDER.filter((code) => optionsByMetric.has(code)).map((code) => optionsByMetric.get(code))
-})
-
 function displayScopeEntity(entity, fallback) {
   if (!entity) return fallback
   if (typeof entity === 'string') return entity
@@ -159,8 +139,25 @@ function scopePayload() {
   }
 }
 
+function dashboardPayload() {
+  return { ...scopePayload(), metricCode: activeMetricCode.value, rankingRole: rankingRole.value, sortOrder: ranking.value.sortOrder || 'desc', silent: true }
+}
+
+async function queryDashboard(action, values = {}) {
+  const requestId = ++dashboardRequestId
+  closeDetail()
+  rankingBusy.value = true
+  try {
+    const response = await requestCashierV3Action(action, { ...dashboardPayload(), ...values })
+    if (requestId === dashboardRequestId) applyDashboardResponse(response)
+    return response
+  } finally {
+    if (requestId === dashboardRequestId) rankingBusy.value = false
+  }
+}
+
 async function applyScope() {
-  return applyDashboardResponse(await requestCashierV3Action('query-business-dashboard-summary', { ...scopePayload(), silent: true }))
+  return queryDashboard('query-business-dashboard-summary')
 }
 
 async function selectScopeEntity(entityType) {
@@ -216,50 +213,62 @@ function toggleDescription(card = {}) {
 async function selectMetric(card) {
   const code = metricCode(card)
   if (!isSupportedMetricCode(code)) return
-  return applyDashboardResponse(await requestCashierV3Action('query-business-dashboard-trend', {
-    ...scopePayload(),
-    metricCode: code,
-    silent: true
-  }))
+  // 卡片主体先切换对应趋势，再打开同一指标明细；过期响应不能打开旧卡片。
+  const pending = queryDashboard('query-business-dashboard-trend', { metricCode: code })
+  const requestId = dashboardRequestId
+  await pending
+  if (requestId === dashboardRequestId && activeMetricCode.value === code) return openMetricDetail(card)
 }
 
-async function openMetricDetail(card) {
+async function openMetricDetail(card, page = 1) {
   const code = metricCode(card)
   if (!isSupportedMetricCode(code)) return
+  const requestId = ++detailRequestId
   const response = await requestCashierV3Action('open-business-dashboard-detail', {
-    ...scopePayload(),
-    metricCode: code,
+    startDate: scope.value.dateRange?.start, endDate: scope.value.dateRange?.end,
+    metricCode: code, page,
     silent: true
   })
-  detail.value = response?.data?.businessDashboard?.detail || response?.data?.data?.businessDashboard?.detail || null
+  if (requestId === detailRequestId) {
+    detail.value = response?.data?.businessDashboard?.detail || response?.data?.data?.businessDashboard?.detail || null
+    if (page === 1) await revealDetail()
+  }
 }
 
-async function changeRankingSort(event) {
-  return applyDashboardResponse(await requestCashierV3Action('query-business-dashboard-ranking', {
-    ...scopePayload(),
-    sortBy: normalizeMetricCode(event.target.value),
-    sortOrder: ranking.value.sortOrder || 'desc',
-    silent: true
-  }))
+async function changeRankingRole(role) {
+  if (role === rankingRole.value) return
+  return queryDashboard('query-business-dashboard-ranking', { rankingRole: role })
 }
 
 async function changeRankingDirection(direction) {
   if (direction === ranking.value.sortOrder) return
-  return applyDashboardResponse(await requestCashierV3Action('query-business-dashboard-ranking', {
-    ...scopePayload(),
-    sortBy: rankingSortBy.value,
-    sortOrder: direction,
-    silent: true
-  }))
+  return queryDashboard('query-business-dashboard-ranking', { sortOrder: direction })
 }
 
-async function openRankingDetail(record) {
-  return requestCashierV3Action('open-business-dashboard-detail', {
-    ...scopePayload(),
-    metricCode: rankingSortBy.value,
-    rankingDimension: ranking.value.dimension,
-    rankingEntityId: record.id || record.entityId || record.storeId || record.staffId || null
+// 明细位于排行下方，打开后主动移入视口，避免成功加载却看似无响应。
+async function revealDetail() {
+  await nextTick()
+  detailPanel.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+function closeDetail() {
+  ++detailRequestId
+  detail.value = null
+}
+
+async function openRankingDetail(record, page = 1) {
+  const requestId = ++detailRequestId
+  // 明细沿用已查询日期，不能把尚未提交的日期草稿用于解释当前榜单。
+  const dateRange = scope.value.dateRange || {}
+  const response = await requestCashierV3Action('open-business-dashboard-detail', {
+    startDate: dateRange.start, endDate: dateRange.end,
+    rankingRole: record.rankingRole || rankingRole.value,
+    rankingEntityId: record.rankingEntityId || record.id, page, silent: true
   })
+  if (requestId === detailRequestId) {
+    detail.value = response?.data?.businessDashboard?.detail || response?.data?.data?.businessDashboard?.detail || null
+    if (page === 1) await revealDetail()
+  }
 }
 
 function applyDashboardResponse(response) {
@@ -339,9 +348,10 @@ function aggregationLabel() {
         :key="metricCode(card) || card.name"
         class="business-metric-card"
         :class="{ 'business-metric-card--active': metricCode(card) === activeMetricCode }"
+        @click="selectMetric(card)"
       >
         <div class="business-metric-card__heading">
-          <button type="button" class="business-metric-card__select" @click="selectMetric(card)">
+          <button type="button" class="business-metric-card__select" @click.stop="selectMetric(card)">
             <span class="business-metric-card__name">{{ card.name || card.label }}</span>
             <strong>{{ formatMetricValue(card) }}</strong>
           </button>
@@ -351,13 +361,13 @@ function aggregationLabel() {
             :aria-controls="descriptionId(card)"
             :aria-expanded="isDescriptionOpen(card)"
             :aria-label="`${card.name || card.label}指标说明`"
-            @click="toggleDescription(card)"
+            @click.stop="toggleDescription(card)"
           >
             <Info :size="16" aria-hidden="true" />
           </button>
           <span v-if="isDescriptionOpen(card)" :id="descriptionId(card)" class="business-metric-card__description-popover" role="tooltip">{{ cardDescription(card) }}</span>
         </div>
-        <button type="button" class="business-metric-card__detail" @click="openMetricDetail(card)">查看明细 →</button>
+        <button type="button" class="business-metric-card__detail" @click.stop="openMetricDetail(card)">查看明细 →</button>
       </article>
       <div v-if="!cards.length" class="business-dashboard-empty">暂无经营数据。</div>
     </section>
@@ -386,26 +396,29 @@ function aggregationLabel() {
         <header>
           <div>
             <h3>{{ rankingTitle }}</h3>
+            <span v-if="ranking.limit">前 {{ ranking.limit }} 名</span>
           </div>
           <div class="business-dashboard-ranking__controls">
-            <label>
-              <span>排序指标</span>
-              <select :value="rankingSortBy" @change="changeRankingSort">
-                <option v-for="option in rankingSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
+            <div class="business-dashboard-ranking__direction" role="group" aria-label="排行角色">
+              <button v-for="option in rankingRoleOptions" :key="option.value" type="button"
+                :class="{ active: rankingRole === option.value }" :aria-pressed="rankingRole === option.value"
+                :disabled="rankingBusy" @click="changeRankingRole(option.value)">{{ option.label }}</button>
+            </div>
             <div class="business-dashboard-ranking__direction" role="group" aria-label="排序方向">
               <button type="button" :class="{ active: ranking.sortOrder !== 'asc' }" @click="changeRankingDirection('desc')">降序</button>
               <button type="button" :class="{ active: ranking.sortOrder === 'asc' }" @click="changeRankingDirection('asc')">升序</button>
             </div>
           </div>
         </header>
+        <p class="business-dashboard-ranking__description">{{ ranking.description }}</p>
         <div class="business-dashboard-ranking__table-wrap">
-          <table v-if="rankingColumns.length" class="business-dashboard-ranking__table">
+          <div v-if="rankingBusy" class="business-dashboard-loading">正在加载{{ rankingTitle }}…</div>
+          <table v-else-if="rankingColumns.length" class="business-dashboard-ranking__table">
             <thead>
               <tr><th v-for="column in rankingColumns" :key="column.key">{{ column.label || column.name }}</th><th>操作</th></tr>
             </thead>
             <tbody>
+              <tr v-if="!rankingRecords.length"><td :colspan="rankingColumns.length + 1" class="business-dashboard-empty">所选日期暂无{{ rankEntityLabel }}业绩数据。</td></tr>
               <tr v-for="record in rankingRecords" :key="record.id || record.entityId || record.name">
                 <td v-for="column in rankingColumns" :key="column.key">{{ rankingCellValue(record, column) }}</td>
                 <td><button type="button" class="button button--text" @click="openRankingDetail(record)">查看{{ rankEntityLabel }}明细</button></td>
@@ -418,17 +431,22 @@ function aggregationLabel() {
       </article>
     </section>
 
-    <section v-if="detail" class="business-dashboard-panel business-dashboard-detail" aria-label="经营明细">
+    <section v-if="detail" ref="detailPanel" class="business-dashboard-panel business-dashboard-detail business-dashboard-detail--personnel" aria-label="经营明细">
       <header>
         <div><h3>{{ detail.metricName }}明细</h3><span>共 {{ detail.total || 0 }} 条</span></div>
-        <button type="button" class="button button--text" @click="detail = null">关闭</button>
+        <button type="button" class="button button--text" @click="closeDetail">关闭</button>
       </header>
       <div class="business-dashboard-ranking__table-wrap">
         <table class="business-dashboard-ranking__table">
           <thead><tr><th v-for="column in detail.columns" :key="column.key">{{ column.label }}</th></tr></thead>
-          <tbody><tr v-for="record in detail.records" :key="record.id"><td v-for="column in detail.columns" :key="column.key">{{ record[column.key] || '—' }}</td></tr></tbody>
+          <tbody><tr v-if="!detail.records.length"><td :colspan="detail.columns.length" class="business-dashboard-empty">所选日期暂无明细。</td></tr><tr v-for="record in detail.records" :key="record.id"><td v-for="column in detail.columns" :key="column.key">{{ record[column.key] ?? '—' }}</td></tr></tbody>
         </table>
       </div>
+      <footer class="business-dashboard-detail__pagination">
+        <span>共 {{ detail.total }} 条 · 每页 20 条 · 第 {{ detail.page }} / {{ Math.max(1, Math.ceil(detail.total / 20)) }} 页</span>
+        <button type="button" class="button button--text" :disabled="detail.page <= 1" @click="detail.rankingRole ? openRankingDetail(detail, detail.page - 1) : openMetricDetail({ metricCode: detail.metricCode }, detail.page - 1)">上一页</button>
+        <button type="button" class="button button--text" :disabled="detail.page * 20 >= detail.total" @click="detail.rankingRole ? openRankingDetail(detail, detail.page + 1) : openMetricDetail({ metricCode: detail.metricCode }, detail.page + 1)">下一页</button>
+      </footer>
     </section>
   </section>
 </template>
@@ -455,7 +473,7 @@ function aggregationLabel() {
 .business-dashboard-data-status__pill { padding: 4px 8px; border-radius: 999px; background: #eaf8ed; color: #287d3c; font-weight: 600; }
 .business-dashboard-data-status__pill--pending { background: #fff7e8; color: #b66a00; }
 .business-dashboard-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.business-metric-card { position: relative; display: grid; min-height: 150px; align-content: start; gap: 9px; padding: 15px; border: 1px solid #dde4ed; border-radius: 11px; background: #fff; color: inherit; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.business-metric-card { cursor: pointer; position: relative; display: grid; min-height: 150px; align-content: start; gap: 9px; padding: 15px; border: 1px solid #dde4ed; border-radius: 11px; background: #fff; color: inherit; text-align: left; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .business-metric-card:hover { border-color: #91caff; box-shadow: 0 7px 17px rgba(22, 119, 204, .08); transform: translateY(-1px); }
 .business-metric-card--active { border-color: #1677cc; box-shadow: 0 0 0 2px rgba(22, 119, 204, .11); }
 .business-metric-card__heading { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -478,6 +496,14 @@ function aggregationLabel() {
 .business-trend-chart__bar-wrap { display: flex; align-items: end; min-height: 165px; padding: 0 5px; border-bottom: 1px solid #e7edf4; }
 .business-trend-chart__bar-wrap i { display: block; width: 100%; min-height: 6px; border-radius: 5px 5px 1px 1px; background: linear-gradient(180deg, #78b8ee, #1677cc); }
 .business-trend-chart__label { overflow: hidden; color: #7a8696; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+/* 邻侧趋势跨多行时卡片仍等高，但标题与表格必须从顶部紧凑排列。 */
+.business-dashboard-ranking, .business-dashboard-detail { align-content: start; }
+.business-dashboard-ranking__description { margin: 12px 0 0; color: #697586; font-size: 12px; line-height: 1.6; }
+/* 人员明细的表格独立滚动，分页固定在结果区底部。 */
+.business-dashboard-detail--personnel { height: min(70vh, 700px); min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; align-content: stretch; }
+.business-dashboard-detail--personnel .business-dashboard-ranking__table-wrap { min-height: 0; }
+.business-dashboard-detail--personnel th { position: sticky; top: 0; background: #fff; z-index: 1; }
+.business-dashboard-detail__pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; color: #697586; font-size: 12px; }
 .business-dashboard-ranking__controls { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
 .business-dashboard-ranking__controls label { display: flex; align-items: center; gap: 6px; color: #697586; font-size: 12px; }
 .business-dashboard-ranking__controls select { height: 31px; border: 1px solid #d9e1eb; border-radius: 6px; background: #fff; color: #303133; font: inherit; }

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { inventoryStatusLabel } from '../../../前端代码/inventory-vue3/src/statusLabels.js'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -9,7 +10,7 @@ const app = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/App
 const modal = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue'), 'utf8')
 const checks = [
   ['SETTLED is projected to Chinese text', labels.includes("SETTLED: '已结算'")],
-  ['status projection preserves unknown non-empty values', labels.includes('return inventoryStatusLabels[raw.toUpperCase()] || raw')],
+  ['known and unknown statuses remain Chinese while historical Chinese text stays intact', inventoryStatusLabel('SETTLED') === '已结算' && inventoryStatusLabel('NEW_INTERNAL_ENUM') === '未知状态' && inventoryStatusLabel('历史状态') === '历史状态' && inventoryStatusLabel(null) === '-'],
   ['inventory list rows use the status projection', app.includes('inventoryStatusLabel(row.status_name') && app.includes('inventoryStatusLabel(row.document_status')],
   ['inventory detail uses the same status projection', modal.includes('function detailStatus(detail') && modal.includes('detailStatus(detail.document)')]
 ]

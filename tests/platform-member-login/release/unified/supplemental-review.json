@@ -1,0 +1,87 @@
+{
+  "sourceTree": "1e98488cb7ac81f30b40df573ba8555c56d69c0a",
+  "originalBusinessCommit": "a04265794299152f083c1d84ca3db825ffe7d70a",
+  "preservedLiveRelease": "42709bdd",
+  "originalAcceptedPatch": "9f520b496aed4b74f2941062ddf57046cce16e39a37a82ca4b83e89e07e54f71",
+  "preservedBaselineFiles": [
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue",
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "后端代码/app/services/report/BasicSalaryManualServices.php",
+    "后端代码/app/services/report/BasicSalaryReportServices.php",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php",
+    "后端代码/config/payroll.php"
+  ],
+  "preservationPatchSHA256": "e719c7e8f71b8d751b09c318739f9de7a021e1188c54ad10df3fc91788e9da95",
+  "businessFilesIdentical": true,
+  "adminSourceIdentical": true,
+  "memberSourceIdentical": true,
+  "supplementalAcceptanceRequired": true,
+  "supplementalAcceptance": true,
+  "deploymentStarted": false,
+  "cashierBaselineReproduced": {
+    "rh": true,
+    "008": true,
+    "010": true
+  },
+  "adminBaselineByteParity": "PASS; all production modules identical; one Webpack lazy filename/content-hash reference differs, normalized references exactly equal",
+  "readOnlyPrerequisites": {
+    "后端代码/app/services/cashier/v3/card/CashierV3HistoricalEntitlementReadServices.php": "a39365ded92d6c17c6b515d425e5c6b301156c9b428e63843be185df5f2589d6",
+    "后端代码/app/services/cashier/v3/card/CashierV3HistoricalEntitlementScopePolicy.php": "a2318573761ca916541607787d17db4856b15a85ca6c7a83eefa8fd24b277a74"
+  },
+  "newMemberBusinessCodeChanged": false,
+  "fixedDatabaseChecks": 40,
+  "fixedClassProvenanceCount": 14,
+  "siteReadOnlyChecks": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "readOnly": true,
+      "businessWrites": 0,
+      "allowedStores": 102,
+      "fields": 22,
+      "total": 151818,
+      "pageRows": 20,
+      "emptyQuery": "PASS",
+      "unrelatedMoneyCommandDenied": true
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "readOnly": true,
+      "businessWrites": 0,
+      "allowedStores": 130,
+      "fields": 22,
+      "total": 5722,
+      "pageRows": 20,
+      "emptyQuery": "PASS",
+      "unrelatedMoneyCommandDenied": true
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "readOnly": true,
+      "businessWrites": 0,
+      "allowedStores": 10,
+      "fields": 22,
+      "total": 12264,
+      "pageRows": 20,
+      "emptyQuery": "PASS",
+      "unrelatedMoneyCommandDenied": true
+    }
+  },
+  "mini": {
+    "result": "PASS",
+    "sourceTree": "1e98488cb7ac81f30b40df573ba8555c56d69c0a",
+    "version": "3.0.70",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com",
+    "sourceIdenticalToAccepted008Member3.0.69.1": true,
+    "uploaded": false
+  },
+  "status": "PM_SUPPLEMENT_ACCEPTED_RELEASE_AUTHORIZED"
+}

@@ -223,12 +223,62 @@ class StoreCombination extends AuthController
     {
         $where = $this->request->getMore([
             ['status', ''],
-            ['data', '', '', 'time'],
+            ['data', ''],
+            ['cid', ''],
+            ['group_id', ''],
+            ['store_ids', []],
+            ['keyword', ''],
+            ['page', 1],
         ]);
-        /** @var StorePinkServices $storePinkServices */
-        $storePinkServices = app()->make(StorePinkServices::class);
-        $list = $storePinkServices->systemPage($where);
+        // Both identifiers must narrow the authenticated list; malformed values never become broad searches.
+        foreach (['cid', 'group_id'] as $key) {
+            if ($where[$key] !== '' && (!ctype_digit((string)$where[$key]) || (int)$where[$key] <= 0))
+                throw new \think\exception\ValidateException('请输入有效的拼团编号');
+        }
+        // This platform list is group-grain; participant statistics retain their existing reader.
+        $reader = new \app\services\activity\combination\CombinationGroupListServices();
+        $view = (string)$this->request->get('view', 'list');
+        $list = $view === 'options' ? $reader->options($this->adminInfo)
+            : $reader->page($where, $this->adminInfo, $view === 'export');
         return $this->success($list);
+    }
+
+    /** Same group identity and participant authority as the visible detail; no page-sized truncation. */
+    public function exportGroup($id)
+    {
+        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+        return $this->success((new \app\services\activity\combination\CombinationRecordServices())->export((int)$id));
+    }
+
+    /** Export every real participant of one activity, independent of the current statistics tab or page. */
+    public function exportActivity($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationRecordServices())->exportActivity((int)$id));
+    }
+
+    /** Virtual seats are management evidence, never paid participants. */
+    public function completeGroup($id)
+    {
+        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+        return $this->success((new \app\services\activity\combination\CombinationGroupManagementServices())->complete(
+            (int)$id, (int)$this->request->adminId()));
+    }
+
+    /** Authenticated admin action; order membership and amounts are reloaded server-side. */
+    public function refundParticipant($id)
+    {
+        $root = (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
+        // A completed group is managed as a whole; the earlier per-member entry cannot bypass that policy.
+        if ((int)$root['status'] === 2) throw new \think\exception\ValidateException('拼团成功后请使用整团退款');
+        $orderId = (int)$this->request->post('order_id', 0);
+        $pink = \think\facade\Db::name('store_pink')->where('order_id_key', $orderId)->find();
+        if (!$pink || ((int)$pink['id'] !== (int)$id && (int)$pink['k_id'] !== (int)$id))
+            throw new \think\exception\ValidateException('该订单不属于当前拼团');
+        $reason = (string)$this->request->post('reason', '');
+        $result = (new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
+            $orderId, $reason, (int)$this->request->adminId(), (bool)$this->request->post('retry', false),
+            $this->request->post('action', '') === 'kick' ? (int)$id : 0);
+        return $this->success($result);
     }
 
     /**
@@ -237,10 +287,29 @@ class StoreCombination extends AuthController
      */
     public function order_pink($id)
     {
+        (new \app\services\activity\combination\CombinationGroupListServices())->assertGroup((int)$id, $this->adminInfo, true);
         /** @var StorePinkServices $storePinkServices */
         $storePinkServices = app()->make(StorePinkServices::class);
         $list = $storePinkServices->getPinkMember($id);
+        // The existing group-record entry owns these actions; no additional refund permission is introduced.
+        foreach ($list as &$participant) {
+            if ((int)$participant['is_virtual'] === 1) {
+                $participant['refund_message'] = '虚拟名额';
+                continue;
+            }
+            $participant = array_merge($participant, (new \app\services\activity\combination\CombinationRefundServices())->describe((int)$participant['order_id_key']));
+        }
+        unset($participant);
         return $this->success(compact('list'));
+    }
+
+    /** Authenticated whole-group command: no client amounts, members or channel identities are trusted. */
+    public function refundWholeGroup($id)
+    {
+        $result = (new \app\services\activity\combination\CombinationRefundServices())->refundGroup(
+            (int)$id, (string)$this->request->post('reason', ''), $this->adminInfo,
+            (string)$this->request->post('action', 'start'));
+        return $this->success($result);
     }
 
 }

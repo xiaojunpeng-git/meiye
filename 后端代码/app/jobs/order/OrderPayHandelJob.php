@@ -37,12 +37,31 @@ class OrderPayHandelJob extends BaseJobs
      */
     public function doJob($orderInfo)
     {
+        $id = (int)($orderInfo['id'] ?? 0);
+        if ($id && (new \app\services\activity\combination\CombinationFulfillmentServices())->managed($id)) {
+            return \think\facade\Db::transaction(function () use ($id) {
+                $fresh = \think\facade\Db::name('store_order')->where('id', $id)->lock(true)->find();
+                $receipt = \think\facade\Db::name('combination_order_fulfillment')->where('order_id', $id)->find();
+                if (!$fresh || (int)$fresh['refund_status'] !== 0 || (int)$fresh['terminal_action'] !== 0
+                    || !$receipt || $receipt['state'] !== 'pending') return true;
+                return $this->handlePaidOrder($fresh);
+            });
+        }
+        return $this->handlePaidOrder($orderInfo);
+    }
+
+    /** Actual issuance is shared; group callers above hold the refund/consumption order lock. */
+    private function handlePaidOrder($orderInfo)
+    {
         if (!$orderInfo) {
             return true;
         }
         if (!empty($orderInfo['is_debt_repay'])) {
             return true;
         }
+        // Queued payment jobs may arrive before the group completes. Issuance uses this same order lock.
+        if ((new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)$orderInfo['id'])
+            && !(int)\think\facade\Db::name('store_pink')->where('order_id_key', $orderInfo['id'])->where('status', 2)->where('is_refund', 0)->count()) return true;
         //待发货状态
         if ($orderInfo['status'] != 0) {
             return true;

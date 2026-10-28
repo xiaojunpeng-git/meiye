@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "checkedAssets": [
+    "/view_admin/js/app.b2279514.js",
+    "/view_cashier_v3/assets/index-13a4a26a.js",
+    "/view_cashier_v3/assets/index-95b0b53f.css"
+  ],
+  "memberH5Available": true,
+  "businessWrites": 0
+}

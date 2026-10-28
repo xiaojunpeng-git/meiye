@@ -67,23 +67,17 @@
 								<text class="iconfont icon-ic_rightarrow"></text>
 							</navigator>
 						</view>
-						<view class="switch flex-center w-176 h-46 bg--w111-f5f5f5" v-if="deliveryList.length > 1">
-							<view v-for="(item, index) in deliveryList" :key="item.key" :class="{ on: switchNum == item.key }" class="btn flex-center w-84 h-38 fs-22 text--w111-666" @click="swithFn(item.key)">
-								{{item.name}}
-							</view>
-						</view>
-						<view class="tips" v-else-if="deliveryList.length == 1">
-							本店仅支持{{deliveryList[0].key == 1?'配送':'到店核销'}}</view>
+						<!-- 会员只选择购买门店，不展示历史履约方式开关。 -->
 					</view>
 					<view class="address-wrap acea-row row-bottom">
 						<view class="address-box">
 							<view class="time">营业时间：{{info.day_time}}</view>
-							<view class="address-info pr-60 mt-20 line1">
+							<view class="address-info pr-60 mt-20">
 								<text class="distance">距您{{info.range}}km</text>
 								{{info.address}}{{info.detailed_address}}
 							</view>
 						</view>
-						<view class="flex">
+						<view class="flex store-actions">
 							<view class="" @click="showMaoLocation">
 								<view class="flex-center w-40 h-40 rd-9 mb-8 bg--w111-f5f5f5">
 									<text class="iconfont icon-ic_map fs-28"></text>
@@ -174,7 +168,7 @@
 					<view class="safe-area-inset-bottom"></view>
 				</view>
 			</view>
-			<view class="footer">
+			<view class="footer" v-if="$memberCartEntryEnabled">
 				<view class="inner-box" :class="{ open: footerOpen }">
 					<view class="inner acea-row row-between row-middle">
 						<view class="items-baseline inline-flex h-60 lh-60rpx overflow" style="flex-wrap: nowrap;">
@@ -279,7 +273,7 @@
 		</tuiDrawer>
 		<!-- #endif -->
 		<!-- 分类购物车下拉列表 -->
-		<cartList :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
+		<cartList v-if="$memberCartEntryEnabled" :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
 		<!-- 产品属性组件 -->
 		<productWindow :attr="attr" :isShow='1' :iSplus='1' :iScart='1' :type="2" :storeInfo="storeInfo" @myevent="onMyEvent" @ChangeAttr="ChangeAttr" @ChangeCartNum="ChangeCartNumDuo" @attrVal="attrVal" @iptCartNum="iptCartNum" @goCat="goCatNum" id='product-window'></productWindow>
 		<!-- 客服弹窗 -->
@@ -528,36 +522,9 @@
 		},
 		mounted() {
 			let that = this;
-			let default_delivery = this.info.default_delivery;
-			const deliveryType = this.info.delivery_type.map(Number).sort();
-			this.deliveryList = [];
-			if (deliveryType.includes(1) || deliveryType.includes(3)) {
-				this.deliveryList.push({
-					name: '配送',
-					key: 1,
-					icon: 'icon-ic_electromobile',
-				});
-			}
-			if (deliveryType.includes(2)) {
-				this.deliveryList.push({
-					name: '到店',
-					key: 2,
-					icon: 'icon-ic_shop1',
-				});
-			}
-			// for (let i = 0; i < this.deliveryList.length; i++) {
-			// 	if (this.deliveryList[i].key == 2 && (!this.info.store_self_mention || this.info.delivery_type == 2)) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	} else if (this.deliveryList[i].key == 1 && this.info.delivery_type == 3) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	}
-			// }
-			if (this.deliveryList.length == 1) {
-				default_delivery = this.deliveryList[0].key;
-			}
-			this.collageDelivery = default_delivery;
+			// 后端沿用数字 2 标识门店订单；会员端不再提供履约类型选择。
+			this.deliveryList = [{ name: '购买门店', key: 2, icon: 'icon-ic_shop1' }];
+			this.collageDelivery = 2;
 			// 获取设备宽度
 			uni.getSystemInfo({
 				success(e) {
@@ -615,7 +582,7 @@
 			uni.$on('activeAddress', (id) => {
 				this.getAddressList(id);
 			});
-			this.switchNumFun(default_delivery);
+			this.switchNumFun(2);
 			that.getAllCategory();
 			that.getCartNum();
 			that.getAddressList();
@@ -2113,7 +2080,7 @@
 		padding: 20rpx;
 
 		.panel {
-			padding: 0 32rpx 32rpx;
+			padding: 0 32rpx 40rpx;
 			border-radius: 16rpx;
 			background: #FFFFFF;
 		}
@@ -2152,6 +2119,13 @@
 		}
 
 		.address-wrap {
+			// 完整地址决定卡片高度；右侧操作保留独立宽度，避免长地址挤出按钮。
+			flex-wrap: nowrap;
+
+			.store-actions {
+				flex-shrink: 0;
+			}
+
 			.address-box {
 				flex: 1;
 				min-width: 0;
@@ -2160,7 +2134,9 @@
 			}
 
 			.address-info {
-				line-height: 34rpx;
+				line-height: 36rpx;
+				white-space: normal;
+				word-break: break-all;
 			}
 
 			.distance {

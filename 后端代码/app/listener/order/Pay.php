@@ -72,8 +72,10 @@ class Pay implements ListenerInterface
         }
         //写入订单支付记录
         OrderStatusJob::dispatch([$orderInfo['id'], 'pay_success', ['change_message' => '用户付款成功', 'change_manager_type' => 'user']]);
-        // 预约商品支付成功后创建预约单并扣次
-        if (empty($orderInfo['refund_status'])) {
+        // Group purchases are rights, not an implicit service appointment. Completion owns issuance.
+        $groupManaged = (new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)$orderInfo['id']);
+        // 其他预约商品沿用原支付后预约逻辑。
+        if (!$groupManaged && empty($orderInfo['refund_status'])) {
             try {
                 /** @var StoreReservationOrderServices $reservationOrderService */
                 $reservationOrderService = app()->make(StoreReservationOrderServices::class);
@@ -90,7 +92,7 @@ class Pay implements ListenerInterface
         $productType = array_column($cartInfo, 'product_type');
         if (!empty($orderInfo['is_debt_repay'])) {
             // 补交订单不生成卡包/核销数据
-        } elseif (count($productType) == 1) {
+        } elseif (!$groupManaged && count($productType) == 1) {
             //卡密、虚拟、次卡、卡项商品订单处理
             OrderPayHandelJob::dispatch([$orderInfo]);
         }

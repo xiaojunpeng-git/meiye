@@ -1,0 +1,33 @@
+PASS empty keyword preserves all original groups
+PASS member search retains group-status narrowing
+PASS 团长 name finds original group
+PASS 团员 name finds original group
+PASS leader/member full or partial phone 19900001001
+PASS leader/member full or partial phone 19900001002
+PASS leader/member full or partial phone 001002
+PASS multiple member matches never duplicate groups
+PASS virtual participant name excluded
+PASS virtual participant phone excluded
+PASS member current/archive/snapshot search f1f新姓名
+PASS member current/archive/snapshot search 独立昵称
+PASS member current/archive/snapshot search 原单姓名
+PASS member current/archive/snapshot search 19900001999
+PASS member current/archive/snapshot search 19900001888
+PASS member current/archive/snapshot search 参团快照
+PASS historical refunded real member remains searchable
+PASS member OR cannot escape outer store grants
+PASS selected unauthorized store cannot broaden grants
+PASS deny-all remains deny-all
+PASS percent underscore backslash treated as literal text
+PASS SQL-like text stays bound search input
+PASS no-match is an explicit empty result
+PASS member-only page one has 20 of 25 groups
+PASS member-only page two has remaining five groups
+PASS member matches retain stable disjoint pagination
+PASS export includes all 25 unique matching groups
+PASS export shares exact store scope
+PASS out-of-range page resolves to last matching page
+PASS real member lookup has an executable MySQL plan
+PASS member lookup avoids a full member scan for every group
+PASS all fabricated group facts rolled back
+COMBINATION_MEMBER_SEARCH_PASS 32 checks

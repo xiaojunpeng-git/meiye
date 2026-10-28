@@ -1,0 +1,17 @@
+{
+  "commit": "77ea458f1daf5b75d03fb1bf23946ef2a896e9db",
+  "branch": "release/008-avatar-login-20261028",
+  "tree": "25a59a911ab183d6da43e05b7701e961a2abe600",
+  "parent": "3f5e2bd89124ee4feb82989662d8b2d5d15dbdc6",
+  "files": [
+    "\u540e\u7aef\u4ee3\u7801/app/services/wechat/WechatUserServices.php",
+    "scripts/member-avatar-login-install.php",
+    "tests/member-avatar-login/local-database.php",
+    "tests/member-avatar-login/evidence/database.txt",
+    "tests/member-avatar-login/evidence/fixed-version.json",
+    "tests/member-avatar-login/evidence/authorization.json",
+    "tests/member-avatar-login/evidence/README.md",
+    "tests/member-avatar-login/evidence/008-before.json"
+  ],
+  "pushAuthorized": false
+}

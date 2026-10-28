@@ -1,0 +1,26 @@
+{
+  "inventory": {
+    "result": "PASS",
+    "output": "/private/tmp/r38-inventory-final",
+    "logSHA256": "3727ae497699073b3356dd6e97c3deb612cc40cf887cedd1ef9449f58b7d5bf1",
+    "artifacts": {
+      "index.html": "34ac7e096da3ec8f6e438de690e178058598bc21f24fc28af0cb53b1d7bbcac1",
+      "assets/index-dc3907fc.css": "dc3907fc7c314765777da168d827ea3ce477d0a06426c1cda7702b2edc89ceb2",
+      "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "assets/index-7dba964c.js": "da42104e4f3f5c8dccb85ef0374cb5b6eb6be839d1a687a52fad24ce9f5ce92a",
+      "assets/index-52a3b1bb.js": "e9f8d473b2e8835c7a3e06f5519d2a855c3a7180e33dec6dc6091822b1cd34b4"
+    }
+  },
+  "cashier": {
+    "result": "PASS",
+    "output": "/private/tmp/r38-cashier-final",
+    "logSHA256": "06aff39eba19aaf8f88b52563ef734afbb875681f4657c55e1beee1c830304f0",
+    "artifacts": {
+      "index.html": "925bd8bc734ce967cdb733ae47367ca93ff1c6a198ce75dd853e12b2d2ad0c65",
+      "assets/index-d9a62e89.js": "bf1d36a813990540a1065d3220ebe52f9bfef2d71ddf55555753afee6b6bccc7",
+      "assets/index-ba445a1a.css": "ba445a1ad46dfdadfd1a7ac6611b38341c07307a09aeacd3be61e12aa6578091",
+      "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "assets/index-a418687c.js": "4a94f35380c30a341a6f58c5624e5c1bc4b9196003d35cd508e9bd90f5474706"
+    }
+  }
+}

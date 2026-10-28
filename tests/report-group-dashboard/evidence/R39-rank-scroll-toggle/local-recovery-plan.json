@@ -1,0 +1,35 @@
+{
+  "runningContainers": [
+    "mohe-growth-release-preview",
+    "mohe-growth-local-worker",
+    "mohe-growth-local-web",
+    "mohe-growth-local-redis",
+    "mohe-growth-local-app",
+    "mohe-fund-v3-src",
+    "mohe-inventory-v3-src",
+    "mohe-cashier-nginx",
+    "mohe-platform-nginx",
+    "mohe-ai-supervisor",
+    "mohe-ai-export-worker",
+    "mohe-ai-execution-worker",
+    "mohe-platform-app",
+    "mohe-nginx",
+    "mohe-cashier-app",
+    "mohe-app",
+    "007-snapshot-admin",
+    "007-snapshot-app",
+    "007-snapshot-redis",
+    "007-snapshot-mysql",
+    "007-local-app",
+    "007-local-redis",
+    "007-local-mysql",
+    "mohe-xinruihao-tunnel",
+    "mohe-mysql",
+    "mohe-redis"
+  ],
+  "restoreAlso": [
+    "mohe-cashier-v3-src",
+    "mohe-admin-src"
+  ],
+  "status": "等待用户批准本地Colima重启；未操作虚拟机或线上服务"
+}

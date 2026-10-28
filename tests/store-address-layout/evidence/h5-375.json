@@ -1,0 +1,34 @@
+{
+  "actions": {
+    "bottom": 155.9921875,
+    "height": 38,
+    "right": 349,
+    "width": 58,
+    "x": 291,
+    "y": 117.9921875
+  },
+  "address": {
+    "bottom": 155.9921875,
+    "height": 36,
+    "right": 291,
+    "width": 265,
+    "x": 26,
+    "y": 119.9921875
+  },
+  "clientHeight": 36,
+  "clientWidth": 265,
+  "lineHeight": "18px",
+  "panel": {
+    "bottom": 175.9921875,
+    "height": 127,
+    "right": 365,
+    "width": 355,
+    "x": 10,
+    "y": 48.9921875
+  },
+  "scrollHeight": 36,
+  "scrollWidth": 265,
+  "text": "距您0km 安徽省马鞍山市花山区湖东中路976号二楼",
+  "viewport": 375,
+  "whiteSpace": "normal"
+}

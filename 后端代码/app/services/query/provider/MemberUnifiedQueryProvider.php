@@ -44,19 +44,19 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
 
     public function pageCode(): string
     {
-        return self::PAGE_CODE;
+        return static::PAGE_CODE;
     }
 
     public function query(array $context, array $payload): array
     {
-        $payload['pageCode'] = self::PAGE_CODE;
+        $payload['pageCode'] = static::PAGE_CODE;
         $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
         $context['data_as_of'] = (int)($context['data_as_of'] ?? time());
         $definitions = $this->definitionsForQuery($context, $payload);
         // 先把 UI 输入完整校验成无 SQL 的规范化计划，再允许它影响 SQL 安全下推。
         // 执行器仍会二次校验并执行同一口径，避免下推与内存计算分叉。
         $validatedPlan = $this->execution->validatedPlan(
-            self::PAGE_CODE,
+            static::PAGE_CODE,
             $definitions,
             $this->executionPayload($payload),
             $context
@@ -66,7 +66,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         if ($result === null) {
             $sourceRows = $this->authorizedSourceRows($context, $normalizedQuery);
             $result = $this->execution->execute(
-                self::PAGE_CODE,
+                static::PAGE_CODE,
                 $sourceRows,
                 $definitions,
                 $this->executionPayload($payload),
@@ -78,7 +78,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             );
         }
 
-        $preference = $this->preferences->load($context, self::PAGE_CODE);
+        $preference = $this->preferences->load($context, static::PAGE_CODE);
         return [
             'records' => array_map(function (array $row): array {
                 return $this->presentRow($row);
@@ -110,7 +110,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         array $fieldKeys
     ): array {
         $context['query_cutoff_date'] = $this->trustedCutoffDate($context);
-        if ((string)($plan['page_code'] ?? '') !== self::PAGE_CODE) {
+        if ((string)($plan['page_code'] ?? '') !== static::PAGE_CODE) {
             throw new UnifiedQueryException(
                 'UNIFIED_QUERY_EXPORT_PLAN_INVALID',
                 '导出查询计划与页面不匹配。',
@@ -132,7 +132,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         ];
         $sourceRows = $this->authorizedSourceRows($context, $query);
         return $this->execution->execute(
-            self::PAGE_CODE,
+            static::PAGE_CODE,
             $sourceRows,
             (array)($plan['custom_definitions'] ?? []),
             $query,
@@ -171,10 +171,10 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         if (!$keys) {
             return [];
         }
-        $preference = $this->preferences->load($context, self::PAGE_CODE);
+        $preference = $this->preferences->load($context, static::PAGE_CODE);
         $pinned = (array)($preference['customFieldVersions'] ?? []);
         $visible = [];
-        foreach ($this->customFields->listVisible($context, self::PAGE_CODE, true) as $field) {
+        foreach ($this->customFields->listVisible($context, static::PAGE_CODE, true) as $field) {
             $visible[(string)$field['key']] = $field;
         }
         $definitions = [];
@@ -189,11 +189,11 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $version = (int)($pinned[$fieldKey] ?? $visible[$fieldKey]['version'] ?? 0);
             $definition = $this->customFields->versionDefinition(
                 $context,
-                self::PAGE_CODE,
+                static::PAGE_CODE,
                 $fieldKey,
                 $version
             );
-            $definition['page_code'] = self::PAGE_CODE;
+            $definition['page_code'] = static::PAGE_CODE;
             $definitions[] = $definition;
         }
         return $definitions;
@@ -274,7 +274,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         $pageQuery = $normalizedQuery;
         $pageQuery['page'] = 1;
         $result = $this->execution->execute(
-            self::PAGE_CODE,
+            static::PAGE_CODE,
             $projected,
             [],
             $pageQuery,
@@ -576,6 +576,8 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         $stores = $this->storeNames(array_values(array_unique(array_values($displayStoreIds))));
         $levels = $this->levelNames($rows);
         $labels = $this->memberLabels($uids);
+        // 一次批量读取当前授权会员的绑定状态，列表和导出共用，不产生逐行查询。
+        $wechatBindings = (new \app\services\user\MemberWechatBindingReadServices())->summaries($uids);
         $exclusive = $this->exclusiveServicePeople($uids, $visibleStoreIds, $allStores);
         $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores, $context);
         $debts = $this->debtSummaries($uids, $visibleStoreIds, $allStores);
@@ -625,6 +627,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
                 'last_service_staff' => (string)($visits[$uid]['last_staff_name'] ?? ''),
                 'latest_visit_date' => (string)($visits[$uid]['latest_date'] ?? ''),
                 'created_at' => $this->dateTime($row['add_time'] ?? 0),
+                'wechat_binding' => $wechatBindings[$uid] ?? '未绑定',
                 '_member_tags' => $tagList,
                 '_member_status_code' => $state['code'],
                 '_scope_store_ids' => $relations[$uid] ?? [],
@@ -700,6 +703,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             'lastServiceStaff' => (string)$row['last_service_staff'],
             'latestVisitDate' => (string)$row['latest_visit_date'],
             'createdAt' => (string)$row['created_at'],
+            'wechatBinding' => (string)($row['wechat_binding'] ?? '未绑定'),
             'queryFieldValues' => $customValues,
             'queryDisplayValues' => $customValues,
         ];

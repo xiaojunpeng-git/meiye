@@ -1,0 +1,11 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+  "sha256": "61107d49a7a68da5342c5bfd8e1419afa9fa99071ce5f0eb9f38e7cc8242c800",
+  "blob": "a7da4af2e8ac995c52b6082f30d2fd4c9f85dc4b",
+  "existingStatus": "MM 前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+  "remoteBaseline": "不适用，未授权本轮发布，未连接远程",
+  "sourceOfTruth": "当前正本cashier-v3热更新源码",
+  "scope": "三个目标排行榜各自切换暂停/继续，默认自动滚动",
+  "time": "2026-10-28T10:34:39.933427"
+}

@@ -36,7 +36,7 @@
 			</view>
 		</view>
 		<view class="w-full h-128 fixed-lb pb-safe flex-center">
-			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">{{ paying ? '正在发起支付' : '确认付款' }}</view>
+			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">{{ paying ? '正在发起支付' : (checkingPayment ? '正在确认支付结果' : (awaitingPaymentConfirmation ? '确认支付结果' : '确认付款')) }}</view>
 		</view>
 		<view v-show="false" v-html="formContent"></view>
 	</view>
@@ -46,7 +46,7 @@
 	import { mapGetters } from "vuex";
 	import countDown from '@/components/countDown';
 	import colors from "@/mixins/color";
-	import { getCashierOrder, orderPay } from "@/api/order";
+	import { getCashierOrder, orderPay, getOrderDetail } from "@/api/order";
 	import { getDebtCashier, debtRepayPay } from "@/api/debt";
 	import { rechargePayAPi, memberCardPayApi } from "@/api/user.js"
 	import { HTTP_REQUEST_URL } from '@/config/app';
@@ -102,6 +102,12 @@
 				],
 				paytype:'',
 				paying: false,
+				awaitingPaymentConfirmation: false,
+				checkingPayment: false,
+				paymentCheckTimer: null,
+				paymentCheckRun: 0,
+				paymentPageVisible: true,
+				isGroupOrder: false,
 				payTypeList:[]
 			}
 		},
@@ -123,7 +129,62 @@
 			if (options.from_type) this.fromType = options.from_type;
 			this.getCashierOrder();
 		},
+		onShow() {
+			this.paymentPageVisible = true;
+			// Returning from the provider means only that its UI closed. The order's
+			// authenticated server state, not referrer data, decides payment success.
+			if (this.awaitingPaymentConfirmation) this.checkPaymentAfterReturn();
+		},
+		onHide() { this.paymentPageVisible = false; this.stopPaymentCheck(); },
+		onUnload() { this.paymentPageVisible = false; this.stopPaymentCheck(); },
 		methods: {
+			stopPaymentCheck() {
+				if (this.paymentCheckTimer !== null) clearTimeout(this.paymentCheckTimer);
+				this.paymentCheckTimer = null;
+				this.paymentCheckRun++;
+				this.checkingPayment = false;
+			},
+			checkPaymentAfterReturn() {
+				if (this.checkingPayment || !this.orderId) return;
+				this.paying = false;
+				// This fix concerns purchase orders. Other payment scenes keep their
+				// existing destinations and can refresh their own state after return.
+				if (this.fromType !== 'order') { this.awaitingPaymentConfirmation = false; return; }
+				this.stopPaymentCheck();
+				this.checkingPayment = true;
+				const run = this.paymentCheckRun;
+				const orderId = this.orderId;
+				let attempts = 0;
+				const check = () => {
+					attempts++;
+					// Bound each read even when the network promise never settles. A late
+					// response must not navigate after timeout, hide, or another check run.
+					const read = new Promise((resolve, reject) => {
+						this.paymentCheckTimer = setTimeout(() => reject(new Error('payment status timeout')), 10000);
+						Promise.resolve().then(() => getOrderDetail(orderId)).then(resolve, reject);
+					});
+					return read.then(res => {
+						if (run !== this.paymentCheckRun || orderId !== this.orderId) return;
+						clearTimeout(this.paymentCheckTimer);
+						this.paymentCheckTimer = null;
+						if (Number(res.data.paid) === 1) {
+							this.stopPaymentCheck();
+							this.awaitingPaymentConfirmation = false;
+							this.pageReject('支付成功', '/pages/goods/order_pay_status/index?order_id=' + encodeURIComponent(orderId));
+						} else if (attempts < 8) {
+							this.paymentCheckTimer = setTimeout(check, 1500);
+						} else {
+							this.stopPaymentCheck();
+							this.$util.Tips({ title: '支付结果待确认，请勿重复付款，可点击确认支付结果' });
+						}
+					}).catch(() => {
+						if (run !== this.paymentCheckRun) return;
+						this.stopPaymentCheck();
+						this.$util.Tips({ title: '暂未查到支付结果，请勿重复付款，请稍后确认' });
+					});
+				};
+				return check();
+			},
       // appPay(qrcode){
       //   // #ifdef MP
       //   //调用富友支付插件
@@ -138,7 +199,8 @@
 			payList(){
 				let list = [];
 				this.cartArr.forEach(item=>{
-					if(item.payStatus == 1){
+					// 拼团只展示微信/支付宝，后端付款接口仍做独立校验。
+					if(item.payStatus == 1 && (!this.isGroupOrder || ['weixin', 'alipay'].includes(item.value))){
 						list.push(item);
 					}
 				})
@@ -186,6 +248,7 @@
 					// #endif
 					//余额支付是否开启
 					this.cartArr[2].payStatus = res.data.yue_pay_status;
+					this.isGroupOrder = !!res.data.is_group_order;
 					this.now_money = res.data.now_money;
 					//线下支付是否开启
 					if (res.data.offline_pay_status == 1) {
@@ -212,7 +275,7 @@
 				//付费会员购买和余额充值不允许使用线下支付和余额支付，未开启线上支付支付的话给出提示并且返回上一页
 				//检查支付类型列表数组的payStatus是不是都是0或者2
 				const isAllPayStatusZero = this.cartArr.every(item => item.payStatus == 0 || item.payStatus == 2);
-				if(isAllPayStatusZero && ['vip','recharge'].includes(this.fromType)){
+				if(isAllPayStatusZero && (['vip','recharge'].includes(this.fromType) || this.isGroupOrder)){
 					return this.$util.Tips({
 						title: '未开启线上支付，请联系管理员'
 					}, {
@@ -222,6 +285,9 @@
 			},
 			goPay(){
 				let that = this;
+				// An issued provider request may already have charged the customer.
+				// Retry the status read only; never issue another payment while unknown.
+				if (that.awaitingPaymentConfirmation) return that.checkPaymentAfterReturn();
 				if (that.paying) return;
 				if(that.active == -1) return that.$util.Tips({
 					title: '请选择付款方式'
@@ -313,21 +379,37 @@
 					let status = res.data.status,
 					orderId = result.order_id || '',
 					jsConfig = result.jsConfig || {};
+					// 下单页传入的可能是临时结算号；支付接口返回的 order_id 才是
+					// 当前会员可查询的真实订单号。支付发起后所有查单、跳转必须固定
+					// 使用真实订单号，避免已经扣款却用临时号得到“订单不存在”。
+					if (orderId) that.orderId = orderId;
           let qr_code=jsConfig.qr_code || '';
           let urlLink=jsConfig.url_link || '';
           if(qr_code != ''){
             // #ifdef MP
             uni.hideLoading();
+            that.awaitingPaymentConfirmation = true;
+            // A prepared provider request is no longer being initiated. Clear
+            // that spinner before opening the provider, even if no page-show
+            // event is delivered on return; further taps can only read status.
+            that.paying = false;
             uni.setStorageSync('fy_pay_type', that.is_bak == 1 ? 'isBack' : that.fromType);
             wx.openEmbeddedMiniProgram({
               appId: jsConfig.app_id,
               path: `/pages/qrPay/qrPay?t=${encodeURIComponent(qr_code)}`,
               envVersion: 'release',
+              success: () => {
+                // Opening the provider is not proof of payment. Start the same
+                // authoritative read while visible without relying on onShow.
+                // Full-screen navigation resumes it through onShow instead.
+                if (that.paymentPageVisible) that.checkPaymentAfterReturn();
+              },
               fail: (error) => {
 				that.$util.Tips({
                   title: (error && error.errMsg) || '未能打开富友支付'
 				});
 				that.paying = false;
+                that.awaitingPaymentConfirmation = false;
               }
             })
             // #endif

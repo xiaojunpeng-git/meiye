@@ -1,0 +1,7 @@
+{
+  "accepted": true,
+  "scope": "本轮四个业务文件、统计测试与发布证据；PM确认测试无问题并授权瑞昊→push→008→010。目录可读性是发布前发现的运行依赖修复，不改工资算法或配置。",
+  "time": "2026-10-27T19:49:45.859076",
+  "fixedVersion": "../fixed-version.json",
+  "newBranch": false
+}

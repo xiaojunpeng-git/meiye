@@ -40,7 +40,7 @@ import {
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
-import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
+import { guideRoundText, personnelEmptyText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
 import { orderBusinessSourceFields, orderBusinessSourceQuery, orderDebtFields, orderDebtQuery } from '@/services/orderCenterReportFilters'
@@ -1541,7 +1541,8 @@ function salesOrderItems(record) {
     craftsmen: [],
     salespeople: [],
     salesManagers: [],
-    guides: []
+    guides: [],
+    assignmentAvailability: {}
   }]
 }
 
@@ -1554,13 +1555,26 @@ function salesOrderItemCustomerTag(item) {
 
 function personnelNames(item, key) {
   const records = Array.isArray(item?.[key]) ? item[key] : []
-  return records.map((person) => person?.name || person?.employeeName || person?.employee_name_snapshot || '').filter(Boolean).join('、') || '—'
+  return records.map((person) => person?.name || person?.employeeName || person?.employee_name_snapshot || '').filter(Boolean).join('、') || personnelEmptyText(item, key)
+}
+
+function salesItemSalespeopleText(item) {
+  const text = salespeoplePerformanceText(item?.salespeople)
+  return text === '—' ? personnelEmptyText(item, 'salespeople') : text
+}
+
+function salesItemGuidesText(item) {
+  const text = guideRoundText(item?.guides)
+  return text === '—' ? personnelEmptyText(item, 'guides') : text
 }
 
 function salesItemCraftsmenText(item) {
   // 销售单中的关联服务行与“服务记录”共用同一展示契约，
   // 避免同一服务在两个页签显示不同的业绩、手工费和项目数。
-  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item, orderLaborFeeVisible.value)
+  if (Array.isArray(item?.craftsmenListAllocations)) {
+    const text = serviceCraftsmenPerformanceText(item, orderLaborFeeVisible.value)
+    return text === '—' ? personnelEmptyText(item, 'craftsmen') : text
+  }
   return personnelNames(item, 'craftsmen')
 }
 
@@ -4092,16 +4106,16 @@ onBeforeUnmount(() => {
               <span v-else>{{ salesItemCraftsmenText(item) }}</span>
             </td>
             <td>
-              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ salespeoplePerformanceText(item.salespeople) }}</button>
-              <span v-else>{{ salespeoplePerformanceText(item.salespeople) }}</span>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ salesItemSalespeopleText(item) }}</button>
+              <span v-else>{{ salesItemSalespeopleText(item) }}</span>
             </td>
             <td v-if="salesAttributionEnabled">
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salesManagers')">{{ personnelNames(item, 'salesManagers') }}</button>
               <span v-else>{{ personnelNames(item, 'salesManagers') }}</span>
             </td>
             <td v-if="salesAttributionEnabled">
-              <button v-if="salesOrderActionAvailable(record, record.entitlementOnly ? 'correct-service-order-guide' : 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust') && !item.voidedAt" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ guideRoundText(item.guides) }}</button>
-              <span v-else>{{ guideRoundText(item.guides) }}</span>
+              <button v-if="salesOrderActionAvailable(record, record.entitlementOnly ? 'correct-service-order-guide' : 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust') && !item.voidedAt" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ salesItemGuidesText(item) }}</button>
+              <span v-else>{{ salesItemGuidesText(item) }}</span>
             </td>
             <!-- 购买明细展示用券前金额；权益价值与整单资金继续读取各自的权威投影。 -->
             <td>{{ itemMoney(item.businessTag === '权益' ? item.entitlementAmount : item.amountBeforeCoupon) }}</td>

@@ -1,0 +1,40 @@
+{
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "file": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+  "sha256": "7354d8aaf11e53cdbb0156b3688e09cc20f473c435fb4c06f99b67e9d1bcc592",
+  "status": "开发与本地自测完成，待产品经理确认验收；未提交、push或部署",
+  "scope": [
+    "三个排行榜独立暂停/继续",
+    "默认自动滚动",
+    "继续时从当前查看位置开始",
+    "原查看条件入口保留"
+  ],
+  "frontEnd": [
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+  ],
+  "backend": [],
+  "migrations": [],
+  "businessDataImpact": "仅浏览器显示状态，无SQL、接口、统计、权限、事务、快照或业务值改变",
+  "source": "当前唯一正本，无新分支或worktree",
+  "generatedArtifacts": [
+    "/private/tmp/mohe-r39-rank-scroll-dist"
+  ],
+  "remote": "未连接或改变线上；未提交、push、部署",
+  "localRuntime": "已获用户授权重启Colima，全部原容器与18081/18091恢复，重载本地代理后页面查询正常。",
+  "browserVerification": {
+    "defaultLabels": [
+      "暂停滚动",
+      "暂停滚动",
+      "暂停滚动"
+    ],
+    "cityPausedPositionUnchanged": true,
+    "storeContinuedWhileCityPaused": true,
+    "independentToggleAllThree": true,
+    "originalViewButtonPreserved": true,
+    "headerButtonsFit": true,
+    "restoredToRolling": true,
+    "preview": "http://127.0.0.1:18081/admin/report/group-management-dashboard"
+  },
+  "buildPurpose": "本地编译验证，不是发布候选，未发布其他工作区改动",
+  "verificationTime": "2026-10-28T12:03:37.082916"
+}

@@ -1,0 +1,63 @@
+{
+  "result": "PASS",
+  "businessCommit": "30edb932378d6eff6f4f3103de157142841fa48d",
+  "prerequisiteCommit": "ea35e6f55dbdaa586478b0f6a9d98fdb7777a739",
+  "branch": "release/008-round4-group-20261027",
+  "authorizedOrder": [
+    "commit",
+    "deploy rh and verify",
+    "push",
+    "deploy 008 and verify",
+    "deploy 010 and verify"
+  ],
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backup": "/www/backups/rh/combination-group-30edb932",
+      "groupCountSuperAdmin": 0,
+      "browser": {
+        "result": "PASS",
+        "site": "rh",
+        "visible": "11列、搜索重置导出、0条空态与分页，无会员编号列",
+        "financialCommands": 0
+      }
+    },
+    "008": {
+      "result": "PASS",
+      "backup": "/www/backups/008/combination-group-30edb932",
+      "groupCountSuperAdmin": 3,
+      "browser": {
+        "result": "PASS",
+        "site": "008",
+        "rows": 3,
+        "keywordRows": 2,
+        "resetRows": 3,
+        "existingDetail": true,
+        "completedGroupSingleRefundHidden": true,
+        "wholeRefundVisible": true,
+        "financialCommands": 0
+      }
+    },
+    "010": {
+      "result": "PASS",
+      "backup": "/www/backups/010/combination-group-30edb932",
+      "groupCountSuperAdmin": 21,
+      "browser": {
+        "result": "PASS",
+        "site": "010",
+        "visibleRows": 0,
+        "authenticatedPage": true,
+        "scopeCheckedReadOnly": true,
+        "superAdminRuntimeRows": 21,
+        "note": "页面当前权限显示0条；现有两名11店范围账号均命中0条，超管命中21条。未改权限或历史门店归属。",
+        "financialCommands": 0
+      }
+    }
+  },
+  "financialCommands": 0,
+  "migrationExecuted": false,
+  "sharedIndexUntouched": true,
+  "sharedHEADUntouched": true,
+  "miniProgramUploaded": false,
+  "completedAt": "2026-10-27T15:15:45.816557+00:00"
+}

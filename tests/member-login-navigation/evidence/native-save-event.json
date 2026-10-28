@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "tool": "automation_evaluate",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "result": {
+      "result": {
+        "replayed": true,
+        "authorizationAlreadyPresent": true,
+        "profileAutoBack": false,
+        "handler": "function editSuccess() {\n              this.isShow = !1, this.finishLogin();\n            }",
+        "serverProfileWrite": false
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "source": "e888c787e5d921284d18879167015d3431ce1a5c",
+  "paths": [
+    "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php",
+    "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php",
+    "后端代码/app/services/payroll/PositionSalaryRuleResolver.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php",
+    "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php",
+    "后端代码/config/payroll.php"
+  ],
+  "actual": {
+    "rh": {
+      "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php": "86bc923a0ab03d868e1ae3d72a8ba10aade0036e2b2d0112f50875c6c6485151",
+      "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php": "3804e11c175f094739eb3a60bb739c8cefc36afd3517c81a71877a9a27c42870",
+      "后端代码/app/services/payroll/PositionSalaryRuleResolver.php": "8e42e79027dc50aa37eddd92103224dfc7629b7059b73caeb36e775825c6952f",
+      "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php": "22e5e882c9845836c3525e7ee115494832dbe9c6c863f3b2e495ed7e80a6fa3e",
+      "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php": "1d7503d05560daa6434c5749b4d4ca6bc6cf50968b1483c4782b1821690579d0",
+      "后端代码/config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087"
+    },
+    "008": {
+      "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php": "86bc923a0ab03d868e1ae3d72a8ba10aade0036e2b2d0112f50875c6c6485151",
+      "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php": "3804e11c175f094739eb3a60bb739c8cefc36afd3517c81a71877a9a27c42870",
+      "后端代码/app/services/payroll/PositionSalaryRuleResolver.php": "8e42e79027dc50aa37eddd92103224dfc7629b7059b73caeb36e775825c6952f",
+      "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php": "22e5e882c9845836c3525e7ee115494832dbe9c6c863f3b2e495ed7e80a6fa3e",
+      "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php": "1d7503d05560daa6434c5749b4d4ca6bc6cf50968b1483c4782b1821690579d0",
+      "后端代码/config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087"
+    },
+    "010": {
+      "后端代码/app/services/payroll/IndependentPositionSalaryRuleServices.php": "86bc923a0ab03d868e1ae3d72a8ba10aade0036e2b2d0112f50875c6c6485151",
+      "后端代码/app/services/payroll/PayrollAlgorithmPolicy.php": "3804e11c175f094739eb3a60bb739c8cefc36afd3517c81a71877a9a27c42870",
+      "后端代码/app/services/payroll/PositionSalaryRuleResolver.php": "8e42e79027dc50aa37eddd92103224dfc7629b7059b73caeb36e775825c6952f",
+      "后端代码/app/services/payroll/ProjectLaborCommissionCalculator.php": "22e5e882c9845836c3525e7ee115494832dbe9c6c863f3b2e495ed7e80a6fa3e",
+      "后端代码/app/services/payroll/ProjectLaborCommissionReadServices.php": "1d7503d05560daa6434c5749b4d4ca6bc6cf50968b1483c4782b1821690579d0",
+      "后端代码/config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087"
+    }
+  },
+  "failure": "Class app/services/payroll/PayrollAlgorithmPolicy not found during UnifiedQueryRuntime registration",
+  "productionChanges": false,
+  "diagnosis": "类文件存在且内容未变；rh/008的payroll目录为root:root 700，www不可读；010目录为755正常。只修正目录权限，不补发工资代码。",
+  "missingFiles": []
+}

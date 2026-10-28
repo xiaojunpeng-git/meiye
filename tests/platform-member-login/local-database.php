@@ -1,0 +1,138 @@
+<?php
+declare(strict_types=1);
+/** Actual local MySQL/services, synthetic members only; no provider, payments or production operations. */
+require '/var/www/html/vendor/autoload.php';
+(new think\App('/var/www/html/'))->initialize();
+use think\facade\Db;
+use app\services\user\MemberLoginManagementServices;
+use app\services\user\MemberWechatBindingReadServices;
+use app\services\user\MemberPhoneResetServices;
+use app\services\user\PlatformMemberScopeServices;
+use app\services\user\PlatformMemberCenterServices;
+use app\services\user\LoginServices;
+use app\services\user\UserAuthServices;
+use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3DataScopeContext;
+if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('LOCAL ONLY');
+foreach (['2026-10-28-会员改号撤销登录','2026-10-28-平台门店会员管理'] as $migration) Db::execute(file_get_contents('/var/www/html/database/upgrades/' . $migration . '/02-正式升级.sql'));
+$count = 0; $tokens = []; $uids = []; $exportFiles = [];
+function pmlCheck(bool $ok, string $label): void { global $count; if (!$ok) throw new RuntimeException('FAIL ' . $label); $count++; echo 'PASS ', $label, PHP_EOL; }
+function pmlReject(callable $fn, string $label): void { try { $fn(); } catch (think\exception\ValidateException $e) { pmlCheck(true, $label); return; } catch (app\services\cashier\v3\CashierV3CommandException $e) { pmlCheck(true, $label); return; } catch (app\services\query\UnifiedQueryException $e) { pmlCheck(true, $label); return; } catch (mohe\exceptions\AuthException $e) { pmlCheck(true, $label); return; } throw new RuntimeException('NOT REJECTED ' . $label); }
+function pmlSeed(string $table, array $data): array { foreach (Db::query('SHOW COLUMNS FROM eb_' . $table) as $f) { $k = $f['Field']; if (array_key_exists($k,$data) || $f['Default'] !== null || $f['Null'] === 'YES' || strpos($f['Extra'],'auto_increment') !== false) continue; $data[$k] = preg_match('/int|decimal|float|double/', $f['Type']) ? 0 : ''; } return $data; }
+$admin = (int)Db::name('system_admin')->where('level',0)->where('status',1)->where('is_del',0)->where('admin_type',0)->value('id');
+$platform = (new PlatformMemberScopeServices())->build($admin);
+$store = (int)$platform['stores'][0]['id']; $otherStore = (int)$platform['stores'][1]['id'];
+$prefix = 'LOCAL_PML_' . bin2hex(random_bytes(5));
+$phoneBase = '196' . random_int(100000, 899999);
+if (Db::name('user')->whereLike('phone',$phoneBase.'%')->count()) throw new RuntimeException('Synthetic number collision');
+$service = new MemberLoginManagementServices(); $security = app()->make(MemberPhoneResetServices::class); $auth = app()->make(UserAuthServices::class);
+$before = (int)Db::name('member_management_receipt')->count();
+Db::startTrans();
+try {
+    for ($n = 1; $n <= 42; $n++) {
+        $uid = (int)Db::name('user')->insertGetId(pmlSeed('user',['nickname'=>$prefix.'_'.$n,'real_name'=>$prefix.'_'.$n,'phone'=>$phoneBase.str_pad((string)$n,2,'0',STR_PAD_LEFT),'pwd'=>md5('OriginalLocal82'),'status'=>1,'is_del'=>0,'now_money'=>'150.00','integral'=>9,'belong_store_id'=>$n === 42 ? $otherStore : $store,'add_time'=>time(),'user_type'=>'routine']));
+        $uids[] = $uid;
+        Db::name('store_user')->insert(pmlSeed('store_user',['uid'=>$uid,'store_id'=>$n === 42 ? $otherStore : $store,'status'=>1]));
+    }
+    $uid = $uids[0];
+    Db::name('wechat_user')->insert(pmlSeed('wechat_user',['uid'=>$uid,'openid'=>$prefix.'_mini','unionid'=>$prefix.'_union','nickname'=>'Local WeChat','headimgurl'=>'','user_type'=>'routine','is_del'=>0,'add_time'=>time()]));
+    Db::name('wechat_user')->insert(pmlSeed('wechat_user',['uid'=>$uid,'openid'=>$prefix.'_official','nickname'=>'Local Official','headimgurl'=>'','user_type'=>'wechat','is_del'=>0,'add_time'=>time()]));
+    Db::name('wechat_user')->insert(pmlSeed('wechat_user',['uid'=>$uids[1],'openid'=>$prefix.'_deleted','nickname'=>'Deleted','headimgurl'=>'','user_type'=>'routine','is_del'=>1,'add_time'=>time()]));
+    $summary = (new MemberWechatBindingReadServices())->summaries([$uid,$uids[1]]);
+    pmlCheck($summary[$uid] === '小程序已绑定、公众号已绑定' && $summary[$uids[1]] === '未绑定', 'batch status distinguishes mini/official and excludes revoked records');
+    $read = $service->read($uid,$platform['operator'],$platform['data']);
+    pmlCheck(count($read['bindings']) === 2 && $read['account'] === $phoneBase.'01', 'login tab reads read-only phone and both channels');
+    $json = json_encode($read);
+    pmlCheck(strpos($json,'openid') === false && strpos($json,'unionid') === false && strpos($json,'pwd') === false && strpos($json,'OriginalLocal82') === false, 'login read never returns stored password/hash or WeChat identity secrets');
+    $token = app()->make(LoginServices::class)->createToken($uid,'routine',md5('OriginalLocal82'),''); $tokens[]=$token['token']; $auth->parseToken($token['token']);
+    $request = ['requestId'=>bin2hex(random_bytes(16)),'revision'=>$read['revision'],'newPassword'=>'VisibleLocal94'];
+    $saved = $service->mutate($uid,'change-password',$request,$platform['operator'],$platform['data'],'ADMIN');
+    $row = Db::name('user')->where('uid',$uid)->find();
+    pmlCheck($row['pwd'] === md5('VisibleLocal94') && $row['phone'] === $read['account'], 'reset stores only existing-compatible hash and leaves account phone unchanged');
+    pmlCheck((string)$row['now_money'] === '150.00' && (int)$row['integral'] === 9, 'password management preserves assets');
+    pmlCheck(count($saved['bindings']) === 2 && (int)$security->state($uid)['phone_verified'] === 1, 'password reset preserves bindings and existing verified phone');
+    pmlReject(function () use ($auth,$token) {$auth->parseToken($token['token']);}, 'old mini session rejected after password change');
+    $receipt = Db::name('member_management_receipt')->where('request_key',$request['requestId'])->find();
+    pmlCheck(strpos(json_encode($receipt),'VisibleLocal94') === false && strpos(json_encode($receipt),md5('VisibleLocal94')) === false, 'audit receipt contains no plaintext password or password hash');
+    $events = (int)Db::name('member_phone_login_reset')->where('uid',$uid)->count();
+    pmlCheck($service->mutate($uid,'change-password',$request,$platform['operator'],$platform['data'],'ADMIN') === $saved && (int)Db::name('member_phone_login_reset')->where('uid',$uid)->count() === $events, 'same actor/request replays without duplicate revocation');
+    pmlReject(function () use ($service,$uid,$request,$platform) { $request['newPassword']='DifferentLocal62'; $service->mutate($uid,'change-password',$request,$platform['operator'],$platform['data'],'ADMIN'); }, 'same request key cannot carry another password');
+    $stale = $request; $stale['requestId']=bin2hex(random_bytes(16));
+    pmlReject(function () use ($service,$uid,$stale,$platform) {$service->mutate($uid,'change-password',$stale,$platform['operator'],$platform['data'],'ADMIN');}, 'stale editor rejected rather than overwriting concurrent login change');
+    pmlCheck(!Db::name('member_management_receipt')->where('request_key',$stale['requestId'])->count(), 'failed change rolls back receipt placeholder');
+    $readonly = $saved; $bad = ['requestId'=>bin2hex(random_bytes(16)),'revision'=>$readonly['revision'],'newPassword'=>'ValidLocal73','phone'=>'19900000000'];
+    pmlReject(function () use ($service,$uid,$bad,$platform) {$service->mutate($uid,'change-password',$bad,$platform['operator'],$platform['data'],'ADMIN');}, 'login API rejects hidden phone/account edits');
+    $clear = ['requestId'=>bin2hex(random_bytes(16)),'revision'=>$saved['revision']];
+    $cleared = $service->mutate($uid,'clear-wechat',$clear,$platform['operator'],$platform['data'],'ADMIN');
+    pmlCheck(!$cleared['bindings'] && (int)$security->state($uid)['phone_verified'] === 0, 'explicit clear removes bindings and requires phone reauthorization');
+    pmlCheck((new MemberWechatBindingReadServices())->summaries([$uid])[$uid] === '未绑定', 'list read agrees with edit binding state after clear');
+    $service->mutate($uid,'change-password',['requestId'=>bin2hex(random_bytes(16)),'revision'=>$cleared['revision'],'newPassword'=>'AnotherLocal63'],$platform['operator'],$platform['data'],'ADMIN');
+    pmlCheck((int)$security->state($uid)['phone_verified'] === 0, 'password reset cannot undo a pending phone reauthorization gate');
+    $op = new CashierV3OperatorScope($store,700000001,$platform['operator']->organizationId(),'0');
+    $scope = new CashierV3DataScopeContext(700000001,0,$store,'0',$op->organizationId(),[$store],CashierV3DataScopeContext::MODE_STORES,[],false,'test','test-scope',['cashier.v3.member','cashier.v3.member.edit'],['id'=>700000001,'staff_name'=>'Local Test']);
+    pmlCheck($service->read($uid,$op,$scope)['memberId'] === $uid, 'store adapter can read its own member using same service');
+    pmlReject(function () use($service,$uids,$op,$scope){$service->read($uids[41],$op,$scope);}, 'another-store UID does not leak login info');
+    $center = new PlatformMemberCenterServices();
+    $first = $center->action($admin,'query-members',['pageCode'=>'platform_member_list','keyword'=>$prefix,'page'=>1,'limit'=>20,'selectedStoreIds'=>[]]);
+    $second = $center->action($admin,'query-members',['pageCode'=>'platform_member_list','keyword'=>$prefix,'page'=>2,'limit'=>20,'selectedStoreIds'=>[]]);
+    $last = $center->action($admin,'query-members',['pageCode'=>'platform_member_list','keyword'=>$prefix,'page'=>3,'limit'=>20,'selectedStoreIds'=>[]]);
+    pmlCheck($first['data']['total'] === 42 && count($first['data']['records']) === 20 && count($second['data']['records']) === 20 && count($last['data']['records']) === 2, 'platform uses authoritative 20/20/2 pagination and complete count');
+    pmlCheck(!array_intersect(array_column($first['data']['records'],'memberId'),array_column($second['data']['records'],'memberId')), 'platform pages have stable distinct rows');
+    $filtered = $center->action($admin,'query-members',['pageCode'=>'platform_member_list','keyword'=>$prefix,'selectedStoreIds'=>[$otherStore],'page'=>1,'limit'=>20]);
+    pmlCheck($filtered['data']['total'] === 1 && (int)$filtered['data']['records'][0]['memberId'] === $uids[41], 'platform selected store narrows scope in backend');
+    pmlReject(function () use($center,$admin){$center->action($admin,'submit-recharge-checkout',[]);}, 'platform bridge rejects unrelated payment/checkout commands');
+    pmlReject(function () use($center,$admin){$center->action($admin,'query-members',['selectedStoreIds'=>[2147483000]]);}, 'forged store scope rejected before reading');
+    $cap = $center->action($admin,'query-unified-query-capabilities',['pageCode'=>'platform_member_list']);
+    pmlCheck(in_array('wechat_binding',array_column($cap['data']['unifiedQueryCapability']['fields'],'key'),true), 'server capability registers binding field for list and export');
+    $edit = $center->action($admin,'open-member-editor',['memberId'=>$uids[2],'pageCode'=>'platform_member_list']);
+    pmlCheck(isset($edit['data']['member']['memberRevision']) && isset($edit['data']['creatorSchema']['profileFields']), 'platform editor reuses complete store profile schema and supplies concurrency proof');
+    $changed = ['memberId'=>$uids[2], 'memberRevision'=>$edit['data']['member']['memberRevision'], 'requestId'=>bin2hex(random_bytes(16)), 'name'=>$prefix.'_U', 'phone'=>$phoneBase.'03'];
+    $updated = $center->action($admin,'update-member',$changed);
+    pmlCheck(Db::name('user')->where('uid',$uids[2])->value('real_name') === $prefix.'_U', 'platform profile save persists through shared domain handler');
+    pmlCheck($center->action($admin,'update-member',$changed)['data'] === $updated['data'], 'platform profile save replays without duplicate events');
+    $changed['requestId'] = bin2hex(random_bytes(16));
+    pmlReject(function () use($center,$admin,$changed){$center->action($admin,'update-member',$changed);}, 'stale platform editor cannot overwrite an already saved member');
+    $latest = $center->action($admin,'open-member-editor',['memberId'=>$uids[2]]);
+    $center->action($admin,'deactivate-member',['memberId'=>$uids[2],'memberRevision'=>$latest['data']['member']['memberRevision'],'requestId'=>bin2hex(random_bytes(16))]);
+    pmlCheck((int)Db::name('user')->where('uid',$uids[2])->value('is_del') === 1, 'platform cancellation preserves original member as soft deleted');
+    $restore = $center->action($admin,'open-member-restore',['memberId'=>$uids[2]]);
+    $center->action($admin,'restore-member',['memberId'=>$uids[2],'memberRevision'=>$restore['data']['member']['memberRevision'],'requestId'=>bin2hex(random_bytes(16))]);
+    pmlCheck((int)Db::name('user')->where('uid',$uids[2])->value('is_del') === 0, 'platform restore reuses original member identity');
+    $created = $center->action($admin,'create-member',['name'=>$prefix.'_C','phone'=>$phoneBase.'99','targetStoreId'=>$store,'requestId'=>bin2hex(random_bytes(16))]);
+    $createdId=(int)$created['data']['member']['memberId'];$uids[]=$createdId;
+    pmlCheck($createdId>0 && (int)Db::name('user')->where('uid',$createdId)->value('belong_store_id') === $store, 'platform create binds the explicitly selected authorized store');
+    $cap=$center->action($admin,'query-unified-query-capabilities',['pageCode'=>'platform_member_list']);
+    $pref=['pageCode'=>'platform_member_list','settings'=>['visibleFields'=>['member_name','created_at','wechat_binding']], 'commandContexts'=>[['kind'=>'query_preference','id'=>'platform_member_list','expectedVersion'=>$cap['versions'][0]['version']]],'requestId'=>bin2hex(random_bytes(16))];
+    $storePref=Db::name('unified_query_preference')->where('account_id',$admin)->where('page_code','member_list')->find();
+    $savedPref=$center->action($admin,'save-unified-query-settings',$pref);
+    pmlCheck($savedPref['versions'][0]['version'] > $cap['versions'][0]['version'], 'platform query preferences save with version advancement');
+    pmlCheck(Db::name('unified_query_preference')->where('account_id',$admin)->where('page_code','member_list')->find() === $storePref, 'same numeric admin and store IDs do not overwrite store query preferences');
+    $pref['requestId']=bin2hex(random_bytes(16));
+    pmlReject(function()use($center,$admin,$pref){$center->action($admin,'save-unified-query-settings',$pref);}, 'concurrent stale query preference save rejected');
+    $runtime=app\services\query\UnifiedQueryRuntime::runtime();
+    $context=(new app\services\query\provider\MemberUnifiedQueryContextFactory($runtime['contextFactory']))->make($platform['operator'],$platform['data'],['pageCode'=>'platform_member_list']);
+    $task=$runtime['exports']->create($context,['pageCode'=>'platform_member_list','fields'=>['member_name','wechat_binding'],'scope'=>'query','query'=>['keyword'=>$prefix,'page'=>1,'limit'=>20]]);
+    $worker=new app\services\query\UnifiedQueryExportWorkerServices($runtime['exports'],$runtime['providers'],$runtime['workerContextResolvers']);
+    $done=$worker->processOne($task['taskId']);
+    if (($done['status']??'')!=='succeeded') echo 'EXPORT_DIAG ',json_encode($done),PHP_EOL;
+    pmlCheck(($done['status']??'')==='succeeded', 'platform asynchronous export resolves current platform identity');
+    $descriptor=$runtime['exports']->resolveDownloadDescriptor($context,$task['taskId']);
+    $path=$runtime['exportStorage']->absolutePath($descriptor['storageKey']);$exportFiles[]=$path;
+    $sheet=PhpOffice\PhpSpreadsheet\IOFactory::load($path)->getActiveSheet()->toArray();
+    pmlCheck(count($sheet)===44 && $sheet[0][1]==='微信绑定信息', 'real XLSX contains all 43 filtered members and binding information');
+    $foreign=$context;$foreign['account_id']=$admin+20000000;
+    pmlReject(function()use($runtime,$foreign,$task){$runtime['exports']->findForAccount($foreign,$task['taskId']);}, 'another account cannot read export task');
+    $otherPage=$context;$otherPage['page_code']='member_list';
+    pmlReject(function()use($runtime,$otherPage,$task){$runtime['exports']->findForAccount($otherPage,$task['taskId']);}, 'same numeric store account cannot read platform page export');
+    $nonroot=(int)Db::name('system_admin')->insertGetId(pmlSeed('system_admin',['account'=>$prefix,'real_name'=>'Local permission test','pwd'=>md5('LocalOnly32'),'roles'=>'','level'=>1,'admin_type'=>0,'status'=>1,'is_del'=>0]));
+    pmlReject(function()use($center,$nonroot){$center->bootstrap($nonroot);}, 'platform admin without member list role fails closed');
+
+
+} finally {
+    foreach($exportFiles as $file) if(is_file($file)) unlink($file);
+    Db::rollback();
+    foreach($tokens as $t)mohe\services\CacheService::clearToken(md5($t));
+    foreach($uids as $uid)think\facade\Cache::delete('user_info_'.$uid);
+}
+pmlCheck((int)Db::name('member_management_receipt')->count() === $before && !Db::name('user')->whereLike('nickname',$prefix.'%')->count(), 'all synthetic members receipts and bindings rolled back');
+echo 'PLATFORM_MEMBER_LOGIN_DATABASE_PASS ', $count, ' checks', PHP_EOL;

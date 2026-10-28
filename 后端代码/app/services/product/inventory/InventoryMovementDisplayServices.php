@@ -23,10 +23,17 @@ final class InventoryMovementDisplayServices
         'batch_transfer_in' => '仓库调拨入库', 'batch_transfer_out' => '仓库调拨出库',
         'stock_count_gain' => '盘盈入库', 'stock_count_loss' => '盘亏出库',
         'salon_usage_issue' => '院装领用', 'salon_usage_out' => '院装领用',
+        'salon_usage_issue_reversal' => '院装领用作废退库',
         'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销',
         'presale_claim_outbound' => '预售领用', 'presale_claim_void' => '预售领用作废',
         'gift_product_claim_outbound' => '赠送领用', 'gift_product_claim_void' => '赠送领用作废',
     ];
+
+    /** 所有库存页面共用中文业务名称；未知代码保留在来源字段追溯，不直接作为用户文案。 */
+    public static function typeName(string $type): string
+    {
+        return self::TYPE_NAMES[$type] ?? '其他库存业务';
+    }
 
     /** Batch lookups stay within each fact's tenant/store and exact source IDs; no per-row SQL. */
     public function decorate(array $facts): array
@@ -83,7 +90,7 @@ final class InventoryMovementDisplayServices
     {
         $type = (string)$fact['source_type'];
         $source = (string)$fact['source_id'];
-        $fact['source_type_name'] = self::TYPE_NAMES[$type] ?? '其他库存业务';
+        $fact['source_type_name'] = self::typeName($type);
         $fact['source_detail_name'] = trim((string)($fact['source_product_name'] ?? '')) ?: '历史业务明细';
         $fact['order_sn'] = trim((string)($fact['document_no_snapshot'] ?? ''));
         if (in_array($type, ['cashier_sale', 'cashier_sale_void', 'cashier_presale_stock_repair'], true)) {

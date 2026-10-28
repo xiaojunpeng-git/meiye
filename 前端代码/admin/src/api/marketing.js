@@ -406,6 +406,11 @@ export function combineListApi(params) {
   });
 }
 
+/** Completed-group refunds are reserved as a whole; amounts and member orders are never browser input. */
+export function combinationWholeRefundApi(id, data) {
+  return request({ url: `marketing/combination/order_pink/${id}/refund_group`, method: 'POST', data });
+}
+
 /**
  * 秒杀统计
  * @param {*} id

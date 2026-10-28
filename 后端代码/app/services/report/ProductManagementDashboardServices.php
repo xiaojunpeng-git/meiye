@@ -21,6 +21,8 @@ final class ProductManagementDashboardServices
     public function dashboard(array $context, array $input): array
     {
         $scope = $this->scope($context, $input);
+        // 批次下钻沿用同一个菜单、门店范围和成本权限；不经过经营金额聚合。
+        if (($input['detail'] ?? '') === 'expiry') return $this->expiryDetail($scope, $input);
         $range = $this->range($input);
         $categories = $this->categories();
         $categoryId = max(0, (int)($input['category_id'] ?? 0));
@@ -272,6 +274,8 @@ final class ProductManagementDashboardServices
                 'product_name' => $row['product_name'], 'category_name' => $categoryNames[(int)$row['category_id']] ?? '未分类',
                 'batch_no' => $row['batch_no'], 'current_quantity' => $row['quantity'], 'expire_date' => $row['expire_date'],
                 'days' => $days, 'status' => $labels[$key],
+                // 同名/同批号可属于不同门店，浏览器只能使用服务端声明的真实身份下钻。
+                'drilldown' => isset($row['batch_id']) ? ['detail' => 'expiry', 'batch_id' => (int)$row['batch_id'], 'batch_store_id' => (int)$row['store_id'], 'cutoff_date' => $cutoff] : null,
                 'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
             ];
         }
@@ -282,7 +286,7 @@ final class ProductManagementDashboardServices
             // independently bounded to ten rows and does not change totals.
             $rankings[$key] = $this->topExpiryRows($rankings[$key]);
         }
-        return ['buckets' => $buckets, 'default_bucket' => 'OVERDUE', 'rankings' => $rankings];
+        return ['buckets' => $buckets, 'default_bucket' => 'OVERDUE', 'rankings' => $rankings, 'cutoff_date' => $cutoff, 'ranking_limit' => 10];
     }
 
     /** Display the ten most urgent batches; bucket totals still count every authorized batch. */
@@ -299,12 +303,73 @@ final class ProductManagementDashboardServices
         return array_slice($rows, 0, 10);
     }
 
-    private function inventoryRows(array $scope): array
+    /** 汇总与下钻共用同一已结算事实、活动仓及截止日范围；冲销按符号抵消，不能排除负向记录。 */
+    private function inventoryFactQuery(array $scope, string $cutoff, int $batchId = 0)
     {
-        $locations = Db::name('inventory_location')->where('tenant_id', $scope['tenant_id'])->whereIn('store_id', $scope['store_ids'])->where('location_status', 'ACTIVE')->column('id'); if (!$locations) return [];
+        $query = Db::name('inventory_batch_movement_fact')->alias('f')
+            ->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')
+            ->join('inventory_location l', 'l.id=f.location_id')
+            ->where('f.tenant_id', $scope['tenant_id'])->where('l.tenant_id', $scope['tenant_id'])
+            ->whereIn('l.store_id', $scope['store_ids'])->where('l.location_status', 'ACTIVE')
+            ->where('f.business_date', '<=', $cutoff)->where('f.fact_status', 'SETTLED');
+        if ($batchId > 0) $query->where('b.id', $batchId);
+        return $query;
+    }
+
+    /** 只读批次流水：精确门店+批次身份，不使用名称模糊匹配；全量合计先于20条分页。 */
+    private function expiryDetail(array $scope, array $input): array
+    {
+        // 同一次只读事务内取得余额、完整合计及当前页，避免并发出入库使三者漂移。
+        return Db::transaction(function () use ($scope, $input): array { return $this->expiryDetailSnapshot($scope, $input); });
+    }
+
+    private function expiryDetailSnapshot(array $scope, array $input): array
+    {
+        $storeId = (int)($input['batch_store_id'] ?? 0);
+        $batchId = (int)($input['batch_id'] ?? 0);
+        $cutoff = (string)($input['cutoff_date'] ?? '');
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $cutoff);
+        if ($batchId <= 0 || !in_array($storeId, $scope['store_ids'], true) || !$date || $date->format('Y-m-d') !== $cutoff || $cutoff > date('Y-m-d')) {
+            throw new \InvalidArgumentException('批次不存在或不在当前权限范围内');
+        }
+        $scope['store_ids'] = [$storeId];
+        $batch = $this->inventoryRows($scope, $cutoff, $batchId)[0] ?? null;
+        if (!$batch) throw new \InvalidArgumentException('当前批次已无可用库存，请刷新看板');
+        $query = $this->inventoryFactQuery($scope, $cutoff, $batchId);
+        $total = (int)(clone $query)->count('f.id');
+        $page = min(max(1, (int)($input['page'] ?? 1)), max(1, (int)ceil($total / 20)));
+        $totals = (clone $query)->fieldRaw('SUM(IF(f.direction=1,f.quantity_units,0)) inbound_units,SUM(IF(f.direction=-1,f.quantity_units,0)) outbound_units')->find();
+        $rows = (clone $query)->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
+            ->field('f.id,f.business_date,f.source_type,f.source_id,n.document_no order_sn,f.direction,f.quantity_units,l.location_name,s.quantity_scale')
+            ->order('f.business_date desc,f.id desc')->page($page, 20)->select()->toArray();
+        foreach ($rows as &$row) {
+            $row['source_type_name'] = \app\services\product\inventory\InventoryMovementDisplayServices::typeName((string)$row['source_type']);
+            $row['direction_name'] = (int)$row['direction'] === 1 ? '入库' : '出库';
+            $row['quantity'] = (int)$row['quantity_units'] / (10 ** (int)$row['quantity_scale']);
+            // 原单据号缺失时不拿内部ID冒充单号。
+            $row['order_sn'] = trim((string)($row['order_sn'] ?? '')) ?: '未记录单号';
+        }
+        unset($row);
+        $divisor = 10 ** (int)$batch['quantity_scale'];
+        return ['batch' => $batch, 'store_name' => (string)(Db::name('system_store')->where('id', $storeId)->value('name') ?? ''),
+            // 明细列定义由后端声明，前端只渲染，不按列名猜值或计算业务合计。
+            'columns' => [
+                ['key' => 'business_date', 'label' => '日期'], ['key' => 'location_name', 'label' => '仓库'],
+                ['key' => 'source_type_name', 'label' => '业务类型'], ['key' => 'order_sn', 'label' => '单据号'],
+                ['key' => 'direction_name', 'label' => '方向'], ['key' => 'quantity', 'label' => '数量'],
+            ], 'table_layout' => ['fixed' => true, 'fixed_header' => true],
+            'cutoff_date' => $cutoff, 'rows' => $rows, 'total' => $total, 'page' => $page, 'page_size' => 20,
+            'inbound_quantity' => (int)($totals['inbound_units'] ?? 0) / $divisor,
+            'outbound_quantity' => (int)($totals['outbound_units'] ?? 0) / $divisor,
+            'data_as_of' => date('Y-m-d H:i:s'), 'read_only' => true];
+    }
+
+    private function inventoryRows(array $scope, ?string $cutoff = null, int $batchId = 0): array
+    {
+        $cutoff = $cutoff ?? date('Y-m-d');
         $signed = 'SUM(IF(f.direction=1,f.quantity_units,-CAST(f.quantity_units AS SIGNED)))';
-        $rows = Db::name('inventory_batch_movement_fact')->alias('f')->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')->join('inventory_location l', 'l.id=f.location_id')->where('f.tenant_id', $scope['tenant_id'])->whereIn('f.location_id', $locations)->where('f.business_date', '<=', date('Y-m-d'))->where('f.fact_status', 'SETTLED')->fieldRaw("l.store_id,b.id batch_id,s.consumable_product_id product_id,b.product_name_snapshot product_name,b.category_name_snapshot category_name,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale,{$signed} quantity_units")->group('l.store_id,b.id,s.consumable_product_id,b.product_name_snapshot,b.category_name_snapshot,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale')->having($signed . '>0')->select()->toArray();
-        return array_map(function (array $row) use ($scope): array { $scale = max(0, (int)$row['quantity_scale']); $units = (int)$row['quantity_units']; return ['batch_id' => (int)$row['batch_id'], 'store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id'], 'category_id' => 0, 'product_name' => (string)$row['product_name'], 'category_name' => (string)$row['category_name'], 'batch_no' => (string)$row['batch_no'], 'expire_date' => $row['expire_date'] ?: null, 'quantity' => $units / (10 ** $scale), 'inventory_cost_cents' => $this->costVisible($scope) ? (int)floor($units * (int)$row['unit_cost_cents'] / (10 ** $scale)) : null]; }, $rows);
+        $rows = $this->inventoryFactQuery($scope, $cutoff, $batchId)->fieldRaw("l.store_id,b.id batch_id,s.consumable_product_id product_id,b.product_name_snapshot product_name,b.category_name_snapshot category_name,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale,{$signed} quantity_units")->group('l.store_id,b.id,s.consumable_product_id,b.product_name_snapshot,b.category_name_snapshot,b.batch_no,b.expire_date,b.unit_cost_cents,s.quantity_scale')->having($signed . '>0')->select()->toArray();
+        return array_map(function (array $row) use ($scope): array { $scale = max(0, (int)$row['quantity_scale']); $units = (int)$row['quantity_units']; return ['batch_id' => (int)$row['batch_id'], 'store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id'], 'quantity_scale' => $scale, 'category_id' => 0, 'product_name' => (string)$row['product_name'], 'category_name' => (string)$row['category_name'], 'batch_no' => (string)$row['batch_no'], 'expire_date' => $row['expire_date'] ?: null, 'quantity' => $units / (10 ** $scale), 'inventory_cost_cents' => $this->costVisible($scope) ? (int)floor($units * (int)$row['unit_cost_cents'] / (10 ** $scale)) : null]; }, $rows);
     }
 
     private function costVisible(array $scope): bool { return (bool)($scope['cost_visible'] ?? false); }

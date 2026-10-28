@@ -1,0 +1,296 @@
+diff --git a/后端代码/app/services/BaseServices.php b/后端代码/app/services/BaseServices.php
+index a1d433a9..a5c26e1f 100644
+--- a/后端代码/app/services/BaseServices.php
++++ b/后端代码/app/services/BaseServices.php
+@@ -66,10 +66,18 @@ abstract class BaseServices
+      * @param $type
+      * @return array
+      */
+-    public function createToken(int $id, $type, string $pwd = '')
++    public function createToken(int $id, $type, string $pwd = '', ?string $memberProof = null)
+     {
+         /** @var JwtAuth $jwtAuth */
+         $jwtAuth = app()->make(JwtAuth::class);
++        // 只处理会员身份，绝不把同数字 ID 的平台/员工/门店 token 当作会员撤销。
++        if (in_array($type, ['api', 'routine', 'wechat'], true)) {
++            return app()->make(\app\services\user\MemberPhoneResetServices::class)->issue(
++                $id, $memberProof, function (string $proof) use ($jwtAuth, $id, $type, $pwd): array {
++                    return $jwtAuth->createToken($id, $type, ['auth' => md5($pwd), 'member_login_nonce' => $proof]);
++                }
++            );
++        }
+         return $jwtAuth->createToken($id, $type, ['auth' => md5($pwd)]);
+     }
+ 
+diff --git a/后端代码/app/services/user/CanonicalUserIdentityServices.php b/后端代码/app/services/user/CanonicalUserIdentityServices.php
+index f2cb6702..bf309523 100644
+--- a/后端代码/app/services/user/CanonicalUserIdentityServices.php
++++ b/后端代码/app/services/user/CanonicalUserIdentityServices.php
+@@ -139,6 +139,10 @@ class CanonicalUserIdentityServices extends BaseServices
+                 $this->releaseIdentity($oldIdentity, $audit, 'RELEASE');
+             }
+             $this->bindReservedIdentity($newIdentity, $uid, $phone, $audit, 'BIND');
++            // 真正换号才撤销登录；重复保存同号不踢人，初次补号仍走原绑定流程。
++            if ((string)$user['phone'] !== '' && (string)$user['phone'] !== $phone) {
++                app()->make(MemberPhoneResetServices::class)->revokeLocked($uid, $audit);
++            }
+             return $uid;
+         });
+     }
+@@ -166,6 +170,9 @@ class CanonicalUserIdentityServices extends BaseServices
+                 $this->releaseIdentity($identity, $audit, 'RELEASE_ON_PHONE_CLEAR');
+             }
+             Db::name('user')->where('uid', $uid)->update(['phone' => '']);
++            if ($oldPhone !== '') {
++                app()->make(MemberPhoneResetServices::class)->revokeLocked($uid, $audit);
++            }
+         });
+     }
+ 
+diff --git a/后端代码/app/services/user/MemberPhoneResetServices.php b/后端代码/app/services/user/MemberPhoneResetServices.php
+new file mode 100644
+index 00000000..c4ce2d36
+--- /dev/null
++++ b/后端代码/app/services/user/MemberPhoneResetServices.php
+@@ -0,0 +1,91 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\user;
++
++use mohe\exceptions\AuthException;
++use think\facade\Db;
++
++/**
++ * 改号后的会员登录隔离。数据库撤销事件为权威，不依赖可过期/可丢失的缓存。
++ * 只改变登录身份；会员 UID、资产、订单和员工/平台端会话均不迁移。
++ */
++class MemberPhoneResetServices
++{
++    /** 调用方须先锁会员行；与手机号替换共用事务，失败时连同微信解绑一起回滚。 */
++    public function revokeLocked(int $uid, array $audit): void
++    {
++        $ids = Db::name('wechat_user')->where('uid', $uid)->column('id');
++        Db::name('member_phone_login_reset')->insert([
++            'uid' => $uid, 'nonce' => bin2hex(random_bytes(16)), 'phone_verified' => 0,
++            'binding_ids' => json_encode(array_values($ids)),
++            'operator_id' => (int)($audit['operator_id'] ?? 0),
++            'source' => (string)($audit['source'] ?? 'PHONE_CHANGE'), 'created_at' => time(),
++        ]);
++        // 留存微信历史行，撤掉 UID，所有旧查询也不能再凭它找到原会员。
++        // 事件保留原 UID -> 微信行 ID 的追溯关系，不保存原始微信会话密钥。
++        Db::name('wechat_user')->where('uid', $uid)->update(['uid' => 0, 'is_del' => 1]);
++    }
++
++    /** 使用 (uid,id) 索引读取最新事件；不缓存，避免旧 worker/cache 放行已撤销凭证。 */
++    public function state(int $uid): array
++    {
++        return Db::name('member_phone_login_reset')->where('uid', $uid)->order('id', 'desc')->find() ?: [];
++    }
++
++    /** 静默微信识别不能解除改号门禁；返回 null 表示必须重新授权手机号。 */
++    public function silentProof(int $uid): ?string
++    {
++        $state = $this->state($uid);
++        return $state && !(int)$state['phone_verified'] ? null : (string)($state['nonce'] ?? '');
++    }
++
++    /**
++     * 在微信登录写事务中锁住原会员，重新核对微信服务端已验证的号码。
++     * 旧授权缓存/旧 unionid 回退不得覆盖或认领改号后的原会员。
++     */
++    public function authorizeWechatLocked(int $uid, string $verifiedPhone): string
++    {
++        $user = Db::name('user')->where('uid', $uid)->lock(true)->find();
++        if (!$user || (int)$user['is_del'] !== 0) $this->deny();
++        $state = $this->state($uid);
++        if ($state) {
++            if ($verifiedPhone !== '' && !hash_equals((string)$user['phone'], $verifiedPhone)) $this->deny();
++            if (!(int)$state['phone_verified']) {
++                if ($verifiedPhone === '' || !hash_equals((string)$user['phone'], $verifiedPhone)) $this->deny();
++                Db::name('member_phone_login_reset')->where('id', (int)$state['id'])->update(['phone_verified' => 1]);
++            }
++        }
++        return (string)($state['nonce'] ?? '');
++    }
++
++    /**
++     * 签发与改号使用相同的会员行锁。微信调用方传入本次认证获得的 proof，
++     * 阻断“认证完成后、签发前又发生改号”的竞态；没有改号的历史凭证仍兼容。
++     */
++    public function issue(int $uid, ?string $expectedProof, callable $create): array
++    {
++        return Db::transaction(function () use ($uid, $expectedProof, $create): array {
++            $user = Db::name('user')->where('uid', $uid)->lock(true)->find();
++            if (!$user || (int)$user['is_del'] !== 0 || !(int)$user['status']) $this->deny();
++            $state = $this->state($uid);
++            $nonce = (string)($state['nonce'] ?? '');
++            if (($state && !(int)$state['phone_verified'])
++                || ($expectedProof !== null && !hash_equals($nonce, $expectedProof))) $this->deny();
++            return $create($nonce);
++        });
++    }
++
++    /** 每次会员 API 都校验撤销代际；重新授权不复活旧 token，改回同号码也不复活。 */
++    public function assertToken(int $uid, string $proof): void
++    {
++        $state = $this->state($uid);
++        if (($state && !(int)$state['phone_verified'])
++            || !hash_equals((string)($state['nonce'] ?? ''), $proof)) $this->deny();
++    }
++
++    private function deny(): void
++    {
++        throw new AuthException('手机号已变更，请重新授权当前手机号登录', 410001);
++    }
++}
+diff --git a/后端代码/app/services/user/UserAuthServices.php b/后端代码/app/services/user/UserAuthServices.php
+index ab490c0c..aa2823f7 100644
+--- a/后端代码/app/services/user/UserAuthServices.php
++++ b/后端代码/app/services/user/UserAuthServices.php
+@@ -81,6 +81,15 @@ class UserAuthServices extends BaseServices
+             throw new AuthException('登录状态有误,请重新登录', 410002);
+         }
+ 
++        // 数据库撤销校验不能被 user 缓存或旧 token 桶绕过；只影响会员 API。
++        try {
++            app()->make(MemberPhoneResetServices::class)->assertToken((int)$user->uid, (string)($tokenData['member_login_nonce'] ?? ''));
++        } catch (AuthException $e) {
++            // 旧凭证首次再用时清掉其令牌桶；未再使用的其他旧凭证也仍由数据库门禁拒绝。
++            CacheService::clearToken($md5Token);
++            throw $e;
++        }
++
+         //有密码在检测
+         if ($user['pwd'] != md5('123456') && $auth !== md5($user['pwd'])) {
+             throw new AuthException('登录已过期,请重新登录', 410001);
+diff --git a/后端代码/app/services/wechat/RoutineServices.php b/后端代码/app/services/wechat/RoutineServices.php
+index a0b5b141..7fe1db20 100644
+--- a/后端代码/app/services/wechat/RoutineServices.php
++++ b/后端代码/app/services/wechat/RoutineServices.php
+@@ -322,7 +322,10 @@ class RoutineServices extends BaseServices
+             throw new ValidateException('获取用户信息失败');
+         }
+ 		$uid = (int)$user['uid'];
+-        $token = $this->createToken($uid, $userType, $user['pwd']);
++        // proof 属于本次已验证登录，不随用户资料返回，也不能签发时重新认领新代际。
++        $proof = $user['_member_login_proof'] ?? '';
++        unset($user['_member_login_proof']);
++        $token = $this->createToken($uid, $userType, $user['pwd'], $proof);
+         if (!$token) {
+             throw new ValidateException('登录失败!');
+         }
+diff --git a/后端代码/app/services/wechat/WechatServices.php b/后端代码/app/services/wechat/WechatServices.php
+index 92381c0a..120dafba 100644
+--- a/后端代码/app/services/wechat/WechatServices.php
++++ b/后端代码/app/services/wechat/WechatServices.php
+@@ -122,7 +122,10 @@ class WechatServices extends BaseServices
+             throw new ValidateException('获取用户信息失败');
+         }
+ 		$uid = (int)$user['uid'];
+-        $token = $this->createToken($uid, $userType, $user['pwd'] ?? '');
++        // 与小程序共用会员改号撤销证明，内存字段不暴露在会员资料中。
++        $proof = $user['_member_login_proof'] ?? '';
++        unset($user['_member_login_proof']);
++        $token = $this->createToken($uid, $userType, $user['pwd'] ?? '', $proof);
+         if (!$token) {
+             throw new ValidateException('登录失败!');
+         }
+diff --git a/后端代码/app/services/wechat/WechatUserServices.php b/后端代码/app/services/wechat/WechatUserServices.php
+index 960ecdee..e20ddd4a 100644
+--- a/后端代码/app/services/wechat/WechatUserServices.php
++++ b/后端代码/app/services/wechat/WechatUserServices.php
+@@ -382,6 +382,13 @@ class WechatUserServices extends BaseServices
+ 				/** @var UserServices $userServices */
+ 				$userServices = app()->make(UserServices::class);
+ 				$user = $userServices->getUserInfo($uid);
++
++                // 改号期间即使有旧授权缓存也不能静默进入；proof 只在内存传给签发边界。
++                if ($user) {
++                    $proof = app()->make(\app\services\user\MemberPhoneResetServices::class)->silentProof((int)$uid);
++                    if ($proof === null) return [];
++                    $user['_member_login_proof'] = $proof;
++                }
+ 				if (isset($user['status']) && !$user['status'])
+ 					throw new AuthException('您已被禁止登录，请联系管理员', 410020);
+ 			}
+@@ -482,6 +489,9 @@ class WechatUserServices extends BaseServices
+         $wechatInfo['user_type'] = $userType;
+         //user表存在和wechat_user表同时存在
+         return $this->transaction(function () use ($openid, $uid, $userInfo, $wechatInfo, $userServices, $spread_uid, $userType) {
++            $security = app()->make(\app\services\user\MemberPhoneResetServices::class);
++            // 选择账号后在写入前加锁重验，不能信任事务外查到的旧手机号/微信关系。
++            $proof = $uid ? $security->authorizeWechatLocked($uid, trim((string)($wechatInfo['phone'] ?? ''))) : '';
+             $wechatInfo['spread_uid'] = $spread_uid;
+             $wechatInfo['uid'] = $uid;
+             if ($userInfo) {
+@@ -534,6 +544,7 @@ class WechatUserServices extends BaseServices
+                     throw new AuthException('生成微信用户失败!');
+                 }
+             }
++            $userInfo['_member_login_proof'] = $proof;
+             return $userInfo;
+         });
+     }
+diff --git a/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/01-升级前检查.sql b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/01-升级前检查.sql
+new file mode 100644
+index 00000000..cdc3461d
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/01-升级前检查.sql
+@@ -0,0 +1,10 @@
++-- 只读预检。必须存在 user/wechat_user/手机号身份表后才运行本轮新增表迁移。
++SELECT CASE WHEN COUNT(DISTINCT TABLE_NAME) = 4 THEN 'PRECHECK_OK'
++ ELSE 'STOP_MISSING_CANONICAL_MEMBER_TABLES' END AS result
++FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
++ AND TABLE_NAME IN ('eb_user','eb_wechat_user','eb_user_phone_identity','eb_user_phone_identity_audit');
++SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
++ WHERE TABLE_SCHEMA = DATABASE() AND
++ ((TABLE_NAME = 'eb_user' AND COLUMN_NAME IN ('uid','phone','status','is_del'))
++ OR (TABLE_NAME = 'eb_wechat_user' AND COLUMN_NAME IN ('id','uid','is_del')))
++ ORDER BY TABLE_NAME, ORDINAL_POSITION;
+diff --git a/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/02-正式升级.sql b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/02-正式升级.sql
+new file mode 100644
+index 00000000..f9b518ca
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/02-正式升级.sql
+@@ -0,0 +1,12 @@
++-- 本地开发迁移；生产执行必须单独授权。MySQL 5.6+，新增表，不改历史会员或资产。
++CREATE TABLE IF NOT EXISTS `eb_member_phone_login_reset` (
++  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++  `uid` bigint unsigned NOT NULL,
++  `nonce` char(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
++  `phone_verified` tinyint unsigned NOT NULL DEFAULT 0,
++  `binding_ids` text NOT NULL COMMENT '被撤销微信历史行ID，不存会话密钥',
++  `operator_id` bigint unsigned NOT NULL DEFAULT 0,
++  `source` varchar(64) NOT NULL DEFAULT '',
++  `created_at` int unsigned NOT NULL,
++  PRIMARY KEY (`id`), UNIQUE KEY `uk_nonce` (`nonce`), KEY `idx_uid_id` (`uid`,`id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会员改号登录撤销与重新授权事件';
+diff --git a/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/03-升级后验证.sql b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/03-升级后验证.sql
+new file mode 100644
+index 00000000..c6e93ed8
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-28-会员改号撤销登录/03-升级后验证.sql
+@@ -0,0 +1,6 @@
++-- 只读验证，表和查询索引均须存在；不输出会员号码或微信身份。
++SELECT CASE WHEN COUNT(*) = 1 THEN 'POSTCHECK_TABLE_OK' ELSE 'STOP_RESET_TABLE_MISSING' END AS result
++ FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'eb_member_phone_login_reset';
++SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX FROM information_schema.STATISTICS
++ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'eb_member_phone_login_reset'
++ ORDER BY INDEX_NAME, SEQ_IN_INDEX;
+diff --git a/后端代码/mohe/utils/JwtAuth.php b/后端代码/mohe/utils/JwtAuth.php
+index de5a47b9..a44bc562 100644
+--- a/后端代码/mohe/utils/JwtAuth.php
++++ b/后端代码/mohe/utils/JwtAuth.php
+@@ -103,7 +103,10 @@ class JwtAuth
+     {
+         $tokenInfo = $this->getToken($id, $type, $params);
+         $exp = $tokenInfo['params']['exp'] - $tokenInfo['params']['iat'] + 60;
+-        $res = CacheService::setTokenBucket(md5($tokenInfo['token']), ['uid' => $id, 'type' => $type, 'token' => $tokenInfo['token'], 'exp' => $exp], (int)$exp, $type);
++        // 与签名 token 同步保存会员撤销证明；历史 token 无此键时只兼容未发生改号的账号。
++        $bucket = ['uid' => $id, 'type' => $type, 'token' => $tokenInfo['token'], 'exp' => $exp];
++        if (array_key_exists('member_login_nonce', $params)) $bucket['member_login_nonce'] = $params['member_login_nonce'];
++        $res = CacheService::setTokenBucket(md5($tokenInfo['token']), $bucket, (int)$exp, $type);
+         if (!$res) {
+             throw new AdminException(ApiErrorCode::ERR_SAVE_TOKEN);
+         }
