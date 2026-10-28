@@ -35,6 +35,8 @@ const fieldGuideFocus = ref('')
 const targetDrawerOpen = ref(false)
 const presentationMode = ref(false)
 const categoryRankTypes = ref({})
+// 暂停只属于当前看板会话和对应排行；刷新数据保留选择，重新进入页面默认滚动。
+const targetRankPaused = ref({})
 const selectedTargetYear = ref(String(new Date().getFullYear()))
 const drilldown = ref(null)
 const drilldownLoading = ref(false)
@@ -346,8 +348,17 @@ async function openTargetDrawer() {
 let targetRankScrollFrame = null
 let dashboardRefreshTimer = null
 const targetRankScrollOffsets = new WeakMap()
+/** 三榜互不影响；继续时以当前可见位置为起点，允许暂停期间手动查看其他名次。 */
+function toggleTargetRankScroll(key) {
+  if (!['company', 'city_manager', 'store'].includes(key)) return
+  targetRankPaused.value = { ...targetRankPaused.value, [key]: !targetRankPaused.value[key] }
+  dashboardElement.value?.querySelectorAll('.dashboard-target-rank-list').forEach((list) => {
+    if (list.dataset.rankKey === key) targetRankScrollOffsets.set(list, list.scrollTop)
+  })
+}
 function autoScrollTargetRankLists() {
   dashboardElement.value?.querySelectorAll('.dashboard-target-rank-list').forEach((list) => {
+    if (targetRankPaused.value[list.dataset.rankKey]) return
     if (list.querySelectorAll('button').length <= 8) return
     const maxScrollTop = list.scrollHeight - list.clientHeight
     if (maxScrollTop <= 1) return
@@ -446,7 +457,7 @@ onBeforeUnmount(() => {
 
       <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">查看明细</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
 
-      <section class="group-dashboard__target-rank-grid"><article v-for="rank in targetRankings" :key="rank.key" class="dashboard-panel"><header><div><h2>{{ rank.title || '-' }}</h2><span>目标 / 实际业绩 / 完成率</span></div><button type="button" class="dashboard-link" @click="showConditions(rank.title || '组织目标排行统计条件', {}, dashboard?.rankings?.source_explanation)">查看条件</button></header><div class="dashboard-target-rank-list"><button v-for="(row, index) in rank.records" :key="row.name" type="button" @click="showConditions(rank.title || '组织目标排行统计条件', { 组织: row.name }, dashboard?.rankings?.source_explanation)"><em>{{ index + 1 }}</em><span>{{ row.name }}</span><small>{{ formatMoney(row.target_amount_cents) }} / {{ formatMoney(row.actual_performance_cents) }}</small><strong :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }">{{ formatRate(row.achievement_rate) }}</strong><i class="dashboard-target-rank__progress" :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }"><b :style="{ width: `${Math.min(Math.max(Number(row.achievement_rate) || 0, 0), 100)}%` }"></b></i></button><p v-if="!rank.records.length" class="dashboard-empty">暂无排行数据。</p></div></article></section>
+      <section class="group-dashboard__target-rank-grid"><article v-for="rank in targetRankings" :key="rank.key" class="dashboard-panel"><header><div class="dashboard-target-rank-heading"><h2>{{ rank.title || '-' }}</h2><span>目标 / 实际业绩 / 完成率</span></div><div class="dashboard-target-rank-actions"><button type="button" class="dashboard-link" :aria-label="`${rank.title || '目标排行'}${targetRankPaused[rank.key] ? '继续滚动' : '暂停滚动'}`" :aria-pressed="Boolean(targetRankPaused[rank.key])" @click="toggleTargetRankScroll(rank.key)">{{ targetRankPaused[rank.key] ? '继续滚动' : '暂停滚动' }}</button><button type="button" class="dashboard-link" @click="showConditions(rank.title || '组织目标排行统计条件', {}, dashboard?.rankings?.source_explanation)">查看条件</button></div></header><div class="dashboard-target-rank-list" :data-rank-key="rank.key"><button v-for="(row, index) in rank.records" :key="row.name" type="button" @click="showConditions(rank.title || '组织目标排行统计条件', { 组织: row.name }, dashboard?.rankings?.source_explanation)"><em>{{ index + 1 }}</em><span>{{ row.name }}</span><small>{{ formatMoney(row.target_amount_cents) }} / {{ formatMoney(row.actual_performance_cents) }}</small><strong :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }">{{ formatRate(row.achievement_rate) }}</strong><i class="dashboard-target-rank__progress" :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }"><b :style="{ width: `${Math.min(Math.max(Number(row.achievement_rate) || 0, 0), 100)}%` }"></b></i></button><p v-if="!rank.records.length" class="dashboard-empty">暂无排行数据。</p></div></article></section>
 
     </template>
 
@@ -630,4 +641,7 @@ onBeforeUnmount(() => {
 .dashboard-category-sale-type span{width:100%;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
 .dashboard-category-sale-type .dashboard-category-sale-type__quantity{color:#2b4358;font-variant-numeric:tabular-nums}
 .dashboard-category-sale-type strong{width:100%;overflow-wrap:anywhere;color:#1f5f8b;font-size:14px;line-height:1.4}
+/* 排行标题可换行，为右侧独立滚动控制和原查看入口保留可点击空间。 */
+.group-dashboard__target-rank-grid .dashboard-target-rank-heading{min-width:0;flex-wrap:wrap;gap:3px 9px}
+.group-dashboard__target-rank-grid .dashboard-target-rank-actions{flex-shrink:0;align-items:center;gap:8px;white-space:nowrap}
 </style>
