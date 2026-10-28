@@ -224,6 +224,8 @@ function summary(field, index) {
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
+  // 员工统计客数与指定客可含小数；只去除合计末尾无意义的零，保留后端精度和导出原值。
+  if (amount != null && active.value?.code === 'basic_employee_summary' && ['service_visits', 'point_visits'].includes(field.key)) return String(amount).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')
   if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) ? String(Number(amount)) : amount
   return index === 0 ? '合计' : '-'
 }
