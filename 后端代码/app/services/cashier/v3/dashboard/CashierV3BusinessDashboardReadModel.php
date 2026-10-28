@@ -23,10 +23,18 @@ final class CashierV3BusinessDashboardReadModel
 
     /** @var string[] */
     public const METRICS = [
-        'sales_amount', 'cash_performance', 'actual_performance',
+        'sales_amount', 'cash_performance', 'refund_performance', 'actual_performance',
         'balance_deduction', 'recharge_amount', 'debt_amount',
         'service_count', 'consumption_performance', 'labor_performance',
     ];
+
+    /** 欠款开关与收银端使用同一配置；测试可注入只读开关，不能更改配置。 */
+    private $debtEnabled;
+
+    public function __construct(?callable $debtEnabled = null)
+    {
+        $this->debtEnabled = $debtEnabled ?: static function (): bool { return (int)sys_config('cashier_debt_pay_switch', 0) === 1; };
+    }
 
     /** @return array<string,mixed> */
     public function initial(CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
@@ -40,10 +48,12 @@ final class CashierV3BusinessDashboardReadModel
         $range = $this->range($payload);
         $this->assertScope($operator, $scope);
         $selected = $this->metric($payload['metricCode'] ?? $payload['metric_code'] ?? 'cash_performance');
-        $sortBy = $this->metric($payload['sortBy'] ?? $payload['sort_by'] ?? $selected);
+        $rankingRole = $this->rankingRole($payload['rankingRole'] ?? 'sales');
         $sortOrder = strtolower((string)($payload['sortOrder'] ?? $payload['sort_order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
         $cards = [];
         foreach (self::METRICS as $code) {
+            // 功能关闭时仅隐藏欠款卡，历史债权事实和其它指标保持不变。
+            if ($code === 'debt_amount' && !call_user_func($this->debtEnabled)) continue;
             $definition = $this->definition($code);
             $rawValue = $this->totalCents($code, $range, $operator, $scope);
             $cards[] = [
@@ -68,7 +78,7 @@ final class CashierV3BusinessDashboardReadModel
             'cards' => $cards,
             'selectedMetricCode' => $selected,
             'trend' => ['metricCode' => $selected, 'points' => $this->trend($selected, $range, $operator, $scope), 'isLoading' => false],
-            'ranking' => $this->ranking($sortBy, $sortOrder, $range, $operator, $scope),
+            'ranking' => $this->ranking($rankingRole, $sortOrder, $range, $operator),
             'metricVersion' => self::METRIC_VERSION,
             'dataAsOf' => date('Y-m-d H:i:s'),
             // 当前读取事实而非滞后的聚合表，结果与可见事实同一快照，无待追平队列。
@@ -82,6 +92,10 @@ final class CashierV3BusinessDashboardReadModel
     {
         $range = $this->range($payload);
         $this->assertScope($operator, $scope);
+        // 排行下钻使用同一角色注册指标和员工 ID，不能退回门店全量明细。
+        if (array_key_exists('rankingRole', $payload)) {
+            return $this->personnelDetail($payload, $range, $operator);
+        }
         $metric = $this->metric($payload['metricCode'] ?? $payload['metric_code'] ?? 'cash_performance');
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(10, (int)($payload['pageSize'] ?? $payload['page_size'] ?? 20)));
@@ -115,7 +129,8 @@ final class CashierV3BusinessDashboardReadModel
             'columns' => [
                 ['key' => 'businessDate', 'label' => '业务日期'], ['key' => 'businessNo', 'label' => '来源单号'],
                 ['key' => 'memberName', 'label' => '会员'], ['key' => 'operatorName', 'label' => '操作人'],
-                ['key' => 'amount', 'label' => $this->definition($metric)['name']], ['key' => 'status', 'label' => '状态'],
+                // 结果已由事实读模型筛选有效数据，内部状态码无需展示给业务人员。
+                ['key' => 'amount', 'label' => $this->definition($metric)['name']],
             ],
             'records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize,
             'dataAsOf' => date('Y-m-d H:i:s'), 'metricVersion' => self::METRIC_VERSION,
@@ -182,48 +197,82 @@ final class CashierV3BusinessDashboardReadModel
         return $points;
     }
 
-    /** @return array<string,mixed> */
-    private function ranking(string $metric, string $order, array $range, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    /**
+     * 两个榜单只读已分配的人员事实；收款操作员不代表销售人或手艺人。
+     * 角色决定唯一注册指标，不能用门店指标下拉框替换人员分配口径。
+     */
+    private function ranking(string $role, string $order, array $range, CashierV3OperatorScope $operator): array
     {
-        // 欠款仍走原有权威读模型，不将本轮冻结指标强行送入注册表。
-        $canonical = $metric === 'debt_amount' ? null : \app\services\query\metric\MetricDefinitionRegistry::canonical($metric);
-        if ($canonical !== null) {
-            $ranking = (new \app\services\query\metric\RegisteredMetricReadServices())->defaultRanking(
-                $canonical, $operator->tenantId(), [$operator->storeId()], $range, 50, $order
-            );
-            $records = [];
-            foreach ($ranking['rows'] as $row) {
-                $records[] = [
-                    'id' => (int)$row['entity_id'], 'name' => (string)$row['entity_name'],
-                    'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney((int)$row['metric_value']) : (int)$row['metric_value'],
-                    'amountCents' => $this->definition($metric)['unit'] === '元' ? (int)$row['metric_value'] : null,
-                ];
-            }
-            return [
-                'dimension' => (string)$ranking['dimension'], 'sortBy' => $metric, 'sortOrder' => $order,
-                'sortOptions' => array_map(function (string $code): array { return ['value' => $code, 'label' => $this->definition($code)['name']]; }, self::METRICS),
-                'columns' => [['key' => 'name', 'label' => '人员'], ['key' => 'amount', 'label' => $this->definition($metric)['name'], 'type' => $this->definition($metric)['unit'] === '元' ? 'money' : 'count']],
-                'records' => $records, 'isLoading' => false,
+        $profile = $this->rankingProfile($role);
+        $ranking = (new \app\services\query\metric\RegisteredMetricReadServices())->defaultRanking(
+            $profile['metric'], $operator->tenantId(), [$operator->storeId()], $range, 50, $order
+        );
+        $records = [];
+        foreach ($ranking['rows'] as $row) {
+            $records[] = [
+                'id' => (int)$row['entity_id'], 'name' => (string)$row['entity_name'],
+                'amount' => $this->centsToMoney((int)$row['metric_value']),
+                'amountCents' => (int)$row['metric_value'],
             ];
         }
-        $source = $this->source($metric, $range, $operator, $scope);
-        $amount = $source['amount'];
-        $value = "SUM({$amount})";
-        $operator = $metric === 'debt_amount'
-            ? "0 AS operator_id, '' AS operator_name"
-            : 'operator_id AS operator_id, MAX(operator_name_snapshot) AS operator_name';
-        $rows = (clone $source['query'])->fieldRaw("{$operator}, COALESCE({$value},0) AS amount")
-            ->group('operator_id')->order('amount ' . $order)->limit(50)->select()->toArray();
+        return [
+            'dimension' => 'employee', 'role' => $role, 'title' => $profile['title'],
+            'roleOptions' => [['value' => 'sales', 'label' => '销售人排行'], ['value' => 'craftsman', 'label' => '手艺人排行']],
+            'sortBy' => $profile['metric'], 'sortOrder' => $order, 'limit' => 50,
+            'description' => $profile['description'],
+            'columns' => [['key' => 'name', 'label' => $profile['personLabel']], ['key' => 'amount', 'label' => $profile['metricLabel'], 'type' => 'money']],
+            'records' => $records, 'isLoading' => false,
+        ];
+    }
+
+    /** 白名单只选择事实读口径，不修改业绩写入、退款或人员资格配置。 */
+    private function rankingProfile(string $role): array
+    {
+        return $role === 'sales'
+            ? ['metric' => 'staff_sales_yeji', 'title' => '销售人排行', 'personLabel' => '销售人', 'metricLabel' => '销售人业绩',
+                'description' => '按分配到销售人名下的现金业绩排行，包含同口径的补交与冲销。']
+            : ['metric' => 'staff_labor_yeji', 'title' => '手艺人排行', 'personLabel' => '手艺人', 'metricLabel' => '劳动业绩',
+                'description' => '按服务完成后分配到手艺人名下的劳动业绩排行，包含同口径的调整与冲销。'];
+    }
+
+    private function rankingRole($role): string
+    {
+        if (!is_string($role) || !in_array($role, ['sales', 'craftsman'], true)) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请选择销售人排行或手艺人排行。');
+        }
+        return $role;
+    }
+
+    /** 下钻与排行复用注册人员事实 Reader；人员筛选只能缩小当前门店和日期范围。 */
+    private function personnelDetail(array $payload, array $range, CashierV3OperatorScope $operator): array
+    {
+        $role = $this->rankingRole($payload['rankingRole']);
+        $profile = $this->rankingProfile($role);
+        $id = filter_var($payload['rankingEntityId'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($id === false) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请选择需要查看的人员。');
+        }
+        $page = max(1, (int)($payload['page'] ?? 1));
+        $data = (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDetailPage(
+            $profile['metric'], $operator->tenantId(), [$operator->storeId()], $range, $id, $page, 20
+        );
         $records = [];
-        foreach ($rows as $row) {
-            $raw = (int)$row['amount'];
-            $records[] = ['id' => (int)$row['operator_id'], 'name' => (string)$row['operator_name'], 'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($raw) : $raw, 'amountCents' => $this->definition($metric)['unit'] === '元' ? $raw : null];
+        foreach ($data['rows'] as $row) {
+            $records[] = [
+                'id' => (string)$row['id'], 'businessDate' => (string)$row['business_date'],
+                'businessNo' => (string)$row['order_no_snapshot'], 'employeeName' => (string)$row['employee_name_snapshot'],
+                'memberName' => (string)$row['member_name_snapshot'], 'amount' => $this->centsToMoney((int)$row['metric_value']),
+                'amountCents' => (int)$row['metric_value'], 'direction' => $row['fact_direction'] === 'reversal' ? '冲销' : '正向/调整',
+            ];
         }
         return [
-            'dimension' => 'operator', 'sortBy' => $metric, 'sortOrder' => $order,
-            'sortOptions' => array_map(function (string $code): array { return ['value' => $code, 'label' => $this->definition($code)['name']]; }, self::METRICS),
-            'columns' => [['key' => 'name', 'label' => '操作人'], ['key' => 'amount', 'label' => $this->definition($metric)['name'], 'type' => $this->definition($metric)['unit'] === '元' ? 'money' : 'count']],
-            'records' => $records, 'isLoading' => false,
+            'metricCode' => $profile['metric'], 'metricName' => $profile['metricLabel'],
+            'rankingRole' => $role, 'rankingEntityId' => $id,
+            'columns' => [['key' => 'businessDate', 'label' => '业务日期'], ['key' => 'businessNo', 'label' => '来源单号'],
+                ['key' => 'employeeName', 'label' => $profile['personLabel']], ['key' => 'memberName', 'label' => '会员'],
+                ['key' => 'amount', 'label' => $profile['metricLabel']], ['key' => 'direction', 'label' => '事实方向']],
+            'records' => $records, 'total' => (int)$data['total'], 'page' => $page, 'pageSize' => 20,
+            'dataAsOf' => date('Y-m-d H:i:s'), 'metricVersion' => self::METRIC_VERSION,
         ];
     }
 
@@ -296,7 +345,7 @@ final class CashierV3BusinessDashboardReadModel
             throw new \RuntimeException('DASHBOARD_METRIC_NOT_REGISTERED');
         }
         return [
-            'name' => (string)$definition['name'],
+            'name' => $code === 'refund_performance' ? '退款金额' : (string)$definition['name'],
             'summary' => (string)$definition['summary'],
             'unit' => $contract['storage_unit'] === 'fen' ? '元' : '次',
         ];
