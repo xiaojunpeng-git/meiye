@@ -2,7 +2,15 @@
 /** 真实统一查询Runtime+MySQL临时表；不导入客户数据，不改任何已有业务表。 */
 $root = getenv('BACKEND_ROOT') ?: getcwd();
 require $root . '/vendor/autoload.php';
-(new \think\App())->initialize();
+// 测试独立挂载的源码时，Composer 共享依赖不应把业务类指向另一份工作区。
+if (getenv('LOCAL_TEST_ENV')) spl_autoload_register(static function (string $class) use ($root): void {
+    if (strpos($class, 'app\\') !== 0) return;
+    $file = $root . '/app/' . str_replace('\\', '/', substr($class, 4)) . '.php';
+    if (is_file($file)) require $file;
+}, true, true);
+$app = new \think\App(rtrim($root, '/') . '/');
+if ($localEnv = getenv('LOCAL_TEST_ENV')) $app->env->load($localEnv);
+$app->initialize();
 use think\facade\Db;
 use app\services\report\BasicReportHostServices as Host;
 use app\services\report\BasicRegistrationWriteServices as Writer;
@@ -33,6 +41,17 @@ try {
     check(count($first['rows']) === 20 && $first['pagination']['total'] === 44, 'Framework page one and complete total');
     check((int)$first['summaries']['amount:sum'] === 4400, 'Full authorized sum rather than current-page sum');
     check((int)Host::query($context, ['summaries' => []])['summaries']['amount:sum'] === 4400, 'Cleared optional summaries cannot erase fixed amount total');
+    // 旧录入可能留有小数点但没有小数；整表查询、合计、导出应按原金额读取且不得改写源记录。
+    $originalInfo = Db::name('salary_store')->where('id', 1)->value('salary_info');
+    $historical = json_decode($originalInfo, true); $historical['shuadanjine'] = '326.';
+    $historicalInfo = json_encode($historical, JSON_UNESCAPED_UNICODE);
+    Db::name('salary_store')->where('id', 1)->update(['salary_info' => $historicalInfo]);
+    $historicalQuery = Host::query($context, ['export' => ['scope' => 'query', 'fields' => ['registration_id', 'amount']]]);
+    check($historicalQuery['pagination']['total'] === 44 && (int)$historicalQuery['summaries']['amount:sum'] === 4626, 'Historical trailing decimal remains readable and contributes to whole sum');
+    $historicalExport = array_values(array_filter($historicalQuery['exportRows'], static function ($r) { return (int)$r['registration_id'] === 1; }));
+    check(count($historicalExport) === 1 && (int)$historicalExport[0]['amount'] === 326, 'Export matches historical amount');
+    check(Db::name('salary_store')->where('id', 1)->value('salary_info') === $historicalInfo, 'Read does not alter original legacy value');
+    Db::name('salary_store')->where('id', 1)->update(['salary_info' => $originalInfo]);
     $second = Host::query($context, ['page' => 2]);
     check(count($second['rows']) === 20 && $second['rows'][0]['registration_id'] !== $first['rows'][0]['registration_id'], 'Page two stable and not duplicated');
     check(count(Host::query($context, ['page' => 3])['rows']) === 4, 'Last-page remainder');
@@ -90,6 +109,8 @@ try {
     check(Db::name('basic_report_registration_audit')->count() === 2, 'Failed transaction adds no audit');
     Db::execute('SET SESSION sql_mode=?', [$oldMode]);
     check(Provider::cents('88.05') === 8805, 'Historical cents remain exact');
+    check(Provider::cents('326.') === 32600 && Provider::cents('-3.') === -300, 'Trailing decimal parses exactly');
+    foreach (['326..', '.', '1.001', '1e2', '1,000'] as $bad) rejects(static function () use ($bad) { Provider::cents($bad); }, 'Invalid historical amount rejected: ' . $bad);
     echo json_encode(['pass' => true, 'checks' => $n, 'source' => 'real_unified_query_runtime_and_temporary_mysql_tables', 'persistent_business_writes' => false]), PHP_EOL;
 } finally {
     foreach ($tables as $table) Db::execute('DROP TEMPORARY TABLE IF EXISTS eb_' . $table);
