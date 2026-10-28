@@ -3478,6 +3478,8 @@ export default {
           return {
             ...item.productInfo.attrInfo,
             store_name: item.productInfo.store_name,
+            // 编辑回传关联状态，避免保存卡项时重新启用已下架项目。
+            status: Number(item.status),
             write_times: item.write_times,
             writeoff_amount: Number(item.writeoff_amount || 0),
             // 卡内手工是卡与项目的独立设置；编辑时回显已保存值，不能重取项目默认值覆盖人工修改。

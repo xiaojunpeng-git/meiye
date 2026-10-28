@@ -932,17 +932,16 @@ class StoreProduct extends BaseModel
                     $query->where(['is_del' => 0, 'is_verify' => 1]);
                     break;
                 case 4:
+                    // 卡项和服务项目没有实体库存，不应出现在售罄列表。
+                    \app\services\product\product\ProductStockEligibility::constrain($query);
                     $query->where(['is_show' => 1,'is_del' => 0, 'is_verify' => 1])->where(function ($query) {
                         $query->whereOr('stock', 0)->whereOr('is_sold', 1);
                     });
                     break;
                 case 5:
-//                    if (isset($data['store_stock']) && $data['store_stock']) {
-//                        $store_stock = $data['store_stock'];
-//                        $query->where(['is_show' => 1, 'is_del' => 0, 'is_verify' => 1, 'is_police' => 1])->where('stock', '<=', $store_stock)->where('stock', '>', 0);
-//                    } else {
-                        $query->where(['is_show' => 1, 'is_del' => 0, 'is_verify' => 1, 'is_police' => 1])->where('stock', '>=', 0);
-//                    }
+                    // 已经误标预警的历史卡项也需排除，列表和顶部计数共用此查询。
+                    \app\services\product\product\ProductStockEligibility::constrain($query);
+                    $query->where(['is_show' => 1, 'is_del' => 0, 'is_verify' => 1, 'is_police' => 1])->where('stock', '>=', 0);
                     break;
                 case 6:
                     $query->where(['is_del' => 1]);

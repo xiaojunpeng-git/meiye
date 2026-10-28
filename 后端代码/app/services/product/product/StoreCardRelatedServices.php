@@ -96,6 +96,22 @@ class StoreCardRelatedServices extends BaseServices
         return array_values($list);
     }
 
+    /** 编辑回显保留停用关联及其状态，不能改变销售和核销读取口径。 */
+    public function getCardRelatedProductForEdit(int $cardProductId): array
+    {
+        $list = $this->dao->getListForCardEdit($cardProductId);
+        foreach ($list as &$item) {
+            // 关联商品不存在时不能静默丢失并用不完整配置覆盖原卡项。
+            if (empty($item['productInfo']) || empty($item['attrInfo'])) {
+                throw new AdminException('卡内项目或规格已不存在，请联系管理员核查后再编辑');
+            }
+            $item['productInfo']['attrInfo'] = $item['attrInfo'];
+            unset($item['attrInfo']);
+        }
+        unset($item);
+        return $list;
+    }
+
     /**
      * 获取卡项商品全部核销数量
      * @param int $card_product_id

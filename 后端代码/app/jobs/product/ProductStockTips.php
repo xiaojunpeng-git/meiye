@@ -17,6 +17,7 @@ use app\services\product\product\StoreCardRelatedServices;
 use app\services\product\product\StoreCatalogWriteLease;
 use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
+use app\services\product\product\ProductStockEligibility;
 use app\services\product\sku\StoreProductAttrValueServices;
 use mohe\basic\BaseJobs;
 use mohe\traits\QueueTrait;
@@ -37,14 +38,18 @@ class ProductStockTips extends BaseJobs
         if ($productId <= 0) {
             return true;
         }
+        // 快速跳过无库存商品；进入写锁后再次检查，防止读取后配置发生变化。
+        $candidate = app()->make(StoreProductServices::class)->get(['id' => $productId], ['product_type', 'is_inventory']);
+        if (!$candidate || !ProductStockEligibility::appliesTo($candidate)) return true;
         $store_stock = sys_config('store_stock') ?? 0;//库存预警界限
         /** @var StoreCatalogWriteLockGuard $catalogGuard */
         $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
         $shouldSend = $catalogGuard->withComponentCatalogMutation([$productId], function (StoreCatalogWriteLease $catalogLease) use ($productId, $store_stock) {
             /** @var StoreProductServices $make */
             $make = app()->make(StoreProductServices::class);
-            $product = $make->get(['id' => $productId], ['stock', 'id', 'is_police', 'is_sold']);
-            if (!$product) {
+            $product = $make->get(['id' => $productId], ['stock', 'id', 'is_police', 'is_sold', 'product_type', 'is_inventory']);
+            // 卡项、项目和不管理库存的产品不会因零库存触发警报或停用关联。
+            if (!$product || !ProductStockEligibility::appliesTo($product)) {
                 return false;
             }
             /** @var StoreProductAttrValueServices $storeValueService */
@@ -86,6 +91,9 @@ class ProductStockTips extends BaseJobs
 	 */
 	public function sendTips($productId, $unique, $type)
 	{
+		// 明细库存消息必须与商品级预警采用相同的库存管理口径。
+		$product = app()->make(StoreProductServices::class)->get(['id' => (int)$productId], ['product_type', 'is_inventory']);
+		if (!$product || !ProductStockEligibility::appliesTo($product)) return true;
 		/** @var StoreProductAttrValueServices $make */
 		$make = app()->make(StoreProductAttrValueServices::class);
 		$stock = $make->value([
