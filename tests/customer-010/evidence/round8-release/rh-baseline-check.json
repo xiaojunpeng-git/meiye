@@ -1,0 +1,8 @@
+{
+  "site": "rh",
+  "mode": 0,
+  "position_model": "legacy",
+  "backend_drift": [],
+  "mobile_asset_drift": [],
+  "baseline_result": "PASS"
+}

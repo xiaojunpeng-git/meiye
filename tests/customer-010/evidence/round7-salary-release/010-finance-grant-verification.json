@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "accounts": [
+    {
+      "admin_id": 38,
+      "edit": true,
+      "freeze": true,
+      "source_projection_consistent": true
+    },
+    {
+      "admin_id": 39,
+      "edit": true,
+      "freeze": true,
+      "source_projection_consistent": true
+    }
+  ],
+  "position_source_form_retains_both_actions": true,
+  "manual_rows": 0,
+  "freeze_rows": 0
+}

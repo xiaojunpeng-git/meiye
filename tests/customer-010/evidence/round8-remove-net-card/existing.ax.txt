@@ -1,0 +1,16 @@
+Browser tab: 12, Title: "127.0.0.1:18119/?mode=0", URL: "http://127.0.0.1:18119/?mode=0".
+1 AXWebArea 127.0.0.1:18119/?mode=0
+	2 container app
+		3 text ‹
+		4 text 员工业绩 测试员工
+		5 text 今天
+		6 text 昨天
+		7 text 上月
+		8 text 本月
+		9 text 自定义
+		10 text 测 测试员工 10月22日-10月22日 现金业绩 0 劳动业绩 60 点客数 0 服务人次 1 项目数 0.333333 手工费 25
+		11 text 现金业绩
+		12 text 劳动业绩
+		13 text 暂无单号 2026-10-22 商品名称：测试项目 消耗金额：0 劳动业绩：60 项目数：0.333333 手工费：25
+
+The focused UI element is 1 AXWebArea 127.0.0.1:18119/?mode=0

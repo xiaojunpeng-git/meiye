@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-28",
+  "patch_fingerprint": "0d85a6ea218f1a5ccd434472533e5a1ff459c752a207358ea74b6b1dbc7f433b",
+  "product_manager_reply": "确认验收通过",
+  "product_accepted": true,
+  "authorized_action": "本轮固定候选本地提交",
+  "deployment_authorized": false,
+  "push_authorized": false
+}

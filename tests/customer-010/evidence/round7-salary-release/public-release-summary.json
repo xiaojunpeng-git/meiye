@@ -1,0 +1,545 @@
+{
+  "rh": {
+    "release": {
+      "result": "PASS",
+      "site": "rh",
+      "source_commit": "e888c787e5d921284d18879167015d3431ce1a5c",
+      "files": 10,
+      "mode": 0,
+      "position_model": "legacy",
+      "existing_business_unchanged": true,
+      "manual_counts": {
+        "basic_salary_manual": 0,
+        "basic_salary_month_control": 0,
+        "basic_salary_manual_audit": 0
+      },
+      "backup": "/www/backups/rh/round7-e888c787e5d9-20261027174334",
+      "public_status": "200",
+      "public_assets_verified": [
+        "public/view_cashier_v3/assets/index-b2ee669c.js",
+        "public/view_cashier_v3/assets/index-5763393d.css"
+      ]
+    },
+    "same_snapshot_salary": {
+      "result": "PASS",
+      "site": "rh",
+      "store_id": 5,
+      "rows": 16,
+      "numeric_fields": 36,
+      "same_snapshot": true,
+      "values_sha256": "9bd476b6970130b58d1fe4451b01ae3e52cc99cb45ed734017ce5d04ebfe32b6"
+    },
+    "actual_service_queries": {
+      "result": "PASS",
+      "site": "rh",
+      "authenticated_http_session": false,
+      "actual_service_scope": true,
+      "queries": {
+        "basic_salary_realtime": {
+          "rows": 16,
+          "total": 16,
+          "columns": [
+            "日期",
+            "门店",
+            "职务",
+            "职级",
+            "姓名",
+            "门店现金业绩",
+            "门店现金提成",
+            "门店实际扣卡业绩",
+            "门店实际扣卡提成",
+            "门店耗卡业绩",
+            "门店耗卡提成",
+            "项目业绩",
+            "项目提点",
+            "项目提成",
+            "产品业绩",
+            "产品提点",
+            "产品提成",
+            "劳动业绩",
+            "劳动提点",
+            "劳动提成",
+            "绩效工资",
+            "指定客",
+            "好评数",
+            "餐补",
+            "加班",
+            "岗位补贴",
+            "其他调整",
+            "应发工资",
+            "考勤",
+            "医社保",
+            "公积金",
+            "个税",
+            "其他扣款",
+            "预支工资",
+            "实发工资",
+            "备注"
+          ],
+          "can_edit": true,
+          "can_freeze": true,
+          "result_sha256": "cbf0a3b929373415ee11f5db081d25fb80af004332b453d3d0ab9397aba717b7"
+        },
+        "basic_employee_summary": {
+          "rows": 12,
+          "total": 12,
+          "columns": [
+            "门店",
+            "员工",
+            "当前职务",
+            "当前职级",
+            "销售业绩",
+            "劳动业绩",
+            "手工费",
+            "分配项目数",
+            "客次",
+            "指定客",
+            "劳动客单价"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "60454fe17e9708e758c887c07902abfd7626548f353325dd9f61f8e86d5f209b"
+        },
+        "basic_cross_store_settlement": {
+          "rows": 0,
+          "total": 0,
+          "columns": [
+            "门店",
+            "结算应付门店ID",
+            "权益使用门店ID",
+            "储值应付",
+            "储值应收",
+            "次卡应付",
+            "次卡应收"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "643d5437104296e21d906ecb15b2c96ad278f20cfc4af53b12bb6069bd853726"
+        }
+      },
+      "write_denied": true
+    },
+    "permission_actions": {
+      "site": "rh",
+      "ids": [
+        2343,
+        2344
+      ],
+      "position_tree_visible": true,
+      "roles_unchanged": true,
+      "automatic_grants": 0
+    },
+    "before_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "cbb9147a4ec0844451124d2cfd4944232c871c532cb26a0b9bb77081f6f9a76c",
+      "app/controller/cashier/v3/Report.php": "ef69a9faefe0b4eb0ea861b3b08e78b4b53da7160ed43bafe10e7a69cb3139d1",
+      "app/services/report/BasicSalaryManualServices.php": null,
+      "app/services/report/BasicSalaryReportServices.php": "162cf7437fce706f2b61f24b0667c2a1c6da154bff21a53b7e830651b41c7845",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "af494e196af6a271bb2006002fd2527bfae1ac438bbee3224c6e9a6b20348947",
+      "route/admin.php": "f69e1c5e4c11bd7239fd1f09ad6269b25fa605d81075501fddecf8821bf288f2",
+      "route/cashier-v3.php": "d8d86c083428008e99e0aef35c36073d3173f0d9ceaca1793ba0b319d2b8f08f",
+      "config/basic_report.php": "6774ff1d9a4ce7f9335ffbffab61a8b8d7f361daa8975c9863f75cc4f8cb655a",
+      "config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087",
+      "public/system.html": "ede8c5abc997c2df51ea2b95ab0636e69905de4de5082117f3c3dc6ba66dc659",
+      "public/view_cashier_v3/index.html": "f899c05668ab0a66fc980421b0cf285eb1077145216a0d176430a3aef6ee33fb",
+      "public/view_mobile_v3/index.html": "b3da79f52d1b84ad5c8bc9dd6edcb489a81d2d5d8e9e52c7df616a8141ac0093"
+    },
+    "before_public_assets": {
+      "public/view_cashier_v3/assets/index-52ae1993.js": "ad4594d8b613bd1515807f1c9a8d18dc1778c8f83097dc8f0feea857b82b2427",
+      "public/view_cashier_v3/assets/index-3f750e37.css": "3f750e37a033c3da2ac65b824aa92cf4821b6489a5e07230fe759d04cf5fca3b",
+      "public/view_mobile_v3/assets/uni.ff98ee44.css": "ff98ee447111dbe49ae6a90e6bb41164ca03048ac66808f0fbd8791f37aba9a9",
+      "public/view_mobile_v3/assets/index-C6QfEbLu.js": "f720ecf5a7c69cc3806e7ccfb4d61f224ba3450b41453a4dede19754fbfd22d0",
+      "public/view_mobile_v3/assets/index-CQXQ6p9m.css": "81b7774471a5e25e6085d3fa289a6522c87fd67bea637632bc3b7a9009c9ae3e"
+    },
+    "old_business_digest_sha256": "8a628d015e4fe453e2d68a5db15f2204dd034b77d595f282871014dbc624de86",
+    "installed_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "63d93bda6f93b157153eff3f94addb4d6ca7bef81e1d1aa0962a4d733de739c7",
+      "app/controller/cashier/v3/Report.php": "e711a783263a96bd07fd5c5a2428c811974b398a421f432908642b8ff24aae19",
+      "app/services/report/BasicSalaryManualServices.php": "5323cf3220e19798a0c5a0ac1c084cea4a8bf2697ce6d49ba0e98d378a8acfba",
+      "app/services/report/BasicSalaryReportServices.php": "33ae17775d321f6f6ebb774e36a6a79dbe5b4a93ba7897c1fd27f30d560f7f6e",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "fa3bf722148cb0d3f358a58e0a0e8159f304acfa57233d221b73fe212722c294",
+      "route/admin.php": "cb685e61b4415e9b1f8eebf99221d8b18a6c859af1db69abad75ea76480efa69",
+      "route/cashier-v3.php": "e0f09b8b5557da8a650a5ae3fb3370bd2b76f8e08005330505e279942c6e47cc",
+      "public/view_cashier_v3/assets/index-5763393d.css": "5763393dfd606f9c33ee746e0928b07238b4028c46063f7cf9f53d030fb4b67d",
+      "public/view_cashier_v3/assets/index-b2ee669c.js": "74cd195e6fd57994c7bb25dd74fec8b0c4dc4b0eab32a6f898bb00012e859c31",
+      "public/view_cashier_v3/index.html": "a204eae2f3d7f1f5b26bcf3dc5a91d19857b5b7e38a8597e33926e3ae77b8a00"
+    },
+    "new_empty_schema": 3
+  },
+  "008": {
+    "release": {
+      "result": "PASS",
+      "site": "008",
+      "source_commit": "e888c787e5d921284d18879167015d3431ce1a5c",
+      "files": 10,
+      "mode": 0,
+      "position_model": "legacy",
+      "existing_business_unchanged": true,
+      "manual_counts": {
+        "basic_salary_manual": 0,
+        "basic_salary_month_control": 0,
+        "basic_salary_manual_audit": 0
+      },
+      "backup": "/www/backups/008/round7-e888c787e5d9-20261027174711",
+      "public_status": "200",
+      "public_assets_verified": [
+        "public/view_cashier_v3/assets/index-b2ee669c.js",
+        "public/view_cashier_v3/assets/index-5763393d.css"
+      ]
+    },
+    "same_snapshot_salary": {
+      "result": "PASS",
+      "site": "008",
+      "store_id": 113,
+      "rows": 6,
+      "numeric_fields": 36,
+      "same_snapshot": true,
+      "values_sha256": "db8e835cbe06af2d84ad237f1527ebcbfcc7421158c69bb5e44c137caf8fb539"
+    },
+    "actual_service_queries": {
+      "result": "PASS",
+      "site": "008",
+      "authenticated_http_session": false,
+      "actual_service_scope": true,
+      "queries": {
+        "basic_salary_realtime": {
+          "rows": 6,
+          "total": 6,
+          "columns": [
+            "日期",
+            "门店",
+            "职务",
+            "职级",
+            "姓名",
+            "门店现金业绩",
+            "门店现金提成",
+            "门店实际扣卡业绩",
+            "门店实际扣卡提成",
+            "门店耗卡业绩",
+            "门店耗卡提成",
+            "项目业绩",
+            "项目提点",
+            "项目提成",
+            "产品业绩",
+            "产品提点",
+            "产品提成",
+            "劳动业绩",
+            "劳动提点",
+            "劳动提成",
+            "绩效工资",
+            "指定客",
+            "好评数",
+            "餐补",
+            "加班",
+            "岗位补贴",
+            "其他调整",
+            "应发工资",
+            "考勤",
+            "医社保",
+            "公积金",
+            "个税",
+            "其他扣款",
+            "预支工资",
+            "实发工资",
+            "备注"
+          ],
+          "can_edit": true,
+          "can_freeze": true,
+          "result_sha256": "d9395470a958fa5904e31c0609ad3ae3b1139fd9177129f833133133b09ac1f0"
+        },
+        "basic_employee_summary": {
+          "rows": 4,
+          "total": 4,
+          "columns": [
+            "门店",
+            "员工",
+            "当前职务",
+            "当前职级",
+            "销售业绩",
+            "劳动业绩",
+            "手工费",
+            "分配项目数",
+            "客次",
+            "指定客",
+            "劳动客单价"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "2adc0236b1315442b6027905464597859dff8eb4069a5f1d66768e20114ab1a6"
+        },
+        "basic_cross_store_settlement": {
+          "rows": 0,
+          "total": 0,
+          "columns": [
+            "门店",
+            "结算应付门店ID",
+            "权益使用门店ID",
+            "储值应付",
+            "储值应收",
+            "次卡应付",
+            "次卡应收"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "643d5437104296e21d906ecb15b2c96ad278f20cfc4af53b12bb6069bd853726"
+        }
+      },
+      "write_denied": true
+    },
+    "permission_actions": {
+      "site": "008",
+      "ids": [
+        2343,
+        2344
+      ],
+      "position_tree_visible": true,
+      "roles_unchanged": true,
+      "automatic_grants": 0
+    },
+    "before_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "cbb9147a4ec0844451124d2cfd4944232c871c532cb26a0b9bb77081f6f9a76c",
+      "app/controller/cashier/v3/Report.php": "ef69a9faefe0b4eb0ea861b3b08e78b4b53da7160ed43bafe10e7a69cb3139d1",
+      "app/services/report/BasicSalaryManualServices.php": null,
+      "app/services/report/BasicSalaryReportServices.php": "162cf7437fce706f2b61f24b0667c2a1c6da154bff21a53b7e830651b41c7845",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "af494e196af6a271bb2006002fd2527bfae1ac438bbee3224c6e9a6b20348947",
+      "route/admin.php": "f69e1c5e4c11bd7239fd1f09ad6269b25fa605d81075501fddecf8821bf288f2",
+      "route/cashier-v3.php": "d8d86c083428008e99e0aef35c36073d3173f0d9ceaca1793ba0b319d2b8f08f",
+      "config/basic_report.php": "6774ff1d9a4ce7f9335ffbffab61a8b8d7f361daa8975c9863f75cc4f8cb655a",
+      "config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087",
+      "public/system.html": "ede8c5abc997c2df51ea2b95ab0636e69905de4de5082117f3c3dc6ba66dc659",
+      "public/view_cashier_v3/index.html": "f899c05668ab0a66fc980421b0cf285eb1077145216a0d176430a3aef6ee33fb",
+      "public/view_mobile_v3/index.html": "b3da79f52d1b84ad5c8bc9dd6edcb489a81d2d5d8e9e52c7df616a8141ac0093"
+    },
+    "before_public_assets": {
+      "public/view_cashier_v3/assets/index-52ae1993.js": "ad4594d8b613bd1515807f1c9a8d18dc1778c8f83097dc8f0feea857b82b2427",
+      "public/view_cashier_v3/assets/index-3f750e37.css": "3f750e37a033c3da2ac65b824aa92cf4821b6489a5e07230fe759d04cf5fca3b",
+      "public/view_mobile_v3/assets/uni.ff98ee44.css": "ff98ee447111dbe49ae6a90e6bb41164ca03048ac66808f0fbd8791f37aba9a9",
+      "public/view_mobile_v3/assets/index-C6QfEbLu.js": "f720ecf5a7c69cc3806e7ccfb4d61f224ba3450b41453a4dede19754fbfd22d0",
+      "public/view_mobile_v3/assets/index-CQXQ6p9m.css": "81b7774471a5e25e6085d3fa289a6522c87fd67bea637632bc3b7a9009c9ae3e"
+    },
+    "old_business_digest_sha256": "3e7e48c695df885565a3570ff3e4831e8561fecac4287f68762c180e192118bf",
+    "installed_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "63d93bda6f93b157153eff3f94addb4d6ca7bef81e1d1aa0962a4d733de739c7",
+      "app/controller/cashier/v3/Report.php": "e711a783263a96bd07fd5c5a2428c811974b398a421f432908642b8ff24aae19",
+      "app/services/report/BasicSalaryManualServices.php": "5323cf3220e19798a0c5a0ac1c084cea4a8bf2697ce6d49ba0e98d378a8acfba",
+      "app/services/report/BasicSalaryReportServices.php": "33ae17775d321f6f6ebb774e36a6a79dbe5b4a93ba7897c1fd27f30d560f7f6e",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "fa3bf722148cb0d3f358a58e0a0e8159f304acfa57233d221b73fe212722c294",
+      "route/admin.php": "cb685e61b4415e9b1f8eebf99221d8b18a6c859af1db69abad75ea76480efa69",
+      "route/cashier-v3.php": "e0f09b8b5557da8a650a5ae3fb3370bd2b76f8e08005330505e279942c6e47cc",
+      "public/view_cashier_v3/assets/index-5763393d.css": "5763393dfd606f9c33ee746e0928b07238b4028c46063f7cf9f53d030fb4b67d",
+      "public/view_cashier_v3/assets/index-b2ee669c.js": "74cd195e6fd57994c7bb25dd74fec8b0c4dc4b0eab32a6f898bb00012e859c31",
+      "public/view_cashier_v3/index.html": "a204eae2f3d7f1f5b26bcf3dc5a91d19857b5b7e38a8597e33926e3ae77b8a00"
+    },
+    "new_empty_schema": 3
+  },
+  "010": {
+    "release": {
+      "result": "PASS",
+      "site": "010",
+      "source_commit": "e888c787e5d921284d18879167015d3431ce1a5c",
+      "files": 10,
+      "mode": 1,
+      "position_model": "independent",
+      "existing_business_unchanged": true,
+      "manual_counts": {
+        "basic_salary_manual": 0,
+        "basic_salary_month_control": 0,
+        "basic_salary_manual_audit": 0
+      },
+      "backup": "/www/backups/010/round7-e888c787e5d9-20261027174851",
+      "public_status": "200",
+      "public_assets_verified": [
+        "public/view_cashier_v3/assets/index-b2ee669c.js",
+        "public/view_cashier_v3/assets/index-5763393d.css"
+      ]
+    },
+    "same_snapshot_salary": {
+      "result": "PASS",
+      "site": "010",
+      "store_id": 9,
+      "rows": 9,
+      "numeric_fields": 36,
+      "same_snapshot": true,
+      "values_sha256": "5408d6834e940673c3f7e09de3a6e9b979115404ec80611f0a1b8827c65200d6"
+    },
+    "actual_service_queries": {
+      "result": "PASS",
+      "site": "010",
+      "authenticated_http_session": false,
+      "actual_service_scope": true,
+      "queries": {
+        "basic_salary_realtime": {
+          "end_date": "2026-10-27",
+          "rows": 9,
+          "total": 9,
+          "columns": [
+            "日期",
+            "门店",
+            "职务",
+            "姓名",
+            "门店现金业绩",
+            "门店现金提成",
+            "门店实际扣卡业绩",
+            "门店实际扣卡提成",
+            "门店耗卡业绩",
+            "门店耗卡提成",
+            "项目业绩",
+            "项目提点",
+            "项目提成",
+            "产品业绩",
+            "产品提点",
+            "产品提成",
+            "劳动业绩",
+            "劳动提点",
+            "劳动提成",
+            "绩效工资",
+            "指定客",
+            "好评数",
+            "餐补",
+            "加班",
+            "岗位补贴",
+            "其他调整",
+            "应发工资",
+            "考勤",
+            "医社保",
+            "公积金",
+            "个税",
+            "其他扣款",
+            "预支工资",
+            "实发工资",
+            "备注"
+          ],
+          "can_edit": true,
+          "can_freeze": true,
+          "result_sha256": "8a3b6a2b1e8b9b111e8376a287883f5b72e39741ca9b7d51d8ab5286d7b25046"
+        },
+        "basic_employee_summary": {
+          "end_date": "2026-10-27",
+          "rows": 7,
+          "total": 7,
+          "columns": [
+            "门店",
+            "员工",
+            "当前职位",
+            "销售业绩",
+            "劳动业绩",
+            "手工费",
+            "分配项目数",
+            "客次",
+            "指定客",
+            "劳动客单价",
+            "劳动提成（预计）",
+            "提成计算状态"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "da6f99cd6afec175045848adc4ae497af191d27d6fd6479da04b02c511da5af6"
+        },
+        "basic_cross_store_settlement": {
+          "end_date": "2026-10-26",
+          "rows": 1,
+          "total": 1,
+          "columns": [
+            "门店",
+            "储值对账金额",
+            "次卡对账金额",
+            "合计"
+          ],
+          "can_edit": false,
+          "can_freeze": false,
+          "result_sha256": "b88d120a846d6af2eaea04f6015e543f697b7714c92029e712aad6817102fe8f"
+        }
+      },
+      "write_denied": true
+    },
+    "permission_actions": {
+      "site": "010",
+      "ids": [
+        2351,
+        2352
+      ],
+      "position_tree_visible": true,
+      "roles_unchanged": true,
+      "automatic_grants": 0
+    },
+    "before_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "cbb9147a4ec0844451124d2cfd4944232c871c532cb26a0b9bb77081f6f9a76c",
+      "app/controller/cashier/v3/Report.php": "ef69a9faefe0b4eb0ea861b3b08e78b4b53da7160ed43bafe10e7a69cb3139d1",
+      "app/services/report/BasicSalaryManualServices.php": null,
+      "app/services/report/BasicSalaryReportServices.php": "162cf7437fce706f2b61f24b0667c2a1c6da154bff21a53b7e830651b41c7845",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "10b28136b6e11909f903f4b2275701774bb0b37b71343d21da6fcacbd2e36ee2",
+      "route/admin.php": "f69e1c5e4c11bd7239fd1f09ad6269b25fa605d81075501fddecf8821bf288f2",
+      "route/cashier-v3.php": "d8d86c083428008e99e0aef35c36073d3173f0d9ceaca1793ba0b319d2b8f08f",
+      "config/basic_report.php": "6774ff1d9a4ce7f9335ffbffab61a8b8d7f361daa8975c9863f75cc4f8cb655a",
+      "config/payroll.php": "f2e2f47d0963d0ad90aafdb1cff4ac147de16c2867b628982a8092db0b207087",
+      "public/system.html": "ede8c5abc997c2df51ea2b95ab0636e69905de4de5082117f3c3dc6ba66dc659",
+      "public/view_cashier_v3/index.html": "f899c05668ab0a66fc980421b0cf285eb1077145216a0d176430a3aef6ee33fb",
+      "public/view_mobile_v3/index.html": "b3da79f52d1b84ad5c8bc9dd6edcb489a81d2d5d8e9e52c7df616a8141ac0093"
+    },
+    "before_public_assets": {
+      "public/view_cashier_v3/assets/index-52ae1993.js": "ad4594d8b613bd1515807f1c9a8d18dc1778c8f83097dc8f0feea857b82b2427",
+      "public/view_cashier_v3/assets/index-3f750e37.css": "3f750e37a033c3da2ac65b824aa92cf4821b6489a5e07230fe759d04cf5fca3b",
+      "public/view_mobile_v3/assets/uni.ff98ee44.css": "ff98ee447111dbe49ae6a90e6bb41164ca03048ac66808f0fbd8791f37aba9a9",
+      "public/view_mobile_v3/assets/index-C6QfEbLu.js": "f720ecf5a7c69cc3806e7ccfb4d61f224ba3450b41453a4dede19754fbfd22d0",
+      "public/view_mobile_v3/assets/index-CQXQ6p9m.css": "81b7774471a5e25e6085d3fa289a6522c87fd67bea637632bc3b7a9009c9ae3e"
+    },
+    "old_business_digest_sha256": "72dbdfba5eed28199cd2116aefd035094354906f8e4ad15ab97d332668dd987e",
+    "installed_file_hashes": {
+      "app/controller/admin/v1/report/UnifiedReport.php": "63d93bda6f93b157153eff3f94addb4d6ca7bef81e1d1aa0962a4d733de739c7",
+      "app/controller/cashier/v3/Report.php": "e711a783263a96bd07fd5c5a2428c811974b398a421f432908642b8ff24aae19",
+      "app/services/report/BasicSalaryManualServices.php": "5323cf3220e19798a0c5a0ac1c084cea4a8bf2697ce6d49ba0e98d378a8acfba",
+      "app/services/report/BasicSalaryReportServices.php": "33ae17775d321f6f6ebb774e36a6a79dbe5b4a93ba7897c1fd27f30d560f7f6e",
+      "app/services/report/query/BasicBusinessQueryProvider.php": "fa3bf722148cb0d3f358a58e0a0e8159f304acfa57233d221b73fe212722c294",
+      "route/admin.php": "cb685e61b4415e9b1f8eebf99221d8b18a6c859af1db69abad75ea76480efa69",
+      "route/cashier-v3.php": "e0f09b8b5557da8a650a5ae3fb3370bd2b76f8e08005330505e279942c6e47cc",
+      "public/view_cashier_v3/assets/index-5763393d.css": "5763393dfd606f9c33ee746e0928b07238b4028c46063f7cf9f53d030fb4b67d",
+      "public/view_cashier_v3/assets/index-b2ee669c.js": "74cd195e6fd57994c7bb25dd74fec8b0c4dc4b0eab32a6f898bb00012e859c31",
+      "public/view_cashier_v3/index.html": "a204eae2f3d7f1f5b26bcf3dc5a91d19857b5b7e38a8597e33926e3ae77b8a00"
+    },
+    "new_empty_schema": 3,
+    "explicit_finance_grant": {
+      "approved_by_product_manager": true,
+      "position_id": 8,
+      "actions": [
+        "edit",
+        "freeze"
+      ],
+      "result": {
+        "result": "PASS",
+        "data": {
+          "position_id": 8,
+          "affected_accounts": 2,
+          "capability_ids": [
+            2351,
+            2352
+          ],
+          "source_version": 5,
+          "other_channels_unchanged": true,
+          "freeze_unchanged": true
+        },
+        "replay": false,
+        "backup": "/www/backups/010/round7-e888c787e5d9-20261027174851/finance-grant-before.json"
+      },
+      "verification": {
+        "result": "PASS",
+        "accounts": [
+          {
+            "admin_id": 38,
+            "edit": true,
+            "freeze": true,
+            "source_projection_consistent": true
+          },
+          {
+            "admin_id": 39,
+            "edit": true,
+            "freeze": true,
+            "source_projection_consistent": true
+          }
+        ],
+        "position_source_form_retains_both_actions": true,
+        "manual_rows": 0,
+        "freeze_rows": 0
+      },
+      "actual_account_ui_verified": "A0751 shows edit and freeze; edit mode entered and cancelled without saving"
+    }
+  }
+}

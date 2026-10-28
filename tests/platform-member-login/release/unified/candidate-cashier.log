@@ -1,0 +1,17 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 2049 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../candidate-cashier-v3-dist/index.html                                  0.48 kB │ gzip:   0.33 kB
+../../../candidate-cashier-v3-dist/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+../../../candidate-cashier-v3-dist/assets/index-95b0b53f.css                 713.58 kB │ gzip: 107.31 kB
+../../../candidate-cashier-v3-dist/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 271.25 kB
+../../../candidate-cashier-v3-dist/assets/index-13a4a26a.js                2,218.94 kB │ gzip: 659.59 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 2.95s
+{"tree":"1e98488cb7ac81f30b40df573ba8555c56d69c0a","variant":"candidate","terminal":"cashier-v3","output":"/private/tmp/platform-member-unified-20261028/candidate-cashier-v3-dist","record":"/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/platform-member-login/release/unified/candidate-cashier-v3-build.json","result":"PASS"}

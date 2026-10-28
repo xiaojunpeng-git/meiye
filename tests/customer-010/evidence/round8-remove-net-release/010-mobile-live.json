@@ -1,0 +1,58 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "phase": "live",
+  "authenticated_http_session": false,
+  "real_scope_resolver": true,
+  "persistent_business_writes": false,
+  "checks": [
+    {
+      "detail_mode": "labor",
+      "algorithm": "project_tiers",
+      "rows": 20,
+      "total": 79,
+      "existing_projection_sha256": "95de91b9844ea76549a9bb18bca227bae98a4e651104904942dd15035ae6f200",
+      "project_values_sha256": "e34bb58213c7aebcfe1f6e1c5b4fa4b02fc7b8baebfd48407b2e0ba54b966db9"
+    },
+    {
+      "detail_mode": "cash",
+      "algorithm": "project_tiers",
+      "rows": 17,
+      "total": 17,
+      "existing_projection_sha256": "0e8a11929b1753a04a20676b15097d9309e1e675a5a955ab32f21ed6c1f412f3",
+      "project_values_sha256": "d5c26fe4843ee025cbcf24111d5e31569d27715ad1c2b21a5fbbde1e4674c0df"
+    },
+    {
+      "detail_mode": "labor",
+      "algorithm": "project_tiers",
+      "rows": 20,
+      "total": 68,
+      "existing_projection_sha256": "721b1e102e51c85dc4ebe9a105c300d8658a445efb73fb3446a52d2fa1bf4294",
+      "project_values_sha256": "421b7aa8d2a7f0fcd50d30446951d443b4d6236c99fba18578f6c11002b12c0f"
+    },
+    {
+      "detail_mode": "cash",
+      "algorithm": "project_tiers",
+      "rows": 20,
+      "total": 25,
+      "existing_projection_sha256": "332da7744f5dce2c57915055ef197b0ebafbd902afaec1d5e112849178dfd1fe",
+      "project_values_sha256": "4f926ee68b74267c2276383220ad4f058f475392b080f2dee09c150dffb29da8"
+    },
+    {
+      "detail_mode": "labor",
+      "algorithm": "project_tiers",
+      "rows": 20,
+      "total": 57,
+      "existing_projection_sha256": "37f48206d94f9e351cf669303981bbec52ad346e4b5077075bd31a5d8bf9f8b6",
+      "project_values_sha256": "421b7aa8d2a7f0fcd50d30446951d443b4d6236c99fba18578f6c11002b12c0f"
+    },
+    {
+      "detail_mode": "cash",
+      "algorithm": "project_tiers",
+      "rows": 20,
+      "total": 39,
+      "existing_projection_sha256": "8d5b78c1e616548abe2c78d3bc7a7302b9baf4d88a5a8d566af8fb361635fe12",
+      "project_values_sha256": "4f926ee68b74267c2276383220ad4f058f475392b080f2dee09c150dffb29da8"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "output": "/tmp/beauty-round9-candidate-cashier",
+  "assets": {
+    "index.html": "e167dc571fc74e1721de84c867ec712ed6e03b02902d7ee45b9651f519171168",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "assets/index-553f822f.css": "553f822f802cc35ab8a7d98d169cc3946c29ddfe4e55eefe5123709e6d9892d4",
+    "assets/index-1b47e224.js": "ceb25b146a75b0e37e39eae1c52650f9a7e0c44d664fe6bce44464f24f951be7",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+  }
+}

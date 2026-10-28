@@ -1,0 +1,7 @@
+Compiler version: 5.26（uni-app x）VDOM模式
+Style isolation version: 2.0
+Compiling...
+​小程序端 style 暂不支持 span 标签选择器，推荐使用 class 选择器，详情参考：https://uniapp.dcloud.net.cn/tutorial/migration-to-vue3.html#style​
+项目  未检测出鸿蒙兼容性问题。
+DONE  Build complete.
+Run method: open Weixin Mini Program Devtools, import ../../../../../../private/tmp/beauty-round8-release/008 run.

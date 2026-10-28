@@ -1,0 +1,22 @@
+{
+  "commit": "0100bf165f3eaafe0dabec6e085c8796dcdb3cde",
+  "message": "010-R8 去掉员工业绩净销售汇总卡片",
+  "files": [
+    "tests/customer-010/evidence/round8-remove-net-card/calculated.ax.txt",
+    "tests/customer-010/evidence/round8-remove-net-card/calculated.png",
+    "tests/customer-010/evidence/round8-remove-net-card/existing.ax.txt",
+    "tests/customer-010/evidence/round8-remove-net-card/fixed-candidate.json",
+    "tests/customer-010/evidence/round8-remove-net-card/h5-build.json",
+    "tests/customer-010/evidence/round8-remove-net-card/h5-build.log",
+    "tests/customer-010/evidence/round8-remove-net-card/mp-weixin-build.json",
+    "tests/customer-010/evidence/round8-remove-net-card/mp-weixin-build.log",
+    "tests/customer-010/evidence/round8-remove-net-card/warehouse-contract.log",
+    "tests/customer-010/evidence/round8-remove-net-card/产品经理补验.json",
+    "tests/customer-010/evidence/round8-remove-net-card/固定补丁与自测-2026-10-27.md",
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue"
+  ],
+  "verification": "固定文件和补丁指纹一致；移动合同及H5/小程序构建通过",
+  "remaining_changes": " M tests/customer-010/evidence/round6-payroll-release/push.json\n?? tests/customer-010/evidence/round6-payroll-algorithm/candidate.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/008-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/010-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/rh-payload.tar.gz\n?? tests/customer-010/evidence/round8-release/008-payload.tar.gz\n?? tests/customer-010/evidence/round8-release/010-payload.tar.gz\n?? tests/customer-010/evidence/round8-release/rh-payload.tar.gz\n?? 前端代码/cashier-v3/node_modules\n?? 前端代码/inventory-vue3/node_modules\n",
+  "deployed": false,
+  "pushed": false
+}

@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+  "branch": "010/basic-report-menu",
+  "remote": "origin",
+  "first_attempt_exit_code": 128,
+  "retry": "success, remote hash verified"
+}

@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "store_id": 108,
+  "checks": [
+    {
+      "month": "2026-09",
+      "rows": 6,
+      "same_snapshot": true,
+      "sha256": "d4b56b5fc0bb3cbc9283a4737e29d92c05cb4904715deccf77dd5aa31ec5de00"
+    },
+    {
+      "month": "2026-10",
+      "rows": 6,
+      "same_snapshot": true,
+      "sha256": "5a5287da3e833102d0a6de4820674c21ac2b1e612e2fd71506b9179161b51a05"
+    }
+  ],
+  "remote_writes": 0,
+  "configuration_file_changed": false
+}

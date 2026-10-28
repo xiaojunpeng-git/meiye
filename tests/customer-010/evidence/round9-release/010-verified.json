@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+  "files": 10,
+  "cutover": "2026-11-01",
+  "mode": 1,
+  "position_model": "independent",
+  "business_write": false,
+  "backup": "/www/backups/010/round9-5cd3f53c3efb-20261028020239",
+  "public_status": "200",
+  "public_assets_verified": [
+    "assets/index-1b47e224.js",
+    "assets/index-553f822f.css"
+  ],
+  "business_unchanged": true,
+  "real_service_query": "PASS"
+}

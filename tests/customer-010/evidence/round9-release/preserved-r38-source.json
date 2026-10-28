@@ -1,0 +1,17 @@
+{
+  "source_tree": "c7128a6258b45eb4dc6f3630e6666176bdc95a05",
+  "source_commits": [
+    "b1cd302c",
+    "625a0280"
+  ],
+  "reason": "retain deployed R38 inventory statistics, warehouse inheritance, units, return, pagination and expiry batch detail",
+  "files": {
+    "前端代码/cashier-v3/src/components/ExpiryBatchDetail.vue": "1193eaf8bc6d7af8274a1d47bbffcfdccc742e5854ea23d8731e8f97e19b71b4",
+    "前端代码/cashier-v3/src/views/ProductDashboardView.vue": "53495a197cbf7197a52fa4cc024cab19c229867b6677b6d9e8fe8b90b8c7b460",
+    "前端代码/inventory-vue3/src/App.vue": "5e514e10e8228fbce9c9697b36a64944c3a53a30987fc5030bae246782e367e6",
+    "前端代码/inventory-vue3/src/components/InventoryOperationalUnifiedQueryToolbar.vue": "5bbd5bd5bfc542d7c26ebd2b562e99fb4fa134134ed686fdb5ca380002bc2eff",
+    "前端代码/inventory-vue3/src/services/inventoryApi.js": "d45bbf09884a9a04eb6fb9f544c268078d073fdcaa9f95c0d2685ba206a4e166",
+    "前端代码/inventory-vue3/src/statusLabels.js": "94ff298f042ef0b3f4e70d080d1a7e9a6835a1518fe1914d901ccb99436f7c74",
+    "前端代码/inventory-vue3/src/styles.css": "c032c5016b803505d7a864ca752be3d22e73693a38900fcc8223f0b260871a12"
+  }
+}

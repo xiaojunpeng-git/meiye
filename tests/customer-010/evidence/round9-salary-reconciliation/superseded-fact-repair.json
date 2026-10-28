@@ -1,0 +1,34 @@
+{
+  "decision": "superseded_by_2026-11-01_cutover",
+  "remote_writes": 0,
+  "deployed": false,
+  "removed_source_sha256": {
+    "后端代码/app/services/payroll/PositionSalaryRuleResolver.php": "86d4be29c876890dd007ced97ae5930736458848350b8c5d33736405f22fec97",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "e4a53bea7ba55aab7fe6377dc1147cf99ad94c59a9b9f4e26840b55c6a95bb74",
+    "后端代码/app/services/report/BasicSalaryReportServices.php": "3ce61dbdcefd7f681911ae73d34023dc5792a695584ba4c8dfe3e977c6e035dc",
+    "scripts/payroll/round7_test_runtime.py": "d77c2627284e23449c49a5be914479c4944be040b14413133965a7038af03307",
+    "tests/customer-010/payroll-local.php": "bd7af50696b2b0edfc0c27737185e0c42f075c9baf9fa473ede918e94b73b1f6",
+    "后端代码/app/services/payroll/PayrollHistoricalIdentityReadServices.php": "b9d7677642216c478d7029423361fc31ea2829c8b575045060baed91adc5c53b",
+    "后端代码/app/services/report/HistoricalFactItemReadServices.php": "d7ad27c1904c8688e6c24219afcda1f4817e38797c42d8e37092bbc08c66ade6",
+    "后端代码/database/upgrades/2026-10-28-工资历史身份/01-结构升级.sql": "a23e1277987220f79f6d01f9710dafaa3822d0ee84c5ef85e4be3faa34061b0e",
+    "后端代码/database/upgrades/2026-10-28-工资历史身份/02-历史业绩项目身份.sql": "2d0d3af9ab2162428af8e4974d85873f7cd12fe98085aef01baa850c8360a34e",
+    "tests/customer-010/round9-original-facts-local.php": "2af05edcfecfd0fbd725c6975032e57d57e3d77519f868ae38595eaed5530367",
+    "tests/customer-010/round9-source-compatibility.php": "14f077387f2b8edeb8d34b3594604bc513428ae6783bac0641feb2b89ef4bd87",
+    "scripts/payroll/round9-attribution-item-plan.py": "506e13974adc8e8b8e9c02f8706d72e2e5c10350d600a6efb0ac6e25b96ff17e",
+    "scripts/payroll/round9-candidate-readonly.py": "2e7974c40f621c9fcbac0ef9fba78a5d104a1ae941a5f4c5d43e203857ea0be2",
+    "scripts/payroll/round9-extract-receipt-evidence.py": "4941fd10c89658fac7bcd8cdd160a221d2921cb4facc67d5fe46d7c746125e5c",
+    "scripts/payroll/round9-identity-plan.py": "56f68009cc550a6e5b1a2e809e6c86637218638d3619c2641bb4dfd061ad3ca4",
+    "scripts/payroll/round9-recharge-fact-plan.py": "1a383aff3b4a66a5a629f6497074c03208399c4bb950cbd3b6683db135aa178f",
+    "scripts/payroll/round9-sale-receipt-plan.py": "6405a3adb9af6566313959ffab78a20bf9188644a91d090cddbba9805b70bbae",
+    "scripts/payroll/round9-service-fact-plan.py": "4de0b2d34d21c27e1a3a605a767b7c1d3957ead3bbec9038a9c310ec2bbef811",
+    "scripts/payroll/round9_fact_common.py": "f7707b71086fed665d340f230ef2b97eccafe0447b82170410441da3abdddb96",
+    "scripts/payroll/run-round9-original-facts-tests.py": "dfd501a32e003d244f71818d31e69237f5b743aa506a5a38168d8a8e28e8dbef",
+    "scripts/payroll/run-round9-tests.py": "8a89982ab682e6d61bafaaab31964088e3f32ecb05aa0ea51fa676df3f6199f5"
+  },
+  "additional_obsolete_readonly_scripts_removed": {
+    "scripts/payroll/round9-graph-readonly.php": "cb3abe8233a94d16ae42215aa913d2e7e326ad0aa826bd8b9622bb8941676830",
+    "scripts/payroll/round9-identity-readonly.php": "50198b3ed8b28dd4d9427a393c77953c6a382fdcea5f4f7a29bcbc8e87098794",
+    "scripts/payroll/round9-salary-readonly.php": "99435e7378410cc6204eae2b3c576dedc4735374be7947d675526dd7c78708dd",
+    "scripts/payroll/round9-source-rule-readonly.php": "93335d481fcaffd2211c6b4b128974ef6a308c944a433d2361715cfe3b553801"
+  }
+}

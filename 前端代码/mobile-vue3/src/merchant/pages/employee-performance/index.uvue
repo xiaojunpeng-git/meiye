@@ -23,7 +23,7 @@
 						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
 							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">商品名称：{{ item.itemName || '—' }}</text><text class="employee-performance__detail-amount">{{ detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
-							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">手工费：{{ item.displayLaborFee || '—' }}</text></view>
+							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">项目数：{{ item.displayProjectCount || '—' }}</text><text v-if="detailMode === 'labor' && !calculated">手工费：{{ item.displayLaborFee || '—' }}</text></view>
                             <view v-if="detailMode === 'labor' && calculated" class="employee-performance__commission" @tap="toggleCommission(item.factId)">
                                 <text>劳动提成（预计）：{{ item.displayCommission || '待核对' }}</text><text>{{ expandedFact === item.factId ? '收起' : '计算依据' }}</text>
                             </view>
@@ -135,8 +135,10 @@
 	function installProjection(payload : any, append : boolean) : void {
 		employeeName.value = String(payload.employee != null ? payload.employee.name || '员工' : '员工')
 		periodLabel.value = String(payload.period != null ? payload.period.label || '当前范围' : '当前范围')
-		metrics.value = Array.isArray(payload.metrics) ? payload.metrics : []
+        // 净销售基数仅在计算依据中展示；计算法另隐藏手工费，项目数与后端计算保持不变。
         calculated.value = payload.laborAlgorithm != null && payload.laborAlgorithm.code === 'project_tiers'
+        let nextMetrics = Array.isArray(payload.metrics) ? payload.metrics : []
+        metrics.value = nextMetrics.filter((metric : any) => metric.code !== 'staff_net_sales' && (!calculated.value || metric.code !== 'staff_labor_fee'))
         if (!append) expandedFact.value = ''
 		let nextDetails = Array.isArray(payload.details) ? payload.details : []
 		details.value = append ? details.value.concat(nextDetails) : nextDetails
@@ -185,6 +187,8 @@
 	.employee-performance__detail-date { flex-shrink: 0; margin-left: 10px; font-size: 11px; color: #8a99aa; }
 	.employee-performance__detail-item { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__detail-amount { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; color: #40546b; }
+	/* 项目数两种模式都显示；可修改模式同时保留手工费，窄屏自然换行。 */
+	.employee-performance__detail-result { flex-wrap: wrap; column-gap: 10px; row-gap: 4px; }
 	.employee-performance__detail-result text { font-size: 13px; font-weight: 700; line-height: 20px; color: #173451; }
     .employee-performance__commission { display: flex; flex-direction: row; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #1677cc; }
     .employee-performance__commission-proof { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 10px; background-color: #f4f8fc; font-size: 12px; color: #40546b; }

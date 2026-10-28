@@ -1,0 +1,31 @@
+{
+  "business_commit": "872b22e34fa73973be6cb39d81ab5d97cf3a1899",
+  "message": "010-R8 手机员工业绩手工费显隐与明细项目数闭环",
+  "actual_files": [
+    "scripts/payroll/round8-component-preview.mjs",
+    "scripts/payroll/run-round8-tests.py",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/backend-test.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/calculated-proof.ax.txt",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/calculated.png",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/existing.ax.txt",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/existing.png",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/fixed-candidate.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/fixture-projections.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/h5-artifacts.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/h5-build.log",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/mini-artifacts.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/mini-build.log",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/warehouse-contract.log",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/产品经理验收记录.json",
+    "tests/customer-010/evidence/round8-mobile-fee-project-count/固定候选与自测-2026-10-27.md",
+    "tests/customer-010/round8-mobile-detail.php",
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php"
+  ],
+  "accepted_source_hash_check": "PASS",
+  "validation": "65项隔离测试、移动合同回归、PHP语法、H5/小程序构建通过；本次仅归档，代码未再变更",
+  "remaining_worktree_changes": " M tests/customer-010/evidence/round6-payroll-release/push.json\n?? tests/customer-010/evidence/round6-payroll-algorithm/candidate.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/008-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/010-payload.tar.gz\n?? tests/customer-010/evidence/round6-payroll-release/rh-payload.tar.gz\n?? 前端代码/cashier-v3/node_modules\n?? 前端代码/inventory-vue3/node_modules\n",
+  "deployed": false,
+  "pushed": false
+}

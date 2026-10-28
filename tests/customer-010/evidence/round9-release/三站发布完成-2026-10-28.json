@@ -1,0 +1,77 @@
+{
+  "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+  "fix_commit": "59f7cdc82440851ddc750be363846e8b70a69964",
+  "date": "2026-10-28",
+  "deployment_order": [
+    "rh verified",
+    "origin push verified",
+    "008 verified",
+    "010 verified"
+  ],
+  "instances": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+      "files": 9,
+      "cutover": "",
+      "mode": 0,
+      "position_model": "legacy",
+      "business_write": false,
+      "backup": "/www/backups/rh/round9-5cd3f53c3efb-20261028015959",
+      "public_status": "200",
+      "public_assets_verified": [
+        "assets/index-1b47e224.js",
+        "assets/index-553f822f.css"
+      ],
+      "business_unchanged": true,
+      "real_service_query": "PASS"
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+      "files": 9,
+      "cutover": "",
+      "mode": 0,
+      "position_model": "legacy",
+      "business_write": false,
+      "backup": "/www/backups/008/round9-5cd3f53c3efb-20261028020217",
+      "public_status": "200",
+      "public_assets_verified": [
+        "assets/index-1b47e224.js",
+        "assets/index-553f822f.css"
+      ],
+      "business_unchanged": true,
+      "real_service_query": "PASS"
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "source_commit": "5cd3f53c3efb0e6da96354e8ff1ba8f568f1371b",
+      "files": 10,
+      "cutover": "2026-11-01",
+      "mode": 1,
+      "position_model": "independent",
+      "business_write": false,
+      "backup": "/www/backups/010/round9-5cd3f53c3efb-20261028020239",
+      "public_status": "200",
+      "public_assets_verified": [
+        "assets/index-1b47e224.js",
+        "assets/index-553f822f.css"
+      ],
+      "business_unchanged": true,
+      "real_service_query": "PASS"
+    }
+  },
+  "real_browser": "010-browser-check.json",
+  "database_migration": false,
+  "business_data_modified": false,
+  "mini_program_upload": false,
+  "import_plan_updated": {
+    "path": "/Users/xiaojunpeng/Documents/Codex/2026-10-23/009-2/outputs/007导入010数据方案.md",
+    "section": "31.26",
+    "sha256": "ba82b5de0250cb3c3c9c09db621387ddfec5ce2dec380711e77722b5927c4e35"
+  },
+  "remaining_work": "无本轮必需发布步骤；10月最终历史工资同步为独立数据导入任务"
+}

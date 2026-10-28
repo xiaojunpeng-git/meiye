@@ -1,0 +1,22 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "store_id": 1,
+  "checks": [
+    {
+      "month": "2026-11",
+      "rows": 12,
+      "same_snapshot": true,
+      "sha256": "ddf8a96b0be1a67f656138a7f6d500c360de7379a656828fe21be4d2967f9075"
+    },
+    {
+      "month": "2026-09",
+      "rows": 9,
+      "payable": 27752,
+      "actual": 27752,
+      "historical_readonly": true
+    }
+  ],
+  "remote_writes": 0,
+  "configuration_file_changed": false
+}

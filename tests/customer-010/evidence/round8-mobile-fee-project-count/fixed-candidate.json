@@ -1,0 +1,16 @@
+{
+  "baseline_head": "a9572429865cdbbf5acfe49665975b5357040e05",
+  "main_checkout_head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "files": {
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue": "0ce620bfd2300bd647ab6b3fd59dbaa728da2f63de78042b7ce562e7c424bd76",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php": "331183fc4c29f612f4de435d6d9826a373f404d1ae767013b1428c0f0dcebf07",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "313e8a61178f189e3f368f9ccd62c3ba4025c6a985fd685e0ca8c0022b4917c7",
+    "tests/customer-010/round8-mobile-detail.php": "3742a4d8fee394d84ab6022348ffbc52ff80f97f52830c76cfbdb33d7580d20c",
+    "scripts/payroll/run-round8-tests.py": "4d5e774e4405f2f316bf0976df1e9f9f08d81405278a4ff152f9d2ecc77f0215",
+    "scripts/payroll/round8-component-preview.mjs": "1122c456b6aa02b8fc58d1a2f4dbccc4da922ea2c623ac2f9bc4b0edaa4d6491"
+  },
+  "fingerprint": "faf6663de6f67c8509015370c9fa3a7df7e72f3f3500f5b7ae1d297862d845b4",
+  "remote": "not applicable: local-only round",
+  "deployment": false,
+  "committed": false
+}

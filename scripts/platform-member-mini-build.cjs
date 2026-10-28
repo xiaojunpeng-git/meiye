@@ -1,0 +1,3 @@
+// Prepare only the explicitly named 008 member app from fixed Git inputs.
+const fs=require('fs'),path=require('path'),Module=require('module');const original=path.resolve('scripts/store-address-mini-build.cjs');let code=fs.readFileSync(original,'utf8');
+for(const[a,b]of[['tests/store-address-layout/release/plan.json','tests/platform-member-login/release/unified/mini-plan.json'],['/private/tmp/store-address-mini-008-20261027','/private/tmp/platform-member-mini-008-20261028']]){if(code.split(a).length!==2)throw Error('Compiler adapter drift');code=code.replace(a,b);}const child=new Module(original,module);child.filename=original;child.paths=Module._nodeModulePaths(path.dirname(original));child._compile(code,original);

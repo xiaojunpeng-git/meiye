@@ -1,0 +1,24 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "salary": {
+    "rows": 6,
+    "export_rows": 6,
+    "source": "unified_business_facts",
+    "can_edit": true,
+    "can_freeze": true,
+    "summary_sha256": "b36537178b6efc9410322180f1e57442618d85b00a698e927d73869f89d6134a"
+  },
+  "other_reports": {
+    "basic_employee_summary": {
+      "rows": 2,
+      "total": 2
+    },
+    "basic_cross_store_settlement": {
+      "rows": 0,
+      "total": 0
+    }
+  },
+  "remote_business_writes": 0,
+  "authenticated_http_session": false
+}

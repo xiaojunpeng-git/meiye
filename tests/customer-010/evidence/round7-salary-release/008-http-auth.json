@@ -1,0 +1,14 @@
+{
+  "adminapi/report/basic/salary/save": {
+    "status": 410000,
+    "message": "请登录"
+  },
+  "adminapi/report/basic/salary/freeze": {
+    "status": 410000,
+    "message": "请登录"
+  },
+  "cashierapi/v3/report/basic/salary/save": {
+    "status": 410000,
+    "message": "请登录"
+  }
+}

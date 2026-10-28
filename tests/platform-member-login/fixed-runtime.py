@@ -1,10 +1,10 @@
 """Run the real DB suite with immutable candidate PHP class blobs, never replacing shared source."""
-import base64,hashlib,io,json,pathlib,re,subprocess,tarfile
-E=pathlib.Path(__file__).parent/'evidence';plan=json.loads((E/'fixed.json').read_text());mapping={};archive=io.BytesIO();prefix='/tmp/platform-member-fixed-'+plan['sourceTree'][:12]
+import base64,hashlib,io,json,pathlib,re,subprocess,tarfile,sys
+E=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else pathlib.Path(__file__).parent/'evidence';plan=json.loads((E/'fixed.json').read_text());mapping={};archive=io.BytesIO();prefix='/tmp/platform-member-fixed-'+plan['sourceTree'][:12]
 with tarfile.open(fileobj=archive,mode='w') as tar:
  for f,h in plan['files'].items():
   if not f.endswith('.php'):continue
-  data=subprocess.check_output(['git','show',plan['sourceTree']+':'+f]);text=data.decode();ns=re.search(r'namespace\s+([^;]+);',text);cl=re.search(r'^(?:abstract )?class\s+(\w+)',text,re.M)
+  data=subprocess.check_output(['git','show',plan['sourceTree']+':'+f]);text=data.decode();ns=re.search(r'namespace\s+([^;]+);',text);cl=re.search(r'^(?:abstract |final )?class\s+(\w+)',text,re.M)
   if not ns or not cl:continue
   dest=prefix+'/'+cl[1]+'.php';mapping[ns[1]+'\\'+cl[1]]=dest
   item=tarfile.TarInfo(dest.lstrip('/'));item.mode=0o444;item.size=len(data);tar.addfile(item,io.BytesIO(data))

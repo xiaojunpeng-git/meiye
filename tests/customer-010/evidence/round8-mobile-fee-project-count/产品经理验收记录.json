@@ -1,0 +1,16 @@
+{
+  "round": "010-R8",
+  "accepted_fingerprint": "faf6663de6f67c8509015370c9fa3a7df7e72f3f3500f5b7ae1d297862d845b4",
+  "product_manager_reply": "确认验收通过",
+  "accepted_scope": "项目数两种模式始终展示；计算法隐藏汇总和劳动明细手工费；可修改模式保留手工费；原算法和业务数据不变",
+  "acceptance_date": "2026-10-27",
+  "precommit_fingerprint_recheck": "PASS",
+  "tests": "65项隔离后端检查、mobile-warehouse回归、PHP语法、H5与mp-weixin本地构建通过",
+  "deployment_authorized": false,
+  "push_authorized": false,
+  "unrelated_changes_excluded": [
+    "round6-payroll-release/push.json",
+    "旧发布压缩包",
+    "node_modules"
+  ]
+}

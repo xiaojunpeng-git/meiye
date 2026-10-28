@@ -1,0 +1,6 @@
+{
+  "backup": "/www/backups/008/round8-0100bf165f3e-20261027231523",
+  "source_commit": "0100bf165f3eaafe0dabec6e085c8796dcdb3cde",
+  "installer_sha256": "f3113cb8196b7e3d43364ec2469f7617ee9b5ae1cc760eb29284bdaaae1f77c6",
+  "probe_sha256": "90a5a04ea11a47d5395653fc98bd97113009371a01541ba5782a457579f105eb"
+}

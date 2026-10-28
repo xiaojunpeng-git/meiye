@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "tool": "polling_task_result",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "taskId": "confirmation_upload_a7b2949c-637a-4647-a02f-6fc75f491d43",
+    "taskType": "confirmation_upload",
+    "status": "success",
+    "createdAt": 1793114201804,
+    "updatedAt": 1793114210381,
+    "detail": "execution_success",
+    "result": {
+      "info": {
+        "size": {
+          "total": 1753423,
+          "packages": [
+            {
+              "name": "TOTAL",
+              "size": 1753423
+            }
+          ]
+        }
+      },
+      "success": true
+    }
+  }
+}

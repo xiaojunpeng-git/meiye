@@ -1,0 +1,90 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "authenticated_http_session": false,
+  "actual_service_scope": true,
+  "queries": {
+    "basic_salary_realtime": {
+      "rows": 16,
+      "total": 16,
+      "columns": [
+        "日期",
+        "门店",
+        "职务",
+        "职级",
+        "姓名",
+        "门店现金业绩",
+        "门店现金提成",
+        "门店实际扣卡业绩",
+        "门店实际扣卡提成",
+        "门店耗卡业绩",
+        "门店耗卡提成",
+        "项目业绩",
+        "项目提点",
+        "项目提成",
+        "产品业绩",
+        "产品提点",
+        "产品提成",
+        "劳动业绩",
+        "劳动提点",
+        "劳动提成",
+        "绩效工资",
+        "指定客",
+        "好评数",
+        "餐补",
+        "加班",
+        "岗位补贴",
+        "其他调整",
+        "应发工资",
+        "考勤",
+        "医社保",
+        "公积金",
+        "个税",
+        "其他扣款",
+        "预支工资",
+        "实发工资",
+        "备注"
+      ],
+      "can_edit": true,
+      "can_freeze": true,
+      "result_sha256": "cbf0a3b929373415ee11f5db081d25fb80af004332b453d3d0ab9397aba717b7"
+    },
+    "basic_employee_summary": {
+      "rows": 12,
+      "total": 12,
+      "columns": [
+        "门店",
+        "员工",
+        "当前职务",
+        "当前职级",
+        "销售业绩",
+        "劳动业绩",
+        "手工费",
+        "分配项目数",
+        "客次",
+        "指定客",
+        "劳动客单价"
+      ],
+      "can_edit": false,
+      "can_freeze": false,
+      "result_sha256": "60454fe17e9708e758c887c07902abfd7626548f353325dd9f61f8e86d5f209b"
+    },
+    "basic_cross_store_settlement": {
+      "rows": 0,
+      "total": 0,
+      "columns": [
+        "门店",
+        "结算应付门店ID",
+        "权益使用门店ID",
+        "储值应付",
+        "储值应收",
+        "次卡应付",
+        "次卡应收"
+      ],
+      "can_edit": false,
+      "can_freeze": false,
+      "result_sha256": "643d5437104296e21d906ecb15b2c96ad278f20cfc4af53b12bb6069bd853726"
+    }
+  },
+  "write_denied": true
+}

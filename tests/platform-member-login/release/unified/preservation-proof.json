@@ -1,0 +1,32 @@
+{
+  "sourceTree": "1e98488cb7ac81f30b40df573ba8555c56d69c0a",
+  "originalBusinessCommit": "a04265794299152f083c1d84ca3db825ffe7d70a",
+  "preservedLiveRelease": "42709bdd",
+  "originalAcceptedPatch": "9f520b496aed4b74f2941062ddf57046cce16e39a37a82ca4b83e89e07e54f71",
+  "preservedBaselineFiles": [
+    "前端代码/cashier-v3/src/views/BasicReportsView.vue",
+    "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue",
+    "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+    "后端代码/app/services/payroll/SalaryStatisticsSourcePolicy.php",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+    "后端代码/app/services/report/BasicSalaryManualServices.php",
+    "后端代码/app/services/report/BasicSalaryReportServices.php",
+    "后端代码/app/services/report/SavedSalaryReportReadServices.php",
+    "后端代码/app/services/report/query/BasicBusinessQueryProvider.php",
+    "后端代码/config/payroll.php"
+  ],
+  "preservationPatchSHA256": "e719c7e8f71b8d751b09c318739f9de7a021e1188c54ad10df3fc91788e9da95",
+  "businessFilesIdentical": true,
+  "adminSourceIdentical": true,
+  "memberSourceIdentical": true,
+  "supplementalAcceptanceRequired": true,
+  "supplementalAcceptance": false,
+  "deploymentStarted": false,
+  "cashierBaselineReproduced": {
+    "rh": true,
+    "008": true,
+    "010": true
+  },
+  "adminBaselineByteParity": "PASS; all production modules identical; one Webpack lazy filename/content-hash reference differs, normalized references exactly equal"
+}

@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "mode": 1,
+  "position_model": "independent",
+  "backend_drift": [],
+  "mobile_asset_drift": [],
+  "baseline_result": "PASS"
+}

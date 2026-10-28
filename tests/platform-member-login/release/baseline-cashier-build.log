@@ -1,0 +1,17 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 2044 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../baseline-cashier-v3-dist/index.html                                  0.48 kB │ gzip:   0.33 kB
+../../../baseline-cashier-v3-dist/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+../../../baseline-cashier-v3-dist/assets/index-bd1ae8c0.css                 711.25 kB │ gzip: 106.90 kB
+../../../baseline-cashier-v3-dist/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 271.25 kB
+../../../baseline-cashier-v3-dist/assets/index-adaa367c.js                2,205.19 kB │ gzip: 654.93 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 3.04s
+{"tree":"6c9d13dfc6b4858582b31dfa8841669a3b3a5745","variant":"baseline","terminal":"cashier-v3","output":"/private/tmp/platform-member-release-20261028/baseline-cashier-v3-dist","record":"/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/platform-member-login/release/baseline-cashier-v3-build.json","result":"PASS"}

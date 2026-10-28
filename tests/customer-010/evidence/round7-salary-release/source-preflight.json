@@ -1,0 +1,17 @@
+{
+  "commit": "e888c787e5d921284d18879167015d3431ce1a5c",
+  "baseline_tree": "4ab3b084eaa9be0a3cca92e6027b8b5f01f6e5e8",
+  "baseline_build_source": "/tmp/beauty-round7-baseline-4ab3b084eaa9",
+  "targets": [
+    "rh",
+    "008",
+    "010"
+  ],
+  "order": [
+    "rh_deploy_verify",
+    "push",
+    "008_deploy_verify",
+    "010_deploy_verify"
+  ],
+  "mini_upload": false
+}

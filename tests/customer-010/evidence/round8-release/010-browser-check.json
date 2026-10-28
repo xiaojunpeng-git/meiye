@@ -1,0 +1,10 @@
+{
+  "site": "010",
+  "result": "PASS",
+  "authenticated_http_session": true,
+  "detail_project_count_lines": 17,
+  "handwork_fee_absent": true,
+  "summary_project_count_visible": true,
+  "existing_commission_proof_visible": true,
+  "private_screenshot": "/tmp/beauty-round8-private-online/010-mobile.png"
+}

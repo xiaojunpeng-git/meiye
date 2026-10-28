@@ -1,0 +1,20 @@
+[
+  {
+    "test": "saved-history",
+    "exit_code": 0,
+    "output": "{\"result\": \"PASS\", \"checks\": 228, \"historical_rows\": 9, \"payable\": 27752, \"actual\": 27752, \"only_legacy_tables\": true, \"remote_writes\": 0, \"temporary_local_database\": true}",
+    "error": ""
+  },
+  {
+    "test": "november-original-algorithm-and-manual",
+    "exit_code": 0,
+    "output": "{\"result\":\"PASS\",\"checks\":44,\"isolated_fixture_database\":true,\"persistent_business_writes\":false}\n",
+    "error": ""
+  },
+  {
+    "test": "blank-config-original-algorithm",
+    "exit_code": 0,
+    "output": "{\"result\":\"PASS\",\"checks\":44,\"isolated_fixture_database\":true,\"persistent_business_writes\":false}\n",
+    "error": ""
+  }
+]
