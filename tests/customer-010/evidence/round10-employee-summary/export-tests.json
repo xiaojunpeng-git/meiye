@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "checks": 7,
+  "columns": [
+    "门店",
+    "职务",
+    "姓名",
+    "现金业绩",
+    "劳动业绩",
+    "客数",
+    "客单价",
+    "项目数",
+    "指定客",
+    "服务总新客",
+    "成交总新客",
+    "新客成交率%"
+  ],
+  "export_rows": 30,
+  "source": "existing CSV implementation + actual PHP/SQL/Host synthetic output"
+}

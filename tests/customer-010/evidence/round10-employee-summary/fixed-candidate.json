@@ -1,0 +1,87 @@
+{
+  "round": 10,
+  "date": "2026-10-28",
+  "baseline_HEAD": "42709bddc562058c6c7b24ed4563c43046299340",
+  "source_root": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu",
+  "file_groups": {
+    "backend": [
+      "\u540e\u7aef\u4ee3\u7801/app/services/report/BasicActivityReportServices.php",
+      "\u540e\u7aef\u4ee3\u7801/app/services/report/EmployeeSummaryNewCustomerReadServices.php"
+    ],
+    "tests": [
+      "tests/customer-010/round10-employee-summary-local.php",
+      "tests/customer-010/round10-export-contract.mjs"
+    ],
+    "scripts": [
+      "scripts/payroll/run-round10-tests.py",
+      "scripts/payroll/round10-readonly-candidate.php",
+      "scripts/payroll/round10-browser-fixture.py"
+    ]
+  },
+  "sha256": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/report/BasicActivityReportServices.php": "67edfbcac0e0433c7909ed3389380bf3186e0c7c4bba3bd730656aa406841259",
+    "\u540e\u7aef\u4ee3\u7801/app/services/report/EmployeeSummaryNewCustomerReadServices.php": "ad814dac53e2dbe4cad1d545fb9d04d5d7f87893f038887f13ea9586aebec7d7",
+    "tests/customer-010/round10-employee-summary-local.php": "f733fc90739744fb69224ad73a2f3f11badbe57f7cbabddc642f2013641d6495",
+    "tests/customer-010/round10-export-contract.mjs": "7fd6bac8ac47a169c3eadc4dc8d81264164f5fdfce77bd336755d1c3a954f5d6",
+    "scripts/payroll/run-round10-tests.py": "996bf68859fed5df4c84394bcf4b0bcdf8945ee8d3e2e0cd22bd32d3c87b0d1f",
+    "scripts/payroll/round10-readonly-candidate.php": "51ead0b8592538c34c624f1386f30357f2f8ef7818ca53cf8e9b4328627b486c",
+    "scripts/payroll/round10-browser-fixture.py": "94f17eca87630c85280cdc72368477787b9025c5bba297332c2034124a65c9ba"
+  },
+  "patch_fingerprint": "cd6239883b153dd8d4822bb0b3ba5758445c27962dd9ba6ae8317e7f2aa87c73",
+  "frontend_source_changed": false,
+  "frontend_build_required": false,
+  "database_migrations": [],
+  "routes_or_permissions_changed": false,
+  "scope": "Employee summary only: exact 12 default labels/order from 007; report-local original new-customer cohorts and 298 threshold; integer percent truncation; existing metrics unchanged",
+  "verification": {
+    "local_integration_checks": 783,
+    "csv_checks": 7,
+    "browser_checks": 8,
+    "php_lint": "PASS",
+    "diff_check": "PASS",
+    "010_readonly_existing_rows_equal": 8,
+    "010_readonly_source_gap_rows": 7,
+    "remote_writes": 0,
+    "indexed_query_families": 5
+  },
+  "known_limitations": [
+    "7 of 8 sampled employee rows lack verifiable historical source attribution; new three metrics remain unknown, not zero. Existing values unchanged.",
+    "No data import/backfill. Missing evidence recorded in import plan. No claim of full parity with 007 data."
+  ],
+  "preserved": [
+    "Other 9 report definitions",
+    "Existing employee metrics",
+    "Salary algorithms",
+    "Mobile algorithms",
+    "Active internal fields and consumers",
+    "Existing generic frontend and CSV export"
+  ],
+  "comments_updated": [
+    "\u540e\u7aef\u4ee3\u7801/app/services/report/BasicActivityReportServices.php",
+    "\u540e\u7aef\u4ee3\u7801/app/services/report/EmployeeSummaryNewCustomerReadServices.php"
+  ],
+  "cleanup": "No replaced unused branch introduced; active internal fields retained with default visibility disabled.",
+  "evidence": [
+    "local-integration.json",
+    "export-tests.json",
+    "browser-tests.json",
+    "lint.json",
+    "010-readonly-candidate.json",
+    "007-column-contract.json",
+    "candidate-left.png",
+    "candidate-right.png",
+    "import-plan-update.json"
+  ],
+  "status": {
+    "development_complete": true,
+    "selftest_pass": true,
+    "product_manager_accepted": false,
+    "committed": false,
+    "deployed": false
+  },
+  "excluded_unrelated_changes": [
+    "round6 push.json",
+    "prior release tarballs and dependency links",
+    "main checkout other-task changes"
+  ]
+}
