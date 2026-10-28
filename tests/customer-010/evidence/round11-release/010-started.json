@@ -1,0 +1,7 @@
+{
+  "source_commit": "fdefbefb8591cfca481746a17ffb2bc6bd464534",
+  "backup": "/www/backups/010/round11-fdefbefb8591-20261029005637",
+  "installer_sha256": "96d4faa233c7457f54da5d85756c1f84a3f2dc3272fd441bb6e6b6cd7d8f9068",
+  "metadata_installer_sha256": "dca08bfc36e374fd231ec890dd30172cfd4adefb48a38a2a6a389eeb83e8fb80",
+  "payload_sha256": "52c36c60c15adf7fe00a7209340b15afce44413ec6839875b190f2a372faa937"
+}
