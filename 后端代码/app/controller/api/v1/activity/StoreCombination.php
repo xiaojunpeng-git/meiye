@@ -12,6 +12,7 @@ namespace app\controller\api\v1\activity;
 
 use app\Request;
 use app\services\activity\combination\StoreCombinationServices;
+use app\services\activity\combination\MemberCombinationRecordServices;
 use app\services\activity\combination\StorePinkServices;
 use app\services\other\QrcodeServices;
 use app\services\store\SystemStoreServices;
@@ -109,6 +110,25 @@ class StoreCombination
 		$user = $request->user();
         $data = $this->services->getPinkInfo($uid, (int)$id, $user->toArray());
         return app('json')->successful($data);
+    }
+
+    /**
+     * 当前登录会员的拼团记录。
+     * UID 只取认证上下文，禁止客户端指定其他会员读取记录。
+     */
+    public function memberRecords(Request $request, MemberCombinationRecordServices $services)
+    {
+        [$status, $page, $limit] = $request->getMore([
+            ['status', 'all'],
+            ['page', 1],
+            ['limit', 20],
+        ], true);
+        return app('json')->successful($services->getList(
+            (int)$request->uid(),
+            (string)$status,
+            (int)$page,
+            (int)$limit
+        ));
     }
 
     /**
