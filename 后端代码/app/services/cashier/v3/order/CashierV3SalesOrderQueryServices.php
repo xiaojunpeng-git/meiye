@@ -2113,6 +2113,14 @@ final class CashierV3SalesOrderQueryServices
                 ? (int)($serviceFact['voided_at'] ?? 0) : null,
             'salesManagers' => array_values($salesManagers),
             'guides' => array_values($guides),
+            // 岗位是否适用是销售明细的业务能力，不随当前操作员权限变化。
+            // 前端据此区分“可分配但尚未分配”和“该行不适用该岗位”。
+            'assignmentAvailability' => [
+                'salespeople' => true,
+                'craftsmen' => $type === '项目',
+                'salesManagers' => true,
+                'guides' => true,
+            ],
         ];
     }
 
@@ -2184,6 +2192,14 @@ final class CashierV3SalesOrderQueryServices
             'serviceRecordNo' => (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')),
             'serviceStatus' => (string)($serviceFact['service_status'] ?? ''),
             'voidedAt' => !empty($serviceFact['void_operation_id']) ? (int)($serviceFact['voided_at'] ?? 0) : null,
+            // 权益行是服务事实：只允许维护本次服务的手艺人和导购，
+            // 不把销售人或销售经理误标成“未分配”。
+            'assignmentAvailability' => [
+                'salespeople' => false,
+                'craftsmen' => true,
+                'salesManagers' => false,
+                'guides' => true,
+            ],
         ];
     }
 
@@ -2658,6 +2674,13 @@ final class CashierV3SalesOrderQueryServices
             'salesManagers' => array_values((array)($v3['salesManagers'] ?? [])),
             'guides' => array_values((array)($v3['guides'] ?? [])),
             'craftsmen' => $v3Ready ? $this->craftsmenForLine($authority) : [],
+            // 只有关联正式 V3 明细才能确认岗位适用性；旧购物车快照不可猜测。
+            'assignmentAvailability' => [
+                'salespeople' => $v3Ready,
+                'craftsmen' => $v3Ready && $type === '项目',
+                'salesManagers' => $v3Ready,
+                'guides' => $v3Ready,
+            ],
         ];
     }
 

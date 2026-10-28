@@ -12,6 +12,14 @@ function personName(person) {
   return String(person?.name || person?.employeeName || person?.employee_name_snapshot || '').trim()
 }
 
+/**
+ * 空人员单元格只读取服务端明确的岗位适用性；旧记录缺失契约时保持“—”，
+ * 防止前端把“不适用”和“可分配但未分配”混为一谈。
+ */
+export function personnelEmptyText(item, role) {
+  return item?.assignmentAvailability?.[role] === true ? '未分配' : '—'
+}
+
 export function salespeoplePerformanceText(people) {
   const records = Array.isArray(people) ? people : []
   return records.map((person) => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   guideRoundText,
+  personnelEmptyText,
   salespeoplePerformanceText,
   serviceCraftsmenPerformanceText
 } from '../../../前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js'
@@ -23,6 +24,10 @@ assert.equal(guideRoundText([
 ]), '笪玉凤（第1轮）、王明（第2轮）、李华（无）')
 assert.equal(guideRoundText([]), '—')
 
+assert.equal(personnelEmptyText({ assignmentAvailability: { salespeople: true } }, 'salespeople'), '未分配')
+assert.equal(personnelEmptyText({ assignmentAvailability: { craftsmen: false } }, 'craftsmen'), '—')
+assert.equal(personnelEmptyText({}, 'guides'), '—')
+
 assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
   { employeeName: '许长娥', isPointCustomer: false, amount: 0, laborFeeAmount: 45, projectCount: '1' },
   { employeeName: '汤静静', isPointCustomer: true, amount: 2980, laborFeeAmount: 0, projectCount: '0.3' }
@@ -35,8 +40,8 @@ assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
 
 const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
 assert.match(view, /'销售人（业绩）'/)
-assert.match(view, /salespeoplePerformanceText\(item\.salespeople\)/)
-assert.match(view, /guideRoundText\(item\.guides\)/)
+assert.match(view, /salesItemSalespeopleText\(item\)/)
+assert.match(view, /salesItemGuidesText\(item\)/)
 assert.match(view, /record\?\.serviceStatus === '已作废'/)
 assert.match(view, /record\?\.reportCraftsmenListAllocations/)
 assert.match(view, /return serviceCraftsmenPerformanceText\(record\)/)
