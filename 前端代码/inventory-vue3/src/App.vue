@@ -21,6 +21,7 @@ import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLin
 import { createDocumentDetailReader } from './documentDetailReader'
 import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'
 import { inventoryStatusLabel } from './statusLabels'
+import { platformTransferQueryScope } from './transferQueryScope'
 import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './services/inventoryApi'
 import { UnifiedQueryDateRange, UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
@@ -1503,10 +1504,8 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       if (platformRequestStatus.value) query.status = platformRequestStatus.value
     }
     if (mode.value === 'platform' && active.value === 'transfer') {
-      const [fromType, fromId] = String(platformTransferFromParty.value || 'ALL:0').split(':')
-      const [toType, toId] = String(platformTransferToParty.value || 'ALL:0').split(':')
-      if (fromType === 'HQ' || fromType === 'STORE') { query.from_party_type = fromType; query.from_party_id = fromType === 'HQ' ? 0 : Number(fromId) || 0; if (fromType === 'HQ') query.from_location_id = Number(fromId) }
-      if (toType === 'HQ' || toType === 'STORE') { query.to_party_type = toType; query.to_party_id = toType === 'HQ' ? 0 : Number(toId) || 0; if (toType === 'HQ') query.to_location_id = Number(toId) }
+      // 保存后刷新目录可能恢复其他页面的仓库；查询始终以当前调出方为准。
+      Object.assign(query, platformTransferQueryScope(platformTransferFromParty.value, platformTransferToParty.value, platformHqLocationId.value))
       if (platformTransferStatus.value) query.status = platformTransferStatus.value
     }
     const businessPeriod = businessDateRange.value
