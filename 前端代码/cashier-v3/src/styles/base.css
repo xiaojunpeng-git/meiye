@@ -530,10 +530,20 @@ button:disabled {
 }
 
 .cashier-workflow-context-source {
+  /* 必填箭头必须以来源按钮为定位容器；缺少此定位时会落到工作台底部并被裁切。 */
+  position: relative;
   max-width: 220px;
   padding: 0 10px;
+  overflow: visible;
   cursor: pointer;
   text-align: left;
+}
+
+/* 必填来源只强调原控件，不插入新布局，也不遮挡用户点击后继续选择。 */
+.cashier-workflow-context-source--required {
+  z-index: 20;
+  border-color: #d97706;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, .18);
 }
 
 .cashier-workflow-context-source:hover {
