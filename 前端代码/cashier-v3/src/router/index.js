@@ -7,6 +7,7 @@ import ProjectReplacementView from '@/views/ProjectReplacementView.vue'
 import RoomStatusView from '@/views/RoomStatusView.vue'
 import ReservationListView from '@/views/ReservationListView.vue'
 import MemberListView from '@/views/MemberListView.vue'
+import PlatformMemberListView from '@/views/PlatformMemberListView.vue'
 import HangOrderListView from '@/views/HangOrderListView.vue'
 import OrderCenterView from '@/views/OrderCenterView.vue'
 import ManagementCenterView from '@/views/ManagementCenterView.vue'
@@ -87,6 +88,7 @@ export function firstGrantedRouteName() {
 }
 
 const routes = [
+  { path: '/platform/member-list', name: 'cashier-v3-platform-member-list', component: PlatformMemberListView, meta: { platformReport: true, title: '用户列表' } },
   { path: '/platform/basic-reports/:report?', name: 'cashier-v3-platform-basic-reports', component: BasicReportsView, meta: { platformReport: true, title: '基础报表' } },
   { path: '/entry', name: 'cashier-v3-entry', component: RoutePlaceholderView },
   { path: '/login', name: 'cashier-v3-login', component: StoreLoginView, meta: { title: '门店端登录' } },

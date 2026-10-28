@@ -1,6 +1,7 @@
 <script setup>
 import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import MemberLoginPanel from './MemberLoginPanel.vue'
 
 /**
  * 会员选择大弹窗内的建档步骤，不提供自己的遮罩或弹窗。
@@ -16,6 +17,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
  * 命令完成收银工作台回填。组件不会在浏览器伪造会员或直接改写收银状态。
  */
 const props = defineProps({
+  loginAdapter: { type: Object, default: null },
   currentStoreName: {
     type: String,
     default: ''
@@ -797,6 +799,7 @@ function cancelCreation() {
             >
               基本信息
             </button>
+            <button v-if="isEditing && loginAdapter" type="button" role="tab" :aria-selected="activeTab === 'login'" :class="{ 'member-creator__tab--active': activeTab === 'login' }" @click="chooseTab('login')">登录信息</button>
             <button
               type="button"
               role="tab"
@@ -814,6 +817,7 @@ function cancelCreation() {
         </div>
 
         <div class="member-creator__tab-body">
+          <MemberLoginPanel v-if="activeTab === 'login' && isEditing && loginAdapter" :member-id="initialMember.memberId || initialMember.id" :adapter="loginAdapter" />
           <div v-show="activeTab === 'basic'" class="member-creator__basic" role="tabpanel">
             <div class="member-creator__form-grid">
               <label class="member-creator__field" data-error-key="name">
@@ -1004,7 +1008,7 @@ function cancelCreation() {
       {{ submitMessage }}
     </div>
 
-    <footer class="member-creator__footer">
+    <footer v-show="activeTab !== 'login'" class="member-creator__footer">
       <button type="button" class="member-creator__button" :disabled="isSubmitting || isOutcomeUncertain" @click="cancelCreation">{{ cancelLabel }}</button>
       <button type="button" class="member-creator__button member-creator__button--primary" :disabled="!canSubmit" @click="submitMember">
         {{ isSubmitting ? '正在保存…' : (isEditing ? '保存修改' : submitLabel) }}

@@ -32,6 +32,11 @@ const cashierApiProxy = {
     target: platformApiTarget,
     changeOrigin: false
   },
+  // 平台会员使用平台管理员会话，与门店 cashier token/后端进程隔离。
+  '/adminapi/user/member-center': {
+    target: platformApiTarget,
+    changeOrigin: false
+  },
   // 库存模块在集团模式下可能访问 adminapi，其他接口继续走收银专用后端。
   '/adminapi': {
     target: cashierApiTarget,
