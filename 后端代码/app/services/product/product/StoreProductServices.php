@@ -555,7 +555,8 @@ class StoreProductServices extends BaseServices
         }
         $productInfo['related'] = [];
         if ($productInfo['product_type'] == 5) {
-            $related = $relatedService->getCardRelatedProduct($id);
+            // 管理端编辑必须回显停用关联，避免保存时覆盖下架项目的原配置。
+            $related = $relatedService->getCardRelatedProductForEdit($id);
             $productInfo['related'] = $related ?? [];
         }
         $couponIds = $productInfo['coupons'] ? array_column($productInfo['coupons'], 'issue_coupon_id') : [];
@@ -1535,8 +1536,9 @@ class StoreProductServices extends BaseServices
 
         $data['stock'] = array_sum(array_map('floatval', array_column($detail, 'stock')));
         $stock = $detail ? min(array_map('floatval', array_column($detail, 'stock'))) : 0;
-        //是否售罄
-        $data['is_sold'] = $stock ? 0 : 1;
+        // 只有启用库存管理的实体产品按库存判断售罄；项目和卡项不能因零库存停用关联。
+        $data['is_sold'] = ((int)$data['product_type'] === 0 && $resolvedIsInventoryEarly === 1)
+            ? ($stock ? 0 : 1) : 0;
         unset($data['supplier_id'], $data['is_copy'], $data['description'], $data['coupon_ids'], $data['items'], $data['attrs'], $data['recommend'], $data['is_sync_stock'], $data['is_sync_show'], $data['single_spec_name']);
         /** @var StoreDescriptionServices $storeDescriptionServices */
         $storeDescriptionServices = app()->make(StoreDescriptionServices::class);
@@ -1722,7 +1724,8 @@ class StoreProductServices extends BaseServices
             $resolvedIsInventory = ((int)$data['product_type'] === 0) ? (int)($data['is_inventory'] ?? 1) : 0;
             $this->dao->update($id, [
                 'stock' => array_sum(array_map('floatval', $attrStockArr)),
-                'is_sold' => min(array_map('floatval', $attrStockArr)) > 0 ? 0 : 1,
+                // 非库存商品不以 SKU 零库存覆盖售罄状态。
+                'is_sold' => $resolvedIsInventory === 1 ? (min(array_map('floatval', $attrStockArr)) > 0 ? 0 : 1) : 0,
                 'is_inventory' => $resolvedIsInventory,
                 'allow_negative_stock' => ((int)$data['product_type'] === 0) ? (int)($data['allow_negative_stock'] ?? 1) : 1,
                 'salon_stock_enabled' => ($resolvedIsInventory === 1) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
