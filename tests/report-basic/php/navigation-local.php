@@ -2,6 +2,7 @@
 /** R51真实本地MySQL临时配置表测试；同名临时表遮蔽持久表，禁止复写客户元数据或岗位授权。 */
 $root = getenv('BACKEND_ROOT') ?: getcwd();
 require $root . '/vendor/autoload.php';
+require $root . '/app/services/report/BasicReportCatalogServices.php';
 // Worktree tests share dependency vendor with the primary checkout; load the candidate catalog explicitly.
 require $root . '/app/services/organization/StorePermissionCatalogServices.php';
 $app = new \think\App($root . '/');
@@ -52,9 +53,9 @@ try {
     // 显式锁定code→ID，避免目录插入新项后旧编号漂移，标题则始终取唯一业务目录。
     $codes = ['store_summary','cross_store_settlement','brush_registration','store_item_sales','item_consumption','writeoff_detail','product_sales',
         'salary_realtime','employee_summary','employee_item_sales','employee_service_home_store','employee_service_store','employee_performance_detail',
-        'balance_order_detail','balance_order_summary','daily_reconciliation','unconsumed_summary','unconsumed_detail','followup_employee_detail','customer_entitlements','unconsumed_as_of_detail'];
+        'balance_order_detail','balance_order_summary','daily_reconciliation','unconsumed_summary','unconsumed_detail','followup_employee_detail','customer_entitlements','unconsumed_as_of_detail','store_reconciliation'];
     $entries = array_column(Reports::entries(), null, 'code');
-    navigation51check(count($entries) === 21, 'Exactly twenty-one business reports');
+    navigation51check(count($entries) === 22, 'Twenty-two reports including store reconciliation');
     foreach ($codes as $index => $code) {
         $node = $defaults[-33001-$index];
         navigation51check($node['navigation_key'] === 'report.basic_'.$code && $node['title'] === $entries['basic_'.$code]['name'], 'Stable code identity and catalog title: '.$code);
@@ -88,7 +89,7 @@ try {
         navigation51check($byId[-29023]['navigation_key'] === '' && $byId[-29023]['parent_id'] === -2804 && $byId[-29023]['sort'] === 30, 'Old stable leaf becomes data-center heading');
         navigation51check($byId[-29023]['enabled'] === $enabled && $byId[-29023]['title'] === '基础报表原名', 'Heading enabled and configured title preserved');
         navigation51check($byId[-33003] === $old[-33003], 'Existing disabled child configuration preserved');
-        navigation51check(count(array_filter($byId, static function ($row) { return $row['parent_id'] === -29023 && $row['id'] < 0; })) === 21, 'All twenty-one navigation children remain under the heading');
+        navigation51check(count(array_filter($byId, static function ($row) { return $row['parent_id'] === -29023 && $row['id'] < 0; })) === 22, 'All twenty-two navigation children remain under the heading');
         navigation51check(count($catalog->validateRows($snapshot['rules'])) === count($defaults), 'Existing public validation accepts heading and direct report children');
         foreach ($old as $id => $row) if ($id !== -29023) navigation51check($byId[$id] === $row, 'Existing rule unchanged: '.$id);
         navigation51check(Db::name('job_position_channel_rule')->order('id')->select()->toArray() === $grants, 'Every channel grant and version untouched');

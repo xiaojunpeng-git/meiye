@@ -146,6 +146,8 @@ final class StorePermissionCatalogServices
             'basic_followup_employee_detail' => -33019,
             'basic_customer_entitlements' => -33020,
             'basic_unconsumed_as_of_detail' => -33021,
+            // 新单表独立能力，只登记身份，不自动授予既有岗位。
+            'basic_store_reconciliation' => -33022,
         ];
     }
 

@@ -13,7 +13,8 @@ const evidence = process.env.R51_BUSINESS_EVIDENCE_DIR || path.join(repo, 'tests
 mkdirSync(evidence, { recursive: true })
 const php = 'require "vendor/autoload.php"; (new \\think\\App())->initialize(); echo json_encode(\\app\\services\\report\\BasicReportHostServices::catalog(), JSON_UNESCAPED_UNICODE);'
 const catalog = JSON.parse(execFileSync('docker', ['exec', 'mohe-cashier-app', 'php', '-r', php], { encoding: 'utf8', maxBuffer: 1024 * 1024 }))
-const reports = catalog.filter(report => report.code !== 'basic_brush_registration')
+// 动态门店/逐日对账矩阵由专用浏览器测试使用原单对账证据验证，不套固定列合成夹具。
+const reports = catalog.filter(report => !['basic_brush_registration', 'basic_store_reconciliation'].includes(report.code))
 const fixtureBase = process.env.R51_FIXTURE_BASE_URL || 'http://127.0.0.1:18091'
 const results = []
 let checks = 0
@@ -105,7 +106,8 @@ try {
       await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 5)
       check(requests.at(-1).page === 2 && requests.at(-1).pageCode === report.code, 'Same report second-page request')
       const money = report.queryFields.find(field => field.money && field.defaultVisible)
-      if (money) check(!(await page.locator('tbody tr').first().innerText()).includes('123.45'), 'Money displays integer yuan')
+      // 跨店结算的两项金额已被产品单独确认为保留分，其余报表仍按统一整元展示。
+      if (money) check((await page.locator('tbody tr').first().innerText()).includes('123.45') === (report.code === 'basic_cross_store_settlement'), 'Money follows approved report precision')
       await page.getByRole('button', { name: '列名取值来源', exact: true }).click()
       await page.getByRole('dialog', { name: '列名取值来源' }).waitFor()
       check(await page.locator('.basic-report-dialog dd').count() === report.queryFields.filter(field => field.defaultVisible).length, 'Sources cover visible columns')

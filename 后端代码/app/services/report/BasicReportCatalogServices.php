@@ -7,11 +7,12 @@ namespace app\services\report;
  */
 final class BasicReportCatalogServices
 {
-    /** 原二十张表加产品随后点名的实时工资表；PK、销售数据等其他旧入口不属于本目录。 */
+    /** 原基础报表及逐轮明确新增的工资表、门店对账单；其他旧入口仍独立保留。 */
     public static function entries(): array
     {
         $groups = [
             '门店统计' => [
+                ['store_reconciliation', '门店对账单', 'payment_method_store_or_day', 'period'],
                 ['store_summary', '门店统计表', 'store_period', 'period'],
                 ['cross_store_settlement', '跨店结算表', 'store_pair_period', 'period'],
                 ['brush_registration', '刷单登记', 'registration', 'registration_date'],
