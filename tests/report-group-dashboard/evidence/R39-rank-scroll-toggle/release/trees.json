@@ -1,0 +1,12 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "b09b887ed04ee455479749db6811ec9b95fffe73",
+  "existingBranch": "release/store-cashier-c14-main",
+  "baselineCommit": "50b8356528acb36ff251f350f2b0137cd8304787",
+  "baselineTree": "c99305f21ccdb571d7db26fd5719aa665374f65a",
+  "candidateTree": "f8d8c444287c6a6cf4be613d511957cd6342554a",
+  "paths": [
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+  ],
+  "priorLiveBuild": "tests/platform-member-login/release/unified/candidate-cashier-v3-build.json"
+}

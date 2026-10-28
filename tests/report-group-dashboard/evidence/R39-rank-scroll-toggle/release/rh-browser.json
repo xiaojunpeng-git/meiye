@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "authenticated": true,
+  "defaultRolling": true,
+  "threeButtons": true,
+  "independentPause": true,
+  "cityStable": true,
+  "storeContinued": true,
+  "resumeRestored": true,
+  "originalConditionsDialog": true,
+  "backendChanges": false,
+  "businessWrites": 0
+}

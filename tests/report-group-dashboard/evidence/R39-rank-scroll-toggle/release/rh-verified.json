@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+  "rollback": "/www/backups/rh/r39-rank-scroll-2f3dad0f",
+  "backendAndConfigurationUnchanged": true,
+  "databaseWrites": 0,
+  "timeUTC": "2026-10-28T05:41:31.592391+00:00",
+  "browserValidation": {
+    "result": "PASS",
+    "site": "rh",
+    "authenticated": true,
+    "defaultRolling": true,
+    "threeButtons": true,
+    "independentPause": true,
+    "cityStable": true,
+    "storeContinued": true,
+    "resumeRestored": true,
+    "originalConditionsDialog": true,
+    "backendChanges": false,
+    "businessWrites": 0
+  }
+}

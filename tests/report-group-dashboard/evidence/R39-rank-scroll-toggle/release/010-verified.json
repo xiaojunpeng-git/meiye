@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+  "rollback": "/www/backups/010/r39-rank-scroll-2f3dad0f",
+  "backendAndConfigurationUnchanged": true,
+  "databaseWrites": 0,
+  "timeUTC": "2026-10-28T05:51:35.752377+00:00",
+  "browserValidation": {
+    "result": "PASS",
+    "site": "010",
+    "scope": "formal platform entry and existing access guard; exact same published assets verified separately",
+    "guard": "403 抱歉，你无权访问该页面",
+    "authenticatedRankingInteraction": false,
+    "limitation": "当前浏览器账号无集团看板访问权限，未扩大权限或声称完成010登录态榜单交互；相同前端产物已在瑞昊、008验证真实暂停/继续。",
+    "businessWrites": 0
+  }
+}

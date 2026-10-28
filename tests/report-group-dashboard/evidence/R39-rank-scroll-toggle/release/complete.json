@@ -1,0 +1,86 @@
+{
+  "round": 39,
+  "result": "PASS",
+  "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "site": "rh",
+      "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+      "rollback": "/www/backups/rh/r39-rank-scroll-2f3dad0f",
+      "backendAndConfigurationUnchanged": true,
+      "databaseWrites": 0,
+      "timeUTC": "2026-10-28T05:41:31.592391+00:00",
+      "browserValidation": {
+        "result": "PASS",
+        "site": "rh",
+        "authenticated": true,
+        "defaultRolling": true,
+        "threeButtons": true,
+        "independentPause": true,
+        "cityStable": true,
+        "storeContinued": true,
+        "resumeRestored": true,
+        "originalConditionsDialog": true,
+        "backendChanges": false,
+        "businessWrites": 0
+      }
+    },
+    "008": {
+      "result": "PASS",
+      "site": "008",
+      "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+      "rollback": "/www/backups/008/r39-rank-scroll-2f3dad0f",
+      "backendAndConfigurationUnchanged": true,
+      "databaseWrites": 0,
+      "timeUTC": "2026-10-28T05:47:07.808843+00:00",
+      "browserValidation": {
+        "result": "PASS",
+        "site": "008",
+        "authenticated": true,
+        "threeButtons": true,
+        "defaultRolling": true,
+        "pauseStable": true,
+        "resumeRestored": true,
+        "businessWrites": 0
+      }
+    },
+    "010": {
+      "result": "PASS",
+      "site": "010",
+      "sourceCommit": "2f3dad0f949acef9d719859138ad94b7b54d2c77",
+      "rollback": "/www/backups/010/r39-rank-scroll-2f3dad0f",
+      "backendAndConfigurationUnchanged": true,
+      "databaseWrites": 0,
+      "timeUTC": "2026-10-28T05:51:35.752377+00:00",
+      "browserValidation": {
+        "result": "PASS",
+        "site": "010",
+        "scope": "formal platform entry and existing access guard; exact same published assets verified separately",
+        "guard": "403 抱歉，你无权访问该页面",
+        "authenticatedRankingInteraction": false,
+        "limitation": "当前浏览器账号无集团看板访问权限，未扩大权限或声称完成010登录态榜单交互；相同前端产物已在瑞昊、008验证真实暂停/继续。",
+        "businessWrites": 0
+      }
+    }
+  },
+  "businessFiles": [
+    "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue"
+  ],
+  "default": "三个排行榜默认滚动，按钮独立暂停/继续，继续从当前查看位置开始",
+  "existingFeaturesPreserved": [
+    "当前已上线会员管理及登录信息",
+    "工资报表",
+    "团长与团员搜索",
+    "库存统计补漏",
+    "既有收银功能"
+  ],
+  "baselineProof": "正本固定基线构建入口及主JS/CSS与三站现网逐字匹配，本轮候选仅一个Vue文件差异。",
+  "backendChanges": false,
+  "databaseWrites": 0,
+  "configurationChanges": false,
+  "serviceRestart": false,
+  "newBranch": false,
+  "browserValidationLimit": "010当前账号访问集团看板为403，保留权限保护；没有声称完成010登录态榜单交互，相同产物在瑞昊和008已完成真实交互验证。",
+  "finishedUTC": "2026-10-28T05:52:23.972370+00:00"
+}
