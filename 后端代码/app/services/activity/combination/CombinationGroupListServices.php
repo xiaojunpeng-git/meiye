@@ -91,11 +91,26 @@ class CombinationGroupListServices
         }
         $keyword = trim((string)($filters['keyword'] ?? ''));
         if (mb_strlen($keyword) > 80) throw new ValidateException('搜索内容过长');
-        if ($keyword !== '') $query->where(function ($q) use ($keyword) {
-            // Parameter binding protects SQL; escaping wildcards makes names and phones literal search text.
+        if ($keyword !== '') {
+            // ORM quoting/binding protects SQL; wildcards in names/phones remain literal text.
             $like = '%' . addcslashes($keyword, '\\%_') . '%';
-            $q->whereLike('u.real_name|u.nickname|o.real_name|u.phone|o.user_phone', $like);
-        });
+            // Materialize unique matching group IDs once: multiple members must not multiply
+            // rows/counts, and a missing legacy k_id index must not cause a full scan per group.
+            // Virtual seats never identify customers; refunded real participation stays searchable.
+            $members = Db::name('store_pink')->alias('search_member')
+                ->leftJoin('user search_user', 'search_user.uid=search_member.uid')
+                ->leftJoin('store_order search_order', 'search_order.id=search_member.order_id_key')
+                ->field('search_member.k_id')->distinct(true)->where('search_member.k_id', '>', 0)
+                ->where('search_member.is_virtual', 0)->where('search_member.uid', '>', 0)
+                ->whereLike('search_user.real_name|search_user.nickname|search_member.nickname|search_order.real_name|search_user.phone|search_order.user_phone', $like)
+                ->buildSql();
+            $query->leftJoin([$members => 'matched_members'], 'matched_members.k_id=g.id')
+                ->where(function ($q) use ($like) {
+                    // Keep both OR branches inside the existing leader-store permission boundary.
+                    $q->whereLike('u.real_name|u.nickname|g.nickname|o.real_name|u.phone|o.user_phone', $like)
+                        ->whereNotNull('matched_members.k_id', 'OR');
+                });
+        }
         $range = (string)($filters['data'] ?? '');
         if ($range !== '') {
             if (!preg_match('~^(\d{4}/\d{2}/\d{2})-(\d{4}/\d{2}/\d{2})$~', $range, $match)) throw new ValidateException('时间范围无效');

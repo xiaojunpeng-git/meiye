@@ -1,0 +1,5 @@
+{
+  "sha256": "d034bd13713910e19a894bb263344e876a735e8fa4ebcbb8073e5e95494822dc",
+  "source": "canonical workspace SFC bytes passed through stdin because Docker bind mount returns EMFILE",
+  "compiler": "existing admin Vue2 template compiler"
+}

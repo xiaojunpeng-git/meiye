@@ -10,7 +10,7 @@
                 <FormItem label="拼团状态：" class="query-field query-status"><Select v-model="formValidate.status" clearable placeholder="全部状态">
                     <Option :value="1">拼团中</Option><Option :value="2">拼团成功</Option><Option :value="3">拼团失败</Option>
                 </Select></FormItem>
-                <FormItem label="会员搜索：" class="query-field query-member"><Input v-model.trim="formValidate.keyword" clearable placeholder="输入会员姓名或手机号" @on-enter="userSearchs" /></FormItem>
+                <FormItem label="会员搜索：" class="query-field query-member"><Input v-model.trim="formValidate.keyword" clearable placeholder="团长/团员姓名或手机号" @on-enter="userSearchs" /></FormItem>
                 <div class="combination-search-actions"><Button type="primary" @click="userSearchs">搜索</Button><Button @click="resetSearch">重置</Button><Button :loading="exporting" :disabled="loading || !total" @click="exportList"><Icon type="ios-download-outline" /> 导出</Button></div>
             </Form>
         </Card>
