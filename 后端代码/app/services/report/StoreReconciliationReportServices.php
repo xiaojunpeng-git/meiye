@@ -72,7 +72,7 @@ final class StoreReconciliationReportServices
     private function project(array $context, array $payload, array $source, array $range, string $mode, int $selected): array
     {
         $stores = $source['stores']; $methods = $stores ? $source['methods'] : []; $receipts = $source['receipts'];
-        if (count($stores) > 90 || count($methods) > 200) throw new \InvalidArgumentException('对账目录过大，请缩小门店范围');
+        if (count($stores) > 250 || count($methods) > 200) throw new \InvalidArgumentException('对账目录过大，请缩小门店范围');
         $ids = array_map('intval', array_column($stores, 'id'));
         if (array_diff($ids, BasicRegistrationQueryProvider::stores($context))) throw new \InvalidArgumentException('对账门店超出当前权限');
         $names = array_column($stores, 'name', 'id'); $methodIndex = array_column($methods, null, 'code');
@@ -176,6 +176,26 @@ final class StoreReconciliationReportServices
         // 普通列表统一20条；只有内部下钻资格核对读取完整的有界支付目录。
         $query['limit'] = $verifyAllMethods ? 200 : 20;
         if (empty($query['sorts'])) $query['sorts'] = [['field' => 'sort_order', 'direction' => 'asc']];
+        // 集团可超过100家门店；不放宽全系统查询限制，也不丢掉宽表右侧门店。
+        // 同一已授权、已投影事实集分列调用原执行器，稳定行键一致后拼回完整导出。
+        if (isset($query['export']['fields']) && is_array($query['export']['fields']) && count($query['export']['fields']) > 100) {
+            $wanted = $query['export']['fields'];
+            if (count($wanted) > 252 || array_filter($wanted, static function ($key): bool { return !is_string($key); })) {
+                throw new \InvalidArgumentException('导出字段数量或标识无效');
+            }
+            $merged = []; $result = null; $identity = null;
+            foreach (array_chunk(array_values(array_unique($wanted)), 99) as $chunk) {
+                $partQuery = $query; $partQuery['export']['fields'] = array_values(array_unique(array_merge(['row_id'], $chunk)));
+                $part = $execution->execute(self::CODE, $rows, [], $partQuery, $context, static function (): bool { return true; });
+                $keys = array_column($part['exportRows'], 'row_id');
+                if ($identity !== null && $identity !== $keys) throw new \RuntimeException('宽表导出行身份不一致');
+                $identity = $keys; $result = $part;
+                foreach ($part['exportRows'] as $index => $record) $merged[$index] = array_replace($merged[$index] ?? [], $record);
+            }
+            $selected = array_fill_keys($wanted, true);
+            $result['exportRows'] = array_map(static function ($row) use ($selected): array { return array_intersect_key($row, $selected); }, $merged);
+            return $result;
+        }
         return $execution->execute(self::CODE, $rows, [], $query, $context, static function (): bool { return true; });
     }
 

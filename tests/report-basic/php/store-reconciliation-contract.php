@@ -31,6 +31,18 @@ $receipts[]=['receipt_id'=>'negative-combination','store_id'=>1,'business_date'=
 $source = static function ($ids,$range) use ($stores,$methods,$receipts) { return ['stores'=>array_values(array_filter($stores,static fn($s)=>in_array($s['id'],$ids,true))),
     'methods'=>$methods,'receipts'=>array_values(array_filter($receipts,static fn($r)=>in_array($r['store_id'],$ids,true)&&$r['business_date']>=$range['start_date']&&$r['business_date']<=$range['end_date']))]; };
 $report = new Report($source);
+// 真实集团102家门店：完整矩阵和导出都必须保留，不能因执行器100字段上限截掉门店。
+$wideStores = [];for($i=1;$i<=102;$i++)$wideStores[]=['id'=>$i,'name'=>'集团门店'.$i];
+$wideReport = new Report(static function()use($wideStores){return ['stores'=>$wideStores,'methods'=>[['code'=>'legacy_1','name'=>'银联扫码']],'receipts'=>[]];});
+$wideContext=['tenant_id'=>'0','visible_store_ids'=>range(1,102),'basic_scope_mode'=>'all','basic_actor_key'=>'platform:1','query_cutoff_date'=>'2026-10-28'];
+$wideQuery=['pageCode'=>Report::CODE,'start_date'=>'2026-09-01','end_date'=>'2026-09-30'];
+$wide=$wideReport->query($wideContext,$wideQuery);
+r11check(count($wide['queryFields'])===104,'102门店及两个固定字段完整展示');
+$wideFields=array_column($wide['queryFields'],'key');
+$wideExport=$wideReport->query($wideContext,$wideQuery+['export'=>['scope'=>'query','fields'=>$wideFields]]);
+r11check(count($wideExport['exportRows'])===1&&count($wideExport['exportRows'][0])===104,'宽表导出无截断或辅助身份列');
+r11check($wideExport['exportRows'][0]['store_102']==='0.00','最后门店原值保留');
+r11reject(static fn()=>$wideReport->query($wideContext,$wideQuery+['export'=>['scope'=>'query','fields'=>array_merge($wideFields,['store_999'])]]),'宽表分列仍验证越权字段');
 $context=['tenant_id'=>'0','visible_store_ids'=>[1,2],'basic_scope_mode'=>'all','basic_actor_key'=>'platform:1','query_cutoff_date'=>'2026-10-28','data_as_of'=>1793145600];
 $query=['pageCode'=>Report::CODE,'start_date'=>'2026-09-01','end_date'=>'2026-09-30'];
 $first=$report->query($context,$query);

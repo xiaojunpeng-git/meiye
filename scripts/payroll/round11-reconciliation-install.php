@@ -19,7 +19,12 @@ $fingerprint=static function():string{return hash('sha256',json_encode([
 $result=Db::transaction(static function()use($fingerprint,$root):array{
  $parents=Db::name('system_menus')->where('unique_auth','admin-report-basic-group-store')->where('type',1)->where('is_del',0)->lock(true)->select()->toArray();
  if(count($parents)!==1)throw new RuntimeException('基础报表门店统计分组缺失或不唯一');
- $catalog=new Catalog();$snapshot=$catalog->snapshot();$rules=array_column($snapshot['rules'],null,'id');
+ // 安装前仍是旧目录，不能用要求新节点总数的运行时snapshot拒绝合法的前一版本。
+ // 先锁定并核对旧节点；显式初始化完成后再由snapshot执行完整新目录校验。
+ $catalog=new Catalog();$catalogRow=Db::name(Catalog::TABLE)->where('id',1)->lock(true)->find();
+ $oldRules=$catalogRow?json_decode((string)$catalogRow['rules_json'],true):null;
+ if(!is_array($oldRules))throw new RuntimeException('原门店权限目录缺失或格式异常');
+ $rules=array_column($oldRules,null,'id');
  foreach(Catalog::basicReportGrantDefinitions()as$grant)if($grant['navigation_id']!==-33022&&!isset($rules[$grant['navigation_id']]))throw new RuntimeException('须先完成原有基础报表权限目录迁移');
  if(!isset($rules[-29023])||($rules[-29023]['navigation_key']??null)!=='')throw new RuntimeException('原基础报表目录尚未迁移');
  $before=$fingerprint();
