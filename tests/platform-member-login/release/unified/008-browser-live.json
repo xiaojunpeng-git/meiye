@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "url": "https://008.cc3798.com/admin/user/list",
+  "currentAccount": "A0751",
+  "bindingColumn": true,
+  "editButtons": 20,
+  "transferButtons": 20,
+  "permissionError": false,
+  "businessWrites": 0
+}

@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "loginExpired": false,
+  "statusKeys": [
+    "success",
+    "loginExpired",
+    "loginUser",
+    "skillVersion",
+    "skillPath",
+    "tokenRequired",
+    "cliTokenRequired",
+    "mcpTokenRequired",
+    "versionRelation",
+    "warning"
+  ]
+}

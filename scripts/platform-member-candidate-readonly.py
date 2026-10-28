@@ -33,4 +33,5 @@ def run(s):
  host='rh-server' if s=='rh' else 'mohe-server';r=subprocess.run(['ssh','-q','-o','BatchMode=yes','-o','ConnectTimeout=15',host,'/www/server/php/74/bin/php -- '+s],input=code.encode(),capture_output=True,timeout=150)
  if r.returncode:raise RuntimeError(s+' '+r.stderr.decode()[-1600:])
  v=json.loads(r.stdout);assert v['result']=='PASS';(R/(s+'-candidate-readonly.json')).write_text(json.dumps(v,indent=2)+'\n');return v
-for v in concurrent.futures.ThreadPoolExecutor(max_workers=2).map(run,['rh','008','010']):print(json.dumps(v),flush=True)
+if __name__=='__main__':
+ for v in concurrent.futures.ThreadPoolExecutor(max_workers=2).map(run,['rh','008','010']):print(json.dumps(v),flush=True)

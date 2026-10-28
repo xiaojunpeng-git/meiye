@@ -1,0 +1,5 @@
+{
+  "error": "Command '['ssh', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', 'mohe-server', '/www/server/php/74/bin/php -- /www/backups/010/platform-member-c3a69f96 backup 0c08b9c3912c58011ca24f8e6f679bfa850a2eebd11eab801964ea47d1e7bf56']' returned non-zero exit status 1.",
+  "started": false,
+  "stderr": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nSQLSTATE[42000]: Syntax error or access violation: 1142 SHOW VIEW command denied to user 'mohe_010_app'@'localhost' for table 'eb_mig_morestore_20261013_member_batch'\n"
+}

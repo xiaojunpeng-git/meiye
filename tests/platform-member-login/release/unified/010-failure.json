@@ -1,0 +1,5 @@
+{
+  "error": "Command '['ssh', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', 'mohe-server', '/www/server/php/74/bin/php -- /www/backups/010/platform-member-12ba0fd2 migrate 2d45196ff234ad5699f708430e30e9501bcaaad7385c87c259d18b2114bcdc18']' returned non-zero exit status 1.",
+  "started": false,
+  "stderr": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nSQLSTATE[42000]: Syntax error or access violation: 1142 CREATE command denied to user 'mohe_010_app'@'localhost' for table 'eb_member_phone_login_reset'\n"
+}

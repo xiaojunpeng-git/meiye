@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "commit": "c3a69f96a34bd3f66090c6a6c4bab63bcf077ec8",
+  "backup": "/www/backups/rh/platform-member-c3a69f96-retry1",
+  "manifestSHA256": "44bee00b1dcbce8a88a80a449e2319e5019a1c98d06f2273c6182c33fe6f9777",
+  "newTables": 2,
+  "files": 100,
+  "businessDataWrites": 0
+}

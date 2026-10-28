@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "commit": "c3a69f96a34bd3f66090c6a6c4bab63bcf077ec8",
+  "backup": "/www/backups/008/platform-member-c3a69f96",
+  "manifestSHA256": "9bc5f5d08ec19c6b75da0276ea86d7fcdedfd37717c4f02e340bd9339e027674",
+  "newTables": 2,
+  "files": 99,
+  "businessDataWrites": 0
+}
