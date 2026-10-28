@@ -4,15 +4,17 @@ namespace app\services\cashier\v3\order;
 
 /**
  * 把已授权、已筛选的销售订单投影为与订单中心表格一致的商品明细行。
- * 明细只读订单 Reader 的历史快照；整单可合计字段仅放首行，避免 Excel 汇总重复计入。
+ * 明细金额只读订单 Reader 的历史快照；分类取商品当前归属，整单金额仅放首行。
  */
 final class CashierV3SalesOrderExportRows
 {
     private const LINE_FIELDS = [
-        'item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson',
+        'item_name', 'product_category', 'unit_price', 'quantity', 'craftsman', 'salesperson',
         'sales_manager', 'guide', 'line_amount',
     ];
     private const REPEATED_CONTEXT_FIELDS = [
+        // 同一销售单拆成商品明细时，每行都需保留单据识别列和办理时间；整单金额仍只在首行。
+        'business_type', 'order_no', 'event_completed_at',
         'sales_order_no', 'business_date', 'member_name', 'phone', 'store',
         'occurred_at', 'cashier', 'source', 'payment_status', 'order_status',
         'supplement', 'payment_completed_at',
@@ -57,6 +59,7 @@ final class CashierV3SalesOrderExportRows
     {
         switch ($field) {
             case 'item_name': return self::itemText($item);
+            case 'product_category': return $item['category'] ?? '未分类';
             case 'unit_price': return $item['unitPrice'] ?? null;
             case 'quantity': return $item['quantity'] ?? null;
             case 'craftsman': return self::craftsmenText($item);

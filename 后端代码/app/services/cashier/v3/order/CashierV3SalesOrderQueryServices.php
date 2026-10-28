@@ -965,6 +965,10 @@ final class CashierV3SalesOrderQueryServices
             ->where('o.paid', 1)
             ->where('o.pay_time', '>', 0)
             ->where('o.is_system_del', 0)
+            ->where(function ($visible) {
+                // Count, list, detail and export share this query: unfinished groups stay out.
+                \app\services\activity\combination\CombinationConsumptionVisibilityServices::apply($visible, 'o');
+            })
             ->where(function ($nested) {
                 $nested->where('o.pid', '>=', 0)->whereOr('o.pid', -2);
             })
