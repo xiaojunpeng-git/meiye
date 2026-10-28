@@ -39,7 +39,9 @@ class CombinationRefundServices
      */
     public static function isManagedHiddenRefundOrder(array $order, bool $lock = false): bool
     {
-        if ((int)($order['is_del'] ?? 0) !== 1 || (int)($order['type'] ?? 0) !== 3) return false;
+        // Card purchase creation changes the group order type to 11; participant and
+        // fulfillment evidence below must still prove the hidden record is a real group order.
+        if ((int)($order['is_del'] ?? 0) !== 1 || !in_array((int)($order['type'] ?? 0), [3, 11], true)) return false;
         $orderId = (int)($order['id'] ?? 0);
         if ($orderId <= 0) return false;
         $participantQuery = Db::name('store_pink')->where('order_id_key', $orderId);
@@ -206,6 +208,9 @@ class CombinationRefundServices
         $receipt = $claim['receipt']; $send = $claim['send']; $claimed = $claim['claimed'];
         $orderId = (int)$receipt['order_id'];
         if (!$claimed) return $this->present($receipt);
+        // The provider hint is presentation-only for this response; it is never persisted as
+        // a refund state or used to release rights, retry or change financial facts.
+        $channelHint = '';
         try {
             if ($send) {
                 // Persist sending BEFORE calling; a crash can only query, never send again blindly.
@@ -215,6 +220,8 @@ class CombinationRefundServices
             }
             if (in_array($receipt['state'], ['sending','pending'], true)) {
                 $result = $this->gateway()->query($receipt);
+                $channelHint = (string)($result['channel_hint'] ?? '');
+                unset($result['channel_hint']); // Not a database field or state transition.
                 Db::transaction(function () use ($orderId, $result, $receipt) {
                     Db::name('store_order')->where('id', $orderId)->lock(true)->find();
                     Db::name('combination_order_refund')->where('order_id', $orderId)
@@ -247,12 +254,18 @@ class CombinationRefundServices
                 }
             }
         } catch (\Throwable $error) {
+            // Never expose raw gateway errors or infer failure from an unsigned/unknown reply.
+            if (in_array($receipt['state'], ['sending', 'pending'], true)) {
+                $channelHint = '退款结果暂未确认，请稍后查询或联系富友核对原退款单，勿重复退款';
+            }
             // Channel success survives local errors and is retried through the existing terminal domain.
             \think\facade\Log::warning('拼团退款待查询或收口 oid=' . $orderId . ' ' . get_class($error));
         } finally {
             Db::name('combination_order_refund')->where('order_id', $orderId)->where('refund_no', $receipt['refund_no'])->update(['lease_until' => 0, 'updated_at' => time()]);
         }
-        return $this->present((array)Db::name('combination_order_refund')->where('order_id', $orderId)->find());
+        $view = $this->present((array)Db::name('combination_order_refund')->where('order_id', $orderId)->find());
+        if ($view['state'] === 'pending' && $channelHint !== '') $view['message'] = $channelHint;
+        return $view;
     }
 
     /** Used by generic refund entries as well: no second refund path may bypass this receipt. */
@@ -339,7 +352,7 @@ class CombinationRefundServices
             'amount' => bcdiv((string)($row['amount_cents'] ?? 0), '100', 2),
             'fuyou_order_no' => (string)($row['channel_order_no'] ?? ''),
             'fuyou_transaction_id' => ($row['channel'] ?? '') === 'balance' ? '' : (string)($row['channel_transaction_id'] ?? ''),
-            'message' => $state === 'success' ? '退款成功' : ($state === 'failed' ? '退款失败，可重试' : '退款处理中，请查询结果')];
+            'message' => $state === 'success' ? '退款成功' : ($state === 'failed' ? '退款失败，可重试' : '退款处理中，请点击查询结果查看渠道反馈')];
     }
 
     /** Read-only eligibility and receipt projection for exactly one participant order. */

@@ -105,11 +105,11 @@
                 groupMemberColumns: [
                     { title: '成员', key: 'nickname', width: 110 }, { title: '订单号', key: 'order_id', minWidth: 190 },
                     { title: '原单实付', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.paid_amount)) },
-                    { title: '当前退款情况', minWidth: 230, render: (h, { row }) => h('span', row.refund_block_reason || row.refund_message || '待校验') }
+                    { title: '当前退款情况', minWidth: 230, render: (h, { row }) => h('span', { style: { whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.5' } }, row.refund_block_reason || row.refund_message || '待校验') }
                 ],
                 refundResultColumns: [
                     { title: '订单ID', key: 'order_id_key', width: 100 },
-                    { title: '退款状态', key: 'message', minWidth: 180 },
+                    { title: '退款状态', key: 'message', minWidth: 180, render: (h, { row }) => h('span', { style: { whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.5' } }, row.message) },
                     { title: '退款金额', key: 'amount', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.amount)) },
                     { title: '退款单号', key: 'refund_no', minWidth: 220 }
                 ],
@@ -236,7 +236,17 @@
                 if (this.groupRefundBusy) return;
                 this.groupRefundBusy = true;
                 return combinationWholeRefundApi(this.refundGroup.id, { action, reason: this.groupRefundReason.trim() || '查询整团退款' })
-                    .then(({ data }) => { this.groupRefundResult = data; this.getList(); })
+                    .then(({ data }) => {
+                        this.groupRefundResult = data;
+                        // Match server results to the original participant order, so the current
+                        // status column immediately explains verified channel feedback as well.
+                        const results = new Map((data.results || []).map(item => [String(item.order_id_key), item]));
+                        this.groupRefundMembers = this.groupRefundMembers.map(member => {
+                            const result = results.get(String(member.order_id_key));
+                            return result && result.message ? { ...member, refund_block_reason: '', refund_message: result.message } : member;
+                        });
+                        this.getList();
+                    })
                     .catch(error => this.$Message.error(error.msg || '整团退款处理失败'))
                     .finally(() => { this.groupRefundBusy = false; });
             },
