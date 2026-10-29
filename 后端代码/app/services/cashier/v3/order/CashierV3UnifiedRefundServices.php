@@ -444,7 +444,7 @@ final class CashierV3UnifiedRefundServices
         if (!$candidate || (int)($candidate['id'] ?? 0) !== $holderId || (int)($candidate['uid'] ?? 0) !== $memberId) {
             throw self::fail('本卡归属已变化，请重新选择。', 'refund_card_owner_changed');
         }
-        $voided = (int)($candidate['is_del'] ?? 0) !== 0 || (int)($candidate['refund_status'] ?? 0) !== 0
+        $sourceTerminated = (int)($candidate['is_del'] ?? 0) !== 0 || (int)($candidate['refund_status'] ?? 0) !== 0
             || (int)($candidate['terminal_action'] ?? 0) !== 0
             || (int)($candidate['paid'] ?? 1) !== 1
             || (int)($candidate['order_deleted'] ?? 0) !== 0
@@ -452,6 +452,7 @@ final class CashierV3UnifiedRefundServices
                 && !($transfer && (int)$candidate['origin_store_id'] === 0
                     && (string)($candidate['mark'] ?? '') === 'migration_entitlement'))
             || (int)($candidate['is_user_del'] ?? 0) !== 0;
+        $voided = $sourceTerminated;
         if ($transfer && (int)($candidate['card_upgrade_use_oid'] ?? 0) > 0) $voided = true;
         $originId = (int)$candidate['oid'];
         $cardState = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $tenantId)
@@ -461,6 +462,11 @@ final class CashierV3UnifiedRefundServices
         $rule = (array)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->lock($lock)->find();
         if ($rule && !in_array((string)$rule['status'], $transfer ? ['active', 'exhausted', 'disabled'] : ['active', 'exhausted'], true)) $voided = true;
+        // 仅当来源、归属和规则仍有效时提示“先启用”；真正终止的卡不能误导操作员尝试启用。
+        $disabledReason = !$sourceTerminated && (int)($cardState['current_member_id'] ?? 0) === $memberId
+            && (string)($cardState['card_status'] ?? '') === 'disabled'
+            && (!$rule || in_array((string)$rule['status'], ['active', 'exhausted'], true))
+            ? mb_substr(trim((string)($cardState['status_reason_snapshot'] ?? '')), 0, 100) : null;
         $isTime = (string)($rule['rule_type'] ?? '') === 'time' || (int)$candidate['write_times'] >= 1000000;
         $carts = Db::name('store_order_cart_info')->where('oid', $originId)->where('cart_type', 2)
             ->where('product_type', 6)->field('id,oid,product_id,cart_info,pay_price,debt_amount,repaid_debt_amount,is_gift,write_times,write_surplus_times,write_end,is_writeoff')
@@ -753,7 +759,9 @@ final class CashierV3UnifiedRefundServices
             && (int)$candidate['origin_uid'] === $memberId && !$otherCollection;
         $reason = $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
             : ($debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
-            : ($voided ? '本卡已作废或退款终止，不能再次退款。'
+            : ($voided ? ($disabledReason !== null
+                    ? '本卡已停用' . ($disabledReason !== '' ? '（原因：' . $disabledReason . '）' : '') . '，请先到卡操作中核对并启用，再办理退款。'
+                    : '本卡已作废或退款终止，不能再次退款。')
                 : ($usableSum <= 0 ? '本卡没有可退的剩余金额。' : '本卡来源状态已变化，请联系管理员核对。')));
         // V3 newly purchased cards have an internal v3c... entitlement order; only
         // the issuance receipt links that order to the customer-facing XS... sale.
