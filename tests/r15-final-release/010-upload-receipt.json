@@ -1,0 +1,84 @@
+{
+  "ok": true,
+  "tool": "polling_task_result",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "taskId": "confirmation_upload_19b75bc6-1a36-4d17-b85a-ed3eb4535181",
+    "taskType": "confirmation_upload",
+    "status": "success",
+    "createdAt": 1793294631084,
+    "updatedAt": 1793294648523,
+    "detail": "execution_success",
+    "result": {
+      "info": {
+        "size": {
+          "total": 10570195,
+          "packages": [
+            {
+              "name": "TOTAL",
+              "size": 10570195
+            },
+            {
+              "name": "main",
+              "size": 2033331
+            },
+            {
+              "name": "/pages/activity/",
+              "size": 747323
+            },
+            {
+              "name": "/pages/admin/",
+              "size": 1783916
+            },
+            {
+              "name": "/pages/annex/",
+              "size": 957677
+            },
+            {
+              "name": "/pages/behalf/",
+              "size": 187730
+            },
+            {
+              "name": "/pages/columnGoods/",
+              "size": 17625
+            },
+            {
+              "name": "/pages/discover/",
+              "size": 204145
+            },
+            {
+              "name": "/pages/extension/",
+              "size": 69648
+            },
+            {
+              "name": "/pages/goods/",
+              "size": 1951490
+            },
+            {
+              "name": "/pages/merchant/",
+              "size": 205062
+            },
+            {
+              "name": "/pages/short_video/",
+              "size": 306289
+            },
+            {
+              "name": "/pages/store/",
+              "size": 430055
+            },
+            {
+              "name": "/pages/users/",
+              "size": 1658748
+            },
+            {
+              "name": "/pages/work/",
+              "size": 17156
+            }
+          ]
+        }
+      },
+      "success": true
+    }
+  }
+}

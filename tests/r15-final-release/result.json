@@ -40,14 +40,16 @@
     "008": {
       "version": "3.0.80",
       "taskId": "confirmation_upload_c598e03b-2d71-4473-ace1-9e66f73716e7",
-      "status": "pending"
+      "status": "success",
+      "receiptFile": "008-upload-receipt.json"
     },
     "010": {
       "version": "3.0.80",
       "taskId": "confirmation_upload_19b75bc6-1a36-4d17-b85a-ed3eb4535181",
-      "status": "pending"
+      "status": "success",
+      "receiptFile": "010-upload-receipt.json"
     }
   },
-  "status": "DEPLOYED_UPLOADS_AWAITING_WECHAT_USER_CONFIRMATION",
+  "status": "DEPLOYMENTS_PUSH_AND_BOTH_UPLOADS_VERIFIED",
   "realDeviceAcceptance": false
 }
