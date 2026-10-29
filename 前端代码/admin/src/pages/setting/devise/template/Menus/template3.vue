@@ -1,5 +1,7 @@
 <script>
+import MemberMenuMedia from "@/components/memberMenuMedia";
 export default {
+  components: { MemberMenuMedia },
   props: {
     MyMenus: {
       type: Array,
@@ -29,7 +31,7 @@ export default {
         v-for="item in MyMenus"
         :key="item.id"
       >
-        <img :src="item.pic" class="image"></img>
+        <MemberMenuMedia :item="item" :size="32" class="image" />
         <div>{{ item.name }}</div>
       </div>
     </div>

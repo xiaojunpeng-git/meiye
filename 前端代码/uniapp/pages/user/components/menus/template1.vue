@@ -1,7 +1,8 @@
 <script>
-import { resolveMemberMenuIcon } from '@/utils/memberMenuIcon';
+import MemberMenuMedia from '@/components/memberMenuMedia';
 
 export default {
+	components: { MemberMenuMedia },
 	inject: ['goMenuPage'],
 	props: {
 		menuData: {
@@ -13,11 +14,6 @@ export default {
 			default: 0
 		}
 	},
-	methods: {
-		menuIcon(item) {
-			return resolveMemberMenuIcon(item);
-		}
-	}
 };
 </script>
 
@@ -29,17 +25,17 @@ export default {
 				<view v-for="(item, index) in menuData.list" :key="index">
 					<!-- #ifdef MP -->
 					<view class="flex-col flex-center" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)" @click="goMenuPage(item.url, item.name)">
-						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+						<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<button class="flex-col flex-center" open-type='contact' v-if="item.url=='/pages/extension/customer_list/chat' && routineContact == 1">
-					  <view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+					  <view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 					  <text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</button>
 					<!-- #endif -->
 					<!-- #ifndef MP -->
 					<view class="flex-col flex-center" @click="goMenuPage(item.url, item.name)">
-						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+						<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<!-- #endif -->
@@ -66,11 +62,6 @@ export default {
 		align-items: center;
 		justify-content: center;
 
-		.iconfont {
-			font-size: 38rpx;
-			line-height: 1;
-			color: var(--view-theme, #7b2941);
-		}
 	}
 
 	::v-deep .text--w111-333 { color: #4d3037 !important; }

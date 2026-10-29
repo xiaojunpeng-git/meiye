@@ -1,5 +1,7 @@
 <script>
+import MemberMenuMedia from "@/components/memberMenuMedia";
 export default {
+  components: { MemberMenuMedia },
   props: {
     menuData: {
       type: Object,
@@ -24,7 +26,7 @@ export default {
           v-for="(item, index) in menuData.list"
           :key="index"
         >
-          <img :src="item.pic" class="image"></img>
+          <MemberMenuMedia :item="item" class="image" />
           <span class="fs-13 lh-18px text--w111-282828 pt-11">{{
             item.name
           }}</span>

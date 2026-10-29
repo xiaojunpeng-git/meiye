@@ -1,5 +1,7 @@
 <script>
+import MemberMenuMedia from "@/components/memberMenuMedia";
 export default {
+  components: { MemberMenuMedia },
   props: {
     MyMenus: {
       type: Array,
@@ -30,7 +32,7 @@ export default {
         :key="item.id"
         @click="goMenuPage(item.url, item.name)"
       >
-        <img :src="item.pic" class="image"></img>
+        <MemberMenuMedia :item="item" :size="20" class="image" />
         <div class="name">{{ item.name }}</div>
         <span class="mobiconfont icon-ic_rightarrow"></span>
       </div>
