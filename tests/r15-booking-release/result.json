@@ -82,15 +82,17 @@
     "008": {
       "version": "3.0.81",
       "taskId": "confirmation_upload_b789d47f-2ccb-45d3-aeec-ce13909322cf",
-      "status": "pending"
+      "status": "success",
+      "receiptFile": "008-upload-receipt.json"
     },
     "010": {
       "version": "3.0.81",
       "taskId": "confirmation_upload_bde0cf67-7c72-41f1-8981-02369af6d3b3",
-      "status": "pending"
+      "status": "success",
+      "receiptFile": "010-upload-receipt.json"
     }
   },
   "rhInitialAttempt": "verification command failed; automatic rollback verified; unchanged candidate retry1 verified",
-  "status": "DEPLOYED_UPLOADS_AWAITING_WECHAT_USER_CONFIRMATION",
+  "status": "DEPLOYMENTS_PUSH_AND_BOTH_UPLOADS_VERIFIED",
   "businessWrites": 0
 }
