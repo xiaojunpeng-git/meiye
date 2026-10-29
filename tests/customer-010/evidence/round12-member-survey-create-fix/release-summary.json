@@ -1,0 +1,49 @@
+{
+  "result": "PASS",
+  "date": "2026-10-29",
+  "feature_commit": "ad40ce8efbd6d0ad08b1f9954986650cf2a819fa",
+  "candidate_fingerprint": "5c2e966e3e8a88c26fad8509079e5fb6f7e973cf67ee95642e211924a2d0120e",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backup": "/www/backups/rh/round12-create-fix-ad40ce8efbd6-20261029133025",
+      "source_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+      "task_total": 0,
+      "existing_survey_data_unchanged": true,
+      "frontend_entries_unchanged": true
+    },
+    "008": {
+      "result": "PASS",
+      "backup": "/www/backups/008/round12-create-fix-ad40ce8efbd6-20261029133124",
+      "source_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+      "task_total": 0,
+      "existing_survey_data_unchanged": true,
+      "frontend_entries_unchanged": true
+    },
+    "010": {
+      "result": "PASS",
+      "backup": "/www/backups/010/round12-create-fix-ad40ce8efbd6-20261029133157",
+      "source_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+      "task_total": 2,
+      "existing_survey_data_unchanged": true,
+      "frontend_entries_unchanged": true
+    }
+  },
+  "order": [
+    "RH deploy verify",
+    "push",
+    "008 deploy verify",
+    "010 deploy verify"
+  ],
+  "local_business_checks": 56,
+  "real_010_browser_list": {
+    "http_status": 200,
+    "task_ids": [
+      2,
+      1
+    ]
+  },
+  "business_writes": 0,
+  "frontend_or_schema_deployment": false,
+  "root_cause": "Answer count queried a nonexistent source column; saved tasks were never lost"
+}
