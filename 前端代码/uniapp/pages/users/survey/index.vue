@@ -13,6 +13,12 @@
             <textarea v-else :focus="focused" class="answer-text" :value="answers[question.id] || ''" maxlength="1000" placeholder="请输入您的想法" @input="setAnswer(question.id, $event.detail.value)" />
           </view>
         </template></required-field-guide>
+        <required-field-guide v-if="requirements.store_required && !requirements.phone_required" ref="storeGuide" anchor="survey-member-store">
+          <view class="question-title">请选择您的所属门店</view>
+          <picker :range="requirements.stores || []" range-key="name" @change="chooseStore"><button>{{ selectedStoreName || '选择所属门店' }}</button></picker>
+          <view class="description">首次选择将保存为您的所属门店。</view>
+        </required-field-guide>
+        <view v-else-if="requirements.store_id" class="description">所属门店：{{ requirements.store_name }}</view>
         <view v-if="error" role="status" aria-live="polite" class="required">{{ error }}</view>
         <button class="submit" :disabled="submitting" @click="submit">{{ submitting ? '提交中…' : '提交问卷' }}</button>
       </template>
@@ -24,16 +30,18 @@
 import { surveyEntry, surveyDetail, surveySubmit, surveyRetry } from '@/api/memberSurvey';
 import { toLogin } from '@/libs/login';
 import RequiredFieldGuide from '@/components/requiredFieldGuide';
+import { surveyEntryToken } from '@/utils/memberSurveyScene';
 export default {
   components: { RequiredFieldGuide },
-  data: () => ({ task: null, answers: {}, loading: true, submitting: false, error: '', taskId: 0, entryToken: '', completed: false, reward: {}, pageScrollTop: 0, loaded: false }),
-  computed: { giftLabel() { return ((this.task && this.task.gifts) || []).map(g => g.name + ' × ' + g.quantity).join('、'); }, draftKey() { return 'member-survey-draft:' + (this.entryToken || this.taskId); } },
-  onLoad(options) { this.entryToken = String(options.entry || ''); this.taskId = Number(options.id || 0); this.load(); },
+  data: () => ({ task: null, answers: {}, loading: true, submitting: false, error: '', taskId: 0, entryToken: '', completed: false, reward: {}, pageScrollTop: 0, loaded: false, selectedStoreId: 0 }),
+  computed: { giftLabel() { return ((this.task && this.task.gifts) || []).map(g => g.name + ' × ' + g.quantity).join('、'); }, draftKey() { return 'member-survey-draft:' + (this.entryToken || this.taskId); }, requirements() { return (this.task && this.task.requirements) || {phone_required:true,store_required:true,stores:[]}; }, selectedStoreName() { const store=(this.requirements.stores || []).find(s => Number(s.id) === this.selectedStoreId); return store ? store.name : ''; } },
+  onLoad(options) { try { this.entryToken = surveyEntryToken(options); this.taskId = Number(options.id || 0); this.load(); } catch(e) { this.error=e.message;this.loading=false; } },
   onShow() { if (this.loaded) this.load(); }, onPageScroll(event) { this.pageScrollTop = event.scrollTop; },
   onUnload() { if (!this.completed) this.persist(); },
   methods: {
     // 草稿只存当前设备并绑定任务轮次，登录跳转可恢复；提交确认后立即清除。
-    persist() { if (this.task && !this.completed) uni.setStorageSync(this.draftKey, { round: this.task.send_round, answers: this.answers }); },
+    persist() { if (this.task && !this.completed) uni.setStorageSync(this.draftKey, { round: this.task.send_round, answers: this.answers, store_id:this.selectedStoreId }); },
+    chooseStore(event) { const store=(this.requirements.stores || [])[Number(event.detail.value)];this.selectedStoreId=store?Number(store.id):0;this.persist(); },
     async load() { this.loading = true; this.error = ''; try {
       const response = this.entryToken ? await surveyEntry(this.entryToken) : await surveyDetail(this.taskId);
       let task = response.data; this.taskId = Number(task.id);
@@ -42,6 +50,7 @@ export default {
       if (draft && Number(draft.round) === Number(task.send_round)) this.answers = draft.answers || {};
       else { this.answers = {}; uni.removeStorageSync(this.draftKey); }
       if (this.completed) uni.removeStorageSync(this.draftKey);
+      const chosen = Number(draft && draft.store_id || 0);this.selectedStoreId=(this.requirements.stores || []).some(s=>Number(s.id)===chosen)?chosen:0;
     } catch (e) { this.error = e.msg || '问卷暂不可用'; this.task = null; } finally { this.loading = false; this.loaded = true; } },
     selected(question, id) { const value = this.answers[question.id]; return question.type === 'multiple' ? (value || []).indexOf(id) !== -1 : value === id; },
     setAnswer(id, value) { this.$set(this.answers, id, value); this.persist(); },
@@ -50,8 +59,9 @@ export default {
       const index = this.task.questions.findIndex(q => q.required && (!this.answers[q.id] || (typeof this.answers[q.id] === 'string' && !this.answers[q.id].trim()) || (Array.isArray(this.answers[q.id]) && !this.answers[q.id].length)));
       if (index !== -1) { this.$refs.guides[index].guide('请在这里填写第' + (index + 1) + '题'); return; }
       this.persist();
-      if (!this.$store.getters.isLogin) { toLogin(undefined, undefined, '/pages/users/survey/index?' + (this.entryToken ? 'entry=' + encodeURIComponent(this.entryToken) : 'id=' + this.taskId)); return; }
-      this.submitting = true; this.error = ''; try { const response = await surveySubmit(this.taskId, this.answers, this.task.send_round); this.reward = response.data.gift || {}; this.completed = true; uni.removeStorageSync(this.draftKey); } catch (e) { this.error = e.msg || '提交失败，已填内容保留，请稍后重试'; } finally { this.submitting = false; }
+      if (!this.$store.getters.isLogin || this.requirements.phone_required) { toLogin(undefined, undefined, '/pages/users/survey/index?' + (this.entryToken ? 'entry=' + encodeURIComponent(this.entryToken) : 'id=' + this.taskId)); return; }
+      if (this.requirements.store_required && !this.selectedStoreId) { this.$refs.storeGuide.guide('请在这里选择您的所属门店');return; }
+      this.submitting = true; this.error = ''; try { const response = await surveySubmit(this.taskId, this.answers, this.task.send_round, this.selectedStoreId); this.reward = response.data.gift || {}; this.completed = true; uni.removeStorageSync(this.draftKey); } catch (e) { this.error = e.msg || '提交失败，已填内容保留，请稍后重试'; } finally { this.submitting = false; }
     },
     async retryReward() { if (this.submitting) return; this.submitting = true; this.error = ''; try { this.reward = (await surveyRetry(this.taskId)).data; } catch (e) { this.error = e.msg || '奖励暂未发放，请稍后重试'; } finally { this.submitting = false; } }
   }

@@ -103,7 +103,10 @@ function _toLogin(push, pathLogin, returnUrl) {
 
 	// #ifdef MP
 	let url
-	if (!BASIC_CONFIG.wechat_auth_switch) {
+	// 问卷提交要求已授权手机号，显式返回问卷时统一走现有强制手机号授权页。
+	if (returnUrl && /^\/pages\/[a-zA-Z0-9_/?=&%.-]+$/.test(returnUrl)) {
+		url = '/pages/users/wechat_login/index'
+	} else if (!BASIC_CONFIG.wechat_auth_switch) {
 		url = '/pages/users/binding_phone/index?pageType=0'
 	} else {
 		url = '/pages/users/wechat_login/index'

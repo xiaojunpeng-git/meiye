@@ -28,7 +28,10 @@ class MemberSurvey
 
     public function submit($id, Request $request, MemberSurveyServices $service)
     {
-        $gift = $service->submit((int)$request->uid(), (int)$id, $request->post('answers', []), (int)$request->post('send_round', 0));
+        // 门店ID只代表未归属会员主动选择，最终有效性与已有归属保护均在事务内核验。
+        $store=$request->post('store_id',0);
+        if(!preg_match('/^(0|[1-9][0-9]{0,9})$/D',(string)$store))throw new \think\exception\ValidateException('所选门店格式不正确');
+        $gift = $service->submit((int)$request->uid(), (int)$id, $request->post('answers', []), (int)$request->post('send_round', 0), (int)$store);
         return app('json')->success('提交成功', ['gift' => $gift]);
     }
 }

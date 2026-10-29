@@ -1,3 +1,3 @@
 <?php
-// 仅由实例配置指定会员H5入口，空值在业务层沿用站点地址，不在配置加载阶段访问数据库。
-return ['member_h5_base_url'=>env('MEMBER_SURVEY_MEMBER_H5_URL','')];
+// 版本只控制小程序码打开正式/体验/开发版，不改变该版本代码包固化的接口地址。
+return ['mini_env_version'=>env('MEMBER_SURVEY_MINI_ENV_VERSION','release')];

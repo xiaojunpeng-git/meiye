@@ -1,0 +1,20 @@
+{
+  "head": "46a19f4f11a036dcd4be02fbc4a1c75bf4f2ce7a",
+  "files": {
+    "后端代码/app/services/user/MemberSurveyServices.php": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+    "后端代码/app/services/user/UserBelongStoreServices.php": "fd2631eb58c6208fc657d18b1be33e3aeb250e7258f054f7b2689ffb7f0d6708",
+    "后端代码/config/member_survey.php": "23091410d41d7f145f847dfa49de642387e1fe0f0cd57f184e6d683654bd61f3",
+    "后端代码/app/controller/api/v1/user/MemberSurvey.php": "30db202ea17323469ce321a0a2eb19931a4e98f43c381a0bfcfc169369c0920f",
+    "前端代码/admin/src/pages/user/survey/index.vue": "8d2d775d091ef86528088fd24965ce1914ee9299263bc3cef01d1d225cd8e015",
+    "前端代码/uniapp/App.vue": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6",
+    "前端代码/uniapp/pages/users/survey/index.vue": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167",
+    "前端代码/uniapp/api/memberSurvey.js": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca",
+    "tests/member-survey/php/local-business.php": "17adbea432e170f40090a6161abe4fad6ae82c9127fd68343c58556e41fca32d",
+    "scripts/member-survey/build-local.cjs": "f2cd26c08391c979defd1c40c3072b576b326425c974dc8a3acb2e6d12ed4d07"
+  },
+  "user_confirmed_member_appid": "wxce4f61fc9c4eaaa6",
+  "instance": "010",
+  "experience_api_origin": "https://010.cc3798.com",
+  "production_007_must_remain_unchanged": true,
+  "secret_not_persisted": true
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "miniprogram",
+  "app_id": "wxce4f61fc9c4eaaa6",
+  "page": "pages/users/survey/index",
+  "scene": "________________________________",
+  "env_version": "trial",
+  "passed": true,
+  "image_mime": "image/jpeg",
+  "image_bytes": 116991,
+  "image_sha256": "a5895a33cc42a87ca007bd5b2f413438e6d217a2c483e80f5996b56dac240f57",
+  "synthetic_token_only": true,
+  "no_business_records_created": true,
+  "connection": "010 only;007 production not connected"
+}

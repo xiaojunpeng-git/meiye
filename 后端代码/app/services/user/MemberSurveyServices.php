@@ -24,11 +24,8 @@ class MemberSurveyServices
     public function qrEntry(int $id):array
     {
         $task=$this->task($id);if(!$this->isActive($task)||empty($task['entry_token']))throw new ValidateException('只有进行中的任务可以生成二维码');
-        $base=rtrim((string)(config('member_survey.member_h5_base_url','') ?: sys_config('site_url','')),'/');
-        $parts=parse_url($base);
-        if(!$parts||empty($parts['host'])||!in_array($parts['scheme']??'',['https','http'],true)||isset($parts['user'])||isset($parts['pass'])||isset($parts['query'])||isset($parts['fragment']))throw new ValidateException('请先配置本实例会员端地址');
-        if($parts['scheme']!=='https'&&!in_array($parts['host'],['127.0.0.1','localhost'],true))throw new ValidateException('会员端地址必须使用HTTPS');
-        return['task_id'=>$id,'title'=>$task['title'],'url'=>$base.'/pages/users/survey/index?entry='.$task['entry_token']];
+        // 真正的小程序码由微信返回，不再用H5网址绘制普通二维码。
+        return ['task_id'=>$id,'title'=>$task['title']]+app()->make(MemberSurveyMiniProgramCodeServices::class)->make((string)$task['entry_token']);
     }
     private function now(): int
     {
@@ -662,11 +659,20 @@ class MemberSurveyServices
             'questions' => $task['questions'], 'deadline' => $task['deadline'],
             'send_round' => (int)$task['send_round'], 'completed'=>(bool)$completed,
             'reward'=>$completed?app()->make(MemberSurveyGiftServices::class)->memberStatus($id,$uid):null,
-            'gifts' => app()->make(MemberSurveyGiftServices::class)->summary($id)];
+            'gifts' => app()->make(MemberSurveyGiftServices::class)->summary($id),
+            'requirements'=>$this->submissionRequirements($uid)];
+    }
+
+    /** 只返回本人的提交门禁；已有归属不可借问卷换店，可选目录只列启用且对外展示门店。 */
+    private function submissionRequirements(int $uid):array
+    {
+        $member=$uid>0?Db::name('user')->where('uid',$uid)->field('phone,belong_store_id')->find():null;
+        $phone=$member&&trim((string)$member['phone'])!=='';$storeId=(int)($member['belong_store_id']??0);
+        return ['phone_required'=>!$phone,'store_required'=>$storeId<=0,'store_id'=>$storeId,'store_name'=>$storeId>0?(string)Db::name('system_store')->where('id',$storeId)->value('name'):'','stores'=>$phone&&$storeId<=0?Db::name('system_store')->where(['is_del'=>0,'is_show'=>1])->field('id,name')->order('id')->select()->toArray():[]];
     }
 
     /** 真实会员和固定轮次防重；答卷先完成，奖励另事务履约并可重试。 */
-    public function submit(int $uid, int $id, $answers, int $expectedRound): array
+    public function submit(int $uid, int $id, $answers, int $expectedRound, int $selectedStoreId=0): array
     {
         $task = $this->task($id);
         if (!$this->isActive($task)) throw new ValidateException('调查任务已结束');
@@ -702,7 +708,8 @@ class MemberSurveyServices
             $normalized[$key] = $value;
         }
         if (count(array_diff(array_keys($answers), array_keys($normalized)))) throw new ValidateException('答案中存在无效题目');
-        $reward = Db::transaction(function () use ($id, $uid, $normalized, $task) {
+        $storeAssigned=false;
+        $reward = Db::transaction(function () use ($id, $uid, $normalized, $task, $selectedStoreId, &$storeAssigned) {
             $lockedTask = Db::name('member_survey_task')->where('id', $id)->lock(true)->find();
             if (!$lockedTask || !$this->isActive($lockedTask) || (int)$lockedTask['send_round'] !== (int)$task['send_round']) {
                 throw new ValidateException('调查已重新发送，请重新打开问卷');
@@ -718,6 +725,9 @@ class MemberSurveyServices
             if ((int)$lockedTarget['completed_round'] >= (int)$task['send_round']) {
                 return (int)Db::name('member_survey_reward')->where('task_id',$id)->where('uid',$uid)->order('id','desc')->value('id');
             }
+            // 手机号只读已认证会员主表，不能信任客户端勾选；首次归属与答卷同事务落库。
+            $assignment=app()->make(UserBelongStoreServices::class)->assignUnboundStoreForSurveyInTx($uid,$selectedStoreId);
+            $storeAssigned=$assignment['changed'];
             $answerId=(int)Db::name('member_survey_answer')->insertGetId(['task_id' => $id, 'uid' => $uid,
                 'answers' => json_encode($normalized, JSON_UNESCAPED_UNICODE),
                 'send_round' => $task['send_round'], 'submitted_at' => $this->now()]);
@@ -725,6 +735,7 @@ class MemberSurveyServices
                 ->update(['submitted_at' => $this->now(), 'completed_round' => $task['send_round']]);
             return app()->make(MemberSurveyGiftServices::class)->enqueueInTx($id,$uid,$answerId,(int)$task['send_round']);
         });
+        if($storeAssigned){try{app()->make(UserServices::class)->cacheTag()->clear();}catch(\Throwable $e){\think\facade\Log::warning('survey member cache refresh pending');}}
         // 答卷先提交成功；奖励单独履约，失败保留待发状态，不诱导会员重复答卷。
         return app()->make(MemberSurveyGiftServices::class)->fulfil($reward);
     }

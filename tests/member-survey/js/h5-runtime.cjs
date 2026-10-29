@@ -1,7 +1,7 @@
 // Exercise the actual compiled member app entry in an isolated browser with synthetic API responses.
 const fs=require('fs'),path=require('path'),http=require('http'),os=require('os');
 const {chromium}=require(path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'));
-const root=path.resolve(__dirname,'../../..'),output='/tmp/r12-survey-member-h5-rh';
+const root=path.resolve(__dirname,'../../..'),output=process.env.R12_RUNTIME_BUILD||'/tmp/r12-survey-member-h5-rh';
 const server=http.createServer((req,res)=>{const file=path.resolve(output,'.'+decodeURIComponent(req.url.split('?')[0]));if(!file.startsWith(output+'/')){res.writeHead(400);res.end();return;}const actual=fs.existsSync(file)&&fs.statSync(file).isFile()?file:path.join(output,'index.html');res.setHeader('content-type',actual.endsWith('.js')?'application/javascript':actual.endsWith('.css')?'text/css':actual.endsWith('.html')?'text/html':'application/octet-stream');res.end(fs.readFileSync(actual));});
 (async()=>{await new Promise(r=>server.listen(18913,'127.0.0.1',r));const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});try{
 const page=await browser.newPage({viewport:{width:390,height:844},userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile MicroMessenger/8.0.50'});const errors=[],requests=[];page.on('pageerror',e=>errors.push(e.message));
@@ -12,5 +12,5 @@ await page.getByText('提交问卷',{exact:true}).click();await page.getByText('
 await page.locator('textarea').fill('真实H5构建输入');await page.getByText('提交问卷',{exact:true}).click();await page.waitForTimeout(1200);
 if(!page.url().includes('/login')&&!page.url().includes('/wechat_login'))throw Error('Submit did not enter login');
 if(errors.length)throw Error('H5 runtime error: '+errors.join(';'));
-const data={passed:true,checks:['实际H5微信浏览器环境公开任务可打开','未登录浏览不抢先OAuth','真实必填定位可用','填写后提交进入登录'],browser_errors:errors,api_requests:requests};fs.writeFileSync(path.join(root,'tests/customer-010/evidence/round12-member-survey/h5-runtime.json'),JSON.stringify(data,null,2));console.log(JSON.stringify(data));
+const data={passed:true,checks:['实际H5微信浏览器环境公开任务可打开','未登录浏览不抢先OAuth','真实必填定位可用','填写后提交进入登录'],browser_errors:errors,api_requests:requests};fs.writeFileSync(path.join(root,process.env.R12_EVIDENCE_DIR||'tests/customer-010/evidence/round12-member-survey','h5-runtime.json'),JSON.stringify(data,null,2));console.log(JSON.stringify(data));
 }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exit(1)});

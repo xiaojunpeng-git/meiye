@@ -179,9 +179,9 @@
     <member-survey-reward :visible="giftOpen" :survey-id="giftTaskId" :questionnaire-id="giftQuestionnaireId" :readonly="giftReadOnly" :inherited="giftInherited"
       @close="giftOpen = false" @saved="giftQuestionnaireId ? loadQuestionnaires() : loadTasks()" />
     <Modal v-model="qrOpen" title="调查任务二维码" :footer-hide="true" width="450">
-      <p>扫码即可填写，不限制提醒名单；提交和领奖时登录会员账号。</p>
-      <div ref="qrCanvas" style="margin:20px auto;width:260px;height:260px" />
-      <p v-if="qrUrl" style="word-break:break-all">{{ qrUrl }}</p>
+      <p>微信扫码直接打开会员小程序问卷。完成前须授权手机号；无所属门店的会员须先选择门店。</p>
+      <img v-if="qrUrl" :src="qrUrl" alt="调查任务小程序码" style="display:block;margin:20px auto;width:260px;height:260px" />
+      <p v-if="qrEnvironment">{{ qrEnvironment === 'trial' ? '体验版' : qrEnvironment === 'develop' ? '开发版' : '正式版' }}会员小程序</p>
       <Button v-if="qrUrl" @click="downloadQr">下载二维码</Button>
       <p v-if="qrError" role="status" aria-live="polite">{{ qrError }}</p>
     </Modal>
@@ -190,7 +190,6 @@
 
 <script>
 import { surveyList, surveyRead, surveyCreate, surveyUpdate, surveyTargets, surveyUpdateTargets, surveyPreview, surveySearchMembers, surveyPublish, surveyStop, surveyResend, surveyResults, surveyExportData, questionnaireList, questionnaireRead, questionnaireCreate, questionnaireUpdate, questionnaireAnalysis, questionnaireTextAnswers, questionnaireExportData } from '@/api/memberSurvey';
-import QRCode from 'qrcodejs2';
 import { guideRequired, clearRequiredGuidance } from '@/utils/requiredGuidance';
 import { surveyQr, surveyRetryRewards, questionnaireOptions } from '@/api/memberSurvey';
 import MemberSurveyReward from '@/components/memberSurveyReward';
@@ -210,7 +209,7 @@ export default {
   components: { MemberSurveyReward },
   data() {
     return {
-      qrOpen: false, qrUrl: '', qrError: '', qrEpoch: 0,
+      qrOpen: false, qrUrl: '', qrError: '', qrEpoch: 0, qrEnvironment: '',
       activeTab: 'tasks', tasks: [], total: 0, page: 1, loading: false, saving: false,
       questionnaireOptions: [], questionnaireTotal: 0, questionnairePage: 1, tableHeight: Math.max(220, window.innerHeight - 340), questionnaires: [], questionnaireLoading: false, questionnaireSaving: false, exportingQuestionnaireId: 0,
       exportingTaskId: 0,
@@ -307,11 +306,11 @@ export default {
     async showQr(row) {
       // 旧请求不能覆盖后来打开的另一任务二维码。
       const epoch = ++this.qrEpoch;
-      this.qrOpen = true; this.qrUrl = ''; this.qrError = '';
-      await this.$nextTick(); if (this.$refs.qrCanvas) this.$refs.qrCanvas.innerHTML = '';
-      try { const { data } = await surveyQr(row.id); if (epoch !== this.qrEpoch || !this.qrOpen) return; this.qrUrl = data.url; await this.$nextTick(); new QRCode(this.$refs.qrCanvas, { text: data.url, width: 260, height: 260, correctLevel: QRCode.CorrectLevel.M }); } catch (e) { if (epoch === this.qrEpoch) { this.qrUrl = ''; this.qrError = e.msg || e.message || '二维码生成失败'; } }
+      this.qrOpen = true; this.qrUrl = ''; this.qrError = ''; this.qrEnvironment = '';
+      try { const { data } = await surveyQr(row.id); if (epoch !== this.qrEpoch || !this.qrOpen) return; if(data.kind!=='miniprogram'||!/^data:image\/(png|jpeg);base64,/.test(data.image||''))throw new Error('未取得有效小程序码');this.qrUrl=data.image;this.qrEnvironment=data.env_version; } catch (e) { if (epoch === this.qrEpoch) { this.qrUrl = ''; this.qrError = e.msg || e.message || '二维码生成失败'; } }
     },
-    downloadQr() { const canvas = this.$refs.qrCanvas.querySelector('canvas'); const image = this.$refs.qrCanvas.querySelector('img'); const link = document.createElement('a'); link.download = '调查任务二维码.png'; link.href = canvas ? canvas.toDataURL('image/png') : image.src; link.click(); },
+    // 下载微信返回的小程序码原图，不在浏览器用普通网址重绘。
+    downloadQr() { if(!this.qrUrl)return;const link = document.createElement('a'); link.download = '调查任务小程序码'+(this.qrUrl.startsWith('data:image/jpeg;')?'.jpg':'.png'); link.href = this.qrUrl; link.click(); },
     async retryRewards(row) { const { data } = await surveyRetryRewards(row.id); this.$Message.info('本次处理 ' + data.processed + ' 条，未成功的奖励仍保留待发'); },
     dateText(ts) {
       const date = new Date(Number(ts) * 1000);

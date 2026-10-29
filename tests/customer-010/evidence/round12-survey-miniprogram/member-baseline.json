@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "source_commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+  "checks": [
+    "前端代码/uniapp/pages/discover/discoverIndex/index.vue与已验收源码一致",
+    "前端代码/uniapp/pages/users/user_card/index.vue与已验收源码一致",
+    "前端代码/uniapp/pages/users/user_card_list/index.vue与已验收源码一致",
+    "tests/member-entitlement-display/model.cjs与已验收源码一致",
+    "PASS: canonical Vue2 template + list/card/project/gift/shared-pool/history/filter/search/navigation/footer/input immutability",
+    "010当前会员端入口与M014已验收发布一致"
+  ],
+  "accepted_release_manifest": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/member-entitlement-display/release/010-manifest.json",
+  "accepted_manifest_sha256": "c24d53b876fc4f1a829e210bf35177a00cd2dc4d7095aedcf684442ade9884f5",
+  "head_file_matches": {
+    "app/services/user/MemberSurveyServices.php": true,
+    "app/services/user/UserBelongStoreServices.php": true,
+    "app/controller/api/v1/user/MemberSurvey.php": true,
+    "config/member_survey.php": true
+  }
+}

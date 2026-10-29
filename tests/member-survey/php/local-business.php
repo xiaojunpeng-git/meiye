@@ -22,8 +22,8 @@ try{
  $tables=array_unique($tables);
  foreach($tables as$t){if(Db::query("SHOW TABLES LIKE 'eb_".$t."'"))Db::execute('CREATE TABLE `'.$fixtureDatabase.'`.`eb_'.$t.'` LIKE `'.$original.'`.`eb_'.$t.'`');}
  Db::execute('USE `'.$fixtureDatabase.'`');$pdo=Db::connect()->getPdo();$sql=file_get_contents($root.'/database/upgrades/2026-10-29-会员调查/01-schema.sql');$pdo->exec($sql);$pdo->exec($sql);
- seed12('user',['uid'=>101,'nickname'=>'合成扫码会员','status'=>1,'delete_time'=>null]);seed12('user',['uid'=>102,'nickname'=>'提醒会员','status'=>1,'delete_time'=>null]);
- seed12('system_store',['id'=>11,'name'=>'合成门店','is_del'=>0]);seed12('system_admin',['id'=>7,'account'=>'test-survey','status'=>1,'is_del'=>0]);
+ seed12('user',['uid'=>101,'nickname'=>'合成扫码会员','phone'=>'13800000101','belong_store_id'=>11,'status'=>1,'delete_time'=>null]);seed12('user',['uid'=>102,'nickname'=>'提醒会员','phone'=>'13800000102','belong_store_id'=>11,'status'=>1,'delete_time'=>null]);
+ seed12('system_store',['id'=>11,'name'=>'合成门店','is_del'=>0,'is_show'=>1]);seed12('system_admin',['id'=>7,'account'=>'test-survey','status'=>1,'is_del'=>0]);
  seed12('organization',['id'=>21,'pid'=>0,'name'=>'合成组织','is_del'=>0]);seed12('organization_store',['store_id'=>11,'org_id'=>21]);
  seed12('store_coupon_issue',['id'=>31,'relation_id'=>11,'status'=>1,'is_del'=>0,'title'=>'合成奖励券','is_permanent'=>1,'is_give_subscribe'=>0,'is_full_give'=>0,'total_count'=>100,'remain_count'=>100]);
  $policy=new app\services\user\MemberSurveyAccessPolicy();
@@ -41,8 +41,19 @@ try{
  $savedAgain=(new Survey())->listTasks(1,20);check12((int)$savedAgain['list'][0]['id']===$id,'刷新服务后仍能读取已保存任务');
  $survey->publish($id);$task=$survey->readTask($id);
  check12(Db::name('member_survey_target')->count()===0,'零提醒名单可发布');
- think\facade\Config::set(['member_h5_base_url'=>'https://example.invalid'],'member_survey');
- $link=$survey->qrEntry($id);check12($link['url']==='https://example.invalid/pages/users/survey/index?entry='.$task['entry_token'],'二维码链接绑定明确任务和受控域名');
+ // 微信网络边界替换为合成PNG；实际scene编解码与环境参数仍使用真实业务代码。
+ class SurveyCodeFixture extends app\services\user\MemberSurveyMiniProgramCodeServices {protected function appId():string{return 'wx0000000000000000';}protected function fetchCode(string $scene,string $page,string $environment):string {if(strlen($scene)!==32||$page!=='pages/users/survey/index'||$environment!=='trial')throw new RuntimeException('invalid mini code request');return base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNaIAAAAASUVORK5CYII=');}}
+ $app->bind(app\services\user\MemberSurveyMiniProgramCodeServices::class,SurveyCodeFixture::class);
+ think\facade\Config::set(['mini_env_version'=>'trial'],'member_survey');
+ $link=$survey->qrEntry($id);check12($link['kind']==='miniprogram'&&strlen($link['scene'])===32&&bin2hex(base64_decode(strtr($link['scene'],'-_','+/')))===$task['entry_token']&&strpos($link['image'],'data:image/png;base64,')===0,'小程序码scene无损定位任务并固定体验环境');
+ // 微信可能返回JPEG，也可能返回JSON错误；响应不能被误认图片或把上游凭据带给客户端。
+ $jpegCode=new class extends SurveyCodeFixture {protected function fetchCode(string $scene,string $page,string $environment):string{return "\xff\xd8\xffsynthetic-jpeg";}};
+ check12(strpos($jpegCode->make($task['entry_token'])['image'],'data:image/jpeg;base64,')===0,'微信JPEG小程序码按正确格式返回');
+ $badCode=new class extends SurveyCodeFixture {protected function fetchCode(string $scene,string $page,string $environment):string{return '{"errcode":40013}';}};
+ reject12(fn()=>$badCode->make($task['entry_token']),'微信JSON错误不能伪装二维码');
+ reject12(fn()=>$jpegCode->make('bad'),'生成小程序码拒绝异常token');
+ $failedCode=new class extends SurveyCodeFixture {protected function fetchCode(string $scene,string $page,string $environment):string{throw new RuntimeException('synthetic-private-detail');}};
+ try{$failedCode->make($task['entry_token']);throw new RuntimeException('expected code failure');}catch(think\exception\ValidateException $error){check12(strpos($error->getMessage(),'synthetic-private-detail')===false,'小程序码上游异常不泄露原始详情');}
  $public=$survey->entry($task['entry_token']);check12($public['id']===$id&&!isset($public['filters'])&&!isset($public['creator_id']),'公开入口只返回填写所需字段');
  reject12(fn()=>$survey->entry('invalid'),'错误二维码拒绝');reject12(fn()=>$survey->submit(101,$id,[],1),'后端必填保护');
  $answer=['1'=>'1','2'=>['1','2'],'3'=>'合成建议'];$result=$survey->submit(101,$id,$answer,1);
@@ -127,6 +138,26 @@ try{
  $expired=$survey->save(['title'=>'过期测试','questionnaire_id'=>$qid],7);$survey->publish($expired);$token=Db::name('member_survey_task')->where('id',$expired)->value('entry_token');Db::name('member_survey_task')->where('id',$expired)->update(['deadline'=>time()-1]);reject12(fn()=>$survey->entry($token),'已过期任务拒绝扫码答题');
  $analysis=$survey->questionnaireAnalysis($qid);check12(count($analysis['groups'])>=1,'问卷分析可读取多任务快照');
  $export=$survey->taskExportData($id2);check12(count($export['details']['rows']??[])===2,'导出保留所有轮次答卷');
+ // 新提交门禁：真实会员主表为准，拒绝路径不能留下答卷、扫码关系、归属历史或权益。
+ seed12('user',['uid'=>103,'nickname'=>'待选店会员','phone'=>'13800000103','belong_store_id'=>0,'status'=>1,'delete_time'=>null]);
+ seed12('user',['uid'=>104,'nickname'=>'未授权手机会员','phone'=>'','belong_store_id'=>11,'status'=>1,'delete_time'=>null]);
+ seed12('user',['uid'=>105,'nickname'=>'回滚会员','phone'=>'13800000105','belong_store_id'=>0,'status'=>1,'delete_time'=>null]);
+ seed12('system_store',['id'=>12,'name'=>'另一门店','is_del'=>0,'is_show'=>1]);seed12('system_store',['id'=>13,'name'=>'隐藏门店','is_del'=>0,'is_show'=>0]);
+ $gated=$survey->save(['title'=>'手机与门店门禁','questionnaire_id'=>$qid],7);$survey->publish($gated);
+ $required=$survey->memberDetail(103,$gated)['requirements'];check12(!$required['phone_required']&&$required['store_required']&&array_column($required['stores'],'id')==[11,12],'已授权无归属仅返回启用可选门店');
+ reject12(fn()=>$survey->submit(104,$gated,['1'=>'答案'],1,11),'未授权手机号即使伪造门店也不能提交');
+ reject12(fn()=>$survey->submit(103,$gated,['1'=>'答案'],1),'无所属门店必须显式选店');
+ reject12(fn()=>$survey->submit(103,$gated,['1'=>'答案'],1,13),'隐藏门店不能作为首次归属');
+ reject12(fn()=>$survey->submit(103,$gated,['1'=>'答案'],1,999),'不存在门店不能作为首次归属');
+ check12(Db::name('member_survey_answer')->where('task_id',$gated)->count()===0&&Db::name('member_survey_target')->where('task_id',$gated)->count()===0,'门禁拒绝不残留答卷或扫码参与关系');
+ Db::execute("CREATE TRIGGER survey_fixture_fail_answer BEFORE INSERT ON eb_member_survey_answer FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture answer failure'");
+ $failed=false;try{$survey->submit(105,$gated,['1'=>'答案'],1,11);}catch(Throwable$e){$failed=true;}finally{Db::execute('DROP TRIGGER survey_fixture_fail_answer');}
+ check12($failed&&(int)Db::name('user')->where('uid',105)->value('belong_store_id')===0&&Db::name('user_belong_store')->where('uid',105)->count()===0&&Db::name('cashier_v3_report_member_store_assignment_period')->where('member_id',105)->count()===0,'答卷失败同步回滚归属主表历史和统计事实');
+ $survey->submit(103,$gated,['1'=>'答案'],1,11);
+ check12((int)Db::name('user')->where('uid',103)->value('belong_store_id')===11&&Db::name('user_belong_store')->where('uid',103)->where('type','survey_choice')->count()===1&&Db::name('cashier_v3_report_member_store_assignment_period')->where('member_id',103)->count()===1,'首次选择门店与答卷同时保存并保留归属历史事实');
+ $survey->submit(103,$gated,['1'=>'答案'],1,12);check12((int)Db::name('user')->where('uid',103)->value('belong_store_id')===11&&Db::name('user_belong_store')->where('uid',103)->count()===1,'重复提交不重复绑店也不覆盖已有归属');
+ $owned=$survey->memberDetail(101,$gated)['requirements'];check12(!$owned['phone_required']&&!$owned['store_required']&&$owned['stores']===[],'已有归属会员不再要求选择门店');
+ $survey->submit(101,$gated,['1'=>'答案'],1,12);check12((int)Db::name('user')->where('uid',101)->value('belong_store_id')===11,'已有归属拒绝通过问卷提交改绑到其他门店');
  $out=['passed'=>true,'checks'=>$checks,'isolated_database_destroyed_on_exit'=>true];echo json_encode($out,JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT)."\n";
  if($path=getenv('R12_RESULT'))file_put_contents($path,json_encode($out,JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
 }finally{

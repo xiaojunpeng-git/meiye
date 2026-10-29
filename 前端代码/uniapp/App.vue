@@ -185,7 +185,8 @@
 				);
 				return false;
 			}
-			if (option.query && option.query.hasOwnProperty('scene')) {
+			// 问卷scene仅携带任务入口，不能触发推广人/归属门店的旧扫码绑定分支。
+			if (!publicSurveyEntry && option.query && option.query.hasOwnProperty('scene')) {
 				let val = that.$util.getUrlParams(decodeURIComponent(option.query.scene));
 				switch (option.scene) {
 					//扫描小程序码
@@ -337,13 +338,13 @@
 			// #endif
 			// #ifdef MP
 			// 小程序静默授权
-			if (!this.$store.getters.isLogin) {
+			if (!publicSurveyEntry && !this.$store.getters.isLogin) {
 				Routine.getCode().then(code => {
 					this.silenceAuth(code);
 				}).catch(res => {
 					uni.hideLoading();
 				});
-			}else if(this.$store.getters.isLogin && await this.getExpired()){
+			}else if(!publicSurveyEntry && this.$store.getters.isLogin && await this.getExpired()){
 				//处理小程序有token情况下但是静默授权失败
 				this.$Cache.clear(LOGIN_STATUS);
 				Routine.getCode().then(code => {
@@ -356,11 +357,11 @@
 			beginSurveyForeground();
 			setTimeout(() => remindMemberSurvey(this.$store), 500);
 			let that = this;
+			const enterOptions = uni.getEnterOptionsSync();
 			// #ifdef MP-WEIXIN
 			// 冷启动、分享卡片和从后台恢复都重新校验，避免直接落到业务深链。
-			enforceMemberPhoneGate(this.$store);
+			enforceMemberPhoneGate(this.$store, (options && options.path) || enterOptions.path || '');
 			// #endif
-			const enterOptions = uni.getEnterOptionsSync();
 			if (enterOptions.query && enterOptions.query.spid) {
 				this.$Cache.set('spid', enterOptions.query.spid);
 				this.globalData.spid = enterOptions.query.spid;

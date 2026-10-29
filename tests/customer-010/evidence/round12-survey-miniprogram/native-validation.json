@@ -1,0 +1,38 @@
+{
+  "status": "native_connection_verified",
+  "app_id": "wxce4f61fc9c4eaaa6",
+  "api_origin": "https://010.cc3798.com",
+  "domain_validation_enabled": true,
+  "checks_passed": [
+    "开发者工具实际加载对应AppID的010包",
+    "扫码编译模式直接进入pages/users/survey/index",
+    "问卷冷启动保留任务页面，没有被手机号门禁提前重定向",
+    "开启合法域名校验时真实请求010接口成功",
+    "合成无效token收到后端业务拒绝，不是微信网络拦截"
+  ],
+  "blocker": null,
+  "observed_existing_domains": null,
+  "required_action": null,
+  "production_007_changed": false,
+  "uploaded": false,
+  "screenshot": "native-final-package-verified.png",
+  "verified_at": "2026-10-29T17:19:04.917441+08:00",
+  "request_url": "https://010.cc3798.com/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff",
+  "http_status": 200,
+  "business_status": 400,
+  "response_message": "问卷链接无效",
+  "synthetic_token_only": true,
+  "full_live_submission": "pending post-acceptance deployment; current online tasks are user drafts",
+  "passed": true,
+  "project": "/tmp/r12-survey-member-mp-weixin-010-mini-flow2",
+  "app_json_sha256": "db7bc6f288914b6f8d23de98e89ae025e3c3ec5adad79cd7a3b5f580adf85795",
+  "vendor_sha256": "ef5ce77e23043a1f638d101538a9266ee807ef6e10fcaf1fedcc55ef1a6b2daa",
+  "checks": [
+    "开发者工具实际加载对应AppID的010包",
+    "扫码编译模式直接进入pages/users/survey/index",
+    "问卷冷启动保留任务页面，没有被手机号门禁提前重定向",
+    "开启合法域名校验时真实请求010接口成功",
+    "合成无效token收到后端业务拒绝，不是微信网络拦截",
+    "纳入已上线M014会员权益基线的最终体验包再次通过原生扫码联网验证"
+  ]
+}

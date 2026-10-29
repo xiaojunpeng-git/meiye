@@ -51,8 +51,9 @@ function redirectToMemberLogin() {
 /**
  * 校验当前页面；返回 false 表示当前业务页已被拦截并开始跳转登录页。
  */
-export function enforceMemberPhoneGate(store) {
-	if (hasMemberPhoneAuthorization(store) || isAllowedRoute(currentRoute())) return true;
+export function enforceMemberPhoneGate(store, pendingRoute = '') {
+    // 冷启动时页面栈尚未建立，使用框架传入的落地页；已有页面永远优先，不能借旧扫码路径放宽门禁。
+    if (hasMemberPhoneAuthorization(store) || isAllowedRoute(currentRoute() || pendingRoute)) return true;
 	redirectToMemberLogin();
 	return false;
 }
