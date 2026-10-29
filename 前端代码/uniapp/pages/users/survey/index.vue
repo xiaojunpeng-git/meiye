@@ -3,7 +3,8 @@
     <view v-if="task" class="survey-card">
       <view class="title">{{ task.title }}</view><view v-if="task.description" class="description">{{ task.description }}</view>
       <view v-if="giftLabel" class="gift-note">完成问卷奖励：{{ giftLabel }}</view>
-      <view v-if="completed" class="completed"><view>问卷已提交，感谢参与。</view><view>{{ reward.message }}</view><view v-if="error" role="status" aria-live="polite" class="required">{{ error }}</view><button v-if="reward.status === 'pending'" :disabled="submitting" @click="retryReward">重试发放奖励</button></view>
+      <view v-if="task.eligibility_pending" class="eligibility"><view>请先登录会员账号，验证是否符合本调查任务的会员要求。</view><button class="submit" @click="loginForEligibility">登录验证资格</button></view>
+      <view v-else-if="completed" class="completed"><view>问卷已提交，感谢参与。</view><view>{{ reward.message }}</view><view v-if="error" role="status" aria-live="polite" class="required">{{ error }}</view><button v-if="reward.status === 'pending'" :disabled="submitting" @click="retryReward">重试发放奖励</button></view>
       <template v-else>
         <required-field-guide v-for="(question, index) in task.questions" :key="question.id" ref="guides" :anchor="'survey-question-' + index"><template v-slot:default="{ focused }">
           <view class="question"><view class="question-title">{{ index + 1 }}. {{ question.title }} <text v-if="question.required" class="required">*</text></view>
@@ -42,6 +43,8 @@ export default {
     // 草稿只存当前设备并绑定任务轮次，登录跳转可恢复；提交确认后立即清除。
     persist() { if (this.task && !this.completed) uni.setStorageSync(this.draftKey, { round: this.task.send_round, answers: this.answers, store_id:this.selectedStoreId }); },
     chooseStore(event) { const store=(this.requirements.stores || [])[Number(event.detail.value)];this.selectedStoreId=store?Number(store.id):0;this.persist(); },
+    // 定向任务的公开码不下发题目；先完成会员登录，再由服务端名单决定是否允许答卷。
+    loginForEligibility() { toLogin(undefined, undefined, '/pages/users/survey/index?' + (this.entryToken ? 'entry=' + encodeURIComponent(this.entryToken) : 'id=' + this.taskId)); },
     async load() { this.loading = true; this.error = ''; try {
       const response = this.entryToken ? await surveyEntry(this.entryToken) : await surveyDetail(this.taskId);
       let task = response.data; this.taskId = Number(task.id);
@@ -83,5 +86,6 @@ export default {
 .answer-text { width:100%; min-height:190rpx; padding:20rpx; box-sizing:border-box; background:#f7f8fa; border-radius:12rpx; font-size:28rpx; }
 .submit { background:#2478eb; color:white; margin:36rpx 0 14rpx; border-radius:12rpx; }
 .empty { padding:80rpx 20rpx; text-align:center; color:#808695; }
+.eligibility { padding:36rpx 0 12rpx; color:#344054; font-size:28rpx; line-height:1.6; }
 </style>
 <style scoped>.option{background:white;text-align:left;padding:12rpx 0;line-height:1.5;border-radius:0}.option::after{border:0}.completed{padding:40rpx 0;line-height:2}</style>

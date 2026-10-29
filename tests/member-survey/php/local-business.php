@@ -72,6 +72,18 @@ try{
  check12(count($survey->entry($task['entry_token'])['questions'])===3,'编辑问卷不改变已发布题目');
  reject12(fn()=>$survey->save(['title'=>'覆盖发布','questionnaire_id'=>$qid],7,$id),'已发布任务不可覆盖');
  $survey->stop($id);reject12(fn()=>$survey->entry($task['entry_token']),'停止后二维码不可答');
+ // 目标条件在发布时固定名单，二维码匿名入口不泄露题目；名单外不能提交或领取奖励。
+ $restrictedId=$survey->save(['title'=>'限定会员扫码任务','questionnaire_id'=>$qid,'filters'=>['uids'=>[102]]],7);
+ $survey->publish($restrictedId);$restrictedTask=$survey->readTask($restrictedId);
+ $restrictedEntry=$survey->entry($restrictedTask['entry_token']);
+ check12($restrictedEntry['eligibility_pending']===true&&$restrictedEntry['questions']===[],'限定会员任务匿名扫码须先登录验证且不下发题目');
+ reject12(fn()=>$survey->memberDetail(101,$restrictedId),'名单外会员不能读取限定任务题目');
+ reject12(fn()=>$survey->submit(101,$restrictedId,['1'=>'已填写'],1),'名单外会员不能直接调用提交接口');
+ check12(Db::name('member_survey_answer')->where('task_id',$restrictedId)->count()===0&&Db::name('member_survey_target')->where('task_id',$restrictedId)->count()===1,'资格拒绝不生成答卷或扫码参与关系');
+ check12(count($survey->memberDetail(102,$restrictedId)['questions'])===1,'发布目标名单会员可读取原题目');
+ $survey->submit(102,$restrictedId,['1'=>'已填写'],1);
+ check12(Db::name('member_survey_answer')->where('task_id',$restrictedId)->where('uid',102)->count()===1,'发布目标名单会员可通过二维码提交');
+ $survey->resend($restrictedId);reject12(fn()=>$survey->submit(101,$restrictedId,['1'=>'已填写'],2),'重发任务后名单外会员仍不能提交');
  // 奖励失败不能丢失答卷；修复依赖后只履约原应发记录。
  $id2=$survey->save(['title'=>'奖励任务','questionnaire_id'=>$qid],7);$gift->saveConfig($id2,['store_id'=>11,'reward_each_round'=>false,'coupon'=>[['id'=>31,'num'=>1,'write_days'=>30]],'product'=>[]]);$survey->publish($id2);
  Db::name('system_admin')->where('id',7)->update(['status'=>0]);$reward=$survey->submit(101,$id2,['1'=>'已填写'],1);

@@ -7,7 +7,7 @@
       </div>
       <Tabs v-model="activeTab">
         <TabPane label="调查任务" name="tasks">
-          <p class="section-hint">发布后可生成二维码，扫码直接参与；目标会员仅用于定向提醒。题目和奖励在发布时固定。</p>
+          <p class="section-hint">发布后可生成二维码；设置目标会员条件时，仅发布名单内的会员可扫码答卷。未设置条件的任务向所有会员开放。题目和奖励在发布时固定。</p>
           <Table :height="tableHeight" :columns="columns" :data="tasks" :loading="loading" border />
           <span class="paging-label">共 {{ total }} 条 · 每页 20 条 · 第 {{ page }} / {{ Math.max(1, Math.ceil(total / 20)) }} 页</span><Page class="pager" :total="total" :current="page" :page-size="20" @on-change="changePage" />
         </TabPane>
@@ -41,7 +41,7 @@
 
     <Modal v-model="targetsOpen" :title="`添加目标会员 · ${targetTaskTitle}`" width="880" :footer-hide="true" :mask-closable="false">
       <div class="editor">
-        <p class="section-hint">筛选会员与手动指定会员会合并为目标名单。保存后可再次编辑，发布时重新计算并固定名单。</p>
+        <p class="section-hint">筛选会员与手动指定会员会合并为目标名单。发布时重新计算并固定名单，名单外会员扫码不能答卷；不设置条件则公开扫码。</p>
         <Divider>条件筛选</Divider>
         <Row :gutter="16">
           <Col span="12"><Checkbox v-model="targetFilters.cash_enabled">按现金业绩筛选</Checkbox></Col>
@@ -179,7 +179,7 @@
     <member-survey-reward :visible="giftOpen" :survey-id="giftTaskId" :questionnaire-id="giftQuestionnaireId" :readonly="giftReadOnly" :inherited="giftInherited"
       @close="giftOpen = false" @saved="giftQuestionnaireId ? loadQuestionnaires() : loadTasks()" />
     <Modal v-model="qrOpen" title="调查任务二维码" :footer-hide="true" width="450">
-      <p>微信扫码直接打开会员小程序问卷。完成前须授权手机号；无所属门店的会员须先选择门店。</p>
+      <p>微信扫码打开会员小程序。已设置目标条件的任务仅允许发布名单内会员答卷；完成前须授权手机号，无所属门店时须先选择门店。</p>
       <img v-if="qrUrl" :src="qrUrl" alt="调查任务小程序码" style="display:block;margin:20px auto;width:260px;height:260px" />
       <p v-if="qrEnvironment">{{ qrEnvironment === 'trial' ? '体验版' : qrEnvironment === 'develop' ? '开发版' : '正式版' }}会员小程序</p>
       <Button v-if="qrUrl" @click="downloadQr">下载二维码</Button>
@@ -225,8 +225,8 @@ export default {
         { title: '任务', key: 'title', minWidth: 210 },
         { title: '问卷', key: 'questionnaire_title', minWidth: 180 },
         { title: '状态', render: (h, { row }) => h('span', row.status === 'published' && row.deadline && row.deadline < Date.now() / 1000 ? '已截止' : ({ draft: '草稿', published: '进行中', stopped: '已停止' }[row.status] || row.status)) },
-        { title: '提醒名单', width: 110, render: (h, { row }) => h('span', row.status === 'draft'
-          ? (row.targets_configured ? '待发布' : '公开扫码') : String(row.target_count)) },
+        { title: '目标会员', width: 110, render: (h, { row }) => h('span', row.status === 'draft'
+          ? (row.targets_configured ? '待发布' : '公开扫码') : (row.targets_configured ? String(row.target_count) : '公开扫码')) },
         { title: '已填写', key: 'answer_count', width: 100 },
         { title: '截止', width: 120, render: (h, { row }) => h('span', row.deadline ? this.dateText(row.deadline) : '无') },
         { title: '操作', width: 640, render: (h, { row }) => h('div', [
@@ -496,7 +496,7 @@ export default {
       } finally { this.saving = false; }
     },
     publishTask(row) {
-      this.$Modal.confirm({ title: '发布调查', content: '发布后二维码对所有扫码用户开放；目标会员仅用于提醒。题目和奖励将固定。确认发布？',
+      this.$Modal.confirm({ title: '发布调查', content: '发布后将固定目标名单；设置了目标条件时，只有名单内会员可以扫码答卷。未设置条件则向所有会员开放。题目和奖励也将固定。确认发布？',
         onOk: async () => { const res = await surveyPublish(row.id); this.$Message.success(`已发布，目标 ${res.data.target_count} 人`); this.loadTasks(); } });
     },
     stopTask(id) {

@@ -8,7 +8,7 @@ use app\services\query\metric\StoreCustomerVisitEligibility;
 use think\exception\ValidateException;
 use think\facade\Db;
 
-/** 会员调查：名单只控制定向提醒；有效任务公开扫码参与，答卷和奖励按会员、任务轮次防重。 */
+/** 会员调查：有目标条件时按发布名单限制答卷资格；无条件任务公开扫码，答卷和奖励按会员、任务轮次防重。 */
 class MemberSurveyServices
 {
     /** 二维码公开读取仅返回答卷所需内容，不暴露目标名单、手机号和后台奖励配置。 */
@@ -50,6 +50,13 @@ class MemberSurveyServices
         $task['questions'] = $this->decode((string)$task['questions']);
         $task['filters'] = $this->decode((string)$task['filters']);
         return $task;
+    }
+
+    /** 已发布目标名单是任务条件在发布时的固定结果，扫码资格不能在访问时按变化中的业绩重新计算。 */
+    private function requiresTarget(array $task): bool
+    {
+        $filters=$task['filters']??[];
+        return !empty($filters['cash_enabled'])||!empty($filters['visits_enabled'])||!empty($filters['uids']);
     }
 
     private function isActive(array $task): bool
@@ -346,7 +353,7 @@ class MemberSurveyServices
             $uids[] = (int)$uid;
         }
         $uids = array_values(array_unique($uids));
-        // 空名单是有效的公开二维码任务，不应被旧定向调查资格条件阻断。
+        // 未配置任何目标条件的任务仍可公开扫码；配置了条件的任务使用发布名单判定资格。
         $start = trim((string)($filters['start_date'] ?? ''));
         $end = trim((string)($filters['end_date'] ?? ''));
         foreach ([$start, $end] as $date) {
@@ -426,7 +433,7 @@ class MemberSurveyServices
             ->getConfigMap(MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY_QUESTIONNAIRE, array_column($rows, 'questionnaire_id')) : [];
         foreach ($rows as &$row) {
             $filters = $this->decode((string)$row['filters']);
-            $row['targets_configured'] = !empty($filters['cash_enabled']) || !empty($filters['visits_enabled']) || !empty($filters['uids']);
+            $row['targets_configured'] = $this->requiresTarget(['filters'=>$filters]);
             unset($row['questions'], $row['filters']);
             $row['questionnaire_title'] = $row['questionnaire_id']
                 ? (string)Db::name('member_survey_questionnaire')->where('id', $row['questionnaire_id'])->value('title') : '旧版任务问卷';
@@ -462,7 +469,7 @@ class MemberSurveyServices
         return ['task_id' => $id, 'status' => $task['status'], 'filters' => $task['filters'], 'members' => $members];
     }
 
-    /** 提醒名单只在草稿修改，发布后固定且不限制公开扫码资格。 */
+    /** 目标条件只在草稿修改；发布后固定名单同时作为扫码答卷资格。 */
     public function saveTargets(int $id, array $input): void
     {
         $filters = $this->normalizedFilters($input);
@@ -538,7 +545,7 @@ class MemberSurveyServices
         return ['count' => count($list), 'list' => $list];
     }
 
-    /** 同事务固定问卷、提醒名单和010奖励配置，空名单也可发布二维码任务。 */
+    /** 同事务固定问卷、目标名单和010奖励配置；未配置条件时允许公开二维码任务。 */
     public function publish(int $id): array
     {
         $task = $this->task($id);
@@ -549,7 +556,7 @@ class MemberSurveyServices
             $questions = $this->questionnaire((int)$task['questionnaire_id'])['questions'];
         }
         $preview = $this->preview($task['filters']);
-        // 目标名单仅用于提醒；二维码任务允许零名单发布，任何扫码用户均可填写。
+        // 目标名单在发布时固定；无筛选条件的公开任务允许零名单发布。
         Db::transaction(function () use ($id, $preview, $questions, $task) {
             $locked=Db::name('member_survey_task')->where('id',$id)->lock(true)->find();
             if(!$locked||$locked['status']!=='draft'||$locked['questions']!==json_encode($task['questions'],JSON_UNESCAPED_UNICODE)||$locked['filters']!==json_encode($task['filters'],JSON_UNESCAPED_UNICODE)|| (int)$locked['questionnaire_id']!==(int)$task['questionnaire_id'] || $locked['title']!==$task['title'] || (int)$locked['deadline']!==(int)$task['deadline'])throw new ValidateException('草稿已变化，请刷新后发布');
@@ -648,13 +655,18 @@ class MemberSurveyServices
         });
     }
 
-    /** 公开问题与本人完成状态分开投影，不暴露其他会员或提醒名单。 */
+    /** 已设会员条件的二维码先要求登录验证；仅合资格会员获得题目，不暴露目标名单。 */
     public function memberDetail(int $uid, int $id): array
     {
         $task = $this->task($id);
         if (!$this->isActive($task)) throw new ValidateException('调查任务已结束');
+        if ($uid<=0&&$this->requiresTarget($task))return ['id'=>$id,'title'=>$task['title'],'description'=>$task['description'],
+            'questions'=>[],'deadline'=>$task['deadline'],'send_round'=>(int)$task['send_round'],
+            'completed'=>false,'eligibility_pending'=>true,'gifts'=>[],'requirements'=>$this->submissionRequirements(0)];
         $target = Db::name('member_survey_target')->where('task_id', $id)->where('uid', $uid)->find();
         $completed=$target && (int)$target['completed_round'] >= (int)$task['send_round'];
+        // 历史已完成答卷可回看；新的答卷只接受发布名单，旧扫码参与关系不能冒充目标资格。
+        if($uid>0&&$this->requiresTarget($task)&&!$completed&&(!$target||$target['source']==='qrcode'))throw new ValidateException('您不符合本调查任务的会员要求');
         return ['id' => $id, 'title' => $task['title'], 'description' => $task['description'],
             'questions' => $task['questions'], 'deadline' => $task['deadline'],
             'send_round' => (int)$task['send_round'], 'completed'=>(bool)$completed,
@@ -680,8 +692,8 @@ class MemberSurveyServices
         if ($expectedRound !== (int)$task['send_round']) throw new ValidateException('调查已重新发送，请重新打开问卷');
         if (!is_array($answers)) throw new ValidateException('请填写问卷');
         $target = Db::name('member_survey_target')->where('task_id', $id)->where('uid', $uid)->find();
-        // 二维码不限提醒名单；会员身份由登录态提供，提交事务内建立参与关系。
         if ($target && (int)$target['completed_round'] >= (int)$task['send_round']) return app()->make(MemberSurveyGiftServices::class)->memberStatus($id,$uid);
+        if($this->requiresTarget($task)&&(!$target||$target['source']==='qrcode'))throw new ValidateException('您不符合本调查任务的会员要求');
         $normalized = [];
         foreach ($task['questions'] as $question) {
             $key = (string)$question['id'];
@@ -718,6 +730,8 @@ class MemberSurveyServices
             $member=Db::name('user')->where('uid',$uid)->where('status',1)->lock(true)->find();
             if(!$member || !empty($member['is_del']) || (!empty($member['delete_time']) && $member['delete_time']!=='0000-00-00 00:00:00'))throw new ValidateException('请使用有效会员账号提交');
             $lockedTarget = Db::name('member_survey_target')->where('task_id', $id)->where('uid', $uid)->lock(true)->find();
+            // 资格与答卷在同一事务复核，不能借旧公开扫码关系或并发请求越过已发布名单。
+            if($this->requiresTarget($task)&&(!$lockedTarget||$lockedTarget['source']==='qrcode'))throw new ValidateException('您不符合本调查任务的会员要求');
             if (!$lockedTarget) {
                 Db::name('member_survey_target')->insert(['task_id'=>$id,'uid'=>$uid,'source'=>'qrcode']);
                 $lockedTarget=['completed_round'=>0];
