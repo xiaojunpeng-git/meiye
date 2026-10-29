@@ -72,6 +72,8 @@ class DiyServices extends BaseServices
 		'order' => [// 订单
 			'style' => 1,// 风格
 			'list' => [
+				// 不附加状态筛选，复用会员自己的全部订单列表与原权限边界。
+				['key' => 'all', 'title' => '全部订单', 'url' => '/pages/goods/order_list/index', 'icon' => 'icon-ic_order1', 'is_show' => 1],
 				['key' => 'unpaid', 'title' => '待付款', 'url' => '/pages/goods/order_list/index?status=0', 'icon' => 'icon-ic_daifukuan', 'is_show' => 1],
 				['key' => 'debt', 'title' => '欠款', 'url' => '/pages/users/debt/index', 'icon' => 'icon-ic_money', 'is_show' => 1],
 				['key' => 'unshipped', 'title' => '待发货', 'url' => '/pages/goods/order_list/index?status=1', 'icon' => 'icon-ic_daifahuo', 'is_show' => 0],
@@ -677,7 +679,7 @@ class DiyServices extends BaseServices
 				return [];
 				break;
 		}
-		return $this->dao->cacheTag()->remember($key, function () use ($name, $default) {
+		$cached = $this->dao->cacheTag()->remember($key, function () use ($name, $default) {
 			$info = $this->dao->get(['template_name' => $name, 'type' => 3]);
 			if ($info) {
 				$result = json_decode($info['value'], true);
@@ -687,6 +689,8 @@ class DiyServices extends BaseServices
 			}
 			return $result;
 		});
+		// 个人中心后台与会员 API 共用缓存键；旧缓存命中也须补新入口，不能只在缓存未命中时处理。
+		return $name === 'member' ? $this->mergeMemberConfig($cached ?: []) : $cached;
 	}
 
 	/**
@@ -701,6 +705,11 @@ class DiyServices extends BaseServices
 		$result = $member ? array_merge($default, array_intersect_key($member, $default)) : $default;
 		$configuredOrder = is_array($result['order'] ?? null) ? $result['order'] : [];
 		$result['order'] = array_merge($default['order'], $configuredOrder);
+		// 老装修已有 list 时浅合并不会补新入口；只补缺失的全部订单，保留原排序、图标及显隐。
+		// 已配置（含主动隐藏）的 all 必须原样保留，刷新或保存后不能重新打开或重复添加。
+		if (is_array($result['order']['list']) && !in_array('all', array_column($result['order']['list'], 'key'), true)) {
+			array_unshift($result['order']['list'], $default['order']['list'][0]);
+		}
 		return $result;
 	}
 

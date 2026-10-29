@@ -90,6 +90,8 @@ export default {
       propertyList: propertyList,
       orderStyle: 1, // 默认选中风格
       orderEntryDefaults: [
+        // 同后端默认值，兼容加载尚未升级的历史装修配置。
+        { key: "all", title: "全部订单", url: "/pages/goods/order_list/index", icon: "icon-ic_order1", is_show: 1 },
         { key: "unpaid", title: "待付款", url: "/pages/goods/order_list/index?status=0", icon: "icon-ic_daifukuan", is_show: 1 },
         { key: "debt", title: "欠款", url: "/pages/users/debt/index", icon: "icon-ic_money", is_show: 1 },
         { key: "unshipped", title: "待发货", url: "/pages/goods/order_list/index?status=1", icon: "icon-ic_daifahuo", is_show: 0 },
@@ -124,6 +126,9 @@ export default {
     ensureOrderList() {
       if (!Array.isArray(this.orderData.list) || !this.orderData.list.length) {
         this.$set(this.orderData, "list", this.orderEntryDefaults.map((item) => ({ ...item })));
+      } else if (!this.orderData.list.some((item) => item && item.key === "all")) {
+        // 只补新增入口，不用默认列表覆盖客户已经调整的名称、图标、顺序或隐藏状态。
+        this.$set(this.orderData, "list", [{ ...this.orderEntryDefaults[0] }, ...this.orderData.list]);
       }
     },
     selectStyle(index) {

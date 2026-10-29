@@ -22,6 +22,8 @@ export default {
     order: {
       style: 1, // 风格
       list: [
+        // 全部订单不携带状态参数；显示、排序和图标仍由装修配置保存。
+        { key: 'all', title: '全部订单', url: '/pages/goods/order_list/index', icon: 'icon-ic_order1', is_show: 1 },
         { key: 'unpaid', title: '待付款', url: '/pages/goods/order_list/index?status=0', icon: 'icon-ic_daifukuan', is_show: 1 },
         { key: 'debt', title: '欠款', url: '/pages/users/debt/index', icon: 'icon-ic_money', is_show: 1 },
         { key: 'unshipped', title: '待发货', url: '/pages/goods/order_list/index?status=1', icon: 'icon-ic_daifahuo', is_show: 0 },
