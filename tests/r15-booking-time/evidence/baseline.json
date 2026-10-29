@@ -1,0 +1,9 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "sourceBaseline": "4b23e1f008b3504a8a744ad831fda38bb6d5848c",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "1cd13344daae2ef656a692010a3c01509b0f5d69f99ef8eaabe597c3fbb766e1",
+    "前端代码/uniapp/components/chooseTime/index.vue": "d21fa54ea0e282a71af2d1d1f36ad5638842668e981ad60feff3a115e493f5aa"
+  },
+  "remoteInstances": "not applicable; local only"
+}

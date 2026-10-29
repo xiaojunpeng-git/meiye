@@ -106,6 +106,8 @@
 		   <chooseTime
 			   class="booking-time-picker"
 			   :embedded="true"
+			   :expandTimeSlots="true"
+			   :filledDateTabs="true"
 			   :isQuantum="true"
 			   :beginTime="timeBegin"
 			   :endTime="timeEnd"
@@ -2214,9 +2216,6 @@ export default {
 		border-color: #07CD9A !important;
 		background: #f0fdf9 !important;
 		color: #07CD9A !important;
-	}
-	.borderb {
-		border-bottom-color: #07CD9A !important;
 	}
 	.all {
 		color: #07CD9A;

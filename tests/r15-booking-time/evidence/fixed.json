@@ -1,0 +1,45 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "sourceBaseline": "4b23e1f008b3504a8a744ad831fda38bb6d5848c",
+  "candidateTree": "26276f925a0032b71bbf3f579c9514f19f5e8809",
+  "patchSHA256": "4c351dc76f16f2d8eac7a98cd3dcae3dbfbb29a3182624ac4767c233635b6425",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "1076bb426a672224be6b76d21471195d738eeb6e39bb097cbd73879a3273b206",
+    "前端代码/uniapp/components/chooseTime/index.vue": "aa5daf680cc54f5803cfc66b93661385da0f2b6922518a97c496243de9fc3f84",
+    "tests/r15-booking-time/browser.cjs": "6992f22fd6dac2a5104452dc313a5dfe3e35f8ef094c507722773b49e60913ee",
+    "scripts/r15-booking-time-build.cjs": "7e335b355a8fca2daeae37d55e4c0455e1e69f2dcf33bd262387889f9ad232b9"
+  },
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE",
+  "backendFiles": 0,
+  "databaseChanges": false,
+  "remoteInstances": "not applicable; local only",
+  "committed": false,
+  "deployed": false,
+  "uploaded": false,
+  "verification": {
+    "browserWidths": [
+      320,
+      375,
+      430
+    ],
+    "visibleTimeSlots": 52,
+    "noNestedClipping": true,
+    "lastRowAboveFooter": true,
+    "filledDatesFollowTheme": true,
+    "dateAndWeekdaySeparateLines": true,
+    "disabledTimeStillRejected": true,
+    "legacyDefaultLayoutRetained": true,
+    "pageBusinessScriptUnchanged": true,
+    "componentMethodsUnchanged": true,
+    "priorRemovalChecks": 22,
+    "ownedRightsAndHistoricalFrontendRegression": "PASS",
+    "H5Build": "PASS",
+    "miniBuild": "PASS",
+    "nativeTemplates": 419,
+    "realDeviceTested": false
+  },
+  "commentsUpdated": [
+    "前端代码/uniapp/pages/activity/reservation/index.vue",
+    "前端代码/uniapp/components/chooseTime/index.vue"
+  ]
+}
