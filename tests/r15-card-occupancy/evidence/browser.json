@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "widths": [
+    320,
+    375,
+    430
+  ],
+  "cardAndStandalone": true,
+  "disabledLabelAndCounts": true,
+  "viewBookingRoute": true,
+  "fullStatusVisible": true,
+  "buttonsAligned": true,
+  "productionRequests": 0
+}

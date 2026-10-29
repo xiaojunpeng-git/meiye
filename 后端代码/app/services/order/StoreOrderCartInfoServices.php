@@ -417,10 +417,12 @@ class StoreOrderCartInfoServices extends BaseServices
 
     public function getOrderCardRelatedCartInfo(int $oid = 0, int $uid = 0)
     {
+        // Member reads are owner-bound; internal staff reads retain their
+        // existing caller permission checks and resolve the order's owner here.
+        $ownerUid = (int)StoreOrder::where('id', $oid)->value('uid');
+        if ($uid > 0 && $ownerUid !== $uid) throw new ValidateException('无权查看该卡项。');
         $cart_info = $this->dao->getCartColunm(['oid' => $oid, 'cart_type' => 2], '*');
         $cart = $this->dao->getOne(['oid' => $oid, 'cart_type' => 0]);
-        /** @var StoreReservationOrderServices $reservationOrderServices */
-        $reservationOrderServices = app()->make(StoreReservationOrderServices::class);
         /** @var StoreProductReplyServices $replyServices */
         $replyServices = app()->make(StoreProductReplyServices::class);
         $pay_price = 0;
@@ -466,12 +468,15 @@ class StoreOrderCartInfoServices extends BaseServices
             $v['waiting_service'] = 0;
             //新增是否评价字段
             $v['is_reply'] = $replyServices->count(['unique' => $v['unique']]);
-            if ($v['product_type'] == 6) {
-                if (!$uid) $uid = $v['uid'];
-                $v['waiting_service'] = $reservationOrderServices->count(['uid' => $uid, 'oid' => $oid, 'cart_info_id' => $v['id'], 'status' => 0, 'is_del' => 0]);
-            }
+
         }
         unset($v);
+        // The member detail and card list share V3 occupancy with the booking
+        // picker. This projection never consumes or repairs purchased rights.
+        if ($ownerUid > 0) {
+            $cart_info = (new \app\services\cashier\v3\reservation\ImportedEntitlementReservationStoreServices())
+                ->withCardBenefitsReservationUsage($ownerUid, $cart_info);
+        }
         return $cart_info;
     }
 

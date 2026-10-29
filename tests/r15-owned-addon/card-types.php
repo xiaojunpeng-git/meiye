@@ -53,6 +53,12 @@ try {
     foreach ($fixtureCards as $type => $f) {
         $group = null; foreach ($options['list'] as $g) if ((int)$g['order']['id'] === $f['oid']) $group = $g;
         if (!$group || $group['order']['card']['rule_type'] !== $type || count($group['cart_info']) !== count($f['ids'])) throw new RuntimeException('Card type missing: ' . $type);
+        $detailUsage = $service->withCardBenefitsReservationUsage(421,
+            Db::name('store_order_cart_info')->whereIn('id', $f['ids'])->select()->toArray());
+        foreach ($detailUsage as $usageRow) {
+            if (!$usageRow['reservation_usage']['known'] || $usageRow['reservation_usage']['available_quantity'] <= 0) throw new RuntimeException('Fresh typed detail unavailable: ' . $type);
+            if ($type === 'time' && $usageRow['reservation_usage']['available_text'] !== '不限次') throw new RuntimeException('Virtual time-card count exposed');
+        }
         $text = json_encode($group, JSON_UNESCAPED_UNICODE);
         if ($type === 'choice_count' && $group['order']['card']['remaining_text'] !== '共享可用1次') throw new RuntimeException('Shared header summed children');
         if ($type === 'choice_kind' && $group['cart_info'][0]['card_presentation']['remaining_text'] !== '待选 · —') throw new RuntimeException('Unselected kinds shown as independently owned');
@@ -75,6 +81,14 @@ try {
         if ((int)$created['reservationId'] <= 0) throw new RuntimeException('Valid typed booking failed');
         // The sibling competes for the same pool/kind slot, despite its own raw count.
         $right = $service->reservationDetail(421, $ids[1], 11);
+        // Card-detail projection must agree with the picker for shared pools
+        // and kind limits, without counting a sibling as a second direct visit.
+        $usageRows = $service->withCardBenefitsReservationUsage(421,
+            Db::name('store_order_cart_info')->whereIn('id', $ids)->select()->toArray());
+        $usageById = array_column($usageRows, null, 'id');
+        if ($usageById[$ids[1]]['reservation_usage']['available_quantity'] !== 0
+            || $usageById[$ids[1]]['waiting_service'] !== 0) throw new RuntimeException('Card detail sibling quota/count differs');
+        if ($type === 'choice_count' && $usageById[$ids[1]]['reservation_usage']['shared_occupied_quantity'] !== 1) throw new RuntimeException('Shared occupancy missing');
         if ($service->availableQuantity(421, $right) !== 0) throw new RuntimeException('Sibling ignored pending pool/kind occupancy');
         Db::name('cashier_v3_reservation')->where('id', $created['reservationId'])->update(['status' => 'CANCELLED']);
         if ($service->availableQuantity(421, $right) <= 0) throw new RuntimeException('Cancel failed to release shared capacity');

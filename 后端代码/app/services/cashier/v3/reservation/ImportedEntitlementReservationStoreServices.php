@@ -273,6 +273,78 @@ final class ImportedEntitlementReservationStoreServices
     }
 
     /**
+     * Read-only card projection: pending visits do not consume physical uses.
+     * Reuse picker/submit quota authority; count direct visits only once in the
+     * card total, while shared-pool occupancy is labelled separately per child.
+     */
+    public function withCardBenefitsReservationUsage(int $uid, array $rows): array
+    {
+        if ($uid <= 0) throw new ValidateException('请先登录。');
+        $projects = array_filter($rows, static function (array $row): bool {
+            return (int)($row['product_type'] ?? 0) === 6;
+        });
+        if (!$projects) return $rows;
+        $orderIds = array_values(array_unique(array_map('intval', array_column($projects, 'oid'))));
+        $owned = Db::name('store_order')->where('uid', $uid)->whereIn('id', $orderIds)->column('id');
+        if (count($owned) !== count($orderIds)) throw new ValidateException('无权查看该项目。');
+        $holders = Db::name('user_card_holder')->where('uid', $uid)->whereIn('oid', $orderIds)
+            ->where('is_del', 0)->select()->toArray();
+        $holderByOrder = []; $rulesByOrder = []; $allIds = array_map('intval', array_column($projects, 'id'));
+        foreach ($holders as $holder) {
+            $oid = (int)$holder['oid'];
+            // Match reservationDetail's first active holder, not a later row
+            // that happens to share its order ID in historical data.
+            if (isset($holderByOrder[$oid])) continue;
+            $holderByOrder[$oid] = $holder;
+            $rulesByOrder[$oid] = (new CashierV3CardRuleEntitlementAuthorityServices())
+                ->authoritiesForHolder(CashierV3ScopeResolver::TENANT_SCOPE_ID, (int)$holder['id']);
+            $allIds = array_merge($allIds, array_map('intval', array_keys($rulesByOrder[$oid])));
+        }
+        // Same tenant, generation and statuses as availableQuantity. Batch the
+        // display counts; neither cancelled nor another member's visits enter it.
+        $pendingRows = Db::name('cashier_v3_reservation_line')->alias('l')
+            ->join('cashier_v3_reservation r', 'r.id=l.reservation_id')
+            ->where('l.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('l.entitlement_source_detail_id', array_values(array_unique($allIds)))
+            ->where('r.member_id', $uid)->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('r.status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'])
+            ->field('l.entitlement_source_detail_id, SUM(l.quantity) AS reserved_quantity')
+            ->group('l.entitlement_source_detail_id')->select()->toArray();
+        $pending = [];
+        foreach ($pendingRows as $row) $pending[(int)$row['entitlement_source_detail_id']] = (int)ceil((float)$row['reserved_quantity']);
+        foreach ($rows as &$row) {
+            if ((int)($row['product_type'] ?? 0) !== 6) continue;
+            $oid = (int)$row['oid']; $id = (int)$row['id'];
+            $detail = $row; $detail['_holder'] = $holderByOrder[$oid] ?? [];
+            $detail['_authority'] = $rulesByOrder[$oid][$id] ?? null;
+            $a = $detail['_authority']; $type = $a['ruleType'] ?? 'legacy';
+            $available = $this->availableQuantity($uid, $detail);
+            $poolOccupied = $pending[$id] ?? 0;
+            if ($type === 'choice_count') {
+                $poolOccupied = 0;
+                foreach ($rulesByOrder[$oid] as $otherId => $other) {
+                    if ((int)$other['combinationGroupNo'] === (int)$a['combinationGroupNo']) $poolOccupied += $pending[(int)$otherId] ?? 0;
+                }
+            }
+            $reason = ''; $now = time();
+            if ((int)($row['write_start'] ?? 0) > $now) $reason = '权益未生效';
+            elseif ((int)($row['write_end'] ?? 0) > 0 && (int)$row['write_end'] < $now) $reason = '权益已过期';
+            elseif ((int)($row['is_writeoff'] ?? 0) === 1 || (int)$row['write_surplus_times'] <= 0) $reason = '次数已用完';
+            elseif ($a && (!$a['choiceAvailable'] || $a['stateStatus'] !== 'active' || (int)$a['remainingTimes'] <= 0)) $reason = '权益不可预约';
+            elseif ($a && ((int)$a['validFrom'] > $now || ((int)$a['validThrough'] > 0 && (int)$a['validThrough'] < $now))) $reason = '不在有效期内';
+            elseif ($available <= 0) $reason = $poolOccupied > 0 ? '已预约占用' : '可选项目已达上限';
+            if ($reason !== '') $available = 0;
+            $row['waiting_service'] = $pending[$id] ?? 0;
+            $row['reservation_usage'] = ['known' => true, 'occupied_quantity' => $pending[$id] ?? 0,
+                'shared_occupied_quantity' => $poolOccupied, 'available_quantity' => $available,
+                'available_text' => $type === 'time' && $available > 0 ? '不限次' : (string)$available . '次',
+                'shared_pool' => $type === 'choice_count', 'disabled_reason' => $reason];
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
      * Historical picker uses read-only owned-right queries, not the legacy
      * write-off list's consistency repair. Main context is checked server-side.
      */

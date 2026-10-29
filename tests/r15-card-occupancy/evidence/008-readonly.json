@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "holderId": 6550,
+  "orderId": 6558,
+  "projects": [
+    {
+      "detailId": 16711,
+      "physicalRemaining": 1,
+      "usage": {
+        "known": true,
+        "occupied_quantity": 2,
+        "shared_occupied_quantity": 2,
+        "available_quantity": 0,
+        "available_text": "0次",
+        "shared_pool": false,
+        "disabled_reason": "已预约占用"
+      },
+      "waiting": 2
+    }
+  ],
+  "unchangedPhysicalRights": true,
+  "businessWrites": 0
+}

@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "occupiedDisabled": true,
+  "actualRemainingPreserved": true,
+  "cardAndStandalone": true,
+  "freshEntryRead": true,
+  "cancelRefresh": true,
+  "readFailureRetry": true,
+  "staleResponseIgnored": true,
+  "sharedPoolLabel": true,
+  "viewReservation": true,
+  "productionRequests": 0
+}

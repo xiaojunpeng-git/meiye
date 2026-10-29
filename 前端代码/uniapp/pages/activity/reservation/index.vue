@@ -284,9 +284,10 @@
 	   		</view>
 	   	</view>
 	   </view>
-	   <view :class="orderId ? 'heights-order' : 'heights'"></view>
+	   <view :class="[orderId ? 'heights-order' : 'heights', { 'heights-order--error': orderId && bookingSubmitError }]"></view>
 	   <view class="booking-footer" v-if="orderId">
-		   <view class="booking-submit-btn" @click="butlerEdit ? reservationButlerUpdate() : reservationOrderCreate()">{{ butlerEdit ? '保存修改' : '立即预约' }}</view>
+		   <view v-if="bookingSubmitError" class="booking-submit-error" role="status" aria-live="polite">{{ bookingSubmitError }}</view>
+		   <view class="booking-submit-btn" :class="{ 'is-submitting': bookingSubmitting }" :aria-disabled="bookingSubmitting ? 'true' : 'false'" @click="butlerEdit ? reservationButlerUpdate() : reservationOrderCreate()">{{ bookingSubmitting ? '提交中…' : (butlerEdit ? '保存修改' : '立即预约') }}</view>
 	   </view>
 	   <view class="footer acea-row row-middle" v-else>
 		   <view class="w-190">
@@ -555,6 +556,9 @@ export default {
 			preselectedStoreApplied: false,
 			configData: this.$Cache.get('BASIC_CONFIG'),
 			serviceMark: '',
+			// One in-flight command; feedback is local UI state, never a booking result.
+			bookingSubmitting: false,
+			bookingSubmitError: '',
 		}
 	},
 	computed: {
@@ -778,7 +782,18 @@ export default {
 			}
 			return extra;
 		},
-		reservationOrderCreate(){
+        bookingFailureMessage(error) {
+            // The request client rejects structured {status,msg} objects. Toast
+            // titles must be text; never expose SQL/stack details to members.
+            const value = typeof error === 'string' ? error : (error && (error.msg || error.message));
+            if (typeof value !== 'string' || !value.trim() || /SQLSTATE|Stack trace|\bSELECT\b.+\bFROM\b/i.test(value)) {
+                return '预约未成功，请稍后重试或联系门店。';
+            }
+            return value.trim();
+        },
+		async reservationOrderCreate(){
+            if (this.bookingSubmitting) return;
+            this.bookingSubmitError = '';
 			if (this.historicalStorePicker && !Number(this.storeId)) {
 				return this.$util.Tips({ title: '请先选择预约门店' });
 			}
@@ -788,6 +803,9 @@ export default {
 			if(!this.verify()){
 				return
 			}
+			// Catch payload/transport failures too, so no click can fail silently.
+			this.bookingSubmitting = true;
+			try {
 			let data = {
 				cart_num:this.cartNum,
 				reservation_time:this.targetDay,
@@ -808,7 +826,7 @@ export default {
 			// #ifdef MP
 			openYuyueSubscribe();
 			// #endif
-			postReservationOrderCreate(this.orderId,data).then(res=>{
+			const res = await postReservationOrderCreate(this.orderId,data);
 				let url = `/pages/goods/reservation_status/index?orderId=${this.orderId}`;
 				const reservationId = Number(res.data && (res.data.reservationId || res.data.id) || 0);
 				if (reservationId > 0) {
@@ -818,9 +836,14 @@ export default {
 					url += `&book_uid=${this.bookUid}`;
 				}
 				uni.navigateTo({ url });
-			}).catch(err=>{
-				return this.$util.Tips({ title: err });
-			})
+            } catch (error) {
+                // Keep the rejection visible beside the submit button, including
+                // when a toast is hidden or disappears before the member reads it.
+                this.bookingSubmitError = this.bookingFailureMessage(error);
+                this.$util.Tips({ title: this.bookingSubmitError });
+            } finally {
+                this.bookingSubmitting = false;
+            }
 		},
 		merchantContextParams() {
 			return {
@@ -1989,6 +2012,9 @@ export default {
 		box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.06);
 		z-index: 20;
 	}
+	.heights-order--error{ height: calc(22vh + 180rpx + env(safe-area-inset-bottom)); }
+	.booking-submit-error{ box-sizing: border-box; color: #9a263d; background: #fff0f2; padding: 16rpx 20rpx; margin-bottom: 16rpx; border-radius: 12rpx; font-size: 26rpx; line-height: 1.5; overflow-wrap: anywhere; max-height: 22vh; overflow-y: auto; }
+	.booking-submit-btn.is-submitting{ opacity: .65; }
 	.booking-submit-btn{
 		height: 88rpx;
 		line-height: 88rpx;
