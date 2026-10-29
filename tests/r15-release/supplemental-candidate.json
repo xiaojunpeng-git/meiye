@@ -1,0 +1,50 @@
+{
+  "candidateTree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+  "acceptedCommits": [
+    "dd4e1e083bd55ff4619ef8e73a602a93468a7bac",
+    "3ff92890059beed8f42735cd78e34fb35f49221d"
+  ],
+  "originalAcceptedFilesUnchanged": true,
+  "sharedHeadAndIndexUnchanged": true,
+  "adminBuild": "PASS",
+  "threeCustomerH5Builds": "PASS",
+  "nativeMiniPrograms": {
+    "008": {
+      "exitCode": 0,
+      "files": 419,
+      "outputSHA256": "b4d35e25b0d2d5bee1c2cf3b74b6699913564d13a448c3ff30783c69acd089b4",
+      "appid": "wx85d4bfd0b4b6aafb"
+    },
+    "010": {
+      "exitCode": 0,
+      "files": 419,
+      "outputSHA256": "b4d35e25b0d2d5bee1c2cf3b74b6699913564d13a448c3ff30783c69acd089b4",
+      "appid": "wxce4f61fc9c4eaaa6"
+    }
+  },
+  "realChromium": {
+    "result": "PASS",
+    "previewStyles": 3,
+    "realMemberFontLoaded": true,
+    "validImages": 4,
+    "brokenImages": 0,
+    "liveIconChange": true,
+    "screenshot": "actual-menu-media.png"
+  },
+  "localMysqlChecks": 12,
+  "mediaModelChecks": 49,
+  "retainedComponentRegressions": [
+    "M014项目搜索/筛选/分组/剩余权益展示",
+    "M015单次与赠送项目原权益预约/封面/双击与失败保护"
+  ],
+  "notVerified": [
+    "两站小程序真机验收",
+    "线上切换后业务回归"
+  ],
+  "productionWrites": 0,
+  "deploymentStarted": false,
+  "pushStarted": false,
+  "uploadStarted": false,
+  "reasonForSupplement": "固定验收后发布基线已有其他任务上线；统一保留R23平台/优惠券、010问卷与扫码手机号流程、M015权益显示及预约功能。",
+  "status": "READY_FOR_PRODUCT_SUPPLEMENTAL_ACCEPTANCE"
+}

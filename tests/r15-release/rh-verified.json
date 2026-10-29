@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+  "tree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+  "backups": {
+    "admin": "/www/backups/rh/combination-group-6c7712ac",
+    "member": "/www/backups/rh/store-address-6c7712ac"
+  },
+  "businessWrites": 0,
+  "configurationChanged": false,
+  "migration": false
+}
