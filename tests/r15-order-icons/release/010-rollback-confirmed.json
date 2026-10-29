@@ -1,0 +1,5 @@
+{
+  "result": "PASS",
+  "originalBaselineRestored": true,
+  "reason": "Public gzip file download timed out; candidate bytes and install checks passed. No business writes."
+}
