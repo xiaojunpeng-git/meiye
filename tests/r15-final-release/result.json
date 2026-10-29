@@ -1,0 +1,53 @@
+{
+  "featureCommit": "f898ba3a3e46d45f32e547541c5d9834bed2e257",
+  "push": "VERIFIED",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/rh/combination-group-f898ba3a",
+        "member": "/www/backups/rh/store-address-f898ba3a"
+      },
+      "cashierPreserved": true,
+      "pcPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true
+    },
+    "008": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/008/combination-group-f898ba3a",
+        "member": "/www/backups/008/store-address-f898ba3a"
+      },
+      "cashierPreserved": true,
+      "pcPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true
+    },
+    "010": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/010/combination-group-f898ba3a",
+        "member": "/www/backups/010/store-address-f898ba3a"
+      },
+      "cashierPreserved": true,
+      "pcPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true
+    }
+  },
+  "uploads": {
+    "008": {
+      "version": "3.0.80",
+      "taskId": "confirmation_upload_c598e03b-2d71-4473-ace1-9e66f73716e7",
+      "status": "pending"
+    },
+    "010": {
+      "version": "3.0.80",
+      "taskId": "confirmation_upload_19b75bc6-1a36-4d17-b85a-ed3eb4535181",
+      "status": "pending"
+    }
+  },
+  "status": "DEPLOYED_UPLOADS_AWAITING_WECHAT_USER_CONFIRMATION",
+  "realDeviceAcceptance": false
+}
