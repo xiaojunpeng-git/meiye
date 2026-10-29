@@ -32,6 +32,8 @@ if ($paymentAdminPrefix !== '') {
 }
 
 Route::group('api', function () {
+    // 公开二维码只读题目，提交和领取奖励仍由下方会员认证组保护。
+    Route::get('survey/entry/:token', 'v1.user.MemberSurvey/entry')->pattern(['token'=>'[a-f0-9]{48}'])->middleware(AuthTokenMiddleware::class,false);
 
 	Route::any('wechat/serve', 'v1.wechat.Wechat/serve');//公众号服务
 	Route::any('wechat/miniServe', 'v1.wechat.Wechat/miniServe');//小程序服务
@@ -357,6 +359,12 @@ Route::group('api', function () {
 	 * 会员授权接口
 	 */
     Route::group(function () {
+        Route::get('survey/pending', 'v1.user.MemberSurvey/pending');
+        Route::post('survey/:id/claim', 'v1.user.MemberSurvey/claim');
+        Route::get('survey/:id/reward', 'v1.user.MemberSurvey/reward');
+        Route::post('survey/:id/reward/retry', 'v1.user.MemberSurvey/retry');
+        Route::get('survey/:id', 'v1.user.MemberSurvey/detail');
+        Route::post('survey/:id/submit', 'v1.user.MemberSurvey/submit');
 		//用户修改手机号
 		Route::post('user/updatePhone', 'v1.Login/update_binding_phone')->name('updateBindingPhone');
 		//设置登录code

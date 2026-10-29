@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/admin",
+  "base_head": "a7a5411b450e4ec3275dad64d825189c15ed3256",
+  "node": "v16.20.2",
+  "source_inputs": {
+    "src/pages/user/survey/index.vue": "8d2d775d091ef86528088fd24965ce1914ee9299263bc3cef01d1d225cd8e015",
+    "src/components/memberSurveyReward/index.vue": "d01ce645c4aaaee91d295e46f0622a2df13b73822644e7e66b3ac907c7752184",
+    "src/utils/memberSurveyExcel.js": "fb01242e316ad6ecb15ae03a6a0b424291d38dbfdb29152e4aef231b136c2fee",
+    "src/utils/requiredGuidance.js": "d6d9128aab08dbe1bc32f7778655924f1dc11bca66be0ef387d3f2e2878035a6",
+    "src/api/memberSurvey.js": "f70dbcc0e60fcc990c34f435ec2b084badc76f5dd529d1c7966669ad5095bf38",
+    "src/router/modules/user.js": "d71d9812268f07938a797f61a9630e69c4225454a7ffedb8349f4ec4801552d6"
+  },
+  "output": "/tmp/r12-survey-admin-final",
+  "html_sha256": "5e9213d8d6dd31907321c9e46e9d3f11b2a355cf4b590907db47e0dace47f2d7",
+  "release": false
+}

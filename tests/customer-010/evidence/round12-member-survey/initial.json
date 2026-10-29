@@ -1,0 +1,41 @@
+{
+  "task": "010-R12-SURVEY",
+  "base_head": "39e16080a93c186fc5edc8a3baadaf3fae81b020",
+  "main_baseline": "827df56b4ee296a214f5551159f54a33f48db9ba",
+  "reference_007_head": "642fa492b899cf7a24ba84a8158b61e5413da30b",
+  "sources": [
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/后端代码/app/services/user/MemberSurveyServices.php",
+      "target": "后端代码/app/services/user/MemberSurveyServices.php",
+      "reference_sha256": "4d7c4b42d8137b56f1e423138b9139fef946460f087a87064d9a7aacf1359b3f"
+    },
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/后端代码/app/controller/admin/v1/user/MemberSurvey.php",
+      "target": "后端代码/app/controller/admin/v1/user/MemberSurvey.php",
+      "reference_sha256": "5f42e439533c782db3e588836154ba341b0970605f4ae66958150f5e7ef7174b"
+    },
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/后端代码/app/controller/api/v1/user/MemberSurvey.php",
+      "target": "后端代码/app/controller/api/v1/user/MemberSurvey.php",
+      "reference_sha256": "3817d51dbb3cd857b823dbbfd33d6e2bb7f496152f7692022971a1219c842671"
+    },
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/前端代码/admin/src/api/memberSurvey.js",
+      "target": "前端代码/admin/src/api/memberSurvey.js",
+      "reference_sha256": "d08bf43c71f3ea81a222d9944ea590a40e2b335605628634f6c64b022f80ba36"
+    },
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/前端代码/admin/src/pages/user/survey/index.vue",
+      "target": "前端代码/admin/src/pages/user/survey/index.vue",
+      "reference_sha256": "1d39d0e86fe079e70c9a1a3fc1f40490bb6faa2784a7e37bea915fdc7de00fed"
+    },
+    {
+      "reference": "/Users/xiaojunpeng/Desktop/魔核/美业/007/前端代码/admin/src/utils/memberSurveyExcel.js",
+      "target": "前端代码/admin/src/utils/memberSurveyExcel.js",
+      "reference_sha256": "6b0524ce02e623ff302487bebed07d060f86ad6bffe2a357ef4086c14bdf2401"
+    }
+  ],
+  "remote_deployment": "本轮未授权部署；007代码只读参考，所有开发落在美容源码对应工作区",
+  "unrelated_dirty_file": "tests/customer-010/evidence/round6-payroll-release/push.json",
+  "confirmed": "二维码不限目标名单；可直接填写，领取奖励/提交时识别会员；保留任务有效状态和防重复；名单仅用于提醒；赠送用010服务"
+}

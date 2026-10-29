@@ -1,0 +1,21 @@
+{
+  "status": "awaiting_recovery_source_authorization",
+  "occurred_at": "2026-10-29",
+  "scope": "Docker mohe-mysql local development database ruihao only",
+  "production_connections_during_failed_test": false,
+  "cause": "Installer included in parent PHP test global scope reinitialized the application and overwrote $database; finally used the overwritten name without a prefix guard.",
+  "verified_damage": "Local ruihao schema is absent. Local binary logging is OFF. Latest found local backup is 2026-10-08.",
+  "recovery_not_yet_claimed": true,
+  "fixes": [
+    "Installer exposes a local-scope function; requiring it does not boot a new application.",
+    "Fixture cleanup requires strict r12_survey_ + random hex name and rejects the original database.",
+    "Runner now provisions a disposable login with SELECT-only on ruihao and write/drop rights exclusively on test-prefixed schemas.",
+    "Runner refuses to start until ruihao restoration is verified."
+  ],
+  "user_informed": true,
+  "independent_feature_testing": {
+    "status": "current business and installation tests passed on new reference schema without restoring ruihao",
+    "business_data_copied": false,
+    "database_credentials": "ephemeral; read-only reference, write/drop limited to fixture prefix"
+  }
+}

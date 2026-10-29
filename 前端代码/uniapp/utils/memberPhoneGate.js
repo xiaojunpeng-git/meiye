@@ -1,10 +1,11 @@
 import { LOGIN_STATUS, USER_INFO } from '@/config/cache';
 import Cache from '@/utils/cache';
 
-// 未授权手机号时只开放完成身份授权所需页面，分享页、首页和业务深链均不得绕过。
+// 公开调查仅允许查看与填写；提交和奖励仍由认证接口保护，其他业务深链继续执行手机号门禁。
 const PHONE_GATE_ALLOWLIST = [
 	'pages/users/wechat_login/index',
-	'pages/users/privacy/index'
+	'pages/users/privacy/index',
+	'pages/users/survey/index'
 ];
 const LOGIN_ROUTE = '/pages/users/wechat_login/index';
 let interceptorsInstalled = false;

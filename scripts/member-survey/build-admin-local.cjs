@@ -1,0 +1,11 @@
+// Local validation uses the project's accepted Node16 platform toolchain; not an authorized 8080 release.
+const fs=require('fs'),path=require('path'),cp=require('child_process'),crypto=require('crypto');
+const root=path.resolve(__dirname,'../..'),app=path.join(root,'前端代码/admin'),output='/tmp/r12-survey-admin-final';
+const files=['src/pages/user/survey/index.vue','src/components/memberSurveyReward/index.vue','src/utils/memberSurveyExcel.js','src/utils/requiredGuidance.js','src/api/memberSurvey.js','src/router/modules/user.js'];
+const inputs=()=>Object.fromEntries(files.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(app,file))).digest('hex')]));const startInputs=inputs();
+if(!process.version.startsWith('v16.'))throw Error('Use accepted Node16 platform toolchain');
+Object.assign(process.env,{NODE_ENV:'production',ANALYZE:'false',VUE_CLI_CONTEXT:app});process.chdir(app);
+const Service=require(path.join(app,'node_modules/@vue/cli-service/lib/Service')),service=new Service(app);service.init('production');service.projectOptions.parallel=false;
+service.webpackChainFns.push(config=>{config.module.rules.values().forEach(rule=>{for(const name of ['cache-loader','thread-loader'])if(rule.uses.has(name))rule.uses.delete(name);});config.cache(false);});
+service.webpackRawConfigFns.push(config=>{for(const plugin of [...(config.plugins||[]),...((config.optimization||{}).minimizer||[])])if(plugin.options)for(const key of ['parallel','cache'])if(key in plugin.options)plugin.options[key]=false;});
+service.run('build',{mode:'production',dest:output}).then(()=>{if(JSON.stringify(startInputs)!==JSON.stringify(inputs()))throw Error('Survey source changed during build');const html=path.join(output,'system.html');if(!fs.existsSync(html))throw Error('Missing actual output');const result={passed:true,source:app,base_head:cp.execFileSync('git',['rev-parse','HEAD'],{cwd:root}).toString().trim(),node:process.version,source_inputs:startInputs,output,html_sha256:crypto.createHash('sha256').update(fs.readFileSync(html)).digest('hex'),release:false};fs.writeFileSync(path.join(root,'tests/customer-010/evidence/round12-member-survey/admin-build.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));}).catch(e=>{console.error(e);process.exitCode=1;});
