@@ -1,0 +1,31 @@
+{
+  "result": "PASS",
+  "layouts": [
+    {
+      "width": 320,
+      "mainRetained": true,
+      "removeReadd": true,
+      "duplicateNamesIndependent": true,
+      "allAddonsRemoved": true,
+      "cornerButtonsInsideViewport": true
+    },
+    {
+      "width": 375,
+      "mainRetained": true,
+      "removeReadd": true,
+      "duplicateNamesIndependent": true,
+      "allAddonsRemoved": true,
+      "cornerButtonsInsideViewport": true
+    },
+    {
+      "width": 430,
+      "mainRetained": true,
+      "removeReadd": true,
+      "duplicateNamesIndependent": true,
+      "allAddonsRemoved": true,
+      "cornerButtonsInsideViewport": true
+    }
+  ],
+  "customerRequests": 0,
+  "createdAppointments": 0
+}

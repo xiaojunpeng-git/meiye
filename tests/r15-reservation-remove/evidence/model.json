@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "checks": 22,
+  "mainRetained": true,
+  "duplicateNamesIndependent": true,
+  "payloadVerified": true,
+  "rapidResponseRace": true,
+  "createdAppointments": 0
+}

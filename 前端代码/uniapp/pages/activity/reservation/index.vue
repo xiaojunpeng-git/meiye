@@ -12,7 +12,10 @@
 			   <text class="booking-header-count">{{ selectedItems.length }} 个项目</text>
 		   </view>
 		   <view class="selected-items acea-row">
-			   <view class="item-tag" v-for="(item, idx) in selectedItems" :key="idx">{{ item.label }}</view>
+			   <view class="item-tag" :class="{ 'item-tag--removable': item.removable }" v-for="item in selectedItems" :key="item.key">
+                   <text>{{ item.label }}</text>
+                   <button v-if="item.removable" class="item-remove" :aria-label="'移除' + item.label" @click.stop="removeSelectedAddon(item.key)"><text aria-hidden="true">×</text></button>
+               </view>
 		   </view>
 		   <view class="service-duration acea-row row-between-wrapper" v-if="totalServiceDuration > 0">
 			   <text>预计服务时长</text>
@@ -465,6 +468,8 @@ export default {
 			customServiceLoading: false,
 			customServiceError: '',
 			customServiceEpoch: 0,
+            staffAvailabilityEpoch: 0,
+            timeAvailabilityEpoch: 0,
 			unique:'',
 			attrList:[],
 			storeName:'',
@@ -592,13 +597,17 @@ export default {
 			if (this.mainItemLabel) {
 				const dur = resolveProjectDuration(this.projectServiceDuration);
 				items.push({
-					label: `${this.mainItemLabel} (${dur}分钟)`,
+					key: `main_${this.orderId || 0}_${this.cartInfoId || 0}`,
+                    removable: false,
+                    label: `${this.mainItemLabel} (${dur}分钟)`,
 				});
 			}
 			this.addonItems.forEach(item => {
 				const dur = resolveAddonDuration(item.addon_service_duration);
 				items.push({
-					label: `${item.product_name} (${dur}分钟)`,
+					key: item._key,
+                    removable: !!item._key,
+                    label: `${item.product_name} (${dur}分钟)`,
 				});
 			});
 			return items;
@@ -1082,6 +1091,16 @@ export default {
 				this.addonPickerSelected.push(item._key);
 			}
 		},
+        removeSelectedAddon(key) {
+            // 只移除当前附加权益的稳定键；同名/同链接项目独立，主权益及已持有权益不变。
+            const index = this.addonItems.findIndex(item => item._key === key);
+            if (!key || index < 0) return false;
+            this.addonItems.splice(index, 1);
+            this.addonPickerSelected = this.addonPickerSelected.filter(selected => selected !== key);
+            // 时长由剩余项目重算，旧时间选择不能继续提交；沿用原老师与时段刷新流程。
+            this.selectedTimeRange = null;
+            return this.loadStaffList();
+        },
 		confirmAddonPicker() {
 			const merged = [...this.addonItems];
 			this.addonPickerOptions.forEach(item => {
@@ -1387,6 +1406,9 @@ export default {
 			this.staffList = list;
 		},
 		loadStaffList() {
+            // 连续删除/加项时仅接收最新上下文的老师及时段响应，避免旧时长结果覆盖新选择。
+            const epoch = ++this.staffAvailabilityEpoch;
+            ++this.timeAvailabilityEpoch;
 			if (!this.storeId) return Promise.resolve();
 			const params = {
 				store_id: this.storeId,
@@ -1399,11 +1421,13 @@ export default {
 				params.service_time = query.reservation_start;
 			}
 			return getReservationStaffList(params).then(res => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = this.filterReservationStaffList(res.data?.list || res.data || []);
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
 				this.loadAvailableTime();
 			}).catch(() => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = [];
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
@@ -1411,6 +1435,7 @@ export default {
 			});
 		},
 		loadAvailableTime() {
+            const epoch = ++this.timeAvailabilityEpoch;
 			if (!this.storeId || !this.targetDay) return;
 			const staffIds = this.selectedStaffIds;
 			getStaffAvailableTime({
@@ -1421,12 +1446,14 @@ export default {
 				service_duration: this.totalServiceDuration,
 				exclude_reservation_id: this.getExcludeReservationId(),
 			}).then(res => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				const data = res.data || {};
 				this.timeBegin = data.begin_time || '09:00:00';
 				this.timeEnd = data.end_time || '22:00:00';
 				this.disableTimeSlot = data.disable_time_slot || [];
 				this.validateSelectedTimeRange();
 			}).catch(() => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				this.disableTimeSlot = [];
 				this.validateSelectedTimeRange();
 			});
@@ -1823,11 +1850,17 @@ export default {
 		opacity: 0.9;
 	}
 	.selected-items{
+        padding-top: 10rpx;
+        align-items: flex-start;
 		flex-wrap: wrap;
 		margin-top: 16rpx;
 		gap: 12rpx;
 	}
 	.item-tag{
+        position: relative;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-wrap: break-word;
 		background: rgba(255,255,255,0.25);
 		padding: 12rpx 24rpx;
 		border-radius: 30rpx;
@@ -1835,6 +1868,28 @@ export default {
 		margin-right: 12rpx;
 		margin-bottom: 12rpx;
 	}
+    .item-tag--removable { padding-right: 40rpx; }
+    .item-remove {
+        position: absolute;
+        top: -10rpx;
+        right: -8rpx;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40rpx;
+        height: 40rpx;
+        min-height: 0;
+        padding: 0;
+        margin: 0;
+        border: 2rpx solid rgba(255,255,255,.65);
+        border-radius: 50%;
+        background: #fff;
+        color: var(--view-theme, #7B2941);
+        font-size: 30rpx;
+        line-height: 1;
+        &::after { border: 0; }
+        &:focus-visible { outline: 2rpx solid #fff; outline-offset: 3rpx; }
+    }
 	.service-duration{
 		margin-top: 20rpx;
 		padding-top: 20rpx;
