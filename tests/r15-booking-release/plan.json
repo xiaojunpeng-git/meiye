@@ -1,0 +1,47 @@
+{
+  "commit": "7e884434db71dc657d8f3e018e96b7fe2d2b2a22",
+  "candidateTree": "a153406f777abe0f1d75ffd847b1fa968037e140",
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "branch": "release/r15-booking-publish-20261030",
+  "acceptedFiles": {
+    "前端代码/uniapp/components/chooseTime/index.vue": "aa5daf680cc54f5803cfc66b93661385da0f2b6922518a97c496243de9fc3f84",
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "1076bb426a672224be6b76d21471195d738eeb6e39bb097cbd73879a3273b206",
+    "后端代码/app/controller/api/v1/order/StoreReservationOrder.php": "36293a108f1502845764412f6ac854044b196046c1968bc3dd3b68c559e6b6d7",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "ff09570bbbf1a02bd05981f8ae3af61fa44c6d1a800d228d79450b0b54b89d4f",
+    "后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php": "a1a1bb36a58542b7e85ce32453f2b3c4d8ba51d28624229fb2e29c2981cc83c2"
+  },
+  "backendFiles": [
+    "app/controller/api/v1/order/StoreReservationOrder.php",
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php",
+    "app/services/cashier/v3/reservation/MemberV3ReservationServices.php"
+  ],
+  "supplementalAccepted": true,
+  "apps": {
+    "008": {
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.81"
+    },
+    "010": {
+      "appid": "wxce4f61fc9c4eaaa6",
+      "version": "3.0.81"
+    }
+  },
+  "memberOutputs": {
+    "008": "/private/tmp/r15-booking-time-native-008-h5/output",
+    "rh": "/private/tmp/r15-booking-publish-rh-h5/output",
+    "010": "/private/tmp/r15-booking-publish-010-h5/output"
+  },
+  "miniOutputs": {
+    "008": "/private/tmp/r15-booking-time-native-008-mp-weixin/output",
+    "010": "/private/tmp/r15-booking-publish-010-mp-weixin/output"
+  },
+  "acceptedPatches": [
+    "047c2edf",
+    "4c351dc7"
+  ],
+  "mini008BuiltTree": "26276f925a0032b71bbf3f579c9514f19f5e8809",
+  "scope": "three backend files and member H5 only; platform, cashier, settings and data protected",
+  "deploymentRetrySuffix": {
+    "rh": "-retry1"
+  }
+}

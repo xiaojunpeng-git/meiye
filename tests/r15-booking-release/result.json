@@ -1,0 +1,96 @@
+{
+  "featureCommit": "7e884434db71dc657d8f3e018e96b7fe2d2b2a22",
+  "push": "VERIFIED",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/rh/combination-group-7e884434-retry1",
+        "member": "/www/backups/rh/store-address-7e884434-retry1"
+      },
+      "platformPreserved": true,
+      "cashierPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true,
+      "runtime": {
+        "site": "rh",
+        "result": "PASS",
+        "existingSchemaReady": true,
+        "bookingClassLoaded": true,
+        "readScenario": {
+          "ownedQuery": true,
+          "projects": 10,
+          "historicalProjects": 0,
+          "cardGroups": 3,
+          "wrongMainOrderDenied": true
+        },
+        "writes": 0
+      }
+    },
+    "008": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/008/combination-group-7e884434",
+        "member": "/www/backups/008/store-address-7e884434"
+      },
+      "platformPreserved": true,
+      "cashierPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true,
+      "runtime": {
+        "site": "008",
+        "result": "PASS",
+        "existingSchemaReady": true,
+        "bookingClassLoaded": true,
+        "readScenario": {
+          "ownedQuery": true,
+          "projects": 7,
+          "historicalProjects": 7,
+          "cardGroups": 7,
+          "wrongMainOrderDenied": true
+        },
+        "writes": 0
+      }
+    },
+    "010": {
+      "result": "PASS",
+      "backups": {
+        "admin": "/www/backups/010/combination-group-7e884434",
+        "member": "/www/backups/010/store-address-7e884434"
+      },
+      "platformPreserved": true,
+      "cashierPreserved": true,
+      "configurationPreserved": true,
+      "migrationUnchanged": true,
+      "runtime": {
+        "site": "010",
+        "result": "PASS",
+        "existingSchemaReady": true,
+        "bookingClassLoaded": true,
+        "readScenario": {
+          "ownedQuery": true,
+          "projects": 1,
+          "historicalProjects": 0,
+          "cardGroups": 1,
+          "wrongMainOrderDenied": true
+        },
+        "writes": 0
+      }
+    }
+  },
+  "uploads": {
+    "008": {
+      "version": "3.0.81",
+      "taskId": "confirmation_upload_b789d47f-2ccb-45d3-aeec-ce13909322cf",
+      "status": "pending"
+    },
+    "010": {
+      "version": "3.0.81",
+      "taskId": "confirmation_upload_bde0cf67-7c72-41f1-8981-02369af6d3b3",
+      "status": "pending"
+    }
+  },
+  "rhInitialAttempt": "verification command failed; automatic rollback verified; unchanged candidate retry1 verified",
+  "status": "DEPLOYED_UPLOADS_AWAITING_WECHAT_USER_CONFIRMATION",
+  "businessWrites": 0
+}

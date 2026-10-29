@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r15-booking-publish.py", line 49, in <module>
+    elif mode=='deploy':deploy(sys.argv[2])
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r15-release-publish.py", line 100, in deploy
+    after=probe(s)
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r15-release-publish.py", line 11, in probe
+    def probe(s):return json.loads(ssh(s,'/www/server/php/74/bin/php -- '+s,(ROOT/'scripts/store-address-release-probe.php').read_bytes()))
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r15-release-publish.py", line 10, in ssh
+    def ssh(s,c,b=None):return run(['ssh','-T','-q','-o','BatchMode=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',HOST[s],c],input=b,timeout=120)
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r15-release-publish.py", line 8, in run
+    def run(a,**kw):return subprocess.check_output(a,cwd=ROOT,stderr=subprocess.PIPE,timeout=kw.pop('timeout',90),**kw)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 424, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ssh', '-T', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', 'rh-server', '/www/server/php/74/bin/php -- rh']' returned non-zero exit status 255.

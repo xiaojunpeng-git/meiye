@@ -1,0 +1,58 @@
+There are differences in the implementation mechanism of the browser kernels and custom components of each mini-program, and there may be compatibility issues with styles and layouts, please refer to: https://uniapp.dcloud.io/matter?id=mp
+Compiling...
+
+已忽略静态资源目录：static/app-plus。详见：https://uniapp.dcloud.net.cn/tutorial/platform.html#static
+提示：Non-h5 platforms: key does not support expression log.$orig.id||lIndex, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/users/system_changelog/index.vue:1
+提示：Non-h5 platforms: key does not support expression index+'i', for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/goods_details/index.vue:1
+提示：Non-h5 platforms: key does not support expression index+'k', for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/goods_details/index.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.row_type+'-'+item.$orig.id+'-'+index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/metric/consume.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.row_type+'-'+item.$orig.id+'-'+index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/metric/actual.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.row_type+'-'+item.$orig.id+'-'+index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/metric/cash.vue:1
+提示：Non-h5 platforms: key does not support expression m.$orig.metric_code||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/yeji/self.vue:1
+提示：Non-h5 platforms: key does not support expression m.$orig.metric_code||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/data/index.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.debt_id||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/debt/index.vue:1
+提示：Non-h5 platforms: key does not support expression task.taskId||task.id, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/care/index.vue:1
+提示：Non-h5 platforms: key does not support expression 'sex-'+s.value, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/customer/index.vue:1
+提示：Non-h5 platforms: key does not support expression s.$orig.key||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/customer/index.vue:1
+提示：Non-h5 platforms: key does not support expression r.id||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/home/index.vue:1
+提示：Non-h5 platforms: key does not support expression topic.id+'p', for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/discover/discoverIndex/index.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.id||index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/goods/reservation_list/index.vue:1
+提示：Non-h5 platforms: key does not support expression m.$orig.metric_code||i, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/merchant/data/components/BusinessBoard.vue:1
+提示：Non-h5 platforms: key does not support expression index+'n', for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/goods/order_pay_status/index.vue:1
+提示：Non-h5 platforms: key does not support expression index+'o', for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/goods/order_pay_status/index.vue:1
+提示：Non-h5 platforms: key does not support expression item.key+'-'+index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/admin/organization/store-select.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.id||index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/admin/staff_center/order/index.vue:1
+提示：Non-h5 platforms: key does not support expression item.$orig.id||index, for details, please refer to: https://uniapp.dcloud.io/use?id=key
+at pages/admin/reservation_list/index.vue:1
+​自定义组件 components/requiredFieldGuide/index 建议移动到子包 pages/users 内​
+​自定义组件 components/chooseTime/index 建议移动到子包 pages/activity 内​
+​自定义组件 components/uni-calendar/uni-calendar 建议移动到子包 pages/admin 内​
+​自定义组件 components/merchantTargetTabs/index 建议移动到子包 pages/admin 内​
+​自定义组件 uni_modules/uni-icons/components/uni-icons/uni-icons 建议移动到子包 pages/admin 内​
+​自定义组件 components/memberCommerceOrders/index 建议移动到子包 pages/goods 内​
+​自定义组件 components/addressWindow/index 建议移动到子包 pages/goods 内​
+​自定义组件 components/merchantTabBar/index 建议移动到子包 pages/merchant 内​
+​自定义组件 components/merchantDateFilter/index 建议移动到子包 pages/merchant 内​
+WARNING: Conflict: Multiple assets emit different content to the same filename project.config.json
+ DONE  Build complete. 
+R12_BUILD_PASS 010 mp-weixin

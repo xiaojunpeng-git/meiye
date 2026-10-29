@@ -1,0 +1,5 @@
+{
+  "app/controller/api/v1/order/StoreReservationOrder.php": "04e381b9a98de35d6aa7cb86cd30044ef67c37fc5aad928bebba3881d9fb4879",
+  "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "fa0db13d1d1e4d6c6534a30b44259faf1f575723f3049b3441e1e94e12d4f781",
+  "app/services/cashier/v3/reservation/MemberV3ReservationServices.php": "533bafe11350ff20cee57e902b0e3e60af7e266ae34013734cb1e4cf519043dc"
+}
