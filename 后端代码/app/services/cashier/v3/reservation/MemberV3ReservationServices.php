@@ -89,7 +89,10 @@ final class MemberV3ReservationServices
         $startClock = $this->clock((string)($slot['start'] ?? $start));
         $appointmentStart = strtotime($date . ' ' . $startClock . ':00');
         if (!$appointmentStart) throw new ValidateException('预约时间无效。');
-        $addonDetails = $this->addonDetails($uid, $detailId, $input['addon_items'] ?? [], $storeId, $historicalOrder);
+        $addonDetails = $this->addonDetails($uid, $detailId, $input['addon_items'] ?? [], $storeId);
+        // Any owned add-on uses server durations and the locked quota checks;
+        // this also protects ordinary mains combined with imported rights.
+        $guardedRightsBooking = $historicalOrder || !empty($addonDetails);
         $duration = (int)($input['service_duration_minutes'] ?? 0);
         if ($duration <= 0 && !empty($slot['end'])) {
             $slotEnd = strtotime($date . ' ' . $this->clock((string)$slot['end']) . ':00');
@@ -105,7 +108,7 @@ final class MemberV3ReservationServices
         }
         $duration = max(1, $duration);
         $mainDuration = $duration;
-        if ($historicalOrder) {
+        if ($guardedRightsBooking) {
             // The browser cannot shorten a multi-project booking to bypass
             // staff conflicts. Rebuild duration from live project settings.
             $mainRight = (new ImportedEntitlementReservationStoreServices())
@@ -140,7 +143,7 @@ final class MemberV3ReservationServices
             $addonIdentity, $staffIds, $duration,
         ], JSON_UNESCAPED_UNICODE));
 
-        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $mainDuration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder, $customInput): array {
+        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $mainDuration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $guardedRightsBooking, $customInput): array {
             $rootOperation = Db::name('cashier_v3_reservation_operation')->where('tenant_id', $tenantId)
                 ->where('command_idempotency_key', $naturalKey)->lock(true)->find();
             if ($rootOperation) {
@@ -162,8 +165,8 @@ final class MemberV3ReservationServices
                 // root operation lock serializes concurrent retries.
                 $naturalKey .= ':attempt:' . (count($attempts) + 1);
             }
-            if ($historicalOrder) {
-                $this->assertHistoricalBookingRightsInTx($uid, $storeId, $detail, $quantity,
+            if ($guardedRightsBooking) {
+                $this->assertBookingRightsInTx($uid, $storeId, $detail, $quantity,
                     $addonDetails, $appointmentStart, $mainDuration);
             }
             $lifecycle = new CashierV3ReservationLifecycleServices();
@@ -651,7 +654,7 @@ final class MemberV3ReservationServices
     }
 
     /** Purchased add-ons are entitlement lines in the same V3 reservation. */
-    private function addonDetails(int $uid, int $mainDetailId, $rawItems, int $storeId, bool $historicalOrder): array
+    private function addonDetails(int $uid, int $mainDetailId, $rawItems, int $storeId): array
     {
         $items = $this->decodeArray($rawItems);
         $details = [];
@@ -662,23 +665,10 @@ final class MemberV3ReservationServices
             if ($detailId <= 0) throw new ValidateException('增项服务必须从已购项目中选择。');
             if (isset($seen[$detailId])) throw new ValidateException('预约项目不能重复选择。');
             $seen[$detailId] = true;
-            if ($historicalOrder) {
-                // Ignore client-provided order, duration and source labels;
-                // the owned detail and store scope are the only authority.
-                $details[] = (new ImportedEntitlementReservationStoreServices())
-                    ->reservationDetail($uid, $detailId, $storeId);
-                continue;
-            }
-            $detail = Db::name('store_order_cart_info')->alias('c')
-                ->join('store_order o', 'o.id=c.oid')
-                ->where('c.id', $detailId)->where('o.uid', $uid)
-                ->where('o.paid', 1)->where('o.is_del', 0)->where('o.is_system_del', 0)->where('o.is_user_del', 0)
-                ->where('o.refund_status', 0)->where('o.terminal_action', 0)
-                ->where('c.cart_type', 2)->where('c.product_type', 6)
-                ->field('c.id,c.oid,c.product_id,c.sku_unique,c.cart_info,c.write_surplus_times')->find();
-            if (!$detail) throw new ValidateException('增项项目不存在或不可预约。');
-            $detail['_duration'] = max(1, (int)($item['addon_service_duration'] ?? StoreProductReservationServices::DEFAULT_PROJECT_SERVICE_DURATION));
-            $details[] = $detail;
+            // The picker is not an authorization grant. Re-resolve ownership,
+            // import scope and expiry even for a forged/stale detail selection.
+            $details[] = (new ImportedEntitlementReservationStoreServices())
+                ->reservationDetail($uid, $detailId, $storeId);
         }
         return $details;
     }
@@ -688,7 +678,7 @@ final class MemberV3ReservationServices
      * right after the idempotency replay gate, including pending reservations;
      * an unavailable add-on aborts the entire booking without consuming visits.
      */
-    private function assertHistoricalBookingRightsInTx(int $uid, int $storeId, array $main,
+    private function assertBookingRightsInTx(int $uid, int $storeId, array $main,
         int $quantity, array $addons, int $at, int $mainDuration): void
     {
         $rights = array_merge([$main], $addons);
@@ -698,6 +688,8 @@ final class MemberV3ReservationServices
         usort($rights, static function (array $left, array $right): int { return (int)$left['id'] <=> (int)$right['id']; });
         foreach ($rights as $right) Db::name('store_order_cart_info')->where('id', (int)$right['id'])->lock(true)->find();
         $authority = new ImportedEntitlementReservationStoreServices();
+        $requestedByPool = [];
+        $requestedKinds = [];
         foreach ($rights as $right) {
             $id = (int)$right['id'];
             $current = $authority->reservationDetail($uid, $id, $storeId, $at);
@@ -706,7 +698,18 @@ final class MemberV3ReservationServices
                 || (!$isMain && (int)$current['_duration'] !== (int)$right['_duration'])) {
                 throw new ValidateException('项目时长已变化，请重新选择预约时间。');
             }
-            if ($authority->availableQuantity($uid, $current) < ($isMain ? $quantity : 1)) {
+            // Distinct candidate projects share a card/group selection limit;
+            // validate the combined request before any reservation line exists.
+            $choice = $authority->choiceConstraint($uid, $current);
+            if ($choice) {
+                $requestedKinds[$choice['key']] = ($requestedKinds[$choice['key']] ?? 0) + $choice['cost'];
+                if ($requestedKinds[$choice['key']] > $choice['available']) {
+                    throw new ValidateException('预约项目超过该卡可选种数。');
+                }
+            }
+            $pool = $authority->reservationPoolKey($current);
+            $requestedByPool[$pool] = ($requestedByPool[$pool] ?? 0) + ($isMain ? $quantity : 1);
+            if ($authority->availableQuantity($uid, $current) < $requestedByPool[$pool]) {
                 throw new ValidateException('预约次数超过剩余权益。');
             }
         }

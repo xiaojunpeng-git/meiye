@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\reservation;
 
 use app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\organization\OrganizationScopeService;
 use app\services\product\product\StoreProductReservationServices;
@@ -131,6 +132,20 @@ final class ImportedEntitlementReservationStoreServices
         $detail['_project_duration'] = (int)$durations['project_service_duration'];
         $detail['_duration'] = (int)$durations['addon_service_duration'];
         $detail['_order'] = $order;
+        // Issued rules, not today's catalogue, own shared pools, choice kinds
+        // and time-card validity. Legacy imports without a rule keep raw rights.
+        $holder = $holder ?? Db::name('user_card_holder')->where('oid', (int)$order['id'])
+            ->where('uid', $uid)->where('is_del', 0)->find();
+        $detail['_holder'] = $holder ?: [];
+        $detail['_authority'] = $holder ? (new CashierV3CardRuleEntitlementAuthorityServices())
+            ->authorityForDetail(CashierV3ScopeResolver::TENANT_SCOPE_ID, (int)$holder['id'], $detailId) : null;
+        if ($detail['_authority']) {
+            $a = $detail['_authority'];
+            if (!$a['choiceAvailable'] || $a['stateStatus'] !== 'active' || (int)$a['remainingTimes'] <= 0) {
+                throw new ValidateException('该卡项目当前不可预约。');
+            }
+            $this->assertValidityWindow(['write_start' => $a['validFrom'], 'write_end' => $a['validThrough']], $at);
+        }
         return $detail;
     }
 
@@ -143,18 +158,118 @@ final class ImportedEntitlementReservationStoreServices
         }
     }
 
-    /** Pending appointments occupy visits; reads never deduct or repair rights. */
+    /** Shared pools reserve visits across all sibling projects, never once per
+     * displayed row. Time-card virtual counters are not user-facing balances. */
     public function availableQuantity(int $uid, array $detail): int
     {
+        $ids = [(int)$detail['id']];
+        $a = $detail['_authority'] ?? null;
+        $choice = $this->choiceConstraint($uid, $detail);
+        if ($choice && $choice['cost'] > $choice['available']) return 0;
+        if ($a && $a['ruleType'] === 'choice_count') {
+            $all = (new CashierV3CardRuleEntitlementAuthorityServices())->authoritiesForHolder(
+                CashierV3ScopeResolver::TENANT_SCOPE_ID, (int)$detail['_holder']['id']);
+            $ids = [];
+            foreach ($all as $id => $other) if ((int)$other['combinationGroupNo'] === (int)$a['combinationGroupNo']) $ids[] = (int)$id;
+        }
         $reserved = Db::name('cashier_v3_reservation_line')->alias('l')
             ->join('cashier_v3_reservation r', 'r.id=l.reservation_id')
             ->where('l.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('l.entitlement_source_detail_id', (int)$detail['id'])
+            ->whereIn('l.entitlement_source_detail_id', $ids)
             ->where('r.member_id', $uid)
             ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
             ->whereIn('r.status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'])
             ->sum('l.quantity');
-        return max(0, (int)floor((int)$detail['write_surplus_times'] - (float)$reserved));
+        $remaining = $a ? (int)$a['remainingTimes'] : (int)$detail['write_surplus_times'];
+        return max(0, (int)floor($remaining - (float)$reserved));
+    }
+
+    /** Pending new project kinds occupy selection slots without permanently
+     * selecting a card component. Cancelling a reservation releases the slot. */
+    public function choiceConstraint(int $uid, array $detail): ?array
+    {
+        $a = $detail['_authority'] ?? null;
+        if (!$a || $a['ruleType'] !== 'choice_kind' || $a['selectionStatus'] !== 'candidate') return null;
+        $authority = new CashierV3CardRuleEntitlementAuthorityServices();
+        $holderId = (int)$detail['_holder']['id'];
+        $snapshot = $authority->snapshotForHolder(CashierV3ScopeResolver::TENANT_SCOPE_ID, $holderId);
+        $state = $snapshot['state'];
+        $limit = (int)$a['combinationGroupNo'] > 0 ? (int)$a['combinationChoiceLimit'] : (int)$state['choice_limit'];
+        $selected = (int)$a['combinationGroupNo'] > 0 ? (int)$a['combinationSelectedKindCount'] : (int)$state['selected_kind_count'];
+        $ids = [];
+        foreach ($authority->authoritiesForHolder(CashierV3ScopeResolver::TENANT_SCOPE_ID, $holderId) as $id => $other) {
+            if ((int)$other['combinationGroupNo'] === (int)$a['combinationGroupNo'] && $other['selectionStatus'] === 'candidate') $ids[] = (int)$id;
+        }
+        $pending = Db::name('cashier_v3_reservation_line')->alias('l')
+            ->join('cashier_v3_reservation r', 'r.id=l.reservation_id')
+            ->where('l.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('l.entitlement_source_detail_id', $ids)->where('r.member_id', $uid)
+            ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('r.status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'])
+            ->column('l.entitlement_source_detail_id');
+        $pending = array_values(array_unique(array_map('intval', $pending)));
+        return ['key' => 'kinds:' . $holderId . ':' . (int)$a['combinationGroupNo'],
+            'cost' => in_array((int)$detail['id'], $pending, true) ? 0 : 1,
+            'available' => max(0, $limit - $selected - count($pending))];
+    }
+
+    /** Stable pool key is backend-only validation identity, never a displayed
+     * card name. Different purchases and combination groups cannot merge. */
+    public function reservationPoolKey(array $detail): string
+    {
+        $a = $detail['_authority'] ?? null;
+        return $a && $a['ruleType'] === 'choice_count'
+            ? 'card:' . (int)$detail['oid'] . ':group:' . (int)$a['combinationGroupNo']
+            : 'detail:' . (int)$detail['id'];
+    }
+
+    /** Display data comes from the issued holder/snapshot. Do not sum children
+     * of a shared pool, guess a legacy rule from its name or expose money data. */
+    private function pickerCard(array $detail): array
+    {
+        $order = $detail['_order']; $holder = $detail['_holder'];
+        if ((int)$order['type'] !== 11 && (int)$order['product_type'] !== 5) return [];
+        $main = Db::name('store_order_cart_info')->where('oid', (int)$order['id'])->where('cart_type', 0)->value('cart_info');
+        $snapshot = json_decode((string)$main, true) ?: [];
+        $name = trim((string)($holder['card_name'] ?? '')) ?: trim((string)($snapshot['productInfo']['store_name'] ?? '')) ?: '卡项';
+        $a = $detail['_authority'] ?? null;
+        $type = $a['cardRuleType'] ?? 'legacy';
+        $labels = ['normal' => '普通卡', 'choice_kind' => '任选种数卡', 'choice_count' => '任选次数卡', 'time' => '时间卡', 'combination' => '组合卡', 'legacy' => '卡项'];
+        $remainingText = isset($holder['write_surplus_times']) ? '剩余' . (int)$holder['write_surplus_times'] . '次' : '';
+        if ($type === 'normal') {
+            $all = (new CashierV3CardRuleEntitlementAuthorityServices())->authoritiesForHolder(
+                CashierV3ScopeResolver::TENANT_SCOPE_ID, (int)$holder['id']);
+            $remainingText = '剩余' . array_sum(array_column($all, 'remainingTimes')) . '次';
+        }
+        if ($type === 'choice_count') $remainingText = '共享可用' . $this->availableQuantity((int)$order['uid'], $detail) . '次';
+        if ($type === 'time') $remainingText = '有效期内不限次';
+        if ($type === 'combination') $remainingText = '按组使用';
+        if ($type === 'choice_kind') {
+            $issued = (new CashierV3CardRuleEntitlementAuthorityServices())->snapshotForHolder(
+                CashierV3ScopeResolver::TENANT_SCOPE_ID, (int)$holder['id']);
+            $state = $issued['state'];
+            $remainingText = '已选' . (int)$state['selected_kind_count'] . '/' . (int)$state['choice_limit'] . '种';
+        }
+        return ['name' => $name, 'number' => trim((string)($holder['card_no'] ?? '')),
+            'rule_type' => $type, 'rule_label' => $labels[$type] ?? '卡项', 'remaining_text' => $remainingText];
+    }
+
+    private function pickerItemPresentation(array $detail, int $available): array
+    {
+        $a = $detail['_authority'] ?? null;
+        $text = '剩余' . $available . '次';
+        if ($a && $a['ruleType'] === 'time') $text = '有效期内不限次';
+        if ($a && $a['ruleType'] === 'choice_count') $text = '共享可用' . $available . '次';
+        if ($a && $a['ruleType'] === 'choice_kind' && $a['selectionStatus'] === 'candidate') $text = '待选 · —';
+        $ruleLabel = (string)($a['sourceKindLabel'] ?? '');
+        if ($a && (int)$a['combinationGroupNo'] > 0) {
+            if ($a['ruleType'] === 'choice_count') $ruleLabel .= ' · 共享可用' . $available . '次';
+            if ($a['ruleType'] === 'choice_kind') $ruleLabel .= ' · 已选' . (int)$a['combinationSelectedKindCount'] . '/' . (int)$a['combinationChoiceLimit'] . '种';
+        }
+        return ['remaining_text' => $text, 'group_no'  => (int)($a['combinationGroupNo'] ?? 0),
+            'group_name' => (string)($a['combinationGroupName'] ?? ''),
+            'rule_label' => $ruleLabel,
+            'selection_status' => (string)($a['selectionStatus'] ?? '')];
     }
 
     /**
@@ -164,6 +279,22 @@ final class ImportedEntitlementReservationStoreServices
     public function addonOptions(int $uid, int $orderId, int $mainDetailId, int $storeId): array
     {
         $this->assertSelectedStore($uid, $orderId, $mainDetailId, $storeId);
+        return $this->ownedAddonOptions($uid, $orderId, $mainDetailId, $storeId);
+    }
+
+    /**
+     * A purchased main right authorizes this picker, never another member's ID.
+     * Every candidate independently passes the same scope/validity rule used at
+     * submission. Ordinary mains may therefore use valid imported add-ons too.
+     */
+    public function ownedAddonOptions(int $uid, int $orderId, int $mainDetailId, int $storeId, int $mainQuantity = 1): array
+    {
+        $main = $this->reservationDetail($uid, $mainDetailId, $storeId);
+        if ((int)$main['oid'] !== $orderId) {
+            throw new ValidateException('主项目与订单不匹配。');
+        }
+        $mainPool = $this->reservationPoolKey($main);
+        $mainChoice = $this->choiceConstraint($uid, $main);
         $candidates = Db::name('store_order_cart_info')->alias('c')
             ->join('store_order o', 'o.id=c.oid')->where('o.uid', $uid)
             ->where('o.paid', 1)->where('o.is_del', 0)->where('o.is_user_del', 0)
@@ -180,13 +311,30 @@ final class ImportedEntitlementReservationStoreServices
                 continue;
             }
             $available = $this->availableQuantity($uid, $detail);
+            $pool = $this->reservationPoolKey($detail);
+            // This draft's main project already occupies the same shared pool.
+            // These are read hints only; submission recomputes the whole demand.
+            if ($pool === $mainPool) $available = max(0, $available - max(1, $mainQuantity));
+            $choice = $this->choiceConstraint($uid, $detail);
+            if ($choice && $mainChoice && $choice['key'] === $mainChoice['key']) {
+                $choice['available'] = max(0, $choice['available'] - $mainChoice['cost']);
+                if ($choice['cost'] > $choice['available']) continue;
+            }
             if ($available <= 0) continue;
             $order = $detail['_order'];
             $oid = (int)$order['id'];
             if (!isset($groups[$oid])) {
                 $groups[$oid] = ['order' => ['id' => $oid, 'type' => (int)$order['type'],
-                    'product_type' => (int)$order['product_type']], 'cart_info' => []];
+                    'product_type' => (int)$order['product_type'],
+                    'card' => $this->pickerCard($detail)], 'cart_info' => []];
             }
+            if ($pool === $mainPool && ($detail['_authority']['cardRuleType'] ?? '') === 'choice_count') {
+                $groups[$oid]['order']['card']['remaining_text'] = '共享可用' . $available . '次';
+            }
+            $presentation = $this->pickerItemPresentation($detail, $available);
+            $presentation += ['pool_key' => $pool, 'available_quantity' => $available,
+                'choice_key' => $choice['key'] ?? '', 'choice_cost' => $choice['cost'] ?? 0,
+                'choice_available' => $choice['available'] ?? 0];
             $snapshot = json_decode((string)$detail['cart_info'], true) ?: [];
             $snapshot['productInfo']['addon_service_duration'] = $detail['_duration'];
             // Return only the picker contract, not the carrier's financial or
@@ -198,6 +346,8 @@ final class ImportedEntitlementReservationStoreServices
                 'is_gift' => (int)$detail['is_gift'], 'is_writeoff' => 0,
                 'write_surplus_times' => $available, 'cart_info' => $snapshot,
                 'addon_service_duration' => (int)$detail['_duration'],
+                // Presentation only: no new client value is used as a right or quota.
+                'card_presentation' => $presentation,
             ];
         }
         return ['list' => array_values($groups)];
