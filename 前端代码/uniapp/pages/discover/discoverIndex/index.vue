@@ -9,9 +9,10 @@
 					<!-- #ifdef APP-PLUS || H5 -->
 					<view class="h-80 pl-20 pr-20 flex-between-center relative">
 					<!-- #endif -->
-						<view class="abs-lt flex-center w-140 h-80">
-							<navigator class="fs-24" :class="tabActive == 2 ? 'text--w111-fff' : 'text--w111-333'" url="/pages/index/index" open-type="switchTab" hover-class="none">
-								<text>返回商城</text>
+						<view class="mall-return-area abs-lt flex-center h-80">
+							<!-- 返回入口统一使用主题底色，浅色和深色社区页都保持白字可读。 -->
+							<navigator class="mall-return-button flex-center fs-24 bg-color text--w111-fff" url="/pages/index/index" open-type="switchTab" hover-class="none">
+								<text>{{ mallReturnLabel }}</text>
 							</navigator>
 							<!-- <view class="flex-center opac w-154 h-58 rd-29rpx">
 							<view class="iconfont icon-ic_left fs-34 text--w111-333" @tap="backTap"></view>
@@ -306,6 +307,8 @@
 	export default {
 		data() {
 			return {
+				// 使用文本绑定输出小于号，避免小程序WXML将其当作标签解析。
+				mallReturnLabel: '<返回商城',
 				sysHeight,
 				tabActive: 1,
 				params: {
@@ -749,6 +752,23 @@
 </script>
 
 <style scoped lang="scss">
+	// 返回入口留出独立布局区，增加按钮内边距时不挤压居中的社区页签。
+	.mall-return-area {
+		width: 220rpx;
+		padding-left: 20rpx;
+		box-sizing: border-box;
+		justify-content: flex-start;
+	}
+
+	.mall-return-button {
+		padding: 0 24rpx;
+		min-height: 64rpx;
+		border-radius: 32rpx;
+		line-height: 1;
+		white-space: nowrap;
+		box-sizing: border-box;
+	}
+
 	.edit-fab {
 		position: fixed;
 		right: 24rpx;

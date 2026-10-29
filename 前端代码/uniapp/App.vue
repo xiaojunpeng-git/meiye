@@ -1,5 +1,6 @@
 <script>
 	import {checkLogin} from './libs/login';
+	import { remindMemberSurvey, beginSurveyForeground } from '@/utils/memberSurveyReminder';
 	import {HTTP_REQUEST_URL} from './config/app';
 	import { LOGIN_STATUS } from "./config/cache.js"
 	import { getShopConfig, silenceAuth, getLogo } from '@/api/public';
@@ -49,6 +50,7 @@
 				deep: true, //深度监听设置为 true
 				handler: function(newV, oldV) {
 					if (newV) {
+						setTimeout(() => remindMemberSurvey(this.$store), 500);
 						// this.getCartNum()
 					} else {
 						this.$store.commit('indexData/setCartNum', '')
@@ -71,6 +73,8 @@
 			}
 		},
 		onLaunch: async function(option) {
+			// 公开调查不抢先静默登录；填写后提交才进入身份认证，并保留问卷深链。
+			const publicSurveyEntry = String(option.path || '').replace(/^\//, '') === 'pages/users/survey/index';
 			uni.hideTabBar()
 			// #ifdef MP-WEIXIN
 			// 手机号授权是会员端全局入口条件，必须在任何业务页面发起跳转前安装拦截器。
@@ -242,7 +246,7 @@
 					/* 本地联调（127.0.0.1/localhost）不跳 PC 壳：HBuilderX:8081 无后端，iframe 易空白 */
 					const host = (typeof location !== 'undefined' && location.hostname) || '';
 					const isLocal = host === '127.0.0.1' || host === 'localhost';
-					if (!isLocal && e.windowWidth > 420 && !window.top.isPC && !/iOS|Android/i.test(e.system)) {
+					if (!publicSurveyEntry && !isLocal && e.windowWidth > 420 && !window.top.isPC && !/iOS|Android/i.test(e.system)) {
 						window.location.pathname = '/static/html/pc.html';
 					}
 				}
@@ -253,7 +257,7 @@
 				this.globalData.isIframe = false;
 			}
 
-			if (window.location.pathname !== '/' && !this.isWork()) {
+			if (!publicSurveyEntry && window.location.pathname !== '/' && !this.isWork()) {
 				let snsapiBase = 'snsapi_base';
 				let urlData = location.pathname + location.search;
 				if (!that.$store.getters.isLogin && uni.getStorageSync('authIng')) {
@@ -349,6 +353,8 @@
 			// #endif
 		},
 		onShow(options) {
+			beginSurveyForeground();
+			setTimeout(() => remindMemberSurvey(this.$store), 500);
 			let that = this;
 			// #ifdef MP-WEIXIN
 			// 冷启动、分享卡片和从后台恢复都重新校验，避免直接落到业务深链。
