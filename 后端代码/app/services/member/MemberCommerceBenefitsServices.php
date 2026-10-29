@@ -349,7 +349,11 @@ final class MemberCommerceBenefitsServices
         $ledgerAvailable = (int)app()->make(UserBillServices::class)
             ->countIntegralBalance($memberIntegral, $uid);
         $available = max(0, min($memberIntegral, $ledgerAvailable) - $this->heldIntegral($uid));
-        $ratioCents = self::moneyCents(sys_config('integral_ratio', 0));
+        // Existing customer instances may keep the optional ratio row blank.
+        // A blank value means points are not configured; it must not block an
+        // otherwise valid member purchase quote.
+        $ratio = trim((string)sys_config('integral_ratio', 0));
+        $ratioCents = $ratio === '' ? 0 : self::moneyCents($ratio);
         if (!$enabled || $ratioCents <= 0 || $payableCents <= 0) {
             return ['enabled' => false, 'available' => $available, 'maxUsable' => 0,
                 'maxDiscountCents' => 0, 'used' => 0, 'discountCents' => 0];
