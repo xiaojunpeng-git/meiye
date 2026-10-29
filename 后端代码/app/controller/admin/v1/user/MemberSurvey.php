@@ -18,6 +18,8 @@ class MemberSurvey extends AuthController
 
     public function qr($id,MemberSurveyServices $service){$this->headquartersOnly();return app('json')->success($service->qrEntry((int)$id));}
     public function giftOptions(MemberSurveyGiftServices $service){$this->headquartersOnly();return app('json')->success($service->options((int)$this->request->get('store_id',0),(string)$this->request->get('keyword','')));}
+    /** 商品目录仅服务总部奖励配置，门店归属和赠送资格仍在保存及发放事务中重验。 */
+    public function giftCatalog(MemberSurveyGiftServices $service){$this->headquartersOnly();return app('json')->success($service->catalog((int)$this->request->get('store_id',0),(array)$this->request->get()));}
     /** 后台重试仅履约该任务已经提交的答卷，不创建答卷或增加赠品配置。 */
     public function retryRewards($id,MemberSurveyGiftServices $service)
     {

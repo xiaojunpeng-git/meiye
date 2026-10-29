@@ -90,6 +90,17 @@ try{
  seed12('store_product_attr_value',['id'=>51,'product_id'=>41,'type'=>0,'unique'=>'survey-project-sku','suk'=>'默认','write_times'=>1]);
  seed12('store_product',['id'=>42,'type'=>1,'relation_id'=>11,'product_type'=>0,'store_name'=>'合成实物','is_del'=>0,'is_verify'=>1,'is_show'=>0,'is_inventory'=>0]);
  seed12('store_product_attr_value',['id'=>52,'product_id'=>42,'type'=>0,'unique'=>'survey-product-sku','suk'=>'默认','stock'=>0]);
+ seed12('store_product',['id'=>43,'type'=>0,'relation_id'=>11,'product_type'=>0,'store_name'=>'不可赠的非实物','is_del'=>0,'is_verify'=>1,'is_show'=>0]);
+ // 共享选品控件仍从所选发放门店的门店商品/规格取值，仓库筛选不会把其他门店混进来。
+ $saleCatalog=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1]);
+ check12($saleCatalog['count']===1&&(int)$saleCatalog['list'][0]['id']===41&&(int)$saleCatalog['list'][0]['attrValue'][0]['id']===51,'问卷商品选择器销售中目录按门店和规格返回');
+ $warehouseCatalog=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>2,'product_type'=>'0']);
+ check12($warehouseCatalog['count']===1&&(int)$warehouseCatalog['list'][0]['id']===42&&(int)$warehouseCatalog['list'][0]['attrValue'][0]['id']===52,'问卷商品选择器仓库中实物可检索');
+ reject12(fn()=>$gift->catalog(11,['product_type'=>'5']),'问卷商品选择器拒绝整卡赠送');
+ for($n=0;$n<21;$n++){seed12('store_product',['id'=>1000+$n,'type'=>1,'relation_id'=>11,'product_type'=>6,'store_name'=>'合成分页项目'.$n,'is_del'=>0,'is_verify'=>1,'is_show'=>1]);seed12('store_product_attr_value',['id'=>1100+$n,'product_id'=>1000+$n,'type'=>0,'unique'=>'survey-page-sku-'.$n,'suk'=>'默认','write_times'=>1]);}
+ $catalogFirst=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1]);$catalogLast=$gift->catalog(11,['page'=>2,'limit'=>20,'type'=>1]);
+ check12($catalogFirst['count']===22&&count($catalogFirst['list'])===20&&$catalogLast['count']===22&&count($catalogLast['list'])===2,'问卷选品目录超过20项时后端分页和总数一致');
+ check12($gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1,'store_name'=>'合成护理项目'])['count']===1,'问卷选品搜索后总数回到完整筛选集');
  seed12('inventory_location',['id'=>61,'tenant_id'=>'0','store_id'=>11,'organization_id'=>'21','location_type'=>'STORE','is_default'=>1,'location_status'=>'ACTIVE','location_name'=>'合成门店仓','organization_path'=>'/21/']);
  $id3=$survey->save(['title'=>'项目实物奖励','questionnaire_id'=>$qid],7);
  $config=['store_id'=>11,'reward_each_round'=>true,'product'=>[['id'=>51,'num'=>2,'write_days'=>30],['id'=>52,'num'=>1,'write_days'=>30]],'coupon'=>[]];

@@ -5,7 +5,7 @@ if(!/^[a-z0-9-]+$/.test(tag))throw Error('Invalid admin build tag');
 const output='/tmp/r12-survey-admin-'+tag;
 const evidence=process.env.R12_EVIDENCE_DIR?path.resolve(root,process.env.R12_EVIDENCE_DIR):path.join(root,'tests/customer-010/evidence/round12-member-survey');if(!evidence.startsWith(path.join(root,'tests/customer-010/evidence')+path.sep))throw Error('Invalid evidence output');fs.mkdirSync(evidence,{recursive:true});
 // 共享平台整包同时固定已上线员工页基线，不能只记录本轮问卷页面。
-const files=['src/pages/user/survey/index.vue','src/components/memberSurveyReward/index.vue','src/utils/memberSurveyExcel.js','src/utils/requiredGuidance.js','src/api/memberSurvey.js','src/router/modules/user.js','src/pages/setting/staff/add.vue','src/pages/setting/staff/index.vue'];
+const files=['src/pages/user/survey/index.vue','src/components/memberSurveyReward/index.vue','src/components/rechargeGiftConfig/index.vue','src/components/goodsAttr/index.vue','src/utils/memberSurveyExcel.js','src/utils/requiredGuidance.js','src/api/memberSurvey.js','src/router/modules/user.js','src/pages/setting/staff/add.vue','src/pages/setting/staff/index.vue'];
 const inputs=()=>Object.fromEntries(files.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(app,file))).digest('hex')]));const startInputs=inputs();
 if(!process.version.startsWith('v16.'))throw Error('Use accepted Node16 platform toolchain');
 // 只清本脚本的生成目录，防止旧资源混入候选；与现网R22保持同一无缓存生产编译链。

@@ -31,4 +31,5 @@ export const surveyExportData = id => request({ url: `user/survey/${id}/export-d
 // 任务二维码与010奖励目录，均使用当前平台会话。
 export const surveyQr = id => request({ url: `user/survey/${id}/qr`, method: 'get' });
 export const surveyGiftOptions = (store_id, keyword = '') => request({ url: 'user/survey/gift-options', method: 'get', params: { store_id, keyword } });
+export const surveyGiftCatalog = (store_id, params) => request({ url: 'user/survey/gift-catalog', method: 'get', params: { ...params, store_id } });
 export const surveyRetryRewards = id => request({ url: `user/survey/${id}/retry-rewards`, method: 'post' });

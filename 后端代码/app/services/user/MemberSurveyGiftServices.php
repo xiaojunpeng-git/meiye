@@ -68,6 +68,39 @@ final class MemberSurveyGiftServices
             ->when($keyword!=='',static function($q)use($keyword){$q->whereLike('title','%'.$keyword.'%');})->field('id,title')->order('id','desc')->limit(100)->select()->toArray();
         return['stores'=>$stores,'products'=>$products,'coupons'=>$coupons];
     }
+    /** 问卷选品复用平台商品选择器的分页外观，但目录始终按明确发放门店和现有可赠类型收窄。 */
+    public function catalog(int $storeId,array $filters):array
+    {
+        if($storeId<=0||!Db::name('system_store')->where('id',$storeId)->where('is_del',0)->count())throw new ValidateException('请先选择有效的奖励发放门店');
+        $page=max(1,min(10000,(int)($filters['page']??1)));$limit=max(1,min(50,(int)($filters['limit']??20)));
+        $keyword=trim((string)($filters['store_name']??''));if(mb_strlen($keyword)>50)throw new ValidateException('搜索内容过长');
+        $type=(string)($filters['product_type']??'');if($type!==''&&!in_array($type,['0','6'],true))throw new ValidateException('问卷只能选择项目或实物产品');
+        $status=(int)($filters['type']??1);if(!in_array($status,[1,2],true))throw new ValidateException('商品状态无效');
+        $query=Db::name('store_product')->alias('p')->where('p.relation_id',$storeId)->where('p.is_del',0)
+            ->where('p.is_verify',1)->where('p.is_show',$status===1?1:0)->whereIn('p.product_type',$type===''?[0,6]:[(int)$type]);
+        // 实物只接收实体产品；目录资格与保存时的赠送校验一致，避免选中后才报不可赠。
+        $query->where(function($q){$q->where('p.product_type',6)->whereOr(function($p){$p->where('p.product_type',0)->where('p.type',1);});});
+        if($keyword!=='')$query->where(function($q)use($keyword){$q->whereLike('p.store_name','%'.$keyword.'%')->whereOr('p.id',$keyword);});
+        $category=(int)($filters['cate_id']??0);if($category>0)$query->whereRaw('FIND_IN_SET(?, p.cate_id)',[$category]);
+        $count=(int)(clone $query)->count();
+        $list=$query->field('p.id,p.store_name,p.product_type,p.image,p.cate_id,p.store_label_id,p.is_show')->order('p.id','desc')->page($page,$limit)->select()->toArray();
+        $ids=array_map('intval',array_column($list,'id'));
+        $skus=$ids?Db::name('store_product_attr_value')->whereIn('product_id',$ids)->where('type',0)->field('id,product_id,suk')->order('id','asc')->select()->toArray():[];
+        $first=[];foreach($skus as$sku)if(!isset($first[(int)$sku['product_id']]))$first[(int)$sku['product_id']]=$sku;
+        $categoryIds=implode(',',array_filter(array_column($list,'cate_id')));
+        $categoryService=app()->make(\app\services\product\category\StoreProductCategoryServices::class);
+        $categories=$categoryIds!==''?$categoryService->getCateParentAndChildName($categoryIds):[];
+        $labelService=app()->make(\app\services\product\label\StoreProductLabelServices::class);
+        foreach($list as&$row){
+            $row['attrValue']=isset($first[(int)$row['id']])?[$first[(int)$row['id']]]:[];
+            $names=$row['cate_id']?$categoryService->getCateName(explode(',',$row['cate_id']),$categories):[];
+            $row['cate_name']=$names?implode(',',$names):'';
+            $labels=$row['store_label_id']?$labelService->getColumn([['relation_id','=',0],['type','=',0],['id','IN',$row['store_label_id']]],'id,label_name'):[];
+            $row['store_label']=$labels?implode(',',array_column($labels,'label_name')):'';
+        }
+        unset($row);
+        return['list'=>$list,'count'=>$count];
+    }
     private function normalize(array $input):array
     {
         $config=$this->configurations()->emptyConfig();$storeRaw=$input['store_id']??0;if(!preg_match('/^(0|[1-9][0-9]{0,9})$/D',(string)$storeRaw))throw new ValidateException('奖励发放门店格式无效');$store=(int)$storeRaw;$config['store_id']=$store;

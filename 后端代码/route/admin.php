@@ -2952,6 +2952,7 @@ Route::group('adminapi', function () {
      */
     Route::group('user', function () {
         Route::get('survey/gift-options', 'v1.user.MemberSurvey/giftOptions')->option(['real_name'=>'调查奖励目录']);
+        Route::get('survey/gift-catalog', 'v1.user.MemberSurvey/giftCatalog')->option(['real_name'=>'调查奖励门店商品目录']);
 
         // 第12轮会员调查：静态子路径先于任务ID路径，沿用后台会话及单功能授权。
         Route::get('survey/questionnaire-options', 'v1.user.MemberSurvey/questionnaireOptions')->option(['real_name'=>'调查问卷选择目录']);

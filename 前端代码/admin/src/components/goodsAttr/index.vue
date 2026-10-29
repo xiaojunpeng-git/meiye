@@ -8,7 +8,12 @@
 					<Cascader :data="treeSelect" placeholder="请选择商品分类" change-on-select filterable v-width="'200px'"
 						@on-change="treeSearchs"></Cascader>
 				</FormItem>
-        <FormItem label="商品标签：" label-for="pid">
+        <FormItem v-if="giftPicker" label="商品类型：">
+          <Select v-model="formValidate.product_type" clearable @on-change="userSearchs">
+            <Option v-for="item in giftTypeOptions" :key="item.id" :value="item.id">{{ item.name }}</Option>
+          </Select>
+        </FormItem>
+        <FormItem v-else label="商品标签：" label-for="pid">
 					<Select v-model="formValidate.store_label_id" clearable
 						@on-change="userSearchs">
 						<Option v-for="item in labelSelect" :value="item.id" :key="item.id">{{ item.label_name }}
@@ -17,7 +22,7 @@
 				</FormItem>
 				</Col>
 				<Col v-bind="grid">
-        <FormItem v-if="isCard && !lockProductType" label="商品类型：">
+        <FormItem v-if="isCard && !lockProductType && !giftPicker" label="商品类型：">
 					<Select v-model="formValidate.product_type" clearable
 						@on-change="userSearchs">
 						<Option v-for="item in productTypeSelect" :value="item.id" :key="item.id">{{ item.label_name }}
@@ -29,7 +34,7 @@
 						style="width: 240px" @on-search="userSearchs" />
 				</FormItem>
 				<!-- 平台卡项选项目时，状态筛选与左侧商品标签处于同一行。 -->
-				<FormItem v-if="Number(chooseType) === 97" label="商品状态：">
+				<FormItem v-if="Number(chooseType) === 97 || giftPicker" label="商品状态：">
 					<Select v-model="formValidate.type" @on-change="userSearchs">
 						<Option :value="1">销售中</Option>
 						<Option :value="2">仓库中</Option>
@@ -65,12 +70,12 @@
 				<vxe-column field="defective_stock" title="残次品数量" min-width="100" v-if="chooseType == 94"></vxe-column>
 				<vxe-column field="product_type" title="商品类型" min-width="100">
 					<template v-slot="{ row }">
-						<span v-if="row.product_type==0">产品</span>
+            <span v-if="row.product_type==0">产品</span>
 						<span v-if="row.product_type==1">卡密商品</span>
 						<span v-if="row.product_type==3">虚拟商品</span>
             <span v-if="row.product_type==4">次卡商品</span>
             <span v-if="row.product_type==5">卡项</span>
-            <span v-if="row.product_type==6">预约商品</span>
+            <span v-if="row.product_type==6">{{ giftPicker ? '项目' : '预约商品' }}</span>
 					</template>
 				</vxe-column>
 				<vxe-column field="cate_name" title="商品分类" min-width="150">
@@ -98,7 +103,7 @@
             show-total
             @on-change="pageChange"
             :page-size="formValidate.limit"
-            @on-page-size-change="pageChange"
+            @on-page-size-change="pageSizeChange"
             show-sizer
         />
       </div>
@@ -169,7 +174,11 @@ export default {
     flatSelect: {
       type: Boolean,
       default: false
-    }
+    },
+    // 储值和问卷共用商品目录选择控件；实际可赠类型由调用方明确缩小。
+    giftPickerTypes: { type: Array, default: null },
+    // 问卷使用发放门店的可赠目录，不让平台商品列表替代门店归属校验。
+    giftListProvider: { type: Function, default: null }
   },
   data() {
     return {
@@ -178,7 +187,7 @@ export default {
       treeSelect: [],
       formValidate: {
         page: 1,
-        limit: 10,
+        limit: this.giftPickerTypes ? 20 : 10,
         cate_id: '',
         store_name: '',
         is_new: this.is_new,
@@ -186,10 +195,11 @@ export default {
         product_type: '',
         choose_type: this.chooseType,
         // 卡项项目选择默认只读销售中商品，2 与商品列表“仓库中”使用同一后端状态口径。
-        type: Number(this.chooseType) === 97 ? 1 : ''
+        type: Number(this.chooseType) === 97 || this.giftPickerTypes ? 1 : ''
       },
       total: 0,
       loading: false,
+      requestSequence: 0,
       grid: {
         xl: 10,
         lg: 10,
@@ -221,6 +231,11 @@ export default {
     labelPosition() {
       return this.isMobile ? 'top' : 'right';
     },
+    giftPicker() { return this.giftPickerTypes !== null; },
+    giftTypeOptions() {
+      return [{ id: 0, name: '产品' }, { id: 5, name: '卡项' }, { id: 6, name: '项目' }]
+        .filter(item => this.giftPickerTypes.includes(item.id));
+    },
     // 库存选品/院装耗材只锁产品；院装项目和卡项选项目只锁项目。
     lockProductType() {
       return [94, 95, 96, 97].includes(Number(this.chooseType));
@@ -232,7 +247,7 @@ export default {
   mounted() {
     this.goodsCategory();
     this.getList();
-    this.getAllLabelApi();
+    if (!this.giftPicker) this.getAllLabelApi();
   },
   methods: {
     applyInventoryProductTypeLock() {
@@ -268,8 +283,15 @@ export default {
       this.formValidate.page = index;
       this.getList();
     },
+    pageSizeChange(limit) {
+      this.formValidate.limit = limit;
+      this.formValidate.page = 1;
+      this.getList();
+    },
     // 列表
     getList() {
+      // 选品弹窗切换门店、类型或页码时，只允许最后一次查询改写可选目录。
+      const sequence = ++this.requestSequence;
       this.loading = true;
       this.applyInventoryProductTypeLock();
       if (this.goodsType) {
@@ -285,11 +307,17 @@ export default {
       } else if (Number(this.chooseType) === 97) {
         this.formValidate.is_card = 0;
       }
-      changeListApi(this.formValidate)
+      const request = this.giftListProvider
+        ? this.giftListProvider({ ...this.formValidate })
+        : changeListApi(this.giftPicker
+          ? { ...this.formValidate, catalog_types: JSON.stringify(this.formValidate.product_type === '' ? this.giftPickerTypes : [Number(this.formValidate.product_type)]) }
+          : this.formValidate);
+      request
         .then(async(res) => {
+          if (sequence !== this.requestSequence) return;
           const list = res.data.list;
           list.forEach(item => {
-            item.attrValue.forEach(j => {
+            (item.attrValue || []).forEach(j => {
               j.store_name = j.suk;
               j.store_names = item.store_name;
               j.cate_name = item.cate_name;
@@ -302,6 +330,7 @@ export default {
           this.loading = false;
         })
         .catch((res) => {
+          if (sequence !== this.requestSequence) return;
           this.loading = false;
           this.$Message.error(res.msg);
         });

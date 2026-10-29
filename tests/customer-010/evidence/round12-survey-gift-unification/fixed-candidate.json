@@ -1,0 +1,40 @@
+{
+  "round": 12,
+  "scope": "010问卷奖励与储值赠送商品选择统一",
+  "base_head": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+  "files": {
+    "前端代码/admin/src/api/memberSurvey.js": "f3ba4ebeadca28954b2a88e2010db5ac74b0c05bc96e9b543452dc29b3b3bdae",
+    "前端代码/admin/src/components/goodsAttr/index.vue": "e7fbaca411a71bbd9cb3eee93897e46e0b2e0b23f9ad09c2ba34d87f4cbc48b5",
+    "前端代码/admin/src/components/memberSurveyReward/index.vue": "7e715d2afb52c83e97fff7b837b87b4c897133e7e33e2d31ceffb9c6219b8098",
+    "前端代码/admin/src/components/rechargeGiftConfig/index.vue": "0bbc366f7e289b3011cd75195ad02fafb6694f81208bd1b4a18564db02fa3346",
+    "后端代码/app/controller/admin/v1/user/MemberSurvey.php": "8d880f009948438a1111ab8c3ca297d4e504b54b0fa931cbaa17108ff012024e",
+    "后端代码/app/services/user/MemberSurveyGiftServices.php": "d4d442c6d3f9bd8b10cb39cfd893a39357057787d23e4ff3aea8f14d98153295",
+    "后端代码/route/admin.php": "dd51c6d75c2894d36f9448be3d028efc337e6a88d3567ca205810605fe355ad4",
+    "scripts/member-survey/build-admin-local.cjs": "526af1a6b1f52eb4eefd4f395c92fd961259f179535eb1fde632f86f0a2d7866",
+    "tests/member-survey/js/browser.cjs": "9e907dbce9751fb4f236d2fae6865bdda284fbd01eb60ef24085d4f9da93d25f",
+    "tests/member-survey/php/local-business.php": "4f8e602c912def212e1be553849945af36d8eb8902b316e6565ef25f3ee9caf2"
+  },
+  "patch_sha256": "9c3d00d5947183ec921e1294e0e65bfa5ab1937dfceac9e7d761574dc8658658",
+  "checks": {
+    "business": 76,
+    "browser": 21,
+    "admin_build_passed": true,
+    "php_syntax_passed": true,
+    "vue_templates_passed": true,
+    "diff_check_passed": true
+  },
+  "behavior": [
+    "问卷奖励按储值赠送七列呈现；优惠券于答卷完成日生效",
+    "储值赠送与问卷赠送复用商品选择器；问卷只允许所选门店的项目与实物产品",
+    "问卷不新增整卡赠送；原奖励发放服务和数据不变"
+  ],
+  "notes": [
+    "本候选仅本地开发和自测，未改写线上业务数据",
+    "非本轮脏文件、发布包与历史证据均未纳入本候选"
+  ],
+  "evidence": [
+    "business.json",
+    "browser.json",
+    "admin-build.json"
+  ]
+}
