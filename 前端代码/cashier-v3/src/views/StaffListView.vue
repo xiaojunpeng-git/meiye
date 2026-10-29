@@ -50,7 +50,6 @@ const baseQueryFields = [
   { key: 'is_manager', label: '店长', defaultVisible: false },
   { key: 'cashier_salesperson_enabled', label: '可作为销售人', defaultVisible: true },
   { key: 'cashier_craftsman_enabled', label: '可作为手艺人', defaultVisible: true },
-  { key: 'craftsman_performance_type', label: '手艺人服务业绩类型', defaultVisible: true },
   { key: 'employment_type_code', label: '人员类型', defaultVisible: true },
   { key: 'status', label: '在职状态', defaultVisible: false, type: 'enum' },
   { key: 'mobile_enabled', label: '手机端', defaultVisible: true },
@@ -81,8 +80,7 @@ function defaultEditorValues() {
     staffName: '', phone: '', avatar: '/static/images/staff/avatar_male.png', account: '', password: '',
     positionIds: [], scopeMode: 'personal', scopeVersion: 0, scopeTouched: false,
     workMemberId: 0, notify: false, status: true, statusVersion: 0,
-    // 仅新建员工预选双项业绩；编辑时仍由详情中的已保存类型覆盖。
-    salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission_labor', mobileEnabled: false, isCustomer: false, customerUrl: '',
+    salespersonEnabled: true, craftsmanEnabled: true, mobileEnabled: false, isCustomer: false, customerUrl: '',
     isReservable: true, employeeNumber: '', idCard: '', age: '', joinArea: '', joinDate: '',
     birthdayDate: '', birthdayType: 1, birthdayArea: '', nowArea: '', contractBegin: '',
     contractEnd: '', salaryStatus: true, department: '', employmentTypeCode: 'internal', employmentTypeVersion: 1
@@ -125,7 +123,8 @@ async function requestAction(action, payload = {}) {
 
 const unifiedQuery = useUnifiedQueryPage({ pageCode: PAGE_CODE, pageName: '员工列表', baseFields: baseQueryFields, requestAction })
 const queryCapability = unifiedQuery.capability
-const queryFields = unifiedQuery.fields
+// 后端保留旧字段仅为兼容已保存查询；本轮门店列表及查询设置均不再提供该列。
+const queryFields = computed(() => unifiedQuery.fields.value.filter((field) => field.key !== 'craftsman_performance_type'))
 const records = computed(() => Array.isArray(projection.value?.records) ? projection.value.records : [])
 const total = computed(() => Math.max(Number(projection.value?.total) || 0, records.value.length))
 const page = computed(() => Math.max(1, Number(projection.value?.page) || 1))
@@ -179,6 +178,8 @@ async function queryStaff(query = {}, resetPage = true) {
     limit: Math.max(1, Number(query.limit || query.pageSize) || pageSize.value)
   }
   delete nextQuery.pageSize
+  // 旧可见列偏好不可随着本次查询或导出重新进入结果列。
+  if (Array.isArray(nextQuery.visibleFields)) nextQuery.visibleFields = nextQuery.visibleFields.filter((key) => key !== 'craftsman_performance_type')
   isQueryLoading.value = true
   queryError.value = ''
   try {
@@ -206,7 +207,7 @@ function initialQuery(capability) {
     pageCode: PAGE_CODE, page: 1, limit: 20, keyword: '', dataScope: 'normal', businessStatus: '', topFilters: [],
     sorts: Array.isArray(settings.sorts) ? settings.sorts : [], filters: Array.isArray(settings.filters) ? settings.filters : [],
     filterRelation: settings.filterRelation === 'any' ? 'any' : 'all', groupBy: Array.isArray(settings.groupBy) ? settings.groupBy : [],
-    summaries: Array.isArray(settings.summaries) ? settings.summaries : [], visibleFields: Array.isArray(settings.visibleFields) ? settings.visibleFields : [],
+    summaries: Array.isArray(settings.summaries) ? settings.summaries : [], visibleFields: Array.isArray(settings.visibleFields) ? settings.visibleFields.filter((key) => key !== 'craftsman_performance_type') : [],
     fieldVersions: settings.customFieldVersions || {}, ...(capability?.queryCutoffDate ? { queryCutoffDate: capability.queryCutoffDate } : {})
   }
 }
@@ -261,8 +262,7 @@ function mapDetail(detail) {
     status: Number(detail?.status ?? 1) === 1, statusVersion: Number(detail?.status_version ?? 0),
     salespersonEnabled: Number(detail?.cashier_salesperson_enabled ?? 1) === 1,
     craftsmanEnabled: Number(detail?.cashier_craftsman_enabled ?? 1) === 1,
-    craftsmanPerformanceType: ['commission', 'labor', 'commission_labor'].includes(String(detail?.craftsman_performance_type || ''))
-      ? String(detail.craftsman_performance_type) : 'commission', isCustomer: Number(detail?.is_customer || 0) === 1,
+    isCustomer: Number(detail?.is_customer || 0) === 1,
     mobileEnabled: Number(detail?.mobile_enabled || 0) === 1,
     customerUrl: String(detail?.customer_url || ''), isReservable: Number(detail?.is_reservable ?? 1) === 1,
     employeeNumber: String(detail?.employee_number || ''), idCard: String(detail?.id_card || ''), age: detail?.age ?? '',
@@ -431,7 +431,6 @@ async function onAvatarFileChange(event) {
               <label class="staff-editor__toggle"><input v-model="editorValues.salespersonEnabled" type="checkbox"><span>可作为销售人：</span></label>
               <label class="staff-editor__toggle"><input v-model="editorValues.craftsmanEnabled" type="checkbox"><span>可作为手艺人：</span></label>
               <fieldset v-if="editorValues.salespersonEnabled" class="staff-editor__choice-field"><legend>人员类型</legend><label><input v-model="editorValues.employmentTypeCode" type="radio" value="internal"><span>内部员工</span></label><label><input v-model="editorValues.employmentTypeCode" type="radio" value="partner"><span>合作方</span></label></fieldset>
-              <fieldset v-if="editorValues.craftsmanEnabled" class="staff-editor__choice-field"><legend>手艺人服务业绩类型</legend><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission"><span>消耗业绩</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="labor"><span>手工费</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission_labor"><span>消耗业绩+手工费</span></label></fieldset>
               <label class="staff-editor__toggle"><input v-model="editorValues.status" type="checkbox"><span>在职状态：</span></label>
             </div>
             <div v-show="editorTab === 'scope'" class="staff-editor__section">

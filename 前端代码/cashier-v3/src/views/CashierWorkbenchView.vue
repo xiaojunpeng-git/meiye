@@ -972,7 +972,6 @@ function canonicalCheckoutCraftsmen(records = []) {
     const normalizedEmployeeId = personnelSource === 'other' && staffId > 1000000000
       ? staffId - 1000000000
       : employeeId
-    const performanceType = String(record?.craftsmanPerformanceType || record?.craftsman_performance_type || '')
     const row = {
       id: staffId,
       staffId,
@@ -987,9 +986,8 @@ function canonicalCheckoutCraftsmen(records = []) {
       isPointCustomer: Boolean(record?.isPointCustomer ?? record?.marked)
     }
     if (personnelSource === 'other') row.personnelSource = 'other'
-    row.craftsmanPerformanceType = ['commission', 'labor', 'commission_labor'].includes(performanceType)
-      ? performanceType
-      : 'commission_labor'
+    // 新草稿统一为双项业绩，避免旧员工设置使其中一个可编辑金额在保存时归零。
+    row.craftsmanPerformanceType = 'commission_labor'
     row.laborFeeCents = Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
     const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
     const explicitGroupKey = String(record?.allocationGroupKey || '').trim()
@@ -2366,10 +2364,9 @@ async function defaultExclusivePersonnelForLine(line) {
       ...record, id: Number(record.staffId || record.id),
       name: record.name || record.staffName || '',
       laborWeight: Number(record.performance || 0),
-      performanceAmountCents: record.craftsmanPerformanceType === 'labor' ? 0
-        : (craftsmanAmounts.get(record) ?? 0),
+      performanceAmountCents: craftsmanAmounts.get(record) ?? 0,
       performanceAmountManual: false,
-      laborFeeCents: record.craftsmanPerformanceType === 'commission' ? 0 : Number(record.laborDefaultFeeCents || 0),
+      laborFeeCents: Number(record.laborDefaultFeeCents || 0),
       projectCount: record.projectCountText || '0',
       isPrimary: index === 0,
       sequence: index + 1,
@@ -4544,18 +4541,10 @@ function checkoutDebtSummary(line) {
 // 100%，但仍必须是可解释的 0-100 整数；最终金额由后端保存为事实快照。
 function personnelAllocationGroupsAreValid(records = [], weightKey = 'laborWeight') {
   if (!Array.isArray(records) || !records.length) return true
-  const craftsmanAllocation = weightKey === 'laborWeight'
   for (const record of records) {
-    const performanceType = String(record?.craftsmanPerformanceType ?? record?.craftsman_performance_type ?? '')
-    const isLabor = performanceType === 'labor'
     const weight = Number(record?.[weightKey])
     if (!Number.isInteger(weight) || weight < 0 || weight > 100) return false
-    // 服务业绩类型只约束手艺人。员工同时具备销售资格时，不能因为其
-    // 服务类型为“仅手工费”而把合法的销售业绩比例判成无效。
-    if (craftsmanAllocation && isLabor) {
-      if (weight !== 0) return false
-      continue
-    }
+    // 新结账可同时分配消耗业绩与手工费；旧人员类型不能拦截本次有效比例。
     const amount = Number(record?.performanceAmountCents ?? record?.performance_amount_cents ?? 0)
     if (!Number.isSafeInteger(amount) || amount < 0) return false
   }
@@ -4581,7 +4570,7 @@ async function confirmPersonnelAssignment(result = {}) {
       performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
       marked: Boolean(record.marked ?? record.isPointCustomer),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
-      craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
+      craftsmanPerformanceType: 'commission_labor',
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
       // 优先保存输入框的原始文本；组件同时携带了已规范化 projectCount，
       // 这里保留双字段兼容，避免跨组件更新时把刚输入的 6.6 回退到旧值 0。
@@ -4705,7 +4694,7 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
     marked: Boolean(record.marked ?? record.isPointCustomer),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
-    craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
+    craftsmanPerformanceType: 'commission_labor',
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
     projectCount: String(record.projectCount ?? record.project_count ?? ''),
     positionId: Number(record.positionId ?? record.position_id ?? 0),
@@ -8369,18 +8358,31 @@ onBeforeUnmount(() => {
                       <template v-else>销售人</template>
                     </button>
                   </div>
-                  <div v-if="isDebtEntryVisible" class="cart-line__meta-slot cart-line__meta-slot--debt">
-                    <!-- 高亮只反映当前草稿行的欠款事实，不从按钮文字反推金额。 -->
-                    <button
-                      v-if="canSetCartLineDebt(line)"
-                      type="button"
-                      class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :class="{ 'cart-line__meta-action--has-amount': lineDebtAmountCents(line) > 0 }"
-                      :title="cartActionLabel('欠款', checkoutDebtSummary(line))"
-                      @click="openCartLineDebt(line)"
-                    >
-                      {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
-                    </button>
+                  <!-- 优惠券与欠款按固定间距展示；两个入口仍各自遵循会员与欠款开关。 -->
+                  <div class="cart-line__meta-slot cart-line__meta-slot--financial">
+                    <div v-if="currentCustomerMode === 'member' && !isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--coupon">
+                      <button
+                        type="button"
+                        class="cart-line__meta-action cart-line__meta-action--enabled"
+                        :title="cartActionLabel('优惠券', line.couponSummary)"
+                        @click="openCartLineCoupon(line)"
+                      >
+                        优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
+                      </button>
+                    </div>
+                    <div v-if="isDebtEntryVisible" class="cart-line__meta-slot cart-line__meta-slot--debt">
+                      <!-- 高亮只反映当前草稿行的欠款事实，不从按钮文字反推金额。 -->
+                      <button
+                        v-if="canSetCartLineDebt(line)"
+                        type="button"
+                        class="cart-line__meta-action cart-line__meta-action--enabled"
+                        :class="{ 'cart-line__meta-action--has-amount': lineDebtAmountCents(line) > 0 }"
+                        :title="cartActionLabel('欠款', checkoutDebtSummary(line))"
+                        @click="openCartLineDebt(line)"
+                      >
+                        {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
+                      </button>
+                    </div>
                   </div>
                   <div v-if="salesAttributionEnabled" class="cart-line__meta-slot cart-line__meta-slot--attribution">
                     <button
@@ -8390,16 +8392,6 @@ onBeforeUnmount(() => {
                       @click="openCartLineAttributions(line)"
                     >
                       {{ isEntitlementLine(line) ? '导购' : '导购/销售经理' }}<template v-if="isEntitlementLine(line) ? guideDisplaySummary(line) : groupAttributionDisplaySummary(line)">:<span class="cart-line__meta-value">{{ isEntitlementLine(line) ? guideDisplaySummary(line) : groupAttributionDisplaySummary(line) }}</span></template>
-                    </button>
-                  </div>
-                  <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--coupon">
-                    <button
-                      type="button"
-                      class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :title="cartActionLabel('优惠券', line.couponSummary)"
-                      @click="openCartLineCoupon(line)"
-                    >
-                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
                     </button>
                   </div>
                   <div
