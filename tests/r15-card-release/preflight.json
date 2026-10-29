@@ -1,0 +1,41 @@
+[
+  {
+    "site": "rh",
+    "affectedSourcesTraceable": true,
+    "benefitReaderBase": "1f914d3e",
+    "memberMatchesPreviousRelease": true,
+    "candidateUnchanged": true,
+    "migration": {
+      "upgrade_key": "20261030_r25_legacy_receipt_order_index",
+      "code_version": "b1398fb93a3c92869daf1d363ce7b42817ab532d",
+      "executed_at": "2026-10-30 01:20:13"
+    },
+    "existingFeatureNote": "existing image fallback retained"
+  },
+  {
+    "site": "008",
+    "affectedSourcesTraceable": true,
+    "benefitReaderBase": "1f914d3e",
+    "memberMatchesPreviousRelease": true,
+    "candidateUnchanged": true,
+    "migration": {
+      "upgrade_key": "20261030_r25_legacy_receipt_order_index",
+      "code_version": "b1398fb93a3c92869daf1d363ce7b42817ab532d",
+      "executed_at": "2026-10-30 01:25:15"
+    },
+    "existingFeatureNote": "existing image fallback retained"
+  },
+  {
+    "site": "010",
+    "affectedSourcesTraceable": true,
+    "benefitReaderBase": "08e54654",
+    "memberMatchesPreviousRelease": true,
+    "candidateUnchanged": true,
+    "migration": {
+      "upgrade_key": "20261030_r25_legacy_receipt_order_index",
+      "code_version": "b1398fb93a3c92869daf1d363ce7b42817ab532d",
+      "executed_at": "2026-10-30 01:27:31"
+    },
+    "existingFeatureNote": "010 retains older pre-image-fallback reader; fixed candidate already includes accepted 1f914d3e prerequisite"
+  }
+]

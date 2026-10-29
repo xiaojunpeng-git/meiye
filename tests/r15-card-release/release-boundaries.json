@@ -1,0 +1,35 @@
+{
+  "featureCommit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+  "acceptedPatch": "535f20f813e9bcb3c423ce343c9435398572d41eeb1b3aaa93dc39d9b30a65b9",
+  "newFeatures": [
+    "card detail occupied/bookable counts",
+    "disabled occupied entry with booking-list link",
+    "refresh on return and before entry",
+    "persistent submit failure and in-flight feedback"
+  ],
+  "preservedFeatures": [
+    "issued card grouping and shared quotas",
+    "entitlement pictures from 1f914d3e",
+    "original permissions and final booking checks",
+    "personal center services/order entries and icons",
+    "platform/cashier/login functions"
+  ],
+  "backendFiles": [
+    "app/services/order/StoreOrderCartInfoServices.php",
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "migration": false,
+  "businessDataWrites": 0,
+  "deployOrder": [
+    "rh",
+    "push",
+    "008",
+    "010"
+  ],
+  "miniVersion": "3.0.83",
+  "miniTargets": [
+    "008 member",
+    "010 member"
+  ],
+  "formalRelease": false
+}
