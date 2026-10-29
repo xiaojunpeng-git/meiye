@@ -14,7 +14,8 @@ final class BasicRegistrationQueryRegistrar implements UnifiedQueryPageRegistrar
             ['platform', '平台', 'text', true, true],
             ['store_name', '门店', 'text', true, false],
             ['registered_date', '核销日期', 'date', true, true],
-            ['coupon_code', '券码', 'text', true, true],
+            // 007 稳态表头采用“劵码”原文；只改展示名，登记字段和保存值不变。
+            ['coupon_code', '劵码', 'text', true, true],
             ['amount', '金额', 'decimal', true, true],
             ['registration_type', '类型', 'text', true, true],
         ];

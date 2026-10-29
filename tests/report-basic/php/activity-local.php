@@ -35,7 +35,7 @@ try {
     // Clone schemas only, never fixture customer rows. Every queried domain table is shadowed.
     foreach (Db::query('SHOW TABLES') as $record) {
         $table = (string)reset($record);
-        if (!preg_match('/^eb_(cashier_v3_|store_product|store_order|system_store|system_business_product|staff_job_position|position)/',$table)) continue;
+        if (!preg_match('/^eb_(cashier_v3_|cash_source|store_product|store_order|system_store|system_business_product|staff_job_position|position)/',$table)) continue;
         Db::execute('CREATE TABLE `'.$testDatabase.'`.`'.$table.'` LIKE `'.$originalDatabase.'`.`'.$table.'`');
         $tables[] = $table;
     }
@@ -75,7 +75,8 @@ try {
     }
     $base = ['tenant_id'=>'0','store_id'=>901,'store_name_snapshot'=>'历史服务店','member_id'=>23,'member_name_snapshot'=>'历史顾客',
         'business_date'=>$date,'business_timezone'=>'Asia/Shanghai','status'=>'effective','fact_direction'=>'forward',
-        'organization_id'=>'0','organization_path_snapshot'=>'/','checkout_request_id'=>'checkout-51','order_id'=>'order-51','order_no_snapshot'=>'SALE-51'];
+        'organization_id'=>'0','organization_path_snapshot'=>'/','checkout_request_id'=>'checkout-51','order_id'=>'order-51','order_no_snapshot'=>'SALE-51',
+        'source_document_type'=>'cashier_snapshot'];
     foreach ([['project',700,20003,2],['product',701,10001,1],['card',702,30001,1]] as $index=>$data) {
         [$type,$item,$amount,$quantity] = $data;
         $fact = 'sale-'.$index; $line = 'line-'.$index;
@@ -144,12 +145,28 @@ try {
     insert51('system_store_staff',['id'=>211,'employee_id'=>11,'store_id'=>901,'position_level'=>71,'status'=>1,'is_del'=>0]);
     verify51(array_column($read('employee_summary')['rows'],null,'employee_id')[11]['position_level_name']==='高级','Exact business-store grade wins');
     Db::name('system_store_staff')->whereIn('id',[210,211])->delete();
-    $employeeItems = $read('employee_item_sales')['rows'];
-    verify51(count($employeeItems)===2 && array_sum(array_column($employeeItems,'sales_quantity'))==2,'Employee item counts use frozen weights');
-    $storeService = $read('employee_service_store')['rows'];
     $homeService = $read('employee_service_home_store')['rows'];
     verify51(count($homeService)===2 && array_unique(array_column($homeService,'store_id'))===[902],'Query-time home differs from service store');
-    verify51(array_unique(array_column($storeService,'store_id'))===[901],'Execution-store report remains execution grain');
+    // 007 的当前员工主表：服务店的历史销售只在该员工仍任职此店时显示。
+    foreach ([11,12] as $employee) insert51('system_store_staff',['id'=>$employee+201,'employee_id'=>$employee,
+        'store_id'=>901,'staff_name'=>'员工'.$employee,'status'=>1,'is_del'=>0]);
+    $storeService = $read('employee_service_store')['rows'];
+    verify51(array_unique(array_column($storeService,'store_id'))===[901],'Current execution-store appointment retains service rows');
+    // 卡销售与商品销售同属原成交行，数量按整单两名销售人员均分，而非业绩金额权重。
+    foreach ([11,12] as $employee) insert51('cashier_v3_performance_fact',$base+[
+        'fact_id'=>'card-person-'.$employee,'source_line_id'=>'line-2','performance_type'=>'sales_performance_allocated',
+        'employee_id'=>$employee,'employee_name_snapshot'=>'历史员工'.$employee,
+        'allocation_weight_numerator'=>1,'allocation_weight_denominator'=>2,'amount_cents'=>15000]);
+    insert51('system_store_staff',['id'=>214,'employee_id'=>13,'store_id'=>901,'staff_name'=>'零销售员工','status'=>1,'is_del'=>0]);
+    $employeeItems = $read('employee_item_sales')['rows'];
+    $salesRows = array_values(array_filter($employeeItems,static function($row){return (int)$row['store_id']===901 && (int)$row['employee_id']!==13;}));
+    verify51(count($salesRows)===6 && array_sum(array_column($salesRows,'sales_quantity'))==4,'All three original sale types split across full order participants');
+    verify51(count(array_filter($salesRows,static function($row){return (float)$row['sales_quantity']===0.5;}))===4,'Two-person sale count is fixed at 0.50 per unit line');
+    verify51(count(array_filter($employeeItems,static function($row){return (int)$row['employee_id']===13 && $row['item_name']==='' && $row['sales_quantity']==0; }))===1,
+        'Current employee without sales receives one empty 0.00 row');
+    $selfItems=$read('employee_item_sales',['_report_scope'=>['mode'=>'self_participant','employee_id'=>11]])['rows'];
+    $allByRowId=array_column($employeeItems,null,'row_id');
+    foreach($selfItems as $row) verify51($row['sales_quantity']===$allByRowId[$row['row_id']]['sales_quantity'],'Employee filter does not recalculate the order denominator');
     $product = $read('product_sales')['rows'];
     verify51(count($product)===1 && $product[0]['sale_amount']==100.01 && $product[0]['quantity']==1,'Product sale line money counted once');
     verify51($product[0]['cash_amount']==80.01 && $product[0]['balance_amount']==20,'Real cash and frozen balance allocation');
@@ -158,7 +175,19 @@ try {
         && !in_array('balance_amount',$read('product_sales')['sum_fields'],true),'Nullable coverage does not publish a false partial sum');
     $followup = $read('followup_employee_detail')['rows'];
     verify51(count($followup)===1 && $followup[0]['sale_amount']==300.01 && $followup[0]['followup_staff_id']===111,'Followup only identity, money from unified sale');
-    verify51(count($read('employee_performance_detail')['rows'])===94,'Allocation-grain detail');
+    // 010 历史有效 type=2 销售迁移后仍属于 007 现金业绩人口，且必须可追到品项。
+    insert51('cashier_v3_performance_fact',array_replace($base,[
+        'fact_id'=>'legacy-person-11','source_line_id'=>'line-0','source_document_type'=>'legacy_store_order',
+        'performance_type'=>'sales_performance_allocated','employee_id'=>11,'employee_name_snapshot'=>'历史员工11',
+        'amount_cents'=>10000]));
+    $performanceRows=$read('employee_performance_detail')['rows'];
+    verify51(count($performanceRows)===7 && array_unique(array_column($performanceRows,'performance_type'))===['销售分配'],
+        '007 performance detail includes current employees and migrated original sales only');
+    verify51(count(array_filter($performanceRows,static function($row){return $row['row_id']==='performance:legacy-person-11' && $row['item_name']==='历史project';}))===1,
+        'Migrated sales performance retains source item identity');
+    Db::name('cashier_v3_performance_fact')->where('fact_id','legacy-person-11')->delete();
+    // 其他报表沿用原来唯一当前所属店的夹具，不让本表专用双店身份改变其合同。
+    Db::name('system_store_staff')->whereIn('id',[212,213])->update(['is_del'=>1]);
     foreach (Reports::codes() as $code) {
         $result = $service->read($code,[901,902],$input);
         verify51($service->read($code,[], $input)['rows']===[],'Empty authorized scope '.$code);
@@ -175,7 +204,10 @@ try {
     reject51(static function () use ($read) { $read('writeoff_detail',['start_date'=>'2026-02-30']); },'Real calendar validation');
     reject51(static function () use ($read) { $read('writeoff_detail',['as_of_date'=>'2026-10-32']); },'Cutoff calendar validation');
     insert51('system_store_staff',['id'=>200,'employee_id'=>11,'store_id'=>901,'status'=>1,'is_del'=>0]);
-    reject51(static function () use ($read) { $read('employee_service_home_store'); },'Ambiguous home rejected');
+    $dualHome=$read('employee_service_home_store')['rows'];
+    verify51(count(array_filter($dualHome,static function($row){return (int)$row['employee_id']===11
+        && (int)$row['store_id']===901 && $row['project_count']>0;}))===1,
+        'Dual current appointment selects matching service store without duplicate service count');
     Db::name('system_store_staff')->where('id',200)->delete();
     Db::name('store_order')->where('id',800)->update(['is_gendan'=>0]);
     verify51($read('followup_employee_detail')['rows']===[],'Missing follow-up does not count');
@@ -214,14 +246,17 @@ try {
     // Final sales allocation must replace old allocation even if its reversal is outside the queried day.
     insert51('cashier_v3_performance_fact',array_replace($base,['fact_id'=>'sales-reversal','source_line_id'=>'line-0','performance_type'=>'sales_performance_allocated',
         'employee_id'=>11,'fact_direction'=>'reversal','reversal_of'=>'sales-person-11','business_date'=>'2026-10-21','amount_cents'=>-10001]));
-    verify51(abs(array_sum(array_column($read('employee_summary')['rows'],'sales_performance'))-180.03)<0.000001,'Future reversal excludes replaced final sales allocation');
+    verify51(abs(array_sum(array_column($read('employee_summary')['rows'],'sales_performance'))-480.03)<0.000001,'Future reversal excludes replaced final sales allocation');
     insert51('cashier_v3_order_lifecycle_operation',['tenant_id'=>'0','store_id'=>901,'operation_id'=>'refund-51','operation_no'=>'REF-51',
         'operation_type'=>'refund','source_type'=>'sales','source_order_id'=>'order-51','status'=>'succeeded']);
     insert51('cashier_v3_performance_fact',array_replace($base,['fact_id'=>'refund-person-12','order_id'=>'refund-51','source_line_id'=>'refund-line',
         'performance_type'=>'refund_sales_deduction','employee_id'=>12,'employee_name_snapshot'=>'历史员工12','amount_cents'=>-101]));
-    verify51(abs(array_sum(array_column($read('employee_summary')['rows'],'sales_performance'))-179.02)<0.000001,'Successful refund deduction keeps cents and correct date');
+    verify51(abs(array_sum(array_column($read('employee_summary')['rows'],'sales_performance'))-479.02)<0.000001,'Successful refund deduction keeps cents and correct date');
+    // 007 员工业绩明细只列原充值/销售，退款冲减仍由员工统计等经营净业绩表保留。
+    Db::name('system_store_staff')->whereIn('id',[212,213])->update(['is_del'=>0]);
     $refunds = array_values(array_filter($read('employee_performance_detail')['rows'],static function ($row) { return $row['performance_type']==='退款冲减'; }));
-    verify51(count($refunds)===1 && $refunds[0]['document_no']==='REF-51' && $refunds[0]['sales_performance']==-1.01,'Refund detail explains signed amount');
+    verify51($refunds===[],'007 performance detail excludes refund deductions');
+    Db::name('system_store_staff')->whereIn('id',[212,213])->update(['is_del'=>1]);
     insert51('cashier_v3_order_lifecycle_operation',['tenant_id'=>'0','store_id'=>901,'operation_id'=>'void-sale-51','operation_no'=>'VOID-51',
         'operation_type'=>'void','source_type'=>'sales','source_order_id'=>'order-51','status'=>'succeeded']);
     verify51($read('store_item_sales')['rows']===[] && $read('product_sales')['rows']===[] && $read('followup_employee_detail')['rows']===[],'Shared sales void guard across all sale projections');

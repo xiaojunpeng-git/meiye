@@ -65,7 +65,14 @@ final class BasicReportHostServices
         // 宿主已完成认证与范围裁剪，重新绑定页面身份，不改变授权集合或信任浏览器身份。
         $context['page_code'] = $code;
         $result = UnifiedQueryRuntime::service('providers')->resolve($code)->query($context, $payload);
-        if ($code !== BasicRegistrationQueryProvider::PAGE_CODE) return $result;
+        if ($code !== BasicRegistrationQueryProvider::PAGE_CODE) {
+            // 007 员工项目明细没有独立表头合计；统一执行器仍负责分页和导出。
+            if (in_array($code, ['basic_employee_item_sales','basic_employee_service_store',
+                'basic_employee_service_home_store','basic_employee_performance_detail'], true)) {
+                $result['table_layout']['summary_position'] = 'none';
+            }
+            return $result;
+        }
         $result['queryFields'] = array_map(static function ($field) {
             $widths = ['registration_id' => 100, 'platform' => 90, 'store_name' => 150, 'registered_date' => 130, 'coupon_code' => 180, 'amount' => 120, 'registration_type' => 100];
             return ['key' => $field[0], 'label' => $field[1], 'type' => $field[2], 'defaultVisible' => $field[3], 'defaultQuick' => $field[4],

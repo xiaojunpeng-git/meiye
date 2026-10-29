@@ -221,12 +221,19 @@ function display(row, field) {
   if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
-  if (field.type === 'decimal') return formatReportCount(row[field.key])
+  if (field.type === 'decimal') return formatReportCount(row[field.key], field)
   if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
 }
-// 数量保留后端给出的有效小数位，只去掉如 711.000000 的补零；不经浮点重算业务值。
-function formatReportCount(value) {
+// 仅按后端列元数据限制页面精度；结果和导出继续使用未格式化的原始数量。
+function formatReportCount(value, field) {
+  const precision = field?.display_precision
+  const minimum = field?.display_min_precision
+  const number = Number(value)
+  if (Number.isInteger(precision) && precision >= 0 && precision <= 6 && Number.isFinite(number)) {
+    const minimumFractionDigits = Number.isInteger(minimum) && minimum >= 0 && minimum <= precision ? minimum : 0
+    return new Intl.NumberFormat('zh-CN', { useGrouping: false, minimumFractionDigits, maximumFractionDigits: precision }).format(number)
+  }
   const text = String(value)
   return /^-?\d+\.\d+$/.test(text) ? text.replace(/0+$/, '').replace(/\.$/, '') : text
 }
@@ -236,7 +243,7 @@ function summary(field, index) {
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
   // 合计与明细使用同一数量显示口径；金额仍使用统一金额格式化函数。
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : field.type === 'decimal' ? formatReportCount(amount) : amount
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : field.type === 'decimal' ? formatReportCount(amount, field) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
@@ -333,7 +340,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
       <section class="basic-reports__results" :aria-busy="loading">
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
-            <tr class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
+            <tr v-if="data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
             <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
           <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
