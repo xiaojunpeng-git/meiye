@@ -1,0 +1,24 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "source": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+  "beforeSha256": "948471ebbc8fa3759ad44bdbbd78d837eef111eba141f092c10600685a04b4bb",
+  "preexistingChanges": "搜索及固定标题区改动保留，本轮只移除卡内项目平铺分支",
+  "remote": "本轮展示修复未连接远程实例",
+  "patchSha256": "1850b68444b649b18c588c9e4e4448e6bd9501e746a81259e115daa097e59199",
+  "files": {
+    "前端代码/uniapp/pages/users/user_card_list/index.vue": "49cef8438e99cd4d0e3c1d08cf3204cfdf76e092bb11b82f1f15a25fabdfc504",
+    "tests/member-entitlement-display/model.cjs": "a5eac092395f840c6c463a707719436ede854db42151feb292c1bfe7336cf1c9"
+  },
+  "tests": [
+    "Vue2真实组件方法与模板执行通过",
+    "卡项不拆分、共享次数不重复累计",
+    "单购项目、赠送项目、历史权益名称保持",
+    "有效/全部、搜索、分类汇总、详情跳转、底栏回调回归",
+    "输入权益数据逐字未改变",
+    "本轮差异仅buildProjects方法，已存在搜索改动完整保留"
+  ],
+  "limits": [
+    "未运行H5浏览器或微信真机本候选；本地8081未启动",
+    "未提交、未部署、未push，未修改数据库"
+  ]
+}

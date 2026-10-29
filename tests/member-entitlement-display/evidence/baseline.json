@@ -1,0 +1,7 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "source": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+  "beforeSha256": "948471ebbc8fa3759ad44bdbbd78d837eef111eba141f092c10600685a04b4bb",
+  "preexistingChanges": "搜索及固定标题区改动保留，本轮只移除卡内项目平铺分支",
+  "remote": "本轮展示修复未连接远程实例"
+}

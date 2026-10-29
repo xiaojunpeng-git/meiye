@@ -274,55 +274,31 @@
 				const projects = [];
 				let colorIdx = 0;
 				cardList.forEach((card) => {
-					// Imported historical purchases stay one visible item, matching
-					// the old member list; checkout keeps the full project choices.
-					if (card.product_type == 5 && !card.historical_display_single && card.related_list && card.related_list.length) {
-						card.related_list.forEach((related) => {
-							projects.push(this.formatProject({
-								key: `related-${related.id}`,
-								holderId: card.id,
-								cartInfoId: related.id,
-								oid: card.oid,
-								name: related.project_name || related.cart_info?.productInfo?.store_name || card.card_name,
-								image: related.image || card.image,
-								remain: related.write_surplus_times,
-								write_times: related.write_times,
-								duration: related.duration || 0,
-								cate_id: related.cate_id || 0,
-								cate_name: related.cate_name || '',
-								uncategorized: this.isUncategorizedProject(related),
-								product_type: related.product_type,
-								status: card.status,
-								is_card_upgraded: card.is_card_upgraded,
-								cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
-								store_name: card.store_name,
-							}));
-							colorIdx++;
-						});
-					} else {
-						projects.push(this.formatProject({
-							key: `card-${card.id}`,
-							holderId: card.id,
-							cartInfoId: 0,
-							oid: card.oid,
-							name: card.card_name,
-							image: card.image,
-							remain: card.write_surplus_times,
-							write_times: card.write_times,
-							duration: 0,
-							cate_id: card.cate_id || 0,
-							cate_name: card.cate_name || '',
-							uncategorized: this.isUncategorizedProject(card),
-							product_type: card.product_type,
-							status: card.status,
-							is_card_upgraded: card.is_card_upgraded,
-							cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
-							store_name: card.store_name,
-							write_valid: card.write_valid,
-							write_end: card.write_end,
-						}));
-						colorIdx++;
-					}
+					// Each holder is one issued entitlement: cards keep their purchased name
+					// and total; standalone purchases/gifts already carry the project name.
+					// Never flatten card components or sum shared-pool child counters here.
+					projects.push(this.formatProject({
+						key: `card-${card.id}`,
+						holderId: card.id,
+						cartInfoId: 0,
+						oid: card.oid,
+						name: card.card_name,
+						image: card.image,
+						remain: card.write_surplus_times,
+						write_times: card.write_times,
+						duration: 0,
+						cate_id: card.cate_id || 0,
+						cate_name: card.cate_name || '',
+						uncategorized: this.isUncategorizedProject(card),
+						product_type: card.product_type,
+						status: card.status,
+						is_card_upgraded: card.is_card_upgraded,
+						cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
+						store_name: card.store_name,
+						write_valid: card.write_valid,
+						write_end: card.write_end,
+					}));
+					colorIdx++;
 				});
 				return projects;
 			},
