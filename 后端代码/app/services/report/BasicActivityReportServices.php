@@ -56,7 +56,7 @@ final class BasicActivityReportServices
             if (PayrollAlgorithmPolicy::calculated()) $metrics[$kind]=array_merge($metrics[$kind],['labor_commission','commission_status']);
         }
         $labels = [
-            'store_id'=>'门店ID', 'store_name'=>'门店', 'employee_id'=>'员工ID', 'employee_name'=>'员工',
+            'store_id'=>'门店ID', 'store_name'=>'门店', 'employee_id'=>'员工ID', 'employee_name'=>'姓名',
             'business_date'=>'业务日期', 'document_no'=>'业务单号', 'member_name'=>'客户名称',
             'item_id'=>'品项ID', 'item_name'=>'品项', 'category_path'=>'当前分类',
             'sale_amount'=>'销售额', 'cash_performance'=>'现金业绩', 'customer_count'=>'销售人数',
@@ -91,9 +91,9 @@ final class BasicActivityReportServices
                 'summable'=>($isMoney && !in_array($key,['employee_balance_performance','balance_amount','labor_unit_price'],true)) || in_array($key, ['quantity','project_count','sales_quantity','service_visits','point_visits'], true),
             ];
         }
-        // 仅员工统计表按007固定列名/顺序展示；旧键保留给既有筛选与表达式，不扩散到其他报表。
+        // 员工统计表的列名与顺序只在本表声明；稳定字段键继续供筛选、合计及导出共用。
         if ($kind === 'employee') {
-            $order = ['store_name'=>'门店','position_name'=>'职务','employee_name'=>'姓名',
+            $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'位置',
                 'sales_performance'=>'现金业绩','labor_performance'=>'劳动业绩','service_visits'=>'客数',
                 'labor_unit_price'=>'客单价','project_count'=>'项目数','point_visits'=>'指定客',
                 'new_customer_total'=>'服务总新客','new_customer_converted'=>'成交总新客','new_customer_conversion_rate'=>'新客成交率%'];
@@ -102,8 +102,8 @@ final class BasicActivityReportServices
                 $field = $byKey[$key] ?? ['key'=>$key,'type'=>$key==='new_customer_conversion_rate'?'integer':'decimal','defaultQuick'=>false,'width'=>150,
                     'money'=>false,'summable'=>$key!=='new_customer_conversion_rate'];
                 $field['label']=$label; $field['defaultVisible']=true;
-                $field['fixed']=in_array($key,['store_name','position_name','employee_name'],true)?'left':'';
-                if($field['fixed']==='left')$field['width']=['store_name'=>100,'position_name'=>100,'employee_name'=>130][$key];
+                $field['fixed']=in_array($key,['store_name','employee_name','position_name'],true)?'left':'';
+                if($field['fixed']==='left')$field['width']=['store_name'=>100,'employee_name'=>130,'position_name'=>100][$key];
                 $ordered[]=$field; unset($byKey[$key]);
             }
             foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
@@ -335,8 +335,9 @@ final class BasicActivityReportServices
             }
         }
         if ($kind === 'employee') return $this->employeeSummary($rows, $stores, $range, $employees, $sales ?? []);
-        if ($kind === 'employee_home') return $this->homeStores(array_values($rows), $stores);
-        return array_values($rows);
+        if ($kind === 'employee_home') $rows = $this->homeStores(array_values($rows), $stores);
+        else $rows = array_values($rows);
+        return $this->completePersonnelStoreNames($rows, $stores);
     }
 
     /**
@@ -363,6 +364,7 @@ final class BasicActivityReportServices
         }
         $this->checkSize($rows);
         if (!$rows) return [];
+        $rows = $this->completePersonnelStoreNames($rows, $stores, $reader, $storeNames);
         $pairs = []; $byStore = [];
         foreach ($rows as $row) {
             $pair = ['store_id'=>(int)$row['store_id'], 'employee_id'=>(int)$row['employee_id']];
@@ -455,6 +457,20 @@ final class BasicActivityReportServices
             foreach (['sales_performance','labor_performance','labor_fee','project_count','sales_quantity'] as $metric) $rows[$key][$metric] = 0;
         }
         foreach (['sales_performance','labor_performance','labor_fee','project_count','sales_quantity'] as $metric) $rows[$key][$metric] += $row[$metric];
+    }
+
+    /** 员工分组各报表逐行显示门店；只补缺失的显示名，保留已冻结历史名称和业务数值。 */
+    private function completePersonnelStoreNames(array $rows, array $stores, ?RegisteredMetricReadServices $reader = null, array $names = []): array
+    {
+        foreach ($rows as &$row) {
+            if (trim((string)($row['store_name'] ?? '')) !== '') continue;
+            if (!$names) $names = ($reader ?? new RegisteredMetricReadServices())->storeNames($stores);
+            $name = trim((string)($names[(int)$row['store_id']] ?? ''));
+            if ($name === '') throw new \LogicException('员工报表门店名称缺失，无法完整展示');
+            $row['store_name'] = $name;
+        }
+        unset($row);
+        return $rows;
     }
 
     private function item(array $fact): array
@@ -684,6 +700,7 @@ final class BasicActivityReportServices
     /** Business wording shared by screen/export metadata; no physical schema leaks into field help. */
     private function source(string $key, string $kind): string
     {
+        if ($key === 'store_name' && in_array($kind, ['employee','employee_item','employee_service','performance'], true)) return '优先显示业务发生时保存的门店名称；原记录缺少名称时，按本行已授权门店身份补充当前门店名称，不改变原业务记录和统计结果。';
         if ($key === 'store_name' && $kind === 'employee_home') return '按查询时员工唯一有效任职的当前门店归属显示；多店归属不猜测，已授权服务门店仍限制实际服务范围。';
         if ($key === 'employee_name' && $kind === 'followup') return '已关联原订单明确记录的跟单任职对应姓名；该兼容身份没有独立历史姓名快照，按当前任职名称展示，不冒充导购或销售经理。';
         if ($key === 'quantity' && in_array($kind,['product','followup'],true)) return '成功销售事实记录的原销售明细数量，不按支付方式或参与人数重复计算；非金额数字。';

@@ -221,17 +221,22 @@ function display(row, field) {
   if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
+  if (field.type === 'decimal') return formatReportCount(row[field.key])
   if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
+}
+// 数量保留后端给出的有效小数位，只去掉如 711.000000 的补零；不经浮点重算业务值。
+function formatReportCount(value) {
+  const text = String(value)
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/0+$/, '').replace(/\.$/, '') : text
 }
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
-  // 员工统计客数与指定客可含小数；只去除合计末尾无意义的零，保留后端精度和导出原值。
-  if (amount != null && active.value?.code === 'basic_employee_summary' && ['service_visits', 'point_visits'].includes(field.key)) return String(amount).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) ? String(Number(amount)) : amount
+  // 合计与明细使用同一数量显示口径；金额仍使用统一金额格式化函数。
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : field.type === 'decimal' ? formatReportCount(amount) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
