@@ -334,7 +334,15 @@ final class MemberCommerceServices
                     'originalLineAmountCents' => $originalUnit * $quantity,
                     'salespeople' => $people, 'craftsmen' => [],
                     'serviceObject' => (int)$product['product_type'] === 6 ? '本人' : '',
-                    'cardPurchaseSnapshot' => $server['authority_snapshot']['cardPurchase'] ?? [],
+                    // Member checkout owns the same immutable original-row proof
+                    // as cashier catalog selection. Seal the complete server
+                    // definition here: preparation deliberately reads a light
+                    // draft and cannot reconstruct this card's component floor.
+                    // The proof strips versions and never edits issued cards.
+                    'cardPurchaseSnapshot' => \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::seal(
+                        (array)($server['authority_snapshot']['cardPurchase'] ?? []),
+                        (int)$scope['store']['id'], (int)$skus[0]['id'], $unit
+                    ),
                     'inventoryOutboundRequired' => (int)$product['product_type'] === 0 ? 1 : 0];
                 $items[] = ['productId' => (int)$product['id'], 'name' => $product['store_name'],
                     'image' => $product['image'], 'quantity' => $quantity, 'amountCents' => $lineAmount];
