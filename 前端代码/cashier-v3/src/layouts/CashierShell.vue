@@ -1426,7 +1426,9 @@ function showMemberDetail(payload = {}) {
     : null
   activeMemberDetailId.value = requestedMemberId || memberDetailId(matchingBackendDetail) || memberDetailId(detail.member) || memberDetailId(detail.record) || null
   memberDetailFallback.value = matchingBackendDetail || detail.member || detail.record || detail.fallback || {}
-  memberDetailInitialTab.value = detail.initialTab || 'profile'
+  // Reuse the store debt switch for direct member-detail entry as well as the visible tab list.
+  memberDetailInitialTab.value = detail.initialTab === 'debt' && state.cashier?.debtPaymentEnabled === false
+    ? 'profile' : (detail.initialTab || 'profile')
   isMemberDetailOpen.value = true
   const openedMemberId = requestedMemberId || memberDetailId(memberDetailFallback.value)
   if (openedMemberId) {
@@ -1595,6 +1597,8 @@ async function prepareDebtRepayment(payload = {}) {
 }
 
 async function loadMemberDetailTab(payload = {}) {
+  // Ignore stale debt-tab intent after the existing store switch has been disabled.
+  if (payload.tab === 'debt' && state.cashier?.debtPaymentEnabled === false) payload = { ...payload, tab: 'profile' }
   if (!payload.memberId) return { success: false, message: '未找到会员。' }
   const loadSequence = ++memberDetailLoadSequence
   isMemberDetailLoading.value = true
@@ -3137,6 +3141,7 @@ onBeforeUnmount(() => {
     v-if="isMemberDetailOpen"
     :detail="memberDetail"
     :initial-tab="memberDetailInitialTab"
+    :debt-payment-enabled="state.cashier?.debtPaymentEnabled !== false"
     :is-loading="isMemberDetailLoading"
     :load-error="memberDetailLoadError"
     :on-action="handleMemberDetailAction"
