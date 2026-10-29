@@ -1,5 +1,7 @@
 <template>
 	<view class="card-list-page">
+		<!-- Keep status/title/search together while the original page continues scrolling. -->
+		<view class="page-header">
 		<!-- #ifdef MP || APP-PLUS -->
 		<view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 		<!-- #endif -->
@@ -11,6 +13,13 @@
 				<view class="header-title">{{ pageTitle }}</view>
 			</view>
 			<view class="filter-tabs">
+				<view class="project-search">
+					<text class="iconfont icon-ic_search"></text>
+					<input v-model="searchKeyword" class="project-search-input" type="text" confirm-type="search"
+						maxlength="80" placeholder="搜索项目" :adjust-position="false" />
+					<view v-if="searchKeyword" class="project-search-clear" role="button" aria-label="清空搜索"
+						@click="searchKeyword = ''">×</view>
+				</view>
 				<view
 					class="filter-tab"
 					:class="{ active: currentFilter === 'valid' }"
@@ -24,6 +33,8 @@
 			</view>
 		</view>
 
+		</view>
+
 		<!-- Use page scrolling: a zero-height native scroll-view can hide rights
 		     on devices even when the same data expands in H5/devtools. -->
 		<view class="content">
@@ -34,7 +45,7 @@
 
 			<view v-else-if="loadend && !hasDisplayContent" class="empty-tip">
 				<view class="empty-icon">📋</view>
-				<text>暂无卡包信息</text>
+				<text>{{ normalizedSearchKeyword ? '暂无匹配项目' : '暂无卡包信息' }}</text>
 			</view>
 
 			<template v-else>
@@ -133,6 +144,8 @@
 				loading: true,
 				loadend: false,
 				currentFilter: 'valid',
+				searchKeyword: '',
+				searchExpandedCategories: {},
 				expandedCategories: {},
 				statusBarHeight: 0,
 				colorIndex: 0,
@@ -152,13 +165,18 @@
 			projectList() {
 				return this.buildProjects(this.cardList);
 			},
+			normalizedSearchKeyword() {
+				return this.searchKeyword.trim().toLowerCase();
+			},
 			filteredProjects() {
-				if (this.currentFilter === 'valid') {
-					return this.projectList.filter((item) => {
-						return item.remain > 0 && item.status == 1 && !item.is_card_upgraded;
-					});
-				}
-				return this.projectList;
+				// The API already returns this authorized member's complete rights list.
+				// Search only narrows project names after the existing valid/all rule;
+				// it never changes rights, ownership, remaining counts or detail IDs.
+				const projects = this.currentFilter === 'valid'
+					? this.projectList.filter(item => item.remain > 0 && item.status == 1 && !item.is_card_upgraded)
+					: this.projectList;
+				if (!this.normalizedSearchKeyword) return projects;
+				return projects.filter(item => String(item.name || '').toLowerCase().includes(this.normalizedSearchKeyword));
 			},
 			categoryGroups() {
 				const map = {};
@@ -194,6 +212,13 @@
 			},
 			hasDisplayContent() {
 				return this.uncategorizedProjects.length > 0 || this.categoryGroups.length > 0;
+			},
+		},
+		watch: {
+			searchKeyword() {
+				// New searches reveal matching projects; clearing restores the ordinary
+				// category expansion choices instead of overwriting the member's view.
+				this.searchExpandedCategories = {};
 			},
 		},
 		onLoad(option) {
@@ -249,55 +274,31 @@
 				const projects = [];
 				let colorIdx = 0;
 				cardList.forEach((card) => {
-					// Imported historical purchases stay one visible item, matching
-					// the old member list; checkout keeps the full project choices.
-					if (card.product_type == 5 && !card.historical_display_single && card.related_list && card.related_list.length) {
-						card.related_list.forEach((related) => {
-							projects.push(this.formatProject({
-								key: `related-${related.id}`,
-								holderId: card.id,
-								cartInfoId: related.id,
-								oid: card.oid,
-								name: related.project_name || related.cart_info?.productInfo?.store_name || card.card_name,
-								image: related.image || card.image,
-								remain: related.write_surplus_times,
-								write_times: related.write_times,
-								duration: related.duration || 0,
-								cate_id: related.cate_id || 0,
-								cate_name: related.cate_name || '',
-								uncategorized: this.isUncategorizedProject(related),
-								product_type: related.product_type,
-								status: card.status,
-								is_card_upgraded: card.is_card_upgraded,
-								cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
-								store_name: card.store_name,
-							}));
-							colorIdx++;
-						});
-					} else {
-						projects.push(this.formatProject({
-							key: `card-${card.id}`,
-							holderId: card.id,
-							cartInfoId: 0,
-							oid: card.oid,
-							name: card.card_name,
-							image: card.image,
-							remain: card.write_surplus_times,
-							write_times: card.write_times,
-							duration: 0,
-							cate_id: card.cate_id || 0,
-							cate_name: card.cate_name || '',
-							uncategorized: this.isUncategorizedProject(card),
-							product_type: card.product_type,
-							status: card.status,
-							is_card_upgraded: card.is_card_upgraded,
-							cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
-							store_name: card.store_name,
-							write_valid: card.write_valid,
-							write_end: card.write_end,
-						}));
-						colorIdx++;
-					}
+					// Each holder is one issued entitlement: cards keep their purchased name
+					// and total; standalone purchases/gifts already carry the project name.
+					// Never flatten card components or sum shared-pool child counters here.
+					projects.push(this.formatProject({
+						key: `card-${card.id}`,
+						holderId: card.id,
+						cartInfoId: 0,
+						oid: card.oid,
+						name: card.card_name,
+						image: card.image,
+						remain: card.write_surplus_times,
+						write_times: card.write_times,
+						duration: 0,
+						cate_id: card.cate_id || 0,
+						cate_name: card.cate_name || '',
+						uncategorized: this.isUncategorizedProject(card),
+						product_type: card.product_type,
+						status: card.status,
+						is_card_upgraded: card.is_card_upgraded,
+						cardClass: CARD_CLASSES[colorIdx % CARD_CLASSES.length],
+						store_name: card.store_name,
+						write_valid: card.write_valid,
+						write_end: card.write_end,
+					}));
+					colorIdx++;
 				});
 				return projects;
 			},
@@ -341,11 +342,13 @@
 				this.currentFilter = filter;
 			},
 			isCategoryExpanded(name) {
-				return this.expandedCategories[name] !== false;
+				const expanded = this.normalizedSearchKeyword ? this.searchExpandedCategories : this.expandedCategories;
+				return expanded[name] !== false;
 			},
 			toggleCategory(name) {
 				const current = this.isCategoryExpanded(name);
-				this.$set(this.expandedCategories, name, !current);
+				const expanded = this.normalizedSearchKeyword ? this.searchExpandedCategories : this.expandedCategories;
+				this.$set(expanded, name, !current);
 			},
 			goProject(project) {
 				if (project.disabled) {
@@ -373,6 +376,15 @@
 	background: #fbf8f6;
 	display: flex;
 	flex-direction: column;
+}
+
+// Sticky is page-based on both H5 and mini-programs; do not reintroduce the
+// zero-height native scroll-view that previously hid otherwise valid projects.
+.page-header {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	flex-shrink: 0;
 }
 
 .status-bar {
@@ -426,10 +438,46 @@
 
 .filter-tabs {
 	display: flex;
+	align-items: center;
 	gap: 10rpx;
 	// 固定占满页头第二行，不随标题长度回到第一行。
 	flex: 0 0 100%;
 	justify-content: flex-end;
+}
+
+.project-search {
+	flex: 1;
+	min-width: 0;
+	height: 64rpx;
+	margin-right: 12rpx;
+	padding: 0 18rpx;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	border-radius: 32rpx;
+	background: rgba(255, 255, 255, 0.82);
+	border: 1rpx solid rgba(123, 41, 65, 0.1);
+
+	.iconfont { font-size: 28rpx; color: #947a80; margin-right: 10rpx; }
+}
+
+.project-search-input {
+	flex: 1;
+	min-width: 0;
+	width: 0;
+	height: 60rpx;
+	font-size: 24rpx;
+	color: #4d3037;
+}
+
+.project-search-clear {
+	flex-shrink: 0;
+	width: 44rpx;
+	height: 60rpx;
+	line-height: 60rpx;
+	text-align: center;
+	font-size: 34rpx;
+	color: #947a80;
 }
 
 .filter-tab {

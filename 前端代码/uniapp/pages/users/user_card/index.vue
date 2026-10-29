@@ -92,7 +92,7 @@
 		</view>
 		<view class="fixed-lb w-full pb-safe bg--w111-fff">
 			<view class="p-20">
-				<navigator :url="`/pages/goods_details/index?id=${cardData.pid || cardData.product_id}`" hover-class="none" class="flex-center h-80 rd-40rpx fw-500 fs-28 text--w111-fff bg-color">再次购买</navigator>
+				<navigator :url="`/pages/goods_details/index?id=${cardData.pid || cardData.product_id}`" hover-class="none" class="repurchase-button flex-center h-80 rd-40rpx fw-500 fs-28">再次购买</navigator>
 			</view>
 		</view>
 		<verifyModal v-if="showQrcode" :qrcode="config.qrc" :qrc="qrc" :verifyCode="cardData.verify_code" :writeDay="cardData.write_day" :writeTimes="cardData.write_times" :writeOff="cardData.write_times" :productType="cardData.product_type" @closeModal="closeModal"></verifyModal>
@@ -149,8 +149,15 @@
 					return {}
 				}
 				if (this.cardData.product_type == 4 || this.cardData.card_cover == 1) {
+					// 卡封面在商品表可保存本站绝对路径；小程序背景图必须使用当前客户的完整 HTTPS 地址。
+					const cover = this.cardData.product_type == 4
+						? `${HTTP_REQUEST_URL}/statics/images/card_cover_image.png`
+						: this.cardData.card_cover_image;
+					const coverUrl = cover && cover.charAt(0) === '/'
+						? `${HTTP_REQUEST_URL.replace(/\/$/, '')}${cover}`
+						: cover;
 					return {
-						'background': `url(${this.cardData.product_type == 4 ? `${HTTP_REQUEST_URL}/statics/images/card_cover_image.png` : this.cardData.card_cover_image}) center/cover no-repeat`,
+						'background': `url(${coverUrl}) center/cover no-repeat`,
 					}
 				} else {
 					return {
@@ -258,6 +265,14 @@
 </script>
 
 <style lang="scss" scoped>
+	// Keep the white action distinguishable from its white footer; include the border inside the original button size.
+	.repurchase-button {
+		box-sizing: border-box;
+		border: 1px solid #d9d9d9;
+		background: #fff;
+		color: #000;
+	}
+
 	.card-mask {
 		background: rgba(0, 0, 0, 0.3);
 	}
