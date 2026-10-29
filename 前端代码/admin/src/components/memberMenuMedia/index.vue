@@ -5,16 +5,17 @@
   </span>
 </template>
 <script>
-import { memberMenuImage, resolveMemberMenuIcon } from '../../../../shared/memberMenuMedia';
+import { memberMenuImage, resolveMemberMenuIcon, resolveMemberOrderIcon } from '../../../../shared/memberMenuMedia';
 import glyphs from '@/assets/member-menu-glyphs.json';
 // 图片失败仅记录当前组件状态，不清空已保存的图片、图标或菜单资料。
 export default {
-  props: { item: { type: Object, default: () => ({}) }, size: { type: Number, default: 24 }},
+  props: { item: { type: Object, default: () => ({}) }, size: { type: Number, default: 24 }, kind: { type: String, default: 'menu' }},
   data() { return { failedImage: '' }; },
   computed: {
-    image() { return memberMenuImage(this.item); },
+    // 订单入口按稳定业务key兜底，不能按服务菜单名称误配或读取无关旧图片。
+    image() { return this.kind === 'order' ? '' : memberMenuImage(this.item); },
     // 使用会员端同一份本地字体；未知图标按通用会员图标兜底，不依赖外部字体CDN。
-    glyph() { const key = resolveMemberMenuIcon(this.item).split(/\s+/).find(name => glyphs[name]); return String.fromCodePoint(parseInt(glyphs[key] || glyphs['icon-ic_user'], 16)); }
+    glyph() { const icon = this.kind === 'order' ? resolveMemberOrderIcon(this.item) : resolveMemberMenuIcon(this.item); const key = icon.split(/\s+/).find(name => glyphs[name]); return String.fromCodePoint(parseInt(glyphs[key] || glyphs[this.kind === 'order' ? 'icon-ic_order1' : 'icon-ic_user'], 16)); }
   }
 };
 </script>
