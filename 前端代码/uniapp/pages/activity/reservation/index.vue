@@ -412,11 +412,12 @@
 							<view v-if="!group.collapsed" class="addon-group-items">
 								<view v-for="section in group.sections" :key="section.key">
 									<view v-if="section.name" class="addon-section-heading">{{ section.name }}<text class="addon-section-rule">{{ section.rule }}</text></view>
-									<view v-for="item in section.items" :key="item._key" class="staff-item addon-picker-item" :class="{ 'addon-card-child': group.card }" @click="toggleAddonItem(item)">
+									<view v-for="item in section.items" :key="item._key" class="staff-item addon-picker-item" :class="{ 'addon-card-child': group.card, 'addon-item-disabled': item.disabled }" :aria-disabled="item.disabled ? 'true' : 'false'" @click="toggleAddonItem(item)">
 										<view class="addon-item-row">
 											<view class="addon-item-name">{{ item.projectDisplayName || item.displayName || item.product_name || item.label }}</view>
 											<view class="addon-item-meta"><text>{{ item.durationText }}</text><text>{{ item.remainingText }}</text></view>
-											<text class="iconfont addon-item-check" :class="isAddonSelected(item._key) ? 'icon-a-ic_CompleteSelect text-color' : 'icon-ic_unselect'"></text>
+											<text v-if="item.disabled" class="addon-disabled-reason" role="status">{{ item.disabledReason }}</text>
+											<text v-else class="iconfont addon-item-check" :class="isAddonSelected(item._key) ? 'icon-a-ic_CompleteSelect text-color' : 'icon-ic_unselect'"></text>
 										</view>
 									</view>
 								</view>
@@ -1001,7 +1002,9 @@ export default {
 				if (Number(item.product_type) !== 6) return;
 				if (Number(item.id) === Number(this.cartInfoId)) return;
 				const canBook = Number(item.write_surplus_times) > 0 && Number(item.is_writeoff) !== 1;
-				if (!canBook) return;
+				// Disabled rows are server-authorized visible rights, never selectable quota.
+				const disabled = item.card_presentation?.disabled === true;
+				if (!canBook && !disabled) return;
 				const pinfo = item.cart_info?.productInfo || {};
 				const attrInfo = pinfo.attrInfo || {};
 				const sku = attrInfo.suk || attrInfo.suk || '';
@@ -1020,6 +1023,8 @@ export default {
 					: this.buildServiceLabel(storeName, cardName, sku, null);
 				const addonDur = resolveAddonDuration(pinfo.addon_service_duration || item.addon_service_duration || this.addonServiceDuration);
 				options.push({
+					disabled,
+					disabledReason: item.card_presentation?.disabled_reason || '暂不可预约',
 					_key: `addon_${order.id}_${item.id}`,
 					label,
 					displayName,
@@ -1098,6 +1103,8 @@ export default {
 			return this.addonPickerSelected.includes(key);
 		},
 		toggleAddonItem(item) {
+			// Occupancy labels explain availability; taps must not change the draft.
+			if (item.disabled) return;
 			const idx = this.addonPickerSelected.indexOf(item._key);
 			if (idx >= 0) {
 				this.addonPickerSelected.splice(idx, 1);
@@ -1129,11 +1136,13 @@ export default {
 		confirmAddonPicker() {
 			const merged = [...this.addonItems];
 			this.addonPickerOptions.forEach(item => {
-				if (this.addonPickerSelected.includes(item._key) && !merged.find(row => row._key === item._key)) {
+				if (!item.disabled && this.addonPickerSelected.includes(item._key) && !merged.find(row => row._key === item._key)) {
 					merged.push(item);
 				}
 			});
-			this.addonItems = merged.filter(item => this.addonPickerSelected.includes(item._key));
+			// A refreshed occupied right must not survive through an older selected draft.
+			const blocked = this.addonPickerOptions.filter(item => item.disabled).map(item => item._key);
+			this.addonItems = merged.filter(item => this.addonPickerSelected.includes(item._key) && !blocked.includes(item._key));
 			this.addonPickerVisible = false;
 			this.selectedTimeRange = null;
 			this.loadStaffList();
@@ -2131,6 +2140,9 @@ export default {
 		font-size: 28rpx;
 	}
 	/* 只改变加项弹层：确定高度的纵向布局保证长列表独立滚动，其他人员弹层保持原样。 */
+	// Occupied rights remain readable and searchable, with a textual reason instead of a selection control.
+	.addon-item-disabled{ background: #f5f5f5; color: #777; }
+	.addon-disabled-reason{ margin-left: 16rpx; color: #777; font-size: 22rpx; line-height: 1.5; max-width: 120rpx; flex-shrink: 0; white-space: normal; }
 	.addon-picker-mask{ overflow: hidden; }
 	.addon-picker-panel{
 		height: 100%;

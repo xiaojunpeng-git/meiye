@@ -65,8 +65,19 @@ try {
     if ($booking->create(421, $ordinaryId, $input)['reservationId'] !== $created['reservationId']) {
         throw new RuntimeException('Mixed booking replay was not idempotent');
     }
-    if (in_array($imported, $ids($service->ownedAddonOptions(421, $ordinaryId, $main, 11)), true)) {
-        throw new RuntimeException('Occupied imported visit remained selectable');
+    // Occupied rights stay visible but expose no selectable quota; physical
+    // remaining uses and submit-time protection remain unchanged.
+    $findImported = static function () use ($service, $ordinaryId, $main, $imported): array {
+        foreach ($service->ownedAddonOptions(421, $ordinaryId, $main, 11)['list'] as $group) {
+            foreach ($group['cart_info'] as $item) if ((int)$item['id'] === $imported) return $item;
+        }
+        throw new RuntimeException('Occupied right was hidden');
+    };
+    $occupied = $findImported();
+    if ($occupied['write_surplus_times'] !== 0 || !$occupied['card_presentation']['disabled']
+        || $occupied['card_presentation']['disabled_reason'] !== '已预约占用'
+        || $occupied['card_presentation']['remaining_text'] !== '剩余1次') {
+        throw new RuntimeException('Occupied right did not explain its disabled state');
     }
     $deny(static function () use ($booking, $ordinaryId, $input): void {
         $booking->create(421, $ordinaryId, array_merge($input, ['reservation_start' => '14:00']));
@@ -78,6 +89,10 @@ try {
     Db::name('cashier_v3_reservation')->where('id', $id)->update(['status' => 'CANCELLED']);
     if (!in_array($imported, $ids($service->ownedAddonOptions(421, $ordinaryId, $main, 11)), true)) {
         throw new RuntimeException('Cancelled booking did not release availability');
+    }
+    $released = $findImported();
+    if ($released['card_presentation']['disabled'] || $released['write_surplus_times'] !== 1) {
+        throw new RuntimeException('Cancelled reservation did not restore selection');
     }
     // A valid ordinary main never grants another organization's imported right.
     Db::name('migration_entitlement_scope')->where('target_uid', 421)->update(['owner_org_id' => 2]);

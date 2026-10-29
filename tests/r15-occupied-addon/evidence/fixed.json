@@ -1,0 +1,26 @@
+{
+  "base": "0e46f2377a1afb015e45d1e3723412c454aa4ed0",
+  "sharedHEAD": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "cd5f8bf3cfb0e4484ab8e7969eeff2edd1115591d29fe555edb78e09de17cb3d",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "5f9ae5486f9e6fa5866c7955b160915f4715ed502b2ced80829d9a7cbc753128",
+    "tests/r15-owned-addon/mixed-booking.php": "0ffcbe4268cfb12b9baf3f55a786aaec7ec6397d10ca90b21b401ba5bcd20d77",
+    "tests/r15-occupied-addon/model.cjs": "c4f190fb7389931e344885690e18fdb36487c9d985965b069283d19532bacf31",
+    "tests/r15-occupied-addon/browser.cjs": "dd1a884e4742ac601dd8cc51db78ad3ceffb83ff97ad41d47c55de9607cd4e21",
+    "scripts/r15-occupied-addon-build.cjs": "2981bc5298e8df204cfeee077a7d1aa8e090da69736dd3c694566645ebb5ea23"
+  },
+  "patchFingerprint": "50cce4fed6f80fd039bb7e7f9a080808e5b3424d073bf165fb5cab7bf1a5e6e0",
+  "tests": {
+    "localDatabase": "PASS occupied visible, physical balance unchanged, duplicate submit denied, cancel restores, rollback, member/store scope, five card rules",
+    "browser": "PASS actual Vue 320/375/430, grouping/folding/search/scroll/remove regression",
+    "h5": "PASS",
+    "mini": "PASS",
+    "native": 419
+  },
+  "limits": [
+    "未做小程序真机验收",
+    "未部署、未push、未上传"
+  ],
+  "indexUnchanged": true,
+  "headUnchanged": true
+}

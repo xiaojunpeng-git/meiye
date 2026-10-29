@@ -311,6 +311,7 @@ final class ImportedEntitlementReservationStoreServices
                 continue;
             }
             $available = $this->availableQuantity($uid, $detail);
+            $beforeMain = $available;
             $pool = $this->reservationPoolKey($detail);
             // This draft's main project already occupies the same shared pool.
             // These are read hints only; submission recomputes the whole demand.
@@ -320,7 +321,12 @@ final class ImportedEntitlementReservationStoreServices
                 $choice['available'] = max(0, $choice['available'] - $mainChoice['cost']);
                 if ($choice['cost'] > $choice['available']) continue;
             }
-            if ($available <= 0) continue;
+            // Keep occupied rights visible without granting quota. Choice-kind
+            // restrictions retain their existing exclusion; only reservation
+            // occupancy is exposed as a disabled, explanatory picker row.
+            if ($choice && $choice['cost'] > $choice['available']) continue;
+            $disabledReason = $available > 0 ? '' : ($beforeMain > 0
+                ? '主项目已占用可用次数' : '已预约占用');
             $order = $detail['_order'];
             $oid = (int)$order['id'];
             if (!isset($groups[$oid])) {
@@ -332,7 +338,13 @@ final class ImportedEntitlementReservationStoreServices
                 $groups[$oid]['order']['card']['remaining_text'] = '共享可用' . $available . '次';
             }
             $presentation = $this->pickerItemPresentation($detail, $available);
-            $presentation += ['pool_key' => $pool, 'available_quantity' => $available,
+            // Booking occupancy has not consumed the physical entitlement.
+            // Show its remaining uses alongside the reason, never as zero uses.
+            if ($disabledReason !== '' && ($detail['_authority']['ruleType'] ?? '') !== 'time') {
+                $presentation['remaining_text'] = '剩余' . (int)($detail['_authority']['remainingTimes'] ?? $detail['write_surplus_times']) . '次';
+            }
+            $presentation += ['disabled' => $available <= 0, 'disabled_reason' => $disabledReason,
+                'pool_key' => $pool, 'available_quantity' => $available,
                 'choice_key' => $choice['key'] ?? '', 'choice_cost' => $choice['cost'] ?? 0,
                 'choice_available' => $choice['available'] ?? 0];
             $snapshot = json_decode((string)$detail['cart_info'], true) ?: [];
