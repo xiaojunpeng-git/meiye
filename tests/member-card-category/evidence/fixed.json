@@ -1,0 +1,47 @@
+{
+  "baselineHead": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "patchSha256": "f7799137f15a12a811ae433d5af5cfc518d5430b692f8eec26027dbe3acfb9e6",
+  "files": {
+    "后端代码/app/services/user/UserCardHolderServices.php": "ca99f7413484d98eb0071fe277e9749f3a0cd26d1b11fe12625b1f5d3199fea6",
+    "tests/member-card-category/category-mysql.php": "295e7423773cc1f49198c15d2848e0d639cc22a47636751ba882285ca6f731d8",
+    "tests/member-card-category/frontend.cjs": "f55e8ee3b832eb7f2b7aacc31d7b5dde46ebac012d9b570b880eeb8c4e4053dc"
+  },
+  "rule": "最高已开启祖先优先；无开启祖先时用开启子类；同级按原排序及ID稳定选择；全部关闭时保留未分类权益",
+  "tests": {
+    "actualMySQL": 17,
+    "backendDtoToRealVue2": "PASS",
+    "previousWholeCardDisplay": "PASS",
+    "previousStandaloneProjectBooking": "PASS"
+  },
+  "scope": {
+    "frontendSource": [],
+    "backendSource": [
+      "后端代码/app/services/user/UserCardHolderServices.php"
+    ],
+    "migrations": [],
+    "tests": [
+      "tests/member-card-category/category-mysql.php",
+      "tests/member-card-category/frontend.cjs"
+    ],
+    "generatedArtifacts": [],
+    "evidenceDirectory": "tests/member-card-category/evidence"
+  },
+  "priorFixedPatchPreserved": "2e089651d238107908c4ec0e4501e430a77618b5a86e06759aa8b3e271aafd36",
+  "dataArchitecture": {
+    "authority": "Existing product category IDs/relations and dedicated mobile_card_show switches; highest enabled ancestor in complete path",
+    "factsAndTransactions": "Read-only display projection. No booking, financial, service or statistics writes. Existing transaction/permission paths unchanged.",
+    "identitiesAndCounts": "One issued holder remains one item; frontend grouping preserves holder IDs and counts.",
+    "compatibility": "Store/master inheritance and relation fallback retained. No fallback to lower category when enabled ancestor exists. Missing/cyclic paths remain ungrouped.",
+    "performance": "Existing point reads per path; bounded depth and duplicate ancestor collapse. No report or write-path changes.",
+    "cleanup": "Old protected resolver removed after full PHP reference scan; callers use the new resolver.",
+    "codeComments": [
+      "Priority in resolver",
+      "Incomplete/cyclic path fail-closed",
+      "No duplicate issued card projection"
+    ]
+  },
+  "remoteWrites": false,
+  "productionCategorySwitchesChanged": false,
+  "issuedRightsChanged": false,
+  "status": "开发自测完成，待产品经理对固定版本确认验收；未提交、未部署"
+}

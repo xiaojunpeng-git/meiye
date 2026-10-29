@@ -186,7 +186,7 @@ class UserCardHolderServices extends BaseServices
 
     /**
      * 解析商品在手机端卡包中应归属的分类
-     * 商品可属于多个分类：仅保留开启「手机端卡包分类」的一级分类；均无则归入未分类
+     * 商品可属于多个分类：同一路径取最高已开启层级；跨路径先层级、再排序和ID稳定选取；均关闭时不分组。
      * @param int $productId
      * @param StoreProductServices $productServices
      * @param StoreProductCategoryServices $categoryServices
@@ -212,23 +212,24 @@ class UserCardHolderServices extends BaseServices
         if (!$cateIds) {
             return $uncategorized;
         }
-        $rootMap = [];
+        $categoryMap = [];
         foreach ($cateIds as $cid) {
-            $root = $this->resolveRootCategoryMeta($cid, $categoryServices);
-            if ($root && $root['cate_id'] > 0) {
-                $rootMap[$root['cate_id']] = $root;
+            $category = $this->resolveCardPackCategoryMeta($cid, $categoryServices);
+            if ($category && $category['cate_id'] > 0) {
+                $categoryMap[$category['cate_id']] = $category;
             }
         }
-        if (!$rootMap) {
+        if (!$categoryMap) {
             return $uncategorized;
         }
-        $enabled = array_values(array_filter($rootMap, function ($item) {
-            return (int)($item['mobile_card_show'] ?? 1) === 1;
-        }));
-        if (!$enabled) {
-            return $uncategorized;
-        }
+        // Each path already supplies its highest enabled category; deduplicate
+        // ancestors before stable selection so a purchased card appears once.
+        $enabled = array_values($categoryMap);
         usort($enabled, function ($a, $b) {
+            // A higher enabled category wins even when a child has a larger display sort.
+            if ($a['depth'] !== $b['depth']) {
+                return $a['depth'] <=> $b['depth'];
+            }
             if ($a['sort'] !== $b['sort']) {
                 return $b['sort'] <=> $a['sort'];
             }
@@ -243,39 +244,35 @@ class UserCardHolderServices extends BaseServices
     }
 
     /**
-     * 根据分类ID解析所属一级分类信息
-     * @param int $cateId
-     * @param StoreProductCategoryServices $categoryServices
-     * @return array|null
+     * 只读解析分类路径：最高已开启祖先优先；父级关闭时允许已开启子级显示。
+     * 缺失父级、循环或异常深度不猜测分类，避免把残缺层级误当一级。
+     * 不修改商品/分类，也不拆分或重复展示同一张已购卡。
+     * @return array{cate_id:int,cate_name:string,mobile_card_show:int,sort:int,depth:int}|null
      */
-    protected function resolveRootCategoryMeta(int $cateId, StoreProductCategoryServices $categoryServices): ?array
+    protected function resolveCardPackCategoryMeta(int $cateId, StoreProductCategoryServices $categoryServices): ?array
     {
-        if ($cateId <= 0) {
-            return null;
+        $path = [];
+        $seen = [];
+        while ($cateId > 0) {
+            if (isset($seen[$cateId]) || count($path) >= 10) return null;
+            $seen[$cateId] = true;
+            $category = $categoryServices->get($cateId, ['id', 'pid', 'cate_name', 'mobile_card_show', 'sort']);
+            if (!$category) return null;
+            $row = is_array($category) ? $category : $category->toArray();
+            $path[] = $row;
+            $cateId = (int)($row['pid'] ?? 0);
         }
-        $current = $categoryServices->get($cateId, ['id', 'pid', 'cate_name', 'mobile_card_show', 'sort']);
-        if (!$current) {
-            return null;
+        foreach (array_reverse($path) as $depth => $row) {
+            if ((int)($row['mobile_card_show'] ?? 1) !== 1 || trim((string)($row['cate_name'] ?? '')) === '') continue;
+            return [
+                'cate_id' => (int)$row['id'],
+                'cate_name' => (string)$row['cate_name'],
+                'mobile_card_show' => 1,
+                'sort' => (int)($row['sort'] ?? 0),
+                'depth' => $depth,
+            ];
         }
-        $rootArr = is_array($current) ? $current : $current->toArray();
-        $guard = 0;
-        while ((int)($rootArr['pid'] ?? 0) > 0 && $guard < 10) {
-            $parent = $categoryServices->get((int)$rootArr['pid'], ['id', 'pid', 'cate_name', 'mobile_card_show', 'sort']);
-            if (!$parent) {
-                break;
-            }
-            $rootArr = is_array($parent) ? $parent : $parent->toArray();
-            $guard++;
-        }
-        if ((int)($rootArr['id'] ?? 0) <= 0 || ($rootArr['cate_name'] ?? '') === '') {
-            return null;
-        }
-        return [
-            'cate_id' => (int)$rootArr['id'],
-            'cate_name' => (string)$rootArr['cate_name'],
-            'mobile_card_show' => (int)($rootArr['mobile_card_show'] ?? 1),
-            'sort' => (int)($rootArr['sort'] ?? 0),
-        ];
+        return null;
     }
 
     /**
