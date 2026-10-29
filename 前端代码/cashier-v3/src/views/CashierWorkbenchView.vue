@@ -4255,17 +4255,20 @@ function handleDebtEditorAmountInput(event) {
 }
 
 function normalizeCouponSelector(selector = {}, line = {}) {
-  const coupons = (Array.isArray(selector.coupons) ? selector.coupons : [])
+  const allCoupons = (Array.isArray(selector.coupons) ? selector.coupons : [])
     .map((coupon) => ({
       ...coupon,
       couponId: String(coupon?.couponId || '')
     }))
-    // Upgrade credits use a separate settlement contract, not normal non-cash
-    // coupon tender. Do not offer an allowance that final checkout must reject.
-    .filter((coupon) => coupon.couponId && (Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade))
+    .filter((coupon) => coupon.couponId)
+  // Preserve unsupported upgrade coupons as read-only choices with a reason.
+  const coupons = allCoupons.filter((coupon) => Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade)
   const belowMinimumCoupons = (Array.isArray(selector.belowMinimumCoupons) ? selector.belowMinimumCoupons : [])
     .map((coupon) => ({ ...coupon, couponId: String(coupon?.couponId || '') }))
     .filter((coupon) => coupon.couponId)
+  if (line.cardOperationUpgrade) belowMinimumCoupons.push(...allCoupons
+    .filter((coupon) => Number(coupon.couponType) === 3)
+    .map((coupon) => ({ ...coupon, unavailableReasons: ['卡项升级暂不支持多次抵用券'] })))
   return {
     ...selector,
     lineId: String(selector.lineId || line.id || ''),
@@ -7962,6 +7965,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (entitlementAddedTimer) window.clearTimeout(entitlementAddedTimer)
   if (cardOperationNoticeTimer) window.clearTimeout(cardOperationNoticeTimer)
+  clearCraftsmanGuidance()
   window.removeEventListener('cashier-v3:open-checkout', openCheckoutFromService)
   window.removeEventListener('cashier-v3:open-prepared-checkout', openPreparedCheckout)
   window.removeEventListener('cashier-v3:open-entitlement-selector', handleOpenEntitlementSelector)
@@ -7979,7 +7983,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:clear-toolbar-business-source', handleToolbarBusinessSourceClear)
   window.removeEventListener('cashier-v3:update-toolbar-business-date', handleToolbarBusinessDateChange)
   window.removeEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusRequiredFieldGuidance)
-  clearCraftsmanGuidance()
 })
 </script>
 
@@ -8252,8 +8255,8 @@ onBeforeUnmount(() => {
               <article
                 v-for="line in group.lines"
                 :key="line.id"
-                :data-cart-line-id="String(line.id)"
                 class="cart-line"
+                :data-cart-line-id="String(line.id)"
                 :class="{
                   'cart-line--active': activeCartLineId === line.id,
                   'cart-line--upgrade': Boolean(cardOperationUpgradeBinding(line)),

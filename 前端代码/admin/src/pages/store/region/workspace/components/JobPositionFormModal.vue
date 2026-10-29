@@ -12,12 +12,12 @@
 
           <label class="jp-field">
             <span>岗位名称</span>
-            <input v-model.trim="form.name" type="text" placeholder="如：店长 / 前台 / 总部运营" :disabled="submitting" />
+            <input v-model.trim="form.name" type="text" placeholder="如：店长 / 前台 / 总部运营" :disabled="submitting || loading || !!loadError" />
           </label>
 
           <label class="jp-field">
             <span>岗位说明</span>
-            <textarea v-model.trim="form.remark" rows="2" placeholder="可选，简要说明岗位职责" :disabled="submitting" />
+            <textarea v-model.trim="form.remark" rows="2" placeholder="可选，简要说明岗位职责" :disabled="submitting || loading || !!loadError" />
           </label>
 
           <div class="jp-field jp-field-switch">
@@ -30,7 +30,7 @@
                 class="jp-switch-input"
                 type="checkbox"
                 :checked="Number(form.status) === 1"
-                :disabled="submitting"
+                :disabled="submitting || loading || !!loadError"
                 @change="form.status = $event.target.checked ? 1 : 0"
               />
               <span class="jp-switch-track" aria-hidden="true"><span class="jp-switch-thumb" /></span>
@@ -48,7 +48,7 @@
                 class="jp-switch-input"
                 type="checkbox"
                 :checked="Number(form.allow_store_select) === 1"
-                :disabled="submitting"
+                :disabled="submitting || loading || !!loadError"
                 @change="form.allow_store_select = $event.target.checked ? 1 : 0"
               />
               <span class="jp-switch-track" aria-hidden="true"><span class="jp-switch-thumb" /></span>
@@ -59,7 +59,7 @@
           <div class="jp-field jp-field-switch">
             <span>业绩独立核算</span>
             <label class="jp-switch" :class="{ 'is-on': Number(form.performance_independent) === 1, 'is-disabled': submitting }">
-              <input class="jp-switch-input" type="checkbox" :checked="Number(form.performance_independent) === 1" :disabled="submitting" @change="form.performance_independent = $event.target.checked ? 1 : 0" />
+              <input class="jp-switch-input" type="checkbox" :checked="Number(form.performance_independent) === 1" :disabled="submitting || loading || !!loadError" @change="form.performance_independent = $event.target.checked ? 1 : 0" />
               <span class="jp-switch-track" aria-hidden="true"><span class="jp-switch-thumb" /></span>
               <span class="jp-switch-text">{{ Number(form.performance_independent) === 1 ? '独立' : '不独立' }}</span>
             </label>
@@ -92,13 +92,19 @@
 
         <section class="jp-main">
           <div class="jp-main-title">功能权限</div>
+          <div v-if="loadError" role="alert">
+            <p>{{ loadError }}</p>
+            <button type="button" class="button secondary" @click="open">重新加载</button>
+          </div>
+          <div v-else-if="loading" role="status">权限菜单加载中…</div>
           <FourChannelPermissionEditor
+            v-else
             ref="editor"
             class="jp-main-editor"
             :menus="menus"
             :value="ruleIds"
             :entries="entryValue"
-            :disabled="submitting"
+            :disabled="submitting || loading || !!loadError"
             :include-platform="true"
             @change="onRulesChange"
           />
@@ -107,7 +113,7 @@
 
       <div class="modal-footer jp-footer">
         <button class="button secondary" type="button" :disabled="submitting" @click="close">取消</button>
-        <button class="button primary" type="button" :disabled="submitting" @click="submit">{{ submitting ? '保存中…' : '保存岗位' }}</button>
+        <button class="button primary" type="button" :disabled="submitting || loading || !!loadError" @click="submit">{{ submitting ? '保存中…' : '保存岗位' }}</button>
       </div>
     </div>
   </div>
@@ -130,6 +136,9 @@ export default {
   },
   data() {
     return {
+      loading: true,
+      loadError: '',
+      loadSequence: 0,
       menus: {},
       ruleIds: { platform: [], store_v3: [], mobile: [] },
       form: {
@@ -166,9 +175,15 @@ export default {
   },
   methods: {
     close() {
+      this.loadSequence += 1;
       this.visible = false;
     },
     open() {
+      // 目录与岗位必须同时成功才能编辑；过期请求不得覆盖新打开岗位的权限。
+      const sequence = ++this.loadSequence;
+      this.loading = true;
+      this.loadError = '';
+      this.menus = {};
       this.form = {
         id: Number(this.positionId) || 0,
         name: '',
@@ -182,20 +197,31 @@ export default {
         use_mobile: 0,
       };
       this.ruleIds = { platform: [], store_v3: [], mobile: [] };
-      const detail = this.form.id > 0 ? this.loadDetail(this.form.id) : Promise.resolve();
-      const menus = this.loadMenus();
+      const detail = this.form.id > 0 ? this.loadDetail(this.form.id, sequence) : Promise.resolve();
+      const menus = this.loadMenus(sequence);
       Promise.all([menus, detail])
         .catch((err) => {
-          this.$Message && this.$Message.error((err && err.msg) || '加载失败');
+          if (sequence !== this.loadSequence) return;
+          this.loadError = (err && (err.msg || err.message)) || '岗位权限加载失败，请重新加载';
+        })
+        .finally(() => {
+          if (sequence === this.loadSequence) this.loading = false;
         });
     },
-    loadMenus() {
+    loadMenus(sequence) {
       return getJobPositionMenus().then((res) => {
-        this.menus = (res && res.data) || {};
+        if (sequence !== this.loadSequence) return;
+        const menus = (res && res.data) || {};
+        // 完整目录缺失不能当作零权限，避免把加载异常变成可提交的空岗位。
+        if (!['platform_menus', 'store_v3_menus', 'mobile_menus'].every(key => Array.isArray(menus[key]) && menus[key].length)) {
+          throw new Error('权限目录不完整，请重新加载');
+        }
+        this.menus = menus;
       });
     },
-    loadDetail(id) {
+    loadDetail(id, sequence) {
       return getJobPositionDetail(id).then((res) => {
+        if (sequence !== this.loadSequence) return;
         const d = (res && res.data) || {};
         const p = d.position || {};
         this.form = {
@@ -226,6 +252,8 @@ export default {
       }
     },
     submit() {
+      // 加载失败时禁止用默认空数组覆盖既有岗位权限。
+      if (this.loading || this.loadError || this.submitting) return;
       if (!String(this.form.name || '').trim()) {
         this.$Message && this.$Message.required
           ? this.$Message.required('岗位名称未填写')
@@ -267,7 +295,7 @@ export default {
       this.visible = false;
     },
     reloadDetail() {
-      if (this.form.id) return this.loadDetail(this.form.id);
+      if (this.form.id) return this.loadDetail(this.form.id, sequence);
       return Promise.resolve();
     },
   },

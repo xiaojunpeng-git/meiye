@@ -203,6 +203,31 @@ final class CashierV3OrderCenterRecordQueryServices
         ];
     }
 
+    /**
+     * 按已授权充值行批量读取赠送事实；固定赠送名称/数量及当前事实状态，不回读现有套餐。
+     * 租户、门店和会员须与来源充值一致，不能只按数字充值ID关联其他实例资料。
+     */
+    private function readRechargeGiftSummaries(array $rows, string $tenantId): array
+    {
+        if (!$rows) return [];
+        $sources = array_column($rows, null, 'id');
+        $parts = [];
+        foreach (Db::name('cashier_v3_gift_fact')->where('tenant_id', $tenantId)
+            ->where('source_type', 'recharge_gift')->whereIn('recharge_id', array_keys($sources))
+            ->field('recharge_id,store_id,member_id,gift_kind,quantity,content_name_snapshot,status')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $id = (int)$fact['recharge_id']; $source = $sources[$id] ?? [];
+            if ((int)($source['store_id'] ?? 0) !== (int)$fact['store_id']
+                || (int)($source['uid'] ?? 0) !== (int)$fact['member_id']) continue;
+            $kind = (string)$fact['gift_kind'];
+            $label = ['coupon'=>'优惠券','project'=>'项目','product'=>'商品'][$kind] ?? '赠送';
+            $unit = ['coupon'=>'张','project'=>'次','product'=>'件'][$kind] ?? '份';
+            $parts[$id][] = $label . '：' . (string)$fact['content_name_snapshot'] . ' × '
+                . (int)$fact['quantity'] . $unit . ((string)$fact['status'] === 'effective' ? '' : '（已撤回）');
+        }
+        return array_map(static function (array $items): string { return implode('；', $items); }, $parts);
+    }
+
     /** @return array{from:string,to:string} */
     private function businessDateRange(array $payload): array
     {
@@ -294,7 +319,8 @@ final class CashierV3OrderCenterRecordQueryServices
         $rechargeSalespeople = $this->readRechargeSalespeople($rows, $tenantId);
         $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
         $balanceCategories = self::balanceCategoriesForStores($rows);
-        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations, $balanceCategories): array {
+        $giftSummaries = $this->readRechargeGiftSummaries($rows, $tenantId);
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations, $balanceCategories, $giftSummaries): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
             $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
@@ -318,6 +344,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'productName' => '余额',
                 'rechargeAmount' => (string)$row['price'],
                 'giftAmount' => (string)$row['give_price'],
+                'giftContentSummary' => $giftSummaries[(int)$row['id']] ?? '无赠送项目、商品或优惠券记录',
                 // Only V3 payment facts are the authoritative cash-performance
                 // source. A zero net amount remains ready when reversals offset
                 // a real V3 collection; legacy recharge columns never fill it.

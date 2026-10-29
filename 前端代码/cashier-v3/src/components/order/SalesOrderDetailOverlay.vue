@@ -265,7 +265,8 @@ function amountRowsForItem(item) {
   const rows = [
     { label: '原价', value: pickValue(item, ['originalAmount', 'originalTotalAmount', 'listAmount']) },
     { label: '改价优惠', value: pickValue(item, ['priceChangeDiscountAmount', 'changePriceDiscountAmount', 'modifiedPriceDiscountAmount']) },
-    { label: '优惠券', value: pickValue(item, ['couponDiscountAmount', 'couponAmount']), note: pickValue(item, ['couponName', 'couponLabel']) },
+    // 券名只读取订单明细冻结快照，与本行抵扣金额一起展示，不查询当前券模板。
+    { label: '优惠券', value: pickValue(item, ['couponDiscountAmount', 'couponAmount']), note: pickValue(item, ['couponName', 'couponLabel']), noteLabel: '使用优惠券：' },
     { label: '应付', value: pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue']) },
     ...(props.debtPaymentEnabled ? [{ label: '欠款', value: pickValue(item, ['debtAmount', 'outstandingAmount']) }] : []),
     { label: '现金业绩', value: pickValue(item, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
@@ -737,7 +738,7 @@ async function runAction(action, payload = {}) {
                   <dt>{{ row.label }}</dt>
                   <dd>
                     <strong v-if="hasValue(row.value)">{{ displayAmount(row.value) }}</strong>
-                    <span v-if="hasValue(row.note)">{{ row.note }}</span>
+                    <span v-if="hasValue(row.note)">{{ row.noteLabel }}{{ row.note }}</span>
                   </dd>
                 </div>
               </dl>

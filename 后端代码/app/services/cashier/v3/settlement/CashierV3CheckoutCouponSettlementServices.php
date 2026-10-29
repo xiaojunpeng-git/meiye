@@ -42,6 +42,10 @@ final class CashierV3CheckoutCouponSettlementServices
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
             $issue = (int)($coupon['cid'] ?? 0) > 0
                 ? (array)Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->find() : [];
+            (new \app\services\activity\coupon\StoreCouponEligibilityServices())->assertUsable(
+                array_merge($issue, $coupon), (int)$plan->header()['member_id'],
+                (int)$plan->header()['store_id'], $orderId
+            );
             $reusable = (int)($issue['coupon_type'] ?? 0) === StoreCouponAllowanceServices::TYPE;
             if (!$coupon
                 || (int)($issue['use_mode'] ?? StoreCouponOrderRule::DETAIL) !== StoreCouponOrderRule::DETAIL
