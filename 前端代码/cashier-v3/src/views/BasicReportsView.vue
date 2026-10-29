@@ -10,6 +10,7 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
 import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
@@ -39,6 +40,8 @@ const salaryDraft = ref(null)
 const salarySaving = ref(false)
 const freezeDialog = ref(null)
 const salaryReport = computed(() => active.value?.code === 'basic_salary_realtime')
+const reconciliationReport = computed(() => active.value?.code === 'basic_store_reconciliation')
+const reconciliationModal = ref(false)
 const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
 const today = ['year', 'month', 'day'].map(type => todayParts.find(part => part.type === type).value).join('-')
 const dates = ref({ start_date: today.slice(0, 7) + '-01', end_date: today, as_of_date: today })
@@ -74,6 +77,8 @@ function resetReportDates(code) {
 /** 在途旧响应不能覆盖新的组织筛选、页码或已退出的报表。 */
 async function run(next = query.value) {
   if (!active.value?.available) return
+  // 动态门店/逐日列由专用展示组件消费同一后端契约，避免宿主重复发起通用表查询。
+  if (reconciliationReport.value) return
   const id = ++requestId
   controller?.abort()
   controller = new AbortController()
@@ -216,17 +221,22 @@ function display(row, field) {
   if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
+  if (field.type === 'decimal') return formatReportCount(row[field.key])
   if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
+}
+// 数量保留后端给出的有效小数位，只去掉如 711.000000 的补零；不经浮点重算业务值。
+function formatReportCount(value) {
+  const text = String(value)
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/0+$/, '').replace(/\.$/, '') : text
 }
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
-  // 员工统计客数与指定客可含小数；只去除合计末尾无意义的零，保留后端精度和导出原值。
-  if (amount != null && active.value?.code === 'basic_employee_summary' && ['service_visits', 'point_visits'].includes(field.key)) return String(amount).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) ? String(Number(amount)) : amount
+  // 合计与明细使用同一数量显示口径；金额仍使用统一金额格式化函数。
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : field.type === 'decimal' ? formatReportCount(amount) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
@@ -285,7 +295,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </script>
 
 <template>
-  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog ? '' : null">
+  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog || reconciliationModal ? '' : null">
     <header class="basic-reports__header">
       <div><button v-if="route.params.report" type="button" class="basic-reports__icon" aria-label="返回基础报表" title="返回基础报表" @click="router.push({ name: route.name })"><ArrowLeft :size="18" /></button><h1>{{ active?.name || '基础报表' }}</h1></div>
       <button v-if="active?.available && data.can_edit" type="button" class="button button--primary" @click="edit()">新增登记</button>
@@ -302,6 +312,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         </div>
       </section>
     </template>
+    <StoreReconciliationReport v-else-if="active?.available && reconciliationReport" :platform="platform" @modal-change="reconciliationModal = $event" />
     <template v-else-if="active?.available">
       <UnifiedReportQueryToolbar :fields="fields" :page-code="active.code"
         :is-query-loading="loading || salarySaving" :executed-query="executedQuery" @query="submitQuery">

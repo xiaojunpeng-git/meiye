@@ -36,7 +36,10 @@ class UnifiedReport extends AuthController
     {
         if (!$this->basicMenuAllStores()) {
             if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
-            return app('json')->success(\app\services\report\BasicReportHostServices::catalog());
+            // 新增门店对账单始终独立授权，旧基础报表总入口不能自动获得新财务读取能力。
+            return app('json')->success(array_values(array_filter(\app\services\report\BasicReportHostServices::catalog(), function (array $entry): bool {
+                return $entry['code'] !== \app\services\report\StoreReconciliationReportServices::CODE || $this->canReadBasicReport($entry['code']);
+            })));
         }
         // 目录只返回当前账号能从菜单进入的报表，不能以目录接口探测其他叶子报表。
         $entries = array_values(array_filter(\app\services\report\BasicReportHostServices::catalog(), function (array $entry): bool {
@@ -142,6 +145,7 @@ class UnifiedReport extends AuthController
     /** 菜单可见是本开关下的唯一基础报表读授权；未知报表仍由目录白名单拒绝。 */
     private function canReadBasicReport(string $code): bool
     {
+        if ($code === \app\services\report\StoreReconciliationReportServices::CODE) return $this->hasMenuPermission('admin-report-' . $code);
         return $this->basicMenuAllStores()
             ? $this->hasMenuPermission('admin-report-' . $code)
             : $this->hasMenuPermission('admin-report-basic');

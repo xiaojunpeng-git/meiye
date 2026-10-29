@@ -106,11 +106,45 @@ final class CashierV3SalesOrderQueryServices
         return $this->pagePayload($criteria, $records, $total, 'partial_legacy_snapshot');
     }
 
+    /**
+     * 历史销售单独读取后交给统一列表合并、筛选、分页；不伪造 V3 收款事实。
+     * 来源前缀隔离旧自增ID与新订单ID，详情同样重新执行当前权限校验。
+     */
+    public function queryHistoricalSalesOrders(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        $reader = new self(function (string $operation, array $criteria): array {
+            return $this->readDatabase($operation, $criteria);
+        }, $this->clock, $this->cursorCodec);
+        $page = $reader->querySalesOrders($payload, $operator, $scope);
+        foreach ($page['records'] as &$record) $record = $this->historicalIdentity($record);
+        unset($record);
+        return $page;
+    }
+
+    /** 明确历史来源，不把来源单号用作可执行的新系统生命周期ID。 */
+    private function historicalIdentity(array $record): array
+    {
+        $record['legacyOrderId'] = (int)$record['orderId'];
+        $record['id'] = 'legacy-sale-' . $record['legacyOrderId'];
+        $record['orderId'] = $record['id'];
+        $record['sourceKind'] = 'legacy_sale';
+        return $record;
+    }
+
     public function salesOrderDetail(
         array $payload,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ) {
+        $requestedId = (string)($payload['orderId'] ?? $payload['salesOrderId'] ?? $payload['id'] ?? '');
+        if ($this->reader === null && preg_match('/^legacy-sale-([1-9][0-9]*)$/D', $requestedId, $match)) {
+            $payload['orderId'] = (int)$match[1];
+            $reader = new self(function (string $operation, array $criteria): array {
+                return $this->readDatabase($operation, $criteria);
+            }, $this->clock, $this->cursorCodec);
+            $detail = $reader->salesOrderDetail($payload, $operatorScope, $dataScope);
+            return $detail === null ? null : $this->historicalIdentity($detail);
+        }
         $criteria = $this->detailCriteria($payload, $operatorScope, $dataScope);
         if ($criteria === null
             || $criteria['allowedStoreIds'] === []
@@ -812,6 +846,18 @@ final class CashierV3SalesOrderQueryServices
                     ->whereRaw('existing_sale.tenant_id=sf.tenant_id AND existing_sale.checkout_request_id=sf.checkout_request_id')
                     ->where('existing_sale.order_status', 'settled')->where('existing_sale.order_direction', 'forward');
             });
+        // 详情已给出权威单据身份，先裁剪两个源再聚合。销售详情不扫描历史服务组；
+        // 纯权益详情仍按完整结账请求分组，且继续经过下方租户/门店权限过滤。
+        $detailId = (string)($criteria['authorityOrderId'] ?? '');
+        if ($detailId !== '') {
+            if (strpos($detailId, 'service:') === 0) {
+                $sales->whereRaw('1=0');
+                $services->where('sf.checkout_request_id', substr($detailId, strlen('service:')));
+            } else {
+                $sales->where('s.order_id', $detailId);
+                $services->whereRaw('1=0');
+            }
+        }
         // 权限和日期下推到两个源，避免为当前门店页面物化整个实例历史。
         foreach ([[$sales, 's'], [$services, 'sf']] as [$query, $alias]) {
             if ($criteria['allowedStoreIds'] !== null) $query->whereIn($alias . '.store_id', $criteria['allowedStoreIds']);
@@ -961,12 +1007,19 @@ final class CashierV3SalesOrderQueryServices
     {
         $query = Db::name('store_order')->alias('o')
             ->where('o.order_type', 0)
+            // 新系统购卡载体有V3发卡回执；不能把它再作为历史消费计一遍。
+            ->where('o.pay_type', '<>', 'cashier_v3')
+            ->whereNotExists(function ($receipt) {
+                $receipt->name('cashier_v3_card_purchase_receipt')->alias('legacy_receipt')
+                    ->whereRaw('legacy_receipt.legacy_order_id=o.id');
+            })
             ->where('o.is_debt_repay', 0)
             ->where('o.paid', 1)
             ->where('o.pay_time', '>', 0)
             ->where('o.is_system_del', 0)
             ->where(function ($visible) {
-                // Count, list, detail and export share this query: unfinished groups stay out.
+                // The V3 order-center count, list, detail and export all read
+                // this base query, so unfinished groups cannot leak via one path.
                 \app\services\activity\combination\CombinationConsumptionVisibilityServices::apply($visible, 'o');
             })
             ->where(function ($nested) {
@@ -983,6 +1036,13 @@ final class CashierV3SalesOrderQueryServices
         }
         if ($criteria['memberId'] !== null) {
             $query->where('o.uid', (int)$criteria['memberId']);
+        }
+        // 旧 Reader 原来只在关键词搜索时限时；统一列表必须始终下推已确认日期。
+        foreach (['dateFrom' => '>=', 'dateTo' => '<='] as $key => $comparison) {
+            if (!empty($criteria[$key])) {
+                $boundary = new \DateTimeImmutable($criteria[$key] . ($key === 'dateFrom' ? ' 00:00:00' : ' 23:59:59'), new \DateTimeZone(self::BUSINESS_TIMEZONE));
+                $query->where('o.pay_time', $comparison, $boundary->getTimestamp());
+            }
         }
         if ($operation === 'snapshot') {
             $query->where('o.pay_time', '<=', (int)$criteria['queryCutoffTimestamp']);
@@ -1025,7 +1085,7 @@ final class CashierV3SalesOrderQueryServices
             'o.store_id', 'o.order_type', 'o.is_debt_repay', 'o.paid',
             'o.is_del', 'o.is_system_del', 'o.pid',
             'o.terminal_action', 'o.refund_status', 'o.status', 'o.total_num',
-            'o.add_time', 'o.pay_time', 'o.remark', 'o.order_note', 'o.total_price', 'o.pay_price',
+            'o.add_time', 'o.pay_time', 'o.remark', 'o.remark AS order_note', 'o.total_price', 'o.pay_price',
             'o.cash_pay_price', 'o.debt_amount',
         ]);
         if ($operation === 'detail') {
@@ -2259,16 +2319,19 @@ final class CashierV3SalesOrderQueryServices
                 if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
             }
         }
-        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
-            ->where(function ($query) use ($orderIds, $requestIds): void {
-                $query->whereIn('order_id', $orderIds);
-                if ($requestIds !== []) $query->whereOr('checkout_request_id', 'in', $requestIds);
-            })
+        // order_id 与 checkout_request_id 各有索引；OR 在大历史库会退化为整表扫描。
+        // 分别读取同一权威范围后按事实主键去重，保留原来“任一关联命中”的完整语义。
+        $base = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
             ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
-            ->where('status', 'effective')
-            ->whereIn('fact_direction', ['forward', 'reversal'])
-            ->field('id,fact_id,order_id,checkout_request_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
-            ->order('id', 'asc')->select()->toArray();
+            ->where('status', 'effective')->whereIn('fact_direction', ['forward', 'reversal'])
+            ->field('id,fact_id,order_id,checkout_request_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key');
+        $byId = [];
+        foreach ([['order_id', $orderIds], ['checkout_request_id', $requestIds]] as [$field, $ids]) {
+            if (!$ids) continue;
+            foreach ((clone $base)->whereIn($field, $ids)->select()->toArray() as $row) $byId[(int)$row['id']] = $row;
+        }
+        ksort($byId, SORT_NUMERIC);
+        $rows = array_values($byId);
         return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
     }
 
@@ -2648,8 +2711,11 @@ final class CashierV3SalesOrderQueryServices
             'unitPrice' => $v3Ready && $quantity > 0 ? $originalAmount / $quantity : null,
             'originalAmount' => $originalAmount,
             'priceChangeDiscountAmount' => null,
+            // 兼容订单也使用正式销售明细的冻结券名；缺少事实时不从当前券模板猜测。
+            'couponName' => $v3Ready ? trim((string)($authority['coupon_name_snapshot'] ?? '')) : '',
             'couponDiscountAmount' => $v3Ready
-                ? $this->moneyFromCents((int)($authority['coupon_discount_cents'] ?? 0)) : null,
+                ? $this->moneyFromCents((int)($authority['coupon_discount_cents'] ?? 0)
+                    + (int)($authority['coupon_payment_cents'] ?? 0)) : null,
             'amountBeforeCoupon' => $v3Ready
                 ? $this->moneyFromCents((int)$authority['sale_amount_cents'] + (int)($authority['coupon_discount_cents'] ?? 0)) : null,
             'payableAmount' => $payableAmount,

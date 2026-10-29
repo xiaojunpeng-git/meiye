@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-28",
+  "round": 10,
+  "accepted_candidate": "cd6239883b153dd8d4822bb0b3ba5758445c27962dd9ba6ae8317e7f2aa87c73",
+  "product_manager_reply": "\u901a\u8fc7",
+  "scope": "Accepted exact fixed candidate including disclosed 7 historical attribution gaps; no data backfill",
+  "selftest": {
+    "local_integration_checks": 783,
+    "csv_checks": 7,
+    "browser_checks": 8,
+    "php_lint": "PASS",
+    "diff_check": "PASS",
+    "010_readonly_existing_rows_equal": 8,
+    "010_readonly_source_gap_rows": 7,
+    "remote_writes": 0,
+    "indexed_query_families": 5
+  },
+  "deployment_authorized": false,
+  "push_authorized": false,
+  "fixed_source_hashes_rechecked": true
+}

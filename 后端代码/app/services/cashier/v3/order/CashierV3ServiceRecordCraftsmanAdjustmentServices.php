@@ -358,16 +358,14 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             $staffId = (int)($craftsman['staffId'] ?? 0);
             $employeeId = (int)($craftsman['employeeId'] ?? 0);
             if ($staffId <= 0 || $employeeId <= 0) continue;
-            $type = (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
-            if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) $type = 'commission_labor';
+            // 历史服务快照仅作来源；本次调整可同时写消耗业绩与手工费。
+            $type = 'commission_labor';
             $projectCount = $hasExplicitProjectCount && array_key_exists('projectCount', $craftsman)
                 ? $this->projectCountText((string)$craftsman['projectCount'])
                 : number_format(($hasExplicitProjectCount
                     ? max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0))
                     : $base + ($index >= $count - $remainder ? 1 : 0)) / 2, 1, '.', '');
-            $feeCents = $type === 'commission'
-                ? 0
-                : max(0, (int)($craftsman['laborFeeCents'] ?? 0));
+            $feeCents = max(0, (int)($craftsman['laborFeeCents'] ?? 0));
             $sourceKind = (string)($craftsman['personnelSource'] ?? 'store');
             if (!in_array($sourceKind, ['store', 'other'], true)) $sourceKind = 'store';
             $rows[] = [
@@ -467,7 +465,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
                 'employeeTypeCode' => (string)$row['employment_type_code'],
                 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
-                'craftsmanPerformanceType' => (string)($row['craftsman_performance_type'] ?: 'commission_labor'),
+                'craftsmanPerformanceType' => 'commission_labor',
                 'craftsmanEligible' => true, 'selectable' => true,
             ];
         }, $rows);
@@ -573,7 +571,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                     'employeeName' => trim((string)$row['name']) ?: (string)$row['staff_name'],
                     'employeeType' => (string)$row['employment_type_code'],
                     'employeeTypeVersion' => max(1, (int)$row['employment_type_version']),
-                    'craftsmanPerformanceType' => (string)$row['craftsman_performance_type'],
+                    'craftsmanPerformanceType' => 'commission_labor',
                     'personnelSource' => 'store',
                     'positionId' => $positionId,
                     'staffJobPositionId' => (int)($row['staff_job_position_id'] ?? 0),
@@ -613,10 +611,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             }
             $fee = $this->nonnegativeInteger($raw['laborFeeCents'] ?? 0, '手工费');
             $projectCount = $this->projectCount($raw);
-            $type = trim((string)($staff['craftsmanPerformanceType'] ?? ''));
-            if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) $type = 'commission_labor';
-            if ($type === 'labor' && $amount !== 0) throw CashierV3CommandException::invalidContext('只拿手工费的手艺人不能分配消耗业绩。');
-            if ($type === 'commission' && $fee !== 0) throw CashierV3CommandException::invalidContext('只拿消耗业绩的手艺人不能填写手工费。');
+            // 调整写入的是新事实，沿用旧服务快照做来源追溯，但不继承已取消的限制。
+            $type = 'commission_labor';
             $rows[] = [
                 'staffId' => $staffId, 'employeeId' => $employeeId,
                 'employeeName' => (string)$staff['employeeName'],

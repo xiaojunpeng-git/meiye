@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "account": "A0751",
+  "request": "GET /adminapi/user/survey?page=1&limit=20",
+  "http_status": 200,
+  "api_status": 200,
+  "visible_total": 2,
+  "rows": [
+    {
+      "id": 2,
+      "status": "draft",
+      "answer_count": 0,
+      "total_answer_count": 0
+    },
+    {
+      "id": 1,
+      "status": "draft",
+      "answer_count": 0,
+      "total_answer_count": 0
+    }
+  ],
+  "no_duplicate_test_tasks_created": true
+}

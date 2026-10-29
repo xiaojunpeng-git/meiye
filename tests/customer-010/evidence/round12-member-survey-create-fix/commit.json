@@ -1,0 +1,17 @@
+{
+  "commit": "ad40ce8efbd6d0ad08b1f9954986650cf2a819fa",
+  "message": "010-R12-FIX 修复创建调查后的非空任务列表查询",
+  "files": [
+    "scripts/member-survey/create-fix-probe.php",
+    "scripts/member-survey/test-local.cjs",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/008-candidate-readonly.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/010-candidate-readonly.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/acceptance.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/business.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/fixed-candidate.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/reproduction.json",
+    "tests/customer-010/evidence/round12-member-survey-create-fix/rh-candidate-readonly.json",
+    "tests/member-survey/php/local-business.php",
+    "后端代码/app/services/user/MemberSurveyServices.php"
+  ]
+}

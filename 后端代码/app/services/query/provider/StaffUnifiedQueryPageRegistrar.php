@@ -21,7 +21,8 @@ class StaffUnifiedQueryPageRegistrar implements UnifiedQueryPageRegistrar
             ['is_manager', '店长', 'text', false, false],
             ['cashier_salesperson_enabled', '可作为销售人', 'text', true, false],
             ['cashier_craftsman_enabled', '可作为手艺人', 'text', true, false],
-            ['craftsman_performance_type', '手艺人服务业绩类型', 'text', true, false],
+            // 保留旧列键供已保存的查询配置解析；门店页面不再展示该配置项，也不默认输出此列。
+            ['craftsman_performance_type', '手艺人服务业绩类型', 'text', false, false],
             ['employment_type_code', '人员类型', 'text', true, false],
             ['status', '在职状态', 'text', true, false],
             ['mobile_enabled', '手机端', 'text', true, false],

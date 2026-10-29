@@ -383,6 +383,21 @@ class ValidCashOrderServices
      */
     public static function sumStoreCashIncomeByCashChoose(array $where): string
     {
+        $amountExpr = self::buildAmountExpr('', 'cash_pay_price');
+        $income = (string)self::storeCashIncomeByCashChooseQuery($where)->sum(Db::raw($amountExpr));
+        $comb = self::sumCombinationCashByCashChoose($where);
+        if (bccomp($comb, '0', 2) > 0) {
+            $income = bcadd($income, $comb, 2);
+        }
+        return $income;
+    }
+
+    /**
+     * 对账单的历史收款兼容Reader与旧汇总共用资格查询，不能在报表内另抄退款/主子单口径。
+     * 返回尚未执行的只读查询；调用方仍须注入服务端授权门店及下单时间。
+     */
+    public static function storeCashIncomeByCashChooseQuery(array $where, ?callable $archiveScope = null)
+    {
         $payTypes = [
             PayServices::WEIXIN_PAY,
             PayServices::ALIAPY_PAY,
@@ -400,13 +415,11 @@ class ValidCashOrderServices
         ];
         /** @var StoreOrderDao $orderDao */
         $orderDao = app()->make(StoreOrderDao::class);
-        $amountExpr = self::buildAmountExpr('', 'cash_pay_price');
-        $income = (string)$orderDao->search($orderWhere + $where)->sum(Db::raw($amountExpr));
-        $comb = self::sumCombinationCashByCashChoose($where);
-        if (bccomp($comb, '0', 2) > 0) {
-            $income = bcadd($income, $comb, 2);
-        }
-        return $income;
+        // 仅显式的历史归档适配器可提供已核实的归档资格；所有原调用继续严格排除删除单。
+        if ($archiveScope !== null) unset($orderWhere['is_system_del']);
+        $query = $orderDao->search($orderWhere + $where);
+        if ($archiveScope !== null) $archiveScope($query, '');
+        return $query;
     }
 
     /**
@@ -414,7 +427,14 @@ class ValidCashOrderServices
      */
     public static function sumCombinationCashByCashChoose(array $where): string
     {
-        return (string)CombinationOrder::alias('a')
+        return (string)self::combinationCashByCashChooseQuery($where)
+            ->sum(Db::raw(self::buildCombinationLineAmountExpr('b', 'a.price')));
+    }
+
+    /** 组合收款明细及其汇总共用同一资格边界，余额、欠款、旧卡不构成收款行。 */
+    public static function combinationCashByCashChooseQuery(array $where, ?callable $archiveScope = null)
+    {
+        $query = CombinationOrder::alias('a')
             ->join('store_order b', 'b.id=a.order_id', 'inner')
             ->where(function ($query) {
                 $query->where('b.pid', '>=', 0)->whereOr('b.pid', -2);
@@ -426,7 +446,6 @@ class ValidCashOrderServices
             })
             ->where('b.pay_type', PayServices::COMBINATION_PAY)
             ->where('b.paid', 1)
-            ->where('b.is_system_del', 0)
             ->where('b.refund_status', 0)
             ->whereIn('b.order_type', [0, 1])
             ->where('a.active_pay', '<>', 3)
@@ -442,8 +461,10 @@ class ValidCashOrderServices
             })
             ->when(true, function ($query) use ($where) {
                 self::applyTimeFilter($query, $where, 'b.add_time');
-            })
-            ->sum(Db::raw(self::buildCombinationLineAmountExpr('b', 'a.price')));
+            });
+        if ($archiveScope !== null) $archiveScope($query, 'b');
+        else $query->where('b.is_system_del', 0);
+        return $query;
     }
 
     /**

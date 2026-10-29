@@ -128,12 +128,12 @@ final class BasicRegistrationQueryProvider implements UnifiedQueryProvider
             (string)$row['salary_info'], (string)$row['table_ids'], (int)($row['staff_id'] ?? 0)], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
-    /** 历史金额由十进制文本解析，不经浮点乘100；新写入的整元校验由写服务执行。 */
+    /** 历史金额由十进制文本解析，不经浮点乘100；允许旧记录的尾随小数点，新写入仍由写服务执行整元校验。 */
     public static function cents($value): int
     {
         $text = trim((string)$value);
         if ($text === '') $text = '0';
-        if (!preg_match('/^(-?)([0-9]{1,10})(?:\.([0-9]{1,2}))?$/D', $text, $parts)) throw new \InvalidArgumentException('登记金额格式异常');
+        if (!preg_match('/^(-?)([0-9]{1,10})(?:\.([0-9]{0,2}))?$/D', $text, $parts)) throw new \InvalidArgumentException('登记金额格式异常');
         return ($parts[1] === '-' ? -1 : 1) * ((int)$parts[2] * 100 + (int)str_pad($parts[3] ?? '', 2, '0'));
     }
 

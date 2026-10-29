@@ -104,6 +104,12 @@ final class StorePermissionCatalogServices
                 'grantable'=>true,'feature_code'=>self::basicReportFeatureCode($entry['code']),
                 'business_parent_id'=>301202];
         }
+        // 已安装目录中的独立报表权限必须可读取并保留。权限登记不等于安装报表 Reader，
+        // 不将尚未包含在本地报表运行目录的页面注入全局查询注册器，避免阻断登录。
+        $items[-33022] = $items[-33022] ?? ['id'=>-33022,'title'=>'门店对账单',
+            'navigation_key'=>'report.basic_store_reconciliation','owner_feature'=>'cashier.v3.basic_reports',
+            'parent_id'=>-29023,'sort'=>0,'grantable'=>true,
+            'feature_code'=>self::basicReportFeatureCode('basic_store_reconciliation'),'business_parent_id'=>301202];
         $items[-30001]=['id'=>-30001,'title'=>'全部订单','navigation_key'=>'order.all','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>0];
         $items[-30002]=['id'=>-30002,'title'=>'消费订单','navigation_key'=>'order.sales','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>10];
         $items[-30003]=['id'=>-30003,'title'=>'充值订单','navigation_key'=>'order.recharge','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>20];
@@ -146,6 +152,8 @@ final class StorePermissionCatalogServices
             'basic_followup_employee_detail' => -33019,
             'basic_customer_entitlements' => -33020,
             'basic_unconsumed_as_of_detail' => -33021,
+            // 新单表独立能力，只登记身份，不自动授予既有岗位。
+            'basic_store_reconciliation' => -33022,
         ];
     }
 

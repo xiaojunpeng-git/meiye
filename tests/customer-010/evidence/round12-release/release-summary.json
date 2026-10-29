@@ -1,0 +1,88 @@
+{
+  "round": 12,
+  "status": "deployed_and_verified",
+  "date": "2026-10-29",
+  "feature_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+  "accepted_fingerprint": "b47316466b858c6e8583f22c5fac01f28f49574d55d7f7e2cfe79367fe400729",
+  "execution_order": [
+    "RH deploy and verify",
+    "push origin/010/basic-report-menu",
+    "008 deploy and verify",
+    "010 deploy and verify"
+  ],
+  "push": {
+    "result": "PASS",
+    "commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+    "remote": "origin",
+    "branch": "010/basic-report-menu"
+  },
+  "instances": {
+    "rh": {
+      "result": "PASS",
+      "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+      "backup": "/www/backups/rh/round12-d76a8ce44b96-20261029115820",
+      "deployed_files": 1348,
+      "new_tables": 7,
+      "roles_unchanged": true,
+      "existing_reports_match": true,
+      "gift_catalog": {
+        "result": "PASS",
+        "store_catalog": 102,
+        "reward_product_options": 100,
+        "reward_coupon_options": 5,
+        "read_only": true
+      },
+      "public_assets_verified": true,
+      "business_rows_imported": 0
+    },
+    "008": {
+      "result": "PASS",
+      "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+      "backup": "/www/backups/008/round12-d76a8ce44b96-20261029120055",
+      "deployed_files": 1348,
+      "new_tables": 7,
+      "roles_unchanged": true,
+      "existing_reports_match": true,
+      "gift_catalog": {
+        "result": "PASS",
+        "store_catalog": 130,
+        "reward_product_options": 21,
+        "reward_coupon_options": 0,
+        "read_only": true
+      },
+      "public_assets_verified": true,
+      "business_rows_imported": 0
+    },
+    "010": {
+      "result": "PASS",
+      "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+      "backup": "/www/backups/010/round12-d76a8ce44b96-20261029120726",
+      "deployed_files": 1271,
+      "new_tables": 7,
+      "roles_unchanged": true,
+      "existing_reports_match": true,
+      "gift_catalog": {
+        "result": "PASS",
+        "store_catalog": 10,
+        "reward_product_options": 100,
+        "reward_coupon_options": 6,
+        "read_only": true
+      },
+      "public_assets_verified": true,
+      "business_rows_imported": 0
+    }
+  },
+  "no_007_historical_business_data_import": true,
+  "no_role_auto_grants": true,
+  "no_real_survey_answers_or_rewards_created_during_online_verification": true,
+  "operational_fixes": [
+    "RH first install automatically rolled back after differential manifest omitted unchanged root H5 CSS from verification; corrected to complete accepted asset manifest",
+    "010 first attempts automatically rolled back because application account intentionally lacks CREATE; deployed fixed schema through preexisting database-specific upgrade connection and verified app grants unchanged",
+    "Restored nonzero CLI error reporting after framework initialization"
+  ],
+  "known_separate_issue": "Previously damaged local ruihao development database has not been restored; recovery source authorization remains pending. Production was not the damaged database.",
+  "operational_source_files": [
+    "scripts/member-survey/release.py",
+    "scripts/member-survey/release-install.php"
+  ]
+}

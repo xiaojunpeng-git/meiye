@@ -828,6 +828,20 @@ class StoreProduct extends AuthController
             $where['status'] = in_array($projectStatus, [1, 2], true) ? $projectStatus : 1;
             unset($where['is_show']);
             $where['is_card'] = 0;
+        } elseif ($chooseType === 98) {
+            // 优惠券沿用平台/供应商商品范围；只开放三种业务类型，卡项同时覆盖旧次卡类型4。
+            // 类型约束在分页前执行，不能让前端过滤导致空页或总数不一致。
+            $selectedType = $where['product_type'];
+            if (!in_array($selectedType, ['', 0, 5, 6, '0', '5', '6'], true)) {
+                throw new \think\exception\ValidateException('商品类型仅支持卡项、项目或产品');
+            }
+            $where['product_type'] = $selectedType === '' ? [0, 4, 5, 6]
+                : ((int)$selectedType === 5 ? [4, 5] : (int)$selectedType);
+            $where['type'] = [0, 2];
+            $status = (int)($where['status'] ?? 1);
+            $where['status'] = in_array($status, [1, 2], true) ? $status : 1;
+            unset($where['is_show']);
+            $where['is_card'] = 0;
         } else {
             $where['type'] = [0, 2];
             if ($where['is_supplier'] == 1) {

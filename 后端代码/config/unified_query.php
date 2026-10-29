@@ -41,6 +41,7 @@ return [
     'registrars' => [
         \app\services\report\query\BasicRegistrationQueryRegistrar::class,
         \app\services\report\query\BasicBusinessQueryRegistrar::class,
+        \app\services\report\query\BasicStoreReconciliationQueryRegistrar::class,
         MemberUnifiedQueryPageRegistrar::class,
         \app\services\query\provider\PlatformMemberUnifiedQueryRegistrar::class,
         StaffUnifiedQueryPageRegistrar::class,
@@ -54,6 +55,7 @@ return [
     'providers' => [
         \app\services\report\query\BasicRegistrationQueryProvider::class,
         \app\services\report\query\BasicStoreSummaryQueryProvider::class,
+        \app\services\report\query\BasicStoreReconciliationQueryProvider::class,
         \app\services\report\query\BasicCrossStoreSettlementQueryProvider::class,
         \app\services\report\query\BasicStoreItemSalesQueryProvider::class,
         \app\services\report\query\BasicItemConsumptionQueryProvider::class,
@@ -103,6 +105,7 @@ return [
     'worker_context_resolvers' => [
         \app\services\report\query\BasicRegistrationWorkerContextResolver::class,
         \app\services\report\query\BasicStoreSummaryWorkerContextResolver::class,
+        \app\services\report\query\BasicStoreReconciliationWorkerContextResolver::class,
         \app\services\report\query\BasicCrossStoreSettlementWorkerContextResolver::class,
         \app\services\report\query\BasicStoreItemSalesWorkerContextResolver::class,
         \app\services\report\query\BasicItemConsumptionWorkerContextResolver::class,

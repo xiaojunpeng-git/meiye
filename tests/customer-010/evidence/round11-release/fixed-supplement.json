@@ -1,0 +1,377 @@
+{
+  "round": 11,
+  "original_accepted_fingerprint": "ee145ff001190bb120c5e569c8067cec48b97058a644cf5fca5b99f6cc714e3e",
+  "base_commit": "bf3b8ea1efcffd6a46f090b8e93477831973baf5",
+  "fingerprint": "042cec4d35e1c193b23ab734ddcbc1d29f30c01c1c4d353416e8a41ce3e1185e",
+  "files": [
+    {
+      "path": "scripts/payroll/round11-reconciliation-install.php",
+      "sha256": "dca08bfc36e374fd231ec890dd30172cfd4adefb48a38a2a6a389eeb83e8fb80"
+    },
+    {
+      "path": "scripts/payroll/round11-reconciliation-source.py",
+      "sha256": "e0de8f0e6487b6dbc6ddcdfaf45f66dbb369f0676237963ba0064d1beed7a64b"
+    },
+    {
+      "path": "scripts/payroll/round11-release-probe.php",
+      "sha256": "19446a0fdcfcda78273a0db5707174a79f1c4e71a33faf56c7b0bc4be4f7867f"
+    },
+    {
+      "path": "scripts/payroll/round11-release.py",
+      "sha256": "cb6053bd4a2c550c36fdc1a385a46c19e1f7386bb81d23278751376d979aced3"
+    },
+    {
+      "path": "tests/report-basic/js/business-browser.mjs",
+      "sha256": "cedac09685720a5d9e49a1b64d38b9c1cb9692071eabf1c47ee1abec4916d307"
+    },
+    {
+      "path": "tests/report-basic/js/store-reconciliation-browser.mjs",
+      "sha256": "4f59928af6a8e9190440c6c913a01638bc6fc82e6ee1215a03dfe99f4ee44f9a"
+    },
+    {
+      "path": "tests/report-basic/php/catalog-contract.php",
+      "sha256": "c5a1ca00cf2d7d9883bae20edec6f1ce5133a803a7e281aeb906eb14809cd3af"
+    },
+    {
+      "path": "tests/report-basic/php/navigation-local.php",
+      "sha256": "77c7cc47c51cbd4915ad90fe66f7bb0d9534ab1da860a7901cec11361b6ca13b"
+    },
+    {
+      "path": "tests/report-basic/php/store-group-grant-contract.php",
+      "sha256": "0fa28ea2a04bda666aefacc7c0733826fd842529bf7f0f8df25f000be98fc7c8"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-contract.php",
+      "sha256": "efe796ba9069055f4147eafb6b1a1b8f6d3cbaab1518473ddaf88d8926867c8f"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-install-local.php",
+      "sha256": "52e14d4d864cdee2cf0fd70e1f74aa97857a368f9a597d76831975fe627e10c1"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-local.php",
+      "sha256": "323501cf0fe34417f416f5091ec36bc32b5ef1372b5a16267e66f655b012a2f7"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-matrix.php",
+      "sha256": "8a3602d5bec556ea692188c584efdf6db4c045d2a13957c5272b732718fe1313"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-permissions.php",
+      "sha256": "07806883aac2830d616e2a7d3ac73a34b1764bfbe36dce16acbe195c00f3527a"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-query.php",
+      "sha256": "44799c75481b71c7829896f4320cc4fd3f8c83261d7ad4a88d3570f3bf5cdf25"
+    },
+    {
+      "path": "tests/report-basic/php/store-reconciliation-runtime.php",
+      "sha256": "21766fab42b1c222793a4ce5b35a8f119850c397d7eb036b5476defd4494c131"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/reports/StoreReconciliationReport.vue",
+      "sha256": "515387094a048c27c5bdb8c62f1dcde915f72e3e2922b058319e94dbd9faf97f"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/dev/r11StoreReconciliationFixture.js",
+      "sha256": "575a8b1c7b3ce4deedf31dbca3cb978fff6615606db0c81ae227a96b318dd773"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/services/basicReportApi.js",
+      "sha256": "c9d28685f551fa1f113a92455371f73472c36f9a61cf92a3db2a110088077c5a"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/BasicReportsView.vue",
+      "sha256": "b780fddd26254a4720f11419971a16182c9acaa51f4854430b27619be08a08d6"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+      "sha256": "510caf415c42f62614ca2bef41ceb516245fd7c6ff45a9987670cb3384f83cb2"
+    },
+    {
+      "path": "后端代码/app/services/order/ValidCashOrderServices.php",
+      "sha256": "4cd16036fb1319616c459c5e22e51b28b5f8f14a0d465dfe5993bcbdaca6ad53"
+    },
+    {
+      "path": "后端代码/app/services/organization/StorePermissionCatalogServices.php",
+      "sha256": "5fb1a7708bf395f0ce42209bdf4cad22b349400909e05317a6745771fbdba2c6"
+    },
+    {
+      "path": "后端代码/app/services/report/BasicReportCatalogServices.php",
+      "sha256": "20550c5e2a7e88c894a552ed4c1fde920d87b929047fa8bade819ed4031ccdda"
+    },
+    {
+      "path": "后端代码/app/services/report/BasicReportHostServices.php",
+      "sha256": "79d972e87122e8d48cb22160afa8637d1da8b91e902d25901411ba3a830e6b58"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreReconciliationMatrix.php",
+      "sha256": "9977ccda7e4415b0581f7a6a07c8aa087504821d7457422fd60b97088cebb65b"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreReconciliationReceiptReader.php",
+      "sha256": "9ba20cb48edf4e3eaee93bfe12fd4c56952e50682a0ef9917d14627db040d8e9"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreReconciliationReportServices.php",
+      "sha256": "94625a1085ea998afa4093780503c0c7d4254fa556d17afb264a2b18572a6d34"
+    },
+    {
+      "path": "后端代码/app/services/report/query/BasicBusinessQueryRegistrar.php",
+      "sha256": "0cb37536b2784d39a057d209be1096f3443f29026d15f3e47119b747175d3224"
+    },
+    {
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationQueryProvider.php",
+      "sha256": "f9194f960f21c4a47085b77b884254318db507512d89f6a4a1d4224b9d978cbd"
+    },
+    {
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationQueryRegistrar.php",
+      "sha256": "0611607fbfd99fc5de5ea177f171a95c13d293fddabe84bbd6062e20ae58a3a0"
+    },
+    {
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationWorkerContextResolver.php",
+      "sha256": "e711d2f810f442d8a83e989bd72f14698b7afca3347a54f8511ef5588b8fac93"
+    },
+    {
+      "path": "后端代码/config/unified_query.php",
+      "sha256": "0666fbc756181a50b8d089532882ea5e0f75d7c02637446a2949329cbf0578e4"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-28-门店对账单/01-平台菜单.sql",
+      "sha256": "9cb9dfee72f93ab1a44d76165855575d3a042af2e31245289187815e32fde2f2"
+    }
+  ],
+  "change_scope": [
+    "仅安装脚本先读取锁定旧目录、补节点后再做新目录完整校验，解决旧目录不能升级的顺序问题",
+    "本表支持最多250门店；宽表在同一已授权事实集分列复用统一执行器校验导出；不放宽全局100字段限制",
+    "新增安装幂等/无扩权/错误实例拒绝与102门店完整导出测试"
+  ],
+  "tests": {
+    "isolated_install_checks": 9,
+    "query_contract_checks": 28,
+    "source_replay_checks": 969,
+    "page_checks": 80,
+    "page_cases": 4,
+    "three_site_readonly_probes": {
+      "rh": {
+        "result": "PASS",
+        "site": "rh",
+        "candidate": true,
+        "report": "basic_store_reconciliation",
+        "matrix_rows": 13,
+        "matrix_columns": 104,
+        "daily_columns": 32,
+        "detail_checks": 1,
+        "export_rows": 13,
+        "query_seconds": 0.5143070220947266,
+        "matrix_sha256": "ea6dfc9e6d898bb9e64b7d52fe3ec1e40ac7a3e86c8d893d6c5e46f07af78c88",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 10,
+            "summaries_sha256": "72abc5d781f42320437d6866b6825eb7b1960432fb1e9cbb099aa281062a89e7"
+          },
+          "basic_salary_realtime": {
+            "total": 12,
+            "summaries_sha256": "724710e285cf42967ec0bab279e48508750f2f6cc93c486ae31d98e717118782"
+          },
+          "basic_cross_store_settlement": {
+            "total": 0,
+            "summaries_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "mode": 0,
+        "position_model": "legacy",
+        "cutover": "",
+        "business_writes": 0,
+        "authenticated_http_session": false
+      },
+      "008": {
+        "result": "PASS",
+        "site": "008",
+        "candidate": true,
+        "report": "basic_store_reconciliation",
+        "matrix_rows": 10,
+        "matrix_columns": 132,
+        "daily_columns": 32,
+        "detail_checks": 1,
+        "export_rows": 10,
+        "query_seconds": 0.03656816482543945,
+        "matrix_sha256": "d38c3ef2bae4e8018226087e00d1bab84fb1fe8412ec663708fb6cba6c6c5867",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 0,
+            "summaries_sha256": "0ef50d777f08403e683e6326bfce276d980a44d2790024317e972cc0e14ea37e"
+          },
+          "basic_salary_realtime": {
+            "total": 7,
+            "summaries_sha256": "b36537178b6efc9410322180f1e57442618d85b00a698e927d73869f89d6134a"
+          },
+          "basic_cross_store_settlement": {
+            "total": 0,
+            "summaries_sha256": "d4420eef304c4cd3e92f4ec567d17e67548772fa4496c5aa0d870f1750ffd98a"
+          }
+        },
+        "mode": 0,
+        "position_model": "legacy",
+        "cutover": "",
+        "business_writes": 0,
+        "authenticated_http_session": false
+      },
+      "010": {
+        "result": "PASS",
+        "site": "010",
+        "candidate": true,
+        "report": "basic_store_reconciliation",
+        "matrix_rows": 12,
+        "matrix_columns": 12,
+        "daily_columns": 32,
+        "detail_checks": 1,
+        "export_rows": 12,
+        "query_seconds": 4.67556095123291,
+        "matrix_sha256": "1afc94992ee3e90b3437052fdcf7e61a6d8f39db1e54a1be236e056785acff92",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 11,
+            "summaries_sha256": "586e462b9007ba2dfae11ecbe6a7fc6091b1916a6920222a697751a3cc3c46d8"
+          },
+          "basic_salary_realtime": {
+            "total": 14,
+            "summaries_sha256": "95e6e6a7b317edf387c5717e8df05c9dd578e6b61c36b8be90cc532cc55b7343"
+          },
+          "basic_cross_store_settlement": {
+            "total": 1,
+            "summaries_sha256": "2cb039cfa730c101c04db83a6d23ef492061e2bb7a90dfefb4d1339f80306399"
+          }
+        },
+        "mode": 1,
+        "position_model": "independent",
+        "cutover": "2026-11-01",
+        "business_writes": 0,
+        "authenticated_http_session": false
+      }
+    },
+    "existing_report_parity": {
+      "rh": {
+        "site": "rh",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 10,
+            "summaries_sha256": "72abc5d781f42320437d6866b6825eb7b1960432fb1e9cbb099aa281062a89e7"
+          },
+          "basic_salary_realtime": {
+            "total": 12,
+            "summaries_sha256": "724710e285cf42967ec0bab279e48508750f2f6cc93c486ae31d98e717118782"
+          },
+          "basic_cross_store_settlement": {
+            "total": 0,
+            "summaries_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "business_writes": 0,
+        "candidate_equals_existing": true
+      },
+      "008": {
+        "site": "008",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 0,
+            "summaries_sha256": "0ef50d777f08403e683e6326bfce276d980a44d2790024317e972cc0e14ea37e"
+          },
+          "basic_salary_realtime": {
+            "total": 7,
+            "summaries_sha256": "b36537178b6efc9410322180f1e57442618d85b00a698e927d73869f89d6134a"
+          },
+          "basic_cross_store_settlement": {
+            "total": 0,
+            "summaries_sha256": "d4420eef304c4cd3e92f4ec567d17e67548772fa4496c5aa0d870f1750ffd98a"
+          }
+        },
+        "business_writes": 0,
+        "candidate_equals_existing": true
+      },
+      "010": {
+        "site": "010",
+        "regressions": {
+          "basic_employee_summary": {
+            "total": 11,
+            "summaries_sha256": "586e462b9007ba2dfae11ecbe6a7fc6091b1916a6920222a697751a3cc3c46d8"
+          },
+          "basic_salary_realtime": {
+            "total": 14,
+            "summaries_sha256": "95e6e6a7b317edf387c5717e8df05c9dd578e6b61c36b8be90cc532cc55b7343"
+          },
+          "basic_cross_store_settlement": {
+            "total": 1,
+            "summaries_sha256": "2cb039cfa730c101c04db83a6d23ef492061e2bb7a90dfefb4d1339f80306399"
+          }
+        },
+        "business_writes": 0,
+        "candidate_equals_existing": true
+      }
+    },
+    "php_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "baseline_proof": {
+    "rh": {
+      "database": "ruihao",
+      "cashier_assets": {
+        "public/view_cashier_v3/index.html": "d478ca75e794e01fc349b678d48c00c306da3feea4899b075ec5d584967543cc",
+        "public/view_cashier_v3/assets/index-3027d4be.js": "8236842f9d76200a3325c7c95159ee3126d1c03d8a80295440bd39bab405ad3b",
+        "public/view_cashier_v3/assets/index-e9745fce.css": "e9745fce0f60a42ddb9802fae6c5c37996b1f58fc4067d631baf7433b5b628e1"
+      },
+      "backend_matches_accepted_pre_r11": true
+    },
+    "008": {
+      "database": "mohe_008",
+      "cashier_assets": {
+        "public/view_cashier_v3/index.html": "d478ca75e794e01fc349b678d48c00c306da3feea4899b075ec5d584967543cc",
+        "public/view_cashier_v3/assets/index-3027d4be.js": "8236842f9d76200a3325c7c95159ee3126d1c03d8a80295440bd39bab405ad3b",
+        "public/view_cashier_v3/assets/index-e9745fce.css": "e9745fce0f60a42ddb9802fae6c5c37996b1f58fc4067d631baf7433b5b628e1"
+      },
+      "backend_matches_accepted_pre_r11": true
+    },
+    "010": {
+      "database": "mohe_010_app",
+      "cashier_assets": {
+        "public/view_cashier_v3/index.html": "d478ca75e794e01fc349b678d48c00c306da3feea4899b075ec5d584967543cc",
+        "public/view_cashier_v3/assets/index-3027d4be.js": "8236842f9d76200a3325c7c95159ee3126d1c03d8a80295440bd39bab405ad3b",
+        "public/view_cashier_v3/assets/index-e9745fce.css": "e9745fce0f60a42ddb9802fae6c5c37996b1f58fc4067d631baf7433b5b628e1"
+      },
+      "backend_matches_accepted_pre_r11": true
+    }
+  },
+  "frontend_assets_unchanged_from_accepted_candidate": [
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/exceljs.min-a0d233a6.js",
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/index-2da1bc6c.js",
+      "sha256": "20fdb11e843ea658aa091d875e3d87bf8e1d715810d416e118d0cb93e3fc8a4a"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/index-ae8d7fac.css",
+      "sha256": "ae8d7facb6d8442c7b30abc8b6c19f9d2dc56584821f576824acbe123b118195"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/login-beauty-quiet-826510a5.png",
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/index.html",
+      "sha256": "a78ea56557daf1afc029171ea720e59f0bd0dc2d455c082990778faa545f1026"
+    }
+  ],
+  "business_values_or_algorithm_changes": false,
+  "target_permission_policy": "只登记新菜单和单表目录，不改旧角色/岗位授权",
+  "online_state": "尚未部署；预检仅只读事务及CLI内存候选",
+  "release_sequence": [
+    "瑞昊独立备份、部署与验证",
+    "push origin 当前任务分支",
+    "渼约008独立备份、部署与验证",
+    "渼约010独立备份、部署与验证"
+  ],
+  "rollback_plan": "逐实例保留所有被替换文件及菜单/权限目录/审计的原始备份；文件和元数据均以部署前后指纹校验，失败恢复本次新增节点和原文件，不覆盖营业新增业务或其他任务并发变更；只重载目标实例进程",
+  "supplemental_pm_acceptance": "待确认"
+}

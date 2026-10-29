@@ -8,10 +8,10 @@ $assert = static function ($value, string $message) use (&$checks): void {
     if (!$value) throw new RuntimeException($message);
 };
 $entries = Catalog::entries();
-$assert(count($entries) === 21, 'Original twenty plus explicitly requested real-time payroll');
-$assert(count(array_unique(array_column($entries, 'code'))) === 21, 'Stable codes must be unique');
+$assert(count($entries) === 22, 'Original reports plus explicitly requested payroll and store reconciliation');
+$assert(count(array_unique(array_column($entries, 'code'))) === 22, 'Stable codes must be unique');
 $groups = array_count_values(array_column($entries, 'group'));
-$assert($groups === ['门店统计' => 7, '员工统计' => 6, '其他报表' => 8], 'Preserve groups and add real-time payroll under employee statistics');
+$assert($groups === ['门店统计' => 8, '员工统计' => 6, '其他报表' => 8], 'Store reconciliation belongs to store statistics');
 $assert(count(array_filter($entries, static function ($r) { return $r['historical_import']; })) === 1, 'Only brush imports history');
 foreach ($entries as $entry) {
     $assert(Catalog::definition($entry['code']) === $entry, 'Exact code resolves one definition');

@@ -10,12 +10,11 @@ const productDefaults = read('前端代码/admin/src/pages/product/productAdd/fo
 const productForm = read('前端代码/admin/src/pages/product/productAdd/index.vue')
 const inventorySwitch = read('前端代码/admin/src/pages/product/productAdd/components/inventorySet.vue')
 
-// 新建预选值与旧资料编辑兼容值分离，避免批量改变已有员工的业绩口径。
-assert.match(storeStaff, /function defaultEditorValues\(\)[\s\S]*?craftsmanPerformanceType: 'commission_labor'/)
+// 人员编辑不再暴露旧类型；新增与编辑统一提交双项，历史员工事实不批量改写。
+assert.doesNotMatch(storeStaff, /craftsmanPerformanceType:/)
 assert.match(storeStaff, /editorStaffId\.value > 0\) replaceEditorValues\(mapDetail\(/)
-assert.match(storeStaff, /detail\?\.craftsman_performance_type[\s\S]*?: 'commission'/)
 assert.match(platformStaff, /function getDefaultStaffForm\(\)[\s\S]*?craftsman_performance_type: 'commission_labor'/)
-assert.match(platformStaff, /craftsman_performance_type: \['commission', 'labor', 'commission_labor'\][\s\S]*?: 'commission'/)
+assert.doesNotMatch(platformStaff, /手艺人服务业绩类型/)
 
 // 新建商品关闭负库存，保存显式发送 0；编辑/复制仍回显商品原设置。
 assert.match(productDefaults, /allow_negative_stock: 0/)

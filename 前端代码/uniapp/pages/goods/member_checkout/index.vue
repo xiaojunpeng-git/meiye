@@ -171,12 +171,13 @@
           <text class="drawer-action confirm-action" @click="closeCoupons">完成</text>
         </view>
         <scroll-view scroll-y class="sales-list">
-          <view v-for="coupon in quote.coupons || []" :key="coupon.id" class="coupon-row" @click="selectCoupon(coupon.id)">
+          <view v-for="coupon in quote.coupons || []" :key="coupon.id" class="coupon-row" @click="coupon.canUse !== false && selectCoupon(coupon.id)" :style="coupon.canUse === false ? 'opacity:0.55' : ''">
             <view class="coupon-copy">
               <text class="coupon-name">{{ coupon.name }}</text>
               <text class="payment-note">优惠 ¥{{ yuan(coupon.discountCents) }}</text>
+              <text v-if="coupon.unavailableReasons && coupon.unavailableReasons.length" class="payment-note">{{ coupon.unavailableReasons.join('；') }}</text>
             </view>
-            <radio :checked="couponId === coupon.id" :color="themeColor" />
+            <radio :disabled="coupon.canUse === false" :checked="couponId === coupon.id" :color="themeColor" />
           </view>
           <view v-if="!(quote.coupons || []).length" class="empty-sales">暂无可用优惠券</view>
         </scroll-view>

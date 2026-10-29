@@ -39,6 +39,7 @@ export default {
   meta,
   component: BasicLayout,
   children: [
+    { path: 'survey', name: 'user_survey', meta: { auth: ['admin-user-survey'], title: '会员调查' }, component: () => import('@/pages/user/survey/index') },
     // {
     //   path: `${Setting.roterPre}/user/list`,
     //   name: `${pre}list`,

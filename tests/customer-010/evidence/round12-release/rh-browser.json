@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "checks": [
+    "Existing authorized group management dashboard still renders",
+    "Current browser account without new survey grant receives 403",
+    "Public survey deep link renders invalid-link message without login redirect"
+  ],
+  "scope": "Real deployed IAB UI; no task or reward records created"
+}

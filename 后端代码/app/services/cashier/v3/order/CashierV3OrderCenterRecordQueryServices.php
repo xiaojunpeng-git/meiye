@@ -203,6 +203,31 @@ final class CashierV3OrderCenterRecordQueryServices
         ];
     }
 
+    /**
+     * 按已授权充值行批量读取赠送事实；固定赠送名称/数量及当前事实状态，不回读现有套餐。
+     * 租户、门店和会员须与来源充值一致，不能只按数字充值ID关联其他实例资料。
+     */
+    private function readRechargeGiftSummaries(array $rows, string $tenantId): array
+    {
+        if (!$rows) return [];
+        $sources = array_column($rows, null, 'id');
+        $parts = [];
+        foreach (Db::name('cashier_v3_gift_fact')->where('tenant_id', $tenantId)
+            ->where('source_type', 'recharge_gift')->whereIn('recharge_id', array_keys($sources))
+            ->field('recharge_id,store_id,member_id,gift_kind,quantity,content_name_snapshot,status')
+            ->order('id', 'asc')->select()->toArray() as $fact) {
+            $id = (int)$fact['recharge_id']; $source = $sources[$id] ?? [];
+            if ((int)($source['store_id'] ?? 0) !== (int)$fact['store_id']
+                || (int)($source['uid'] ?? 0) !== (int)$fact['member_id']) continue;
+            $kind = (string)$fact['gift_kind'];
+            $label = ['coupon'=>'优惠券','project'=>'项目','product'=>'商品'][$kind] ?? '赠送';
+            $unit = ['coupon'=>'张','project'=>'次','product'=>'件'][$kind] ?? '份';
+            $parts[$id][] = $label . '：' . (string)$fact['content_name_snapshot'] . ' × '
+                . (int)$fact['quantity'] . $unit . ((string)$fact['status'] === 'effective' ? '' : '（已撤回）');
+        }
+        return array_map(static function (array $items): string { return implode('；', $items); }, $parts);
+    }
+
     /** @return array{from:string,to:string} */
     private function businessDateRange(array $payload): array
     {
@@ -259,11 +284,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
-        // 历史充值用原支付/创建时间承接日期；不回写业务表，不产生 V3 资金事实。
-        $dateExpression = CashierV3HistoricalRechargeDate::sql();
-        foreach (['businessDateFrom' => '>=', 'businessDateTo' => '<='] as $key => $comparison) {
-            if (!empty($criteria[$key])) $query->whereRaw($dateExpression . ' ' . $comparison . ' ?', [$criteria[$key]]);
-        }
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
@@ -286,19 +307,20 @@ final class CashierV3OrderCenterRecordQueryServices
                 ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
         }
         $total = (int)(clone $query)->count('r.id');
-        $rows = $this->pageRows($query, $criteria, 'business_date', 'r.id', implode(',', [
+        $rows = $this->pageRows($query, $criteria, 'r.business_date', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
             'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
             'r.business_source_primary_id', 'r.business_source_primary_name_snapshot',
             'r.business_source_secondary_id', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
-            $dateExpression . ' AS business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
+            'r.business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
         $rechargeEconomics = $this->readRechargeEconomics($rows);
         $rechargeSalespeople = $this->readRechargeSalespeople($rows, $tenantId);
         $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
         $balanceCategories = self::balanceCategoriesForStores($rows);
-        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations, $balanceCategories): array {
+        $giftSummaries = $this->readRechargeGiftSummaries($rows, $tenantId);
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations, $balanceCategories, $giftSummaries): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
             $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
@@ -322,6 +344,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'productName' => '余额',
                 'rechargeAmount' => (string)$row['price'],
                 'giftAmount' => (string)$row['give_price'],
+                'giftContentSummary' => $giftSummaries[(int)$row['id']] ?? '无赠送项目、商品或优惠券记录',
                 // Only V3 payment facts are the authoritative cash-performance
                 // source. A zero net amount remains ready when reversals offset
                 // a real V3 collection; legacy recharge columns never fill it.
@@ -2384,62 +2407,57 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    /**
-     * 升级事件归属于新卡成交单，不是旧卡购买日期/门店。多张旧卡升级同一新单只显示一次。
-     * 补差只取新单实付减已保存的升级抵扣，不用旧卡原价猜补差；没有抵扣证据则留空。
-     */
     private function readLegacyCardUpgrades(array $criteria): array
     {
-        if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'card_upgrade') return [[], 0];
-        $timeSql = 'COALESCE(NULLIF(target.pay_time, 0), target.add_time)';
-        $query = Db::name('store_order')->alias('target')
-            ->leftJoin('user u', 'u.uid = target.uid')
-            ->leftJoin('system_store s', 's.id = target.store_id')
-            ->leftJoin('system_store_staff st', 'st.id = target.staff_id')
-            ->whereIn('target.id', function ($old) {
-                // 非相关子查询只扫描一次旧卡标记，避免无专用索引时逐目标单重扫。
-                $old->name('store_order')->where('card_upgrade_use_oid', '>', 0)->field('card_upgrade_use_oid');
-            })->where('target.paid', 1)->where('target.is_system_del', 0);
-        $this->applyStoreScope($query, 'target.store_id', $criteria['allowedStoreIds']);
-        $this->applyTimestampBusinessDateRange($query, $timeSql, $criteria);
-        $this->applyKeyword($query, $criteria['keyword'], ['target.order_id', 'u.real_name', 'u.nickname', 'u.phone']);
-        if ($criteria['status'] === 'cancelled' || $criteria['status'] === 'voided') {
-            $query->where('target.terminal_action', '>', 0);
-        } elseif ($criteria['status'] === 'completed' || ($criteria['dataScope'] === 'normal' && $criteria['status'] === '')) {
-            $query->where('target.terminal_action', 0)->where('target.refund_status', 0);
-        } elseif ($criteria['status'] !== '') return [[], 0];
-        $total = (int)(clone $query)->count('target.id');
-        $rows = $query->field('target.id,target.order_id,target.pay_price,target.terminal_action,target.refund_status,'
-            . 'target.pay_time,target.add_time,target.uid,u.real_name,u.nickname,u.phone,s.name AS store_name,st.staff_name')
-            ->orderRaw($timeSql . ' DESC')->order('target.id', 'desc')
-            ->limit($criteria['page'] * $criteria['pageSize'])->select()->toArray();
-        $ids = array_column($rows, 'id');
-        if ($ids === []) return [[], $total];
-        $oldCards = $credits = [];
-        foreach (Db::name('store_order')->whereIn('card_upgrade_use_oid', $ids)
-            ->field('id,order_id,card_upgrade_use_oid')->order('id')->select()->toArray() as $old) {
-            $oldCards[(int)$old['card_upgrade_use_oid']][(int)$old['id']] = (string)$old['order_id'];
+        if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'card_upgrade') {
+            return [[], 0];
         }
-        foreach (Db::name('combination_order')->whereIn('order_id', $ids)->where('type', 1)
-            ->where('active_pay', 3)->where('pay_sub_type', 'card_upgrade')
-            ->field('order_id,upgrade_old_oid,price')->select()->toArray() as $part) {
-            $targetId = (int)$part['order_id'];
-            if (!isset($oldCards[$targetId][(int)$part['upgrade_old_oid']]) || bccomp((string)$part['price'], '0', 2) < 0) continue;
-            $credits[$targetId] = bcadd($credits[$targetId] ?? '0', (string)$part['price'], 2);
+        $query = Db::name('store_order')->alias('o')
+            ->leftJoin('store_order target', 'target.id = o.card_upgrade_use_oid')
+            ->leftJoin('user u', 'u.uid = o.uid')
+            ->leftJoin('system_store s', 's.id = o.store_id')
+            ->leftJoin('system_store_staff st', 'st.id = o.staff_id')
+            ->where('o.card_upgrade_use_oid', '>', 0)
+            ->where('o.paid', 1)
+            ->where('o.is_system_del', 0);
+        $this->applyStoreScope($query, 'o.store_id', $criteria['allowedStoreIds']);
+        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(o.pay_time, 0), o.add_time)', $criteria);
+        $this->applyKeyword($query, $criteria['keyword'], [
+            'o.order_id', 'target.order_id', 'u.real_name', 'u.nickname', 'u.phone',
+        ]);
+        if ($criteria['status'] === 'completed') {
+            $query->where('o.terminal_action', 0);
+        } elseif ($criteria['status'] === 'cancelled') {
+            $query->where('o.terminal_action', '>', 0);
+        } elseif ($criteria['status'] !== '') {
+            return [[], 0];
         }
-        return [array_map(function (array $row) use ($oldCards, $credits): array {
-            $id = (int)$row['id']; $time = (int)($row['pay_time'] ?: $row['add_time']);
-            $amount = isset($credits[$id]) && bccomp((string)$row['pay_price'], $credits[$id], 2) >= 0
-                ? bcsub((string)$row['pay_price'], $credits[$id], 2) : '';
+        $total = (int)(clone $query)->count('o.id');
+        $limit = $criteria['page'] * $criteria['pageSize'];
+        $rows = $query->field(implode(',', [
+            'o.id', 'o.order_id', 'o.card_upgrade_use_oid', 'o.pay_price', 'o.debt_amount',
+            'o.terminal_action', 'o.pay_time', 'o.add_time', 'target.order_id AS target_order_no',
+            'o.uid', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
+        ]))->order('o.pay_time', 'desc')->order('o.id', 'desc')->limit($limit)->select()->toArray();
+        return [array_map(function (array $row): array {
+            $time = (int)($row['pay_time'] ?: $row['add_time']);
             return $this->cardOperationRecord([
-                'id'=>'legacy-card-upgrade-target:' . $id, 'operationNo'=>'UP-T-' . $id,
-                'operationType'=>'card_upgrade',
-                'operationStatus'=>(int)$row['terminal_action'] > 0 || (int)$row['refund_status'] === 2 ? 'cancelled' : 'completed',
-                'businessDate'=>$this->date($time), 'memberId'=>(int)$row['uid'], 'memberName'=>$this->memberName($row),
-                'sourceCard'=>'原卡订单 ' . implode('、', array_values($oldCards[$id] ?? [])),
-                'targetContent'=>'升级订单 ' . $row['order_id'], 'amount'=>$amount,
-                'salesOrderNo'=>(string)$row['order_id'], 'storeName'=>$row['store_name'], 'operatorName'=>$row['staff_name'],
-                'reason'=>'', 'completedAt'=>$this->dateTime($time), '_sortTime'=>$time,
+                'id' => 'legacy-card-upgrade:' . $row['id'],
+                'operationNo' => 'UP-' . $row['id'],
+                'operationType' => 'card_upgrade',
+                'operationStatus' => (int)$row['terminal_action'] > 0 ? 'cancelled' : 'completed',
+                'businessDate' => $this->date($time),
+                'memberId' => (int)($row['uid'] ?? 0),
+                'memberName' => $this->memberName($row),
+                'sourceCard' => '原卡订单 ' . $row['order_id'],
+                'targetContent' => '升级订单 ' . ($row['target_order_no'] ?: $row['card_upgrade_use_oid']),
+                'amount' => (string)$row['pay_price'],
+                'salesOrderNo' => (string)$row['target_order_no'],
+                'storeName' => $row['store_name'],
+                'operatorName' => $row['staff_name'],
+                'reason' => (float)$row['debt_amount'] > 0 ? '含欠款 ' . $row['debt_amount'] . ' 元' : '',
+                'completedAt' => $this->dateTime($time),
+                '_sortTime' => $time,
             ]);
         }, $rows), $total];
     }
@@ -2684,7 +2702,6 @@ final class CashierV3OrderCenterRecordQueryServices
             'bank' => '银联刷卡',
             'yue' => '余额',
             'offline' => '线下记账',
-            'combination' => '组合支付',
         ];
         $normalized = strtolower(trim($code));
         return $labels[$normalized] ?? ($code !== '' ? $code : '未标注');
@@ -2704,21 +2721,8 @@ final class CashierV3OrderCenterRecordQueryServices
             foreach ($decoded as $line) {
                 if (!is_array($line)) continue;
                 $method = trim((string)($line['paymentMethod'] ?? $line['payment_method'] ?? ''));
-                if ($method !== '') {
-                    $labels[$method] = $this->paymentLabel($method);
-                    continue;
-                }
-                // 旧充值按当时的收款名称快照显示；不以现有字典或 type 数字猜渠道。
-                // 部分旧 JSON 二次转义了 Unicode，只解码一次，不执行任意内容。
-                $name = trim((string)($line['name'] ?? ''));
-                if (strpos($name, '\\u') !== false) {
-                    $decodedName = preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', static function (array $match): string {
-                        $value = json_decode('"' . $match[0] . '"');
-                        return is_string($value) ? $value : $match[0];
-                    }, $name);
-                    if (is_string($decodedName)) $name = $decodedName;
-                }
-                if ($name !== '') $labels['legacy:' . $name] = $name;
+                if ($method === '') continue;
+                $labels[$method] = $this->paymentLabel($method);
             }
         }
         if ($labels !== []) return implode('、', array_values($labels));

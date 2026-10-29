@@ -1,0 +1,33 @@
+{
+  "baseline_HEAD": "c075baa3903c4a579321e4a51000ed8f55fb941e",
+  "main_HEAD": "c56295f75347209bff85df7f84f95320ff487ece",
+  "main_related_file_status": "D  \u524d\u7aef\u4ee3\u7801/cashier-v3/src/views/BasicReportsView.vue\n?? \u524d\u7aef\u4ee3\u7801/cashier-v3/src/views/BasicReportsView.vue",
+  "main_related_file_sha256": "c526efe1781c7cbd2196270e16bd33af388e438578aa4d8e8b88a5443cda39fa",
+  "source_file": "\u524d\u7aef\u4ee3\u7801/cashier-v3/src/views/BasicReportsView.vue",
+  "baseline_sha256": "086f5dc0001d0bb32ae3b550d8a21460abe24e4996aa8a4228073610d42afeb1",
+  "candidate_sha256": "8cc1a06b5df412944f2721e51852d5f1383402499ed0765d5d8bdbfe4a52a46b",
+  "patch_fingerprint": "ee52b2b5d540334ceebf1637bb7713f6118443f51361c7f56d630d90b15619d6",
+  "scope": "Only employee summary totals service_visits and point_visits; strip trailing decimal zeros without numeric conversion",
+  "tests": {
+    "summary_cases": 15,
+    "local_browser": "PASS: two zero-valued totals render 0, 12 columns and paging visible using anonymous SQL fixture",
+    "vite_build": "PASS, temporary output only",
+    "git_diff_check": "PASS"
+  },
+  "build_output": "/tmp/beauty-r10-summary-trim",
+  "build_assets_sha256": {
+    "index.html": "dd8b01cb6e09308a5c0b11696cc2ea6b776b88ea3d9d3fb6192c01ed42311863",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "assets/index-750db5a4.css": "750db5a4e743a46ce297afd5658f70c688c9efdf4e7e55f5ccfd61f5af27d350",
+    "assets/index-54f24565.js": "53c27b0e8ad1d3bb82b422dc36905d322fc28ee3e05dde00d775afbbceb98f78",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+  },
+  "architecture": "Display only; facts, permissions, time, calculations, API and exported values unchanged; no migration or write",
+  "retained_features": "Other report formats, salary editing and freeze, report fields and existing cash metrics unchanged",
+  "status": {
+    "selftest_pass": true,
+    "product_manager_accepted": false,
+    "committed": false,
+    "deployed": false
+  }
+}

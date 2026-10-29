@@ -2,11 +2,23 @@
 /** 门店基础报表分组授权合同：编号、目录、岗位映射和接口入口一致。 */
 declare(strict_types=1);
 error_reporting(E_ERROR);
-require dirname(__DIR__, 3) . '/后端代码/vendor/autoload.php';
-require dirname(__DIR__, 3) . '/后端代码/app/services/organization/StorePermissionCatalogServices.php';
-require dirname(__DIR__, 3) . '/后端代码/app/services/organization/JobPositionPolicyServices.php';
-require dirname(__DIR__, 3) . '/后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php';
-require dirname(__DIR__, 3) . '/后端代码/app/services/report/BasicReportHostServices.php';
+$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
+require $backend . '/vendor/autoload.php';
+// 依赖目录可共享，业务类始终来自本次受测工作区，避免测到另一分支的旧目录。
+spl_autoload_register(static function (string $class) use ($backend): void {
+    if (strpos($class, 'app\\') !== 0) return;
+    $path = $backend . '/app/' . str_replace('\\', '/', substr($class, 4)) . '.php';
+    if (is_file($path)) require $path;
+}, true, true);
+$app = new \think\App($backend . '/');
+if ($localEnv = getenv('BEAUTY_LOCAL_ENV')) $app->env->load($localEnv);
+$app->initialize();
+set_exception_handler(static function (Throwable $error): void { fwrite(STDERR, $error->getMessage() . "\n"); exit(1); });
+require $backend . '/app/services/report/BasicReportCatalogServices.php';
+require $backend . '/app/services/organization/StorePermissionCatalogServices.php';
+require $backend . '/app/services/organization/JobPositionPolicyServices.php';
+require $backend . '/app/http/middleware/cashier/CashierCheckRoleMiddleware.php';
+require $backend . '/app/services/report/BasicReportHostServices.php';
 
 use app\services\organization\StorePermissionCatalogServices as Catalog;
 use app\http\middleware\cashier\CashierCheckRoleMiddleware;
@@ -26,9 +38,9 @@ $navigation = Catalog::navigationItems();
 $check(($navigation[-29023]['grantable'] ?? true) === false, '展示分组不能作为负编号保存');
 $check(count(array_filter($navigation, static function ($row): bool {
     return ($row['parent_id'] ?? 0) === -29023 && !empty($row['navigation_key']);
-})) === 21, '基础报表菜单应保留 21 个入口');
+})) === 22, '基础报表菜单应包含新增门店对账共22个入口');
 $reportGrants = Catalog::basicReportGrantDefinitions();
-$check(count($reportGrants) === 21, '岗位逐表权限须从已登记报表菜单生成');
+$check(count($reportGrants) === 22, '岗位逐表权限须从已登记报表菜单生成');
 $allGrantableNavigation = Catalog::grantableNavigationDefinitions();
 $registeredGrantable = array_filter($navigation, static function (array $row): bool { return !empty($row['grantable']); });
 $check(count($allGrantableNavigation) === count($registeredGrantable), '岗位树未自动读取可授权的菜单规则');
