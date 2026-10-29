@@ -34,7 +34,12 @@ try{
  $policy->assertPlatform(['id'=>7,'level'=>1,'admin_type'=>0],[['unique_auth'=>'admin-user-survey']]);check12(true,'总部菜单授权可管理');
  $survey=new Survey();$gift=new Gift();$questions=[['type'=>'single','title'=>'选择题','required'=>true,'options'=>['甲','乙']],['type'=>'multiple','title'=>'多选题','required'=>true,'options'=>['一','二']],['type'=>'text','title'=>'建议','required'=>false,'options'=>[]]];
  $qid=$survey->saveQuestionnaire(['title'=>'合成问卷','questions'=>$questions],7);
- $id=$survey->save(['title'=>'公开扫码任务','questionnaire_id'=>$qid],7);$survey->publish($id);$task=$survey->readTask($id);
+ $id=$survey->save(['title'=>'公开扫码任务','questionnaire_id'=>$qid],7);
+ // 必须走保存后的非空列表回读；空库查询不能覆盖逐任务统计SQL。
+ $savedList=$survey->listTasks(1,20);$savedRow=array_column($savedList['list'],null,'id')[$id]??null;
+ check12($savedList['count']===1&&$savedRow!==null&&$savedRow['title']==='公开扫码任务'&&(int)$savedRow['answer_count']===0&&(int)$savedRow['total_answer_count']===0,'创建成功后非空列表可回读草稿及零答卷');
+ $savedAgain=(new Survey())->listTasks(1,20);check12((int)$savedAgain['list'][0]['id']===$id,'刷新服务后仍能读取已保存任务');
+ $survey->publish($id);$task=$survey->readTask($id);
  check12(Db::name('member_survey_target')->count()===0,'零提醒名单可发布');
  think\facade\Config::set(['member_h5_base_url'=>'https://example.invalid'],'member_survey');
  $link=$survey->qrEntry($id);check12($link['url']==='https://example.invalid/pages/users/survey/index?entry='.$task['entry_token'],'二维码链接绑定明确任务和受控域名');
@@ -44,10 +49,14 @@ try{
  check12($result['status']==='none'&&Db::name('member_survey_answer')->count()===1,'名单外会员可提交');
  $survey->submit(101,$id,$answer,1);check12(Db::name('member_survey_answer')->count()===1,'同轮重复提交不重复答卷');
  check12($survey->memberDetail(101,$id)['completed']===true,'已提交返回完成状态');
+ $answeredRow=array_column($survey->listTasks(1,20)['list'],null,'id')[$id];
+ check12((int)$answeredRow['target_count']===0&&(int)$answeredRow['answer_count']===1&&(int)$answeredRow['total_answer_count']===1,'扫码答卷计入当前轮及累计答卷且不扩大提醒名单');
  check12($survey->results($id)['target_count']===0&&(float)$survey->results($id)['answer_rate']===0.0,'公开参与不膨胀提醒名单完成率');
  check12($survey->pending(101)===null,'扫码参与者不加入提醒队列');
  $survey->resend($id);reject12(fn()=>$survey->submit(101,$id,$answer,1),'旧轮次表单不能提交新一轮');$survey->submit(101,$id,$answer,2);
  check12(Db::name('member_survey_answer')->count()===2,'新轮次保留旧答卷');
+ $roundRow=array_column($survey->listTasks(1,20)['list'],null,'id')[$id];
+ check12((int)$roundRow['answer_count']===1&&(int)$roundRow['total_answer_count']===2,'非空列表区分当前轮答卷和跨轮累计答卷');
  $survey->saveQuestionnaire(['title'=>'新版问卷','questions'=>[['type'=>'text','title'=>'新题','required'=>false]]],7,$qid);
  check12(count($survey->entry($task['entry_token'])['questions'])===3,'编辑问卷不改变已发布题目');
  reject12(fn()=>$survey->save(['title'=>'覆盖发布','questionnaire_id'=>$qid],7,$id),'已发布任务不可覆盖');

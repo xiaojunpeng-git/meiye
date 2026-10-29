@@ -3,7 +3,10 @@
 const path=require('path'),cp=require('child_process'),fs=require('fs'),crypto=require('crypto'),os=require('os');
 const root=path.resolve(__dirname,'../..'),backend=path.join(root,'后端代码');
 const canonical=path.dirname(fs.realpathSync(path.join(backend,'vendor')));
-const evidence=path.join(root,'tests/customer-010/evidence/round12-member-survey');
+// 修复回归另存证据，不覆盖已验收候选的历史测试记录；输出只允许在本项目证据目录。
+const evidence=process.env.R12_EVIDENCE_DIR?path.resolve(root,process.env.R12_EVIDENCE_DIR):path.join(root,'tests/customer-010/evidence/round12-member-survey');
+if(!evidence.startsWith(path.join(root,'tests/customer-010/evidence')+path.sep))throw Error('Evidence output outside project');
+fs.mkdirSync(evidence,{recursive:true});
 const result=path.join(evidence,'business.json');
 const nonce=crypto.randomBytes(6).toString('hex'),username='r12_test_'+nonce,password=crypto.randomBytes(24).toString('hex');
 const reference='r12_reference_'+nonce;

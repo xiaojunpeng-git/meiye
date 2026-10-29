@@ -436,7 +436,8 @@ class MemberSurveyServices
             $row['target_count'] = Db::name('member_survey_target')->where('task_id', $row['id'])->where('source','<>','qrcode')->count();
             $row['answer_count'] = Db::name('member_survey_answer')->where('task_id', $row['id'])
                 ->where('send_round', $row['send_round'])->count();
-            $row['total_answer_count'] = Db::name('member_survey_answer')->where('task_id', $row['id'])->where('source','<>','qrcode')->count();
+            // 累计答卷包含扫码与提醒名单的全部轮次；source只在参与关系表中，不能用来筛除答卷。
+            $row['total_answer_count'] = Db::name('member_survey_answer')->where('task_id', $row['id'])->count();
             $row['gift_inherited'] = $row['status'] === 'draft' && (int)$row['questionnaire_id'] > 0
                 && !isset($ownGiftLookup[(int)$row['id']]);
             $gift = $row['gift_inherited']

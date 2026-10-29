@@ -1,0 +1,120 @@
+{
+  "scope": "R12 member survey nonempty task list repair",
+  "base_head": "9f8499f626a988c81c14618c908db8b46d67970d",
+  "status": "local_tests_passed_awaiting_PM_supplementary_acceptance",
+  "files": [
+    {
+      "path": "后端代码/app/services/user/MemberSurveyServices.php",
+      "sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36"
+    },
+    {
+      "path": "tests/member-survey/php/local-business.php",
+      "sha256": "17adbea432e170f40090a6161abe4fad6ae82c9127fd68343c58556e41fca32d"
+    },
+    {
+      "path": "scripts/member-survey/test-local.cjs",
+      "sha256": "701dce5fe404076a21be26cf5d17a21caa2818131dd88a7fd778e744d5cb1e84"
+    },
+    {
+      "path": "scripts/member-survey/create-fix-probe.php",
+      "sha256": "3d5e409bf725a323de2f315e2ef2980b855dbc0d9ec4a60a7c1be5b6255fb385"
+    }
+  ],
+  "backend_changes": [
+    "Remove invalid source filter from cumulative answer count; all submitted answers across all rounds remain included"
+  ],
+  "tests": {
+    "original_failure_reproduced": true,
+    "isolated_local_business_checks": 56,
+    "local_checks_sha256": "b7ad9d01c5cd5ff43f66147265969a070d51260f31bf0ad9b3b76333a69c244a",
+    "production_candidate_readonly": {
+      "rh": {
+        "result": "PASS",
+        "site": "rh",
+        "before_service_sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca",
+        "candidate_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+        "task_total": 0,
+        "task_rows_verified": 0,
+        "task_ids": [],
+        "survey_data_sha256": {
+          "member_survey_task": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_questionnaire": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_target": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_answer": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_popup": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward_config": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "survey_data_unchanged": true,
+        "runtime_source_file_unchanged": true,
+        "platform_entry_sha256": "5e9213d8d6dd31907321c9e46e9d3f11b2a355cf4b590907db47e0dace47f2d7",
+        "member_entry_sha256": "ffb70e96a4fd86643e5616a83418ae9397656197646036cf6bb252787616e3e1",
+        "business_writes": 0
+      },
+      "008": {
+        "result": "PASS",
+        "site": "008",
+        "before_service_sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca",
+        "candidate_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+        "task_total": 0,
+        "task_rows_verified": 0,
+        "task_ids": [],
+        "survey_data_sha256": {
+          "member_survey_task": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_questionnaire": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_target": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_answer": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_popup": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward_config": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "survey_data_unchanged": true,
+        "runtime_source_file_unchanged": true,
+        "platform_entry_sha256": "5e9213d8d6dd31907321c9e46e9d3f11b2a355cf4b590907db47e0dace47f2d7",
+        "member_entry_sha256": "b9b206291f4950a7459d99c69357d873b5fa7c7cf6c83953d6649614966fe447",
+        "business_writes": 0
+      },
+      "010": {
+        "result": "PASS",
+        "site": "010",
+        "before_service_sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca",
+        "candidate_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+        "task_total": 2,
+        "task_rows_verified": 2,
+        "task_ids": [
+          2,
+          1
+        ],
+        "survey_data_sha256": {
+          "member_survey_task": "d1758349fb40cf02e0f005ffa1128686d929c7f99655ea9e5861d1e3bc733bae",
+          "member_survey_questionnaire": "85e79a3d85547be66fc8b52c9eba0abe65f6d60338234123024d94a1c6f59e1d",
+          "member_survey_target": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_answer": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_popup": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward_config": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "member_survey_reward": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "survey_data_unchanged": true,
+        "runtime_source_file_unchanged": true,
+        "platform_entry_sha256": "5e9213d8d6dd31907321c9e46e9d3f11b2a355cf4b590907db47e0dace47f2d7",
+        "member_entry_sha256": "342b138b282b468e0c22aa4ba77a67aa3bf70fa099d06214a6d51cbe52c50835",
+        "business_writes": 0
+      }
+    }
+  },
+  "not_changed": [
+    "Existing tasks, answers, rewards, reminder recipients",
+    "Gift issuance and eligibility rules",
+    "Frontend assets and database schema"
+  ],
+  "comments_updated": [
+    "后端代码/app/services/user/MemberSurveyServices.php",
+    "tests/member-survey/php/local-business.php",
+    "scripts/member-survey/test-local.cjs",
+    "scripts/member-survey/create-fix-probe.php"
+  ],
+  "no_feature_commit": true,
+  "no_runtime_deployment": true,
+  "expected_delivery_after_acceptance": "backend service only, followed by real page reload and saved-task readback",
+  "fingerprint": "5c2e966e3e8a88c26fad8509079e5fb6f7e973cf67ee95642e211924a2d0120e"
+}
