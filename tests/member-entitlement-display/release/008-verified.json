@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+  "backup": "/www/backups/008/store-address-a08a1f77",
+  "files": 266,
+  "backend": {
+    "alreadyCurrent": true,
+    "sha256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c"
+  },
+  "businessWrites": 0,
+  "migration": false
+}

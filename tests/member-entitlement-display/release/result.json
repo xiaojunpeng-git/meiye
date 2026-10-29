@@ -1,0 +1,74 @@
+{
+  "round": 14,
+  "sourceCommit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+  "retainedBaselineCommit": "076730d77d9a539716197ea5064a2f0909916286",
+  "sourceTree": "7d544d737d7fa0dcb35306efb8af631546b35c81",
+  "acceptedPatch": "1850b68444b649b18c588c9e4e4448e6bd9501e746a81259e115daa097e59199",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+      "backup": "/www/backups/rh/store-address-a08a1f77",
+      "files": 266,
+      "backend": {
+        "installed": true,
+        "sha256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c",
+        "rollback": "/www/backups/rh/store-address-a08a1f77/MemberCommerceServices.before-a6bcb56c.php"
+      },
+      "businessWrites": 0,
+      "migration": false
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+      "backup": "/www/backups/008/store-address-a08a1f77",
+      "files": 266,
+      "backend": {
+        "alreadyCurrent": true,
+        "sha256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c"
+      },
+      "businessWrites": 0,
+      "migration": false
+    },
+    "010": {
+      "result": "PASS",
+      "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+      "backup": "/www/backups/010/store-address-a08a1f77",
+      "files": 266,
+      "backend": {
+        "installed": true,
+        "sha256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c",
+        "rollback": "/www/backups/010/store-address-a08a1f77/MemberCommerceServices.before-a6bcb56c.php"
+      },
+      "businessWrites": 0,
+      "migration": false
+    }
+  },
+  "push": {
+    "result": "PASS",
+    "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+    "remote": "origin",
+    "branch": "release/m014-member-entitlements-20261029"
+  },
+  "databaseChangesThisRelease": false,
+  "existingCardsModified": false,
+  "newOrdersOrPayments": 0,
+  "h5BusinessCheck": {
+    "site": "008",
+    "holderId": 6550,
+    "listAndDetailName": "王牌 · 粉红丝带（体验卡）",
+    "remaining": 1,
+    "result": "PASS",
+    "screenshot": "tests/member-entitlement-display/release/008-live-list.png"
+  },
+  "mini": {
+    "version": "3.0.75",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "sourceTree": "7d544d737d7fa0dcb35306efb8af631546b35c81",
+    "runtime": "compiled simulator with local fixtures",
+    "productionDataWrites": 0,
+    "uploadStatus": "pending developer-tool user confirmation",
+    "taskId": "confirmation_upload_273d2696-abe9-453f-8666-3f9153ee85e5"
+  },
+  "recordedAt": "2026-10-29T08:02:28.311168+00:00"
+}

@@ -1,0 +1,39 @@
+PASS unique sale snapshot contains no catalogue or envelope versions
+PASS business-only signature survives JSON and version removal
+PASS default switch off
+PASS unchanged signed normal still usable when disabled
+PASS unchanged signed card retains existing manual-price behavior
+PASS row total increases independently of times
+PASS card price adds delta not row sum
+PASS two cards preserve price floor before real coupon discount
+PASS manual-price bypass rejected
+PASS increasing times alone keeps original total
+PASS snapshot survives changed catalogue
+PASS JSON hang roundtrip preserves signature and adjusted rows
+PASS legacy unchanged card still works
+PASS custom cards not reinterpreted as ordinary edits
+PASS upgrade metadata preserves floor validation
+PASS lower amount
+PASS lower times
+PASS changed times require explicit unchanged total
+PASS fractional yuan
+PASS fractional times
+PASS deleted project
+PASS added project
+PASS project replacement
+PASS specification replacement
+PASS baseline tampering
+PASS signature tampering
+PASS cross-store replay
+PASS deleted signature cannot bypass
+PASS one project increase cannot offset another decrease
+PASS overflow times
+PASS live switch stops pending edited checkout
+PASS reproduce unsealed member versus lightweight preparation
+PASS member proof validates with lightweight preparation
+PASS member proof survives serialized frozen order
+PASS member original proof keeps component identities and counts
+PASS member proof does not permit deleting a purchased project
+PASS member proof does not permit lowering original counts
+PASS member proof does not permit replacing original SKU
+PASS non-normal card definitions remain unchanged

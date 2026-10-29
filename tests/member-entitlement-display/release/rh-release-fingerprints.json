@@ -1,0 +1,29 @@
+{
+  "beforeMemberEntry": {
+    "index": "ffb70e96a4fd86643e5616a83418ae9397656197646036cf6bb252787616e3e1",
+    "assets": {
+      "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+      "/static/js/chunk-vendors.052862aa.js": "731cc294777df06dd60e26ff92eb759099ac9e306519d0d45d2de4eaae346281",
+      "/static/js/index.66336ed7.js": "53c21792aceca9e8d9f188d3a9b95be070154ac872630a8d30536af7086c36bc"
+    }
+  },
+  "afterMemberEntry": {
+    "index": "6915a341bea0622f153c6a2a5857093fac8dd21835a8fa77a8d745f1b87bb2fb",
+    "assets": {
+      "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+      "/static/js/chunk-vendors.10097741.js": "66f14612b3932dc5869bc83331594c7569555f6b990aac4ac75d700af162f21d",
+      "/static/js/index.39fe4afa.js": "aefe7d0ab841abfeee8a2ded84c6e1a099691662b64704d918bcb3ffeb41f0e2"
+    }
+  },
+  "beforeFullFingerprint": "475e483f96e0240c6ec4dcb9934dadc49383e127662578b0de2fa1dd401cb20b",
+  "afterFullFingerprint": "d2051ebb52f80a7facba99e03e160ae5b08d4ab2c4341594ebada26661fa6c83",
+  "manifestFingerprint": "644ef0948af1d66bc0f3fc8eb4185c43c6dcade5d391f65739768d80c5f1504f",
+  "runtime": {
+    "site": "rh",
+    "result": "PASS",
+    "businessWrites": 0,
+    "backendSHA256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c",
+    "holderReadVerified": true,
+    "adapterLoaded": true
+  }
+}

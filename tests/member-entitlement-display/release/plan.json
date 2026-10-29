@@ -1,0 +1,40 @@
+{
+  "commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+  "candidateTree": "7d544d737d7fa0dcb35306efb8af631546b35c81",
+  "baselineTree": "0c42e22d32b7991fb5df091eb772d2f6ecda481b",
+  "prerequisiteCommit": "076730d77d9a539716197ea5064a2f0909916286",
+  "baselinePublishedCommit": "9f17dd91e253bb688a7706c2459b0d42231ccc80",
+  "sharedHead": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "sharedIndex": "8bc2a90fda712858697951d9ee952330af8391cae543c14a1ae5666362d8904b",
+  "parentCommit": "9f17dd91e253bb688a7706c2459b0d42231ccc80",
+  "branch": "release/m014-member-entitlements-20261029",
+  "version": "3.0.75",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "targets": [
+    "rh",
+    "008",
+    "010"
+  ],
+  "retainedFiles": [
+    "前端代码/uniapp/App.vue",
+    "前端代码/uniapp/api/memberSurvey.js",
+    "前端代码/uniapp/components/requiredFieldGuide/index.vue",
+    "前端代码/uniapp/libs/login.js",
+    "前端代码/uniapp/pages.json",
+    "前端代码/uniapp/pages/discover/discoverIndex/index.vue",
+    "前端代码/uniapp/pages/users/survey/index.vue",
+    "前端代码/uniapp/pages/users/user_card/index.vue",
+    "前端代码/uniapp/pages/users/user_card_list/index.vue",
+    "前端代码/uniapp/utils/memberPhoneGate.js",
+    "前端代码/uniapp/utils/memberSurveyReminder.js"
+  ],
+  "files": [
+    "前端代码/uniapp/pages/users/user_card_list/index.vue",
+    "tests/member-entitlement-display/model.cjs",
+    "scripts/m014-member-build.cjs",
+    "tests/member-entitlement-display/evidence/baseline.json",
+    "tests/member-entitlement-display/evidence/fixed.json"
+  ],
+  "acceptedPatch": "1850b68444b649b18c588c9e4e4448e6bd9501e746a81259e115daa097e59199"
+}

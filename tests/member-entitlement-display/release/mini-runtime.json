@@ -1,0 +1,133 @@
+{
+  "ok": true,
+  "tool": "automation_evaluate",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "result": {
+      "result": {
+        "route": "pages/users/user_card_list/index",
+        "names": [
+          "王牌 · 粉红丝带（体验卡）",
+          "五行灸（单次）",
+          "赠送护理项目"
+        ],
+        "remains": [
+          1,
+          1,
+          2
+        ],
+        "visible": [
+          {},
+          {},
+          {}
+        ],
+        "cards": [
+          {
+            "id": "",
+            "dataset": {
+              "eventOpts": [
+                [
+                  "tap",
+                  [
+                    [
+                      "goProject",
+                      [
+                        "$0"
+                      ],
+                      [
+                        [
+                          [
+                            "uncategorizedProjects",
+                            "key",
+                            "card-6550"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            "left": 12,
+            "right": 378,
+            "top": 169,
+            "bottom": 238.5,
+            "width": 366,
+            "height": 69.5
+          },
+          {
+            "id": "",
+            "dataset": {
+              "eventOpts": [
+                [
+                  "tap",
+                  [
+                    [
+                      "goProject",
+                      [
+                        "$0"
+                      ],
+                      [
+                        [
+                          [
+                            "uncategorizedProjects",
+                            "key",
+                            "card-2"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            "left": 12,
+            "right": 378,
+            "top": 250.5,
+            "bottom": 320,
+            "width": 366,
+            "height": 69.5
+          },
+          {
+            "id": "",
+            "dataset": {
+              "eventOpts": [
+                [
+                  "tap",
+                  [
+                    [
+                      "goProject",
+                      [
+                        "$0"
+                      ],
+                      [
+                        [
+                          [
+                            "uncategorizedProjects",
+                            "key",
+                            "card-3"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            "left": 12,
+            "right": 378,
+            "top": 332,
+            "bottom": 401.5,
+            "width": 366,
+            "height": 69.5
+          }
+        ],
+        "loading": false,
+        "inputUnchanged": true,
+        "localFixtures": true,
+        "productionWrites": 0
+      }
+    }
+  }
+}

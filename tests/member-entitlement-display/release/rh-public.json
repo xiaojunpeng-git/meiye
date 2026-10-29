@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "checked": [
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.10097741.js",
+    "/static/js/index.39fe4afa.js",
+    "/static/js/pages-users-survey-index.f80843af.js",
+    "/static/js/pages-discover-discoverIndex-index.d36d4347.js",
+    "/static/js/pages-users-user_card-index.16de7fcc.js",
+    "/static/js/pages-users-user_card_list-index.3a57400d.js"
+  ],
+  "readOnlyAPIs": {
+    "/api/diy/get_diy/0": 200,
+    "/api/menu/user": 200
+  },
+  "businessWrites": 0
+}
