@@ -69,6 +69,12 @@
                 <span class="span">
                   <Input v-model="item.name" placeholder="请输入标题" />
                 </span>
+                <div class="entry-switch-row">
+                  <span>入口显示</span>
+                  <i-switch :value="isMenuVisible(item) ? 1 : 0" :true-value="1" :false-value="0" size="large" @on-change="setMenuVisibility(item, $event)">
+                    <span slot="open">显示</span><span slot="close">隐藏</span>
+                  </i-switch>
+                </div>
                 <div class="input-box mt10">
                   <Select
                     :value="item.icon || ''"
@@ -156,6 +162,7 @@
 <script>
 import draggable from "vuedraggable";
 import MemberMenuMedia from "@/components/memberMenuMedia";
+import { isMemberServiceVisible } from "../../../../../../shared/memberMenuMedia";
 import uploadPictures from "@/components/uploadPictures";
 import propertyList from "@/plugins/propertyList";
 import linkaddress from "@/components/linkaddress";
@@ -231,6 +238,9 @@ export default {
     this.menuStyle = this.$store.state.admin.userTemplateConfig.menu.style;
   },
   methods: {
+    // 缺字段默认显示；只记录本条目开关，不改写图标、链接或顺序。
+    isMenuVisible(item) { return isMemberServiceVisible(item); },
+    setMenuVisibility(item, value) { this.$set(item, "is_show", value ? 1 : 0); },
     setMenuIcon(item, icon) {
       this.$set(item, "icon", icon || "");
     },
@@ -279,6 +289,15 @@ export default {
 <style lang="stylus" scoped>
 .bg-fff {
   background-color: #fff;
+}
+
+.entry-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #999;
 }
 
 .main {

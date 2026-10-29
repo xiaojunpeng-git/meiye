@@ -112,6 +112,35 @@ try {
         'Failed save partially changed banner/menu mirrors');
     clearDiy();
     check(count($service->getMemberData()['routine_my_menus']) === 14, 'Rollback refresh lost menus');
+    // One link may appear twice; each persisted entry has an independent visibility choice.
+    $visibility = $payload;
+    $visibility['member']['menu']['list'] = [
+        ['name'=>'隐藏同链','url'=>'/pages/index/index','pic'=>'','icon'=>'','type'=>1,'is_show'=>0],
+        ['name'=>'显示同链','url'=>'/pages/index/index','pic'=>'','icon'=>'','type'=>1,'is_show'=>1],
+        ['name'=>'默认显示','url'=>'/pages/index/index','pic'=>'','icon'=>'','type'=>1],
+        ['name'=>'字符串隐藏','url'=>'/pages/index/index','pic'=>'','icon'=>'','type'=>1,'is_show'=>'0'],
+        ['name'=>'布尔隐藏','url'=>'/pages/index/index','pic'=>'','icon'=>'','type'=>1,'is_show'=>false],
+        ['name'=>'权限仍限制','url'=>'/pages/users/user_spread_user/index','pic'=>'','icon'=>'','type'=>1,'is_show'=>1],
+    ];
+    $visibility['routine_my_menus'] = $visibility['member']['menu']['list'];
+    $service->memberSaveData($visibility);
+    check($service->getMemberData()['member']['menu']['list'] === $visibility['member']['menu']['list'], 'Admin refresh lost hidden entries or order');
+    check(Db::name('system_group_data')->where('gid',$menuId)->where('status',0)->count() === 3, 'Legacy mirrors did not hide disabled entries');
+    $visibilityResponse = (new app\controller\api\v1\PublicController(new think\facade\App()))->menu_user($app->request);
+    $visibilityApi = json_decode($visibilityResponse->getContent(),true)['data'];
+    check(array_column($visibilityApi['diy_data']['menu']['list'],'name') === ['显示同链','默认显示'], 'Member API visibility or authority regressed');
+    check(array_column($visibilityApi['routine_my_menus'],'name') === ['显示同链','默认显示'], 'Legacy member response exposed hidden services');
+    $visibility['member']['menu']['list'][0]['is_show'] = 1;
+    $visibility['routine_my_menus'] = $visibility['member']['menu']['list'];
+    $service->memberSaveData($visibility);
+    check(array_column($service->getCacheDiyData('member')['menu']['list'],'name')[0] === '隐藏同链', 'Reenable did not restore original position');
+    check(count($service->getMemberData()['member']['menu']['list']) === 6, 'Reenable changed stored entries');
+    foreach ($visibility['member']['menu']['list'] as &$item) $item['is_show'] = 0;
+    unset($item);
+    $visibility['routine_my_menus'] = $visibility['member']['menu']['list'];
+    $service->memberSaveData($visibility);
+    check($service->getCacheDiyData('member')['menu']['list'] === [], 'All hidden services still emitted');
+    check(count($service->getMemberData()['member']['menu']['list']) === 6, 'All hidden configuration was deleted');
     $payload['member']['menu']['list'] = [];
     $payload['routine_my_menus'] = [];
     $service->memberSaveData($payload);
@@ -119,7 +148,7 @@ try {
     $threw = false;
     try { $service->memberSaveData(['member' => []]); } catch (Throwable $e) { $threw = true; }
     check($threw, 'Empty uninitialized document accepted');
-    echo "member-center mysql PASS: missing groups, gid=0 isolation, save/refresh, mirrors, full rollback, explicit empty\n";
+    echo "member-center mysql PASS: missing groups, gid=0 isolation, save/refresh, mirrors, full rollback, explicit empty, visibility persistence/API/legacy/authority\n";
 } finally {
     foreach (array_reverse($tables) as $name) {
         Db::execute('DROP TEMPORARY TABLE IF EXISTS `' . $tablePrefix . $name . '`');

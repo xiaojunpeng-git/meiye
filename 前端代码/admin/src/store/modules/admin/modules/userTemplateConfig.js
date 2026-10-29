@@ -143,7 +143,15 @@ export default {
             url: e.url
           };
         });
-        res.data.member.menu.list = myMenu;
+        const configuredServices = res.data.member.menu && res.data.member.menu.list;
+        // 单项开关使用后以DIY完整列表读回，不能被缺少显隐字段的旧镜像覆盖而丢失隐藏项。
+        // 未使用开关的历史配置继续原镜像回填，保留既有图片兼容行为。
+        const hasVisibility = Array.isArray(configuredServices) && configuredServices.some(item => Object.prototype.hasOwnProperty.call(item, 'is_show'));
+        res.data.member.menu.list = hasVisibility ? configuredServices.map(item => ({
+          ...item,
+          pic: Array.isArray(item.pic) ? (item.pic[0] || '') : (item.pic || ''),
+          icon: item.icon || ''
+        })) : myMenu;
         if (!res.data.member.merMenu) {
           res.data.member.merMenu = state.merMenu;
         }

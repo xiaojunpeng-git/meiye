@@ -1,4 +1,5 @@
 <script>
+import { visibleMemberServices } from '../../../../../../../shared/memberMenuMedia';
 import MemberMenuMedia from "@/components/memberMenuMedia";
 export default {
   components: { MemberMenuMedia },
@@ -13,6 +14,8 @@ export default {
     },
   },
 
+  // 只过滤展示副本，保留完整配置及原有客服与跳转分支。
+  computed: { visibleServices() { return visibleMemberServices(this.menuData.list); } },
   methods: {},
 };
 </script>
@@ -23,7 +26,7 @@ export default {
       <div class="grid-column-4 grid-gap-x-19px grid-gap-y-27px mt-19">
         <div
           class="w-65 flex-col flex-center"
-          v-for="(item, index) in menuData.list"
+          v-for="(item, index) in visibleServices"
           :key="index"
         >
           <MemberMenuMedia :item="item" class="image" />

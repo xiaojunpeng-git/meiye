@@ -1,0 +1,18 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "sourceBaseline": "46fa31d282bb10732925653bfd8144d36f7b61c4",
+  "files": {
+    "前端代码/admin/src/pages/setting/devise/templateConfig/MenuConfig.vue": "80c640a4a7278ee79894917b4e7fc7852fc0682f9ece7512f8eeb0d79df613cf",
+    "前端代码/admin/src/store/modules/admin/modules/userTemplateConfig.js": "82b13f1faf0ae3393c7634d186e0bdb2db0ebd1018e6d6581138ab0e2e5d0f69",
+    "前端代码/shared/memberMenuMedia.js": "df69fad9153ee296be2f3a9162a64ea656a6c30f94d5bad05bbc9173e05cc2bb",
+    "后端代码/app/services/diy/DiyServices.php": "a0d97d6bf0fb23ce71d86235caec295e3c3b7e260cfc3c3fae781369b06b3b31",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template1.vue": "37155958d0f030a93f23d4fe9ee7c53bb000dc14ede3523322754daa74d9974e",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template2.vue": "72c182f59097c25e6d659e3807c0144d0bd9c83c004a91e2c093084c7c33602f",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template3.vue": "0b70afbb1283a8237e304889a039ae0df80de4682024676b099e70bcd00eb2f9",
+    "前端代码/uniapp/pages/user/components/menus/template1.vue": "f13e4b635e4dc6d0ea5d0f4cc7341ffbb0727be77b3970a71398c034846214f2",
+    "前端代码/uniapp/pages/user/components/menus/template2.vue": "c1a1876f651233a208397bdbdd7136fec3c252fded8e05aaba756e6bd39250ac",
+    "前端代码/uniapp/pages/user/components/menus/template3.vue": "1177d944a985c1e5148ed59ed0f1113c13aed7575a3efaa55bbe1c9f9270ad6e"
+  },
+  "indexSHA256": "39c996f91a98d6da47e4837549beca0239ddde08b5a9ad993b3ecf76e0ee0cef",
+  "remote": "not applicable; local development only"
+}

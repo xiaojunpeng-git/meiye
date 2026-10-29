@@ -51,3 +51,8 @@ export const memberMenuImage = (item = {}) => {
  const pic = Array.isArray(item.pic) ? item.pic[0] : item.pic;
  return typeof pic === 'string' ? pic.trim() : '';
 };
+
+/** 旧配置缺少显隐字段时保持显示；开关仅缩小入口展示，不代替后端业务权限。 */
+export const isMemberServiceVisible = (item) => !!item && ![0, '0', false].includes(item.is_show);
+/** 返回展示列表副本，不删除、排序或改写已保存的服务配置。 */
+export const visibleMemberServices = (items) => Array.isArray(items) ? items.filter(isMemberServiceVisible) : [];

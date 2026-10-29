@@ -1,9 +1,12 @@
 <script>
+import { visibleMemberServices } from '../../../../../shared/memberMenuMedia';
 import MemberMenuMedia from '@/components/memberMenuMedia';
 
 export default {
 	components: { MemberMenuMedia },
 	inject: ['goMenuPage'],
+	// 只过滤展示副本，保留完整配置及原有客服与跳转分支。
+	computed: { visibleServices() { return visibleMemberServices(this.menuData); } },
 	props: {
 		menuData: {
 			type: Array,
@@ -19,7 +22,7 @@ export default {
 
 <template>
 	<view class="px-20 grid-column-3 grid-gap-24rpx mt-20">
-		<view v-for="(item, index) in menuData" :key="index">
+		<view v-for="(item, index) in visibleServices" :key="index">
 			<!-- #ifdef MP -->
 			<view class="flex-col flex-center bg--w111-fff h-220 rd-24rpx" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)"
 				@tap="goMenuPage(item.url, item.name)">

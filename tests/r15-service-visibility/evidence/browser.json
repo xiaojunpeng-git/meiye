@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "styles": 3,
+  "realIViewSwitches": true,
+  "counts": [
+    3,
+    2,
+    3,
+    0,
+    2
+  ],
+  "configurationEntriesRetained": 3,
+  "duplicateLinkIndependent": true,
+  "customerRequests": 0
+}

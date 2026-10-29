@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "checks": 56,
+  "previewStyles": 3,
+  "memberStyles": 3,
+  "conditionalBranchCases": 12,
+  "duplicateLinksIndependent": true,
+  "legacyDefaultVisible": true,
+  "hiddenReadBack": true
+}
