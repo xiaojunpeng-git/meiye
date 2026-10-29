@@ -93,7 +93,7 @@ final class BasicActivityReportServices
         }
         // 员工统计表的列名与顺序只在本表声明；稳定字段键继续供筛选、合计及导出共用。
         if ($kind === 'employee') {
-            $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'位置',
+            $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'职位',
                 'sales_performance'=>'现金业绩','labor_performance'=>'劳动业绩','service_visits'=>'客数',
                 'labor_unit_price'=>'客单价','project_count'=>'项目数','point_visits'=>'指定客',
                 'new_customer_total'=>'服务总新客','new_customer_converted'=>'成交总新客','new_customer_conversion_rate'=>'新客成交率%'];

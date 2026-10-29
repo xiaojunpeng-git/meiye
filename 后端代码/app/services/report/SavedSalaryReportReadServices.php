@@ -5,7 +5,7 @@ use think\facade\Db;
 
 /**
  * 启用实时工资前的已保存月表，只读金额/提点/人工项，不调用业务指标或工资公式。
- * 月份与门店取原保存记录；姓名/位置缺少保存名称时只用档案补充展示，不据此重算金额。
+ * 月份与门店取原保存记录；姓名/职位缺少保存名称时只用档案补充展示，不据此重算金额。
  */
 final class SavedSalaryReportReadServices
 {
@@ -81,7 +81,7 @@ final class SavedSalaryReportReadServices
             unset($field);
             $sources=[];
             foreach($fields as$field)$sources[$field['key']]=in_array($field['key'],['month','store_name','employee_name','position_name','position_level_name'],true)
-                    ?'月份、门店取当月保存记录，姓名和位置仅关联档案展示，不参与历史工资重算。'
+                    ?'月份、门店取当月保存记录，姓名和职位仅关联档案展示，不参与历史工资重算。'
                     :'读取当月已保存的'.$field['label'].'；不按当前业绩、职位、提点或公式重新计算。';
             $frozen=Db::name('salary_freeze')->where('date',strtotime($month.'-01 Asia/Shanghai'))->column('is_freeze');
             if(count($frozen)>1)throw new \RuntimeException('同月冻结记录重复，请核对');

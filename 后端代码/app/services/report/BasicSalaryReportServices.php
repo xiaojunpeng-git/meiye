@@ -73,8 +73,8 @@ final class BasicSalaryReportServices
             $out[] = $this->field($key, $label, 'number', false, true);
         foreach (self::MANUAL as $key=>$label)
             $out[] = $this->field($key, $label, $key === 'beizhu' ? 'text' : 'number', !in_array($key, ['beizhu','haoqingshu'], true), $key !== 'beizhu');
-        // 员工分组先显示门店、姓名、位置；保留工资月份及既有工资字段契约。
-        $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'位置','month'=>'日期','position_level_name'=>'职级',
+        // 员工分组先显示门店、姓名、职位；仅纠正列名，保留工资月份及既有工资字段契约。
+        $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'职位','month'=>'日期','position_level_name'=>'职级',
             'mendianxianjinyeji'=>'门店现金业绩','mendianxianjinticheng'=>'门店现金提成',
             'mendianshijikoukayeji'=>'门店实际扣卡业绩','mendianshijikoukaticheng'=>'门店实际扣卡提成',
             'mendianlaodongyeji'=>'门店耗卡业绩','mendianlaodongticheng'=>'门店耗卡提成',
