@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "sourceFiles": 1,
+  "removedOnlyObsoleteImageOrIconRequirement": true,
+  "saveAPIAndPayloadUnchanged": true,
+  "nameAndLinkChecksPreserved": true,
+  "businessBackendUnchanged": true,
+  "onlineWrites": 0
+}

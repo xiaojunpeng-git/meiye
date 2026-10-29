@@ -280,10 +280,8 @@ export default {
 		  	if(!menu[i].name){
 		  	   return this.$Message.error('请输入我的服务标题')
 		  	}
-            // Existing iconfont entries deliberately have no uploaded image.
-            if (!menu[i].pic && !menu[i].icon) {
-              return this.$Message.error('请选择我的服务图标或图片');
-            }
+            // 图标和图片均可留空：渲染器按名称匹配内置图标，未知名称也有通用图标兜底。
+            // 保存原始选择，不强制上传图片，也不把自动匹配结果写回客户配置。
 		  	if(!menu[i].url){
 		  	   return this.$Message.error('请输入我的服务链接')
 		  	}

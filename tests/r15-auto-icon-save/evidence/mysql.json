@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "localDockerOnly": true,
+  "testProcessSHA256": "7828ba108da53c498d6d645a77a775da3073762c41546e85dfc910a1126c1f27",
+  "autoIconSaveRefresh": true,
+  "optionalLegacyMirrors": true,
+  "rollback": true,
+  "productionWrites": 0
+}

@@ -86,6 +86,17 @@ try {
     $service->memberSaveData($payload);
     check(Db::name('system_group_data')->where('gid', $menuId)->count() === 14, 'Legacy mirror missing');
     check(count($service->getMemberData()['routine_my_menus']) === 14, 'Legacy GET missing');
+    // Auto-match stays an empty visual selection in the authoritative document and mirrors.
+    $auto = $payload;
+    foreach ($auto['member']['menu']['list'] as &$item) { $item['pic'] = ''; $item['icon'] = ''; }
+    unset($item);
+    $auto['routine_my_menus'] = $auto['member']['menu']['list'];
+    $service->memberSaveData($auto);
+    $autoRead = $service->getCacheDiyData('member');
+    check($autoRead['menu']['list'] === $auto['member']['menu']['list'], 'Auto-match save/read changed the visual choice');
+    check(document()['menu']['list'] === $auto['member']['menu']['list'], 'Auto-match choice not persisted');
+    check(Db::name('system_group_data')->where('gid', $menuId)->count() === 14, 'Auto-match legacy mirror missing');
+    $service->memberSaveData($payload);
     $before = document();
     $mirrorBefore = Db::name('system_group_data')->order('id')->select()->toArray();
     $bad = $payload;

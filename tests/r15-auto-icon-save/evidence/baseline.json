@@ -1,0 +1,11 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "sourceBaseline": "d04d613b7317b3eb514fd6c550ec58128f29774a",
+  "indexSHA256": "39c996f91a98d6da47e4837549beca0239ddde08b5a9ad993b3ecf76e0ee0cef",
+  "files": {
+    "前端代码/admin/src/pages/setting/devise/users.vue": "bcbcfbd89f031b107b2d3f43e365bafda888a7472e8436ff42e03c65d67813d7",
+    "tests/member-center-save/editor.cjs": "bf132f553b03a671b94e5d42ff5d58e8b04229caca756818c46e98cb2447ec6f",
+    "tests/member-center-save/mysql.php": "70230229525f3fb74fb6424993f2737778f09f0ea959fac369b3eeba8230dae9"
+  },
+  "remote": "not applicable; local repair only"
+}
