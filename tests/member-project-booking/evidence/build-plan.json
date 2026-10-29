@@ -1,0 +1,12 @@
+{
+  "commit": null,
+  "candidateTree": "50ef8af502a128d8771cf04a2fd2ca93a2701bc4",
+  "publishedMemberCommit": "ad52b8021e2e1d4733daaedf9fe8008e75067d2c",
+  "sharedHead": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "files": {
+    "\u524d\u7aef\u4ee3\u7801/uniapp/pages/users/user_card/index.vue": "bfdb75d3cb3524262634aa8c409edd1216bd41e3e44dd50ddb715ebd4152da6a"
+  },
+  "localOnly": true
+}

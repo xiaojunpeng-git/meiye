@@ -1,0 +1,135 @@
+{
+  "baselineHead": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "publishedMemberBaseline": "ad52b8021e2e1d4733daaedf9fe8008e75067d2c",
+  "candidateTree": "50ef8af502a128d8771cf04a2fd2ca93a2701bc4",
+  "patchSha256": "2e089651d238107908c4ec0e4501e430a77618b5a86e06759aa8b3e271aafd36",
+  "files": {
+    "前端代码/uniapp/pages/users/user_card/index.vue": "bfdb75d3cb3524262634aa8c409edd1216bd41e3e44dd50ddb715ebd4152da6a",
+    "tests/member-project-booking/model.cjs": "605efbc338fa206297911b68f859913a91b5c5c1a091137bab0db2bb8b928824",
+    "tests/member-project-booking/booking-mysql.php": "ba0b99d6642f0e7d133a311c79601aed338978b35e50721940dfd6e6c4d2ea3c",
+    "tests/member-project-booking/native-check.py": "ad913053e4c03f317162559ca2cc9acbc232941ebec5a3fbc0484fe8336ef993",
+    "tests/member-project-booking/preview.cjs": "132c7fd85f8053f8879b9f5a3c69b70c0728115e21e7e6b153916752e8fd2622",
+    "scripts/m015-member-build.cjs": "20f27a53a9180ff73adb370095ce3dc5aedb6e3ea559e9047647ec7723ec4909"
+  },
+  "sourceGroups": {
+    "frontend": [
+      "前端代码/uniapp/pages/users/user_card/index.vue"
+    ],
+    "backend": [],
+    "migrations": [],
+    "tests": [
+      "tests/member-project-booking/model.cjs",
+      "tests/member-project-booking/booking-mysql.php",
+      "tests/member-project-booking/native-check.py",
+      "tests/member-project-booking/preview.cjs"
+    ],
+    "engineeringScripts": [
+      "scripts/m015-member-build.cjs"
+    ],
+    "generatedArtifacts": [
+      "/private/tmp/m015-project-booking-final-008-h5/output",
+      "/private/tmp/m015-project-booking-final-008-mp-weixin-retry2/output"
+    ],
+    "evidenceDirectory": "tests/member-project-booking/evidence"
+  },
+  "checks": {
+    "component": "PASS",
+    "mysqlBookingAndConfirmation": 25,
+    "durationRegression": 8,
+    "h5": {
+      "widths": [
+        320,
+        375
+      ],
+      "singleAndGiftCoverLoaded": true,
+      "bookingRouteBoundToOriginalDetail": true
+    },
+    "mini": {
+      "route": "pages/users/user_card/index",
+      "standalone": true,
+      "canReserve": true,
+      "cover": "https://myqiniu.cc3798.com/attach/2026/10/cdb38202610242231172909.jpg",
+      "detailId": 16651,
+      "button": {
+        "id": "",
+        "dataset": {
+          "eventOpts": [
+            [
+              "tap",
+              [
+                [
+                  "reserveStandaloneProject",
+                  [
+                    "$event"
+                  ]
+                ]
+              ]
+            ]
+          ]
+        },
+        "left": 201,
+        "right": 380,
+        "top": 668,
+        "bottom": 709,
+        "width": 179,
+        "height": 41
+      },
+      "image": {
+        "id": "",
+        "dataset": {},
+        "left": 10,
+        "right": 380,
+        "top": 12,
+        "bottom": 201,
+        "width": 370,
+        "height": 189
+      },
+      "width": 390,
+      "localFixtures": true,
+      "productionWrites": 0
+    },
+    "miniBooking": {
+      "route": "pages/activity/reservation/index",
+      "orderId": "6540",
+      "detailId": "16651",
+      "options": {
+        "orderId": "6540",
+        "cartInfoId": "16651"
+      },
+      "localFixtures": true,
+      "productionWrites": 0
+    },
+    "productionReadOnlyPreparation": {
+      "holderId": 6538,
+      "orderId": 6540,
+      "detailId": 16651,
+      "available": 1,
+      "duration": 60,
+      "storeId": 108,
+      "name": "八倍水动力",
+      "businessWrites": 0,
+      "submittedReservations": 0
+    }
+  },
+  "dataArchitecture": {
+    "authority": "Existing paid order/detail/holder; existing V3 booking lifecycle",
+    "eventsAndStatistics": "Unchanged. New UI calls only read endpoints before navigation. Existing booking/confirmation handlers retain facts and permissions.",
+    "writes": "Frontend source only; local DB fixtures rolled back. No production create/confirm/writeoff or asset changes.",
+    "snapshots": "Existing names, counts, validity and amounts preserved. Gift wrapper matched by issued project identity, never price/count/name guesses.",
+    "concurrency": "Preflight double-click guard; existing server ownership and lifecycle checks retained.",
+    "historicalCompatibility": "Existing cards keep the card-related booking path and original skin/repurchase action.",
+    "codeComments": [
+      "Standalone identity boundary",
+      "Ambiguous details cannot select a different right",
+      "Cover media has no entitlement meaning",
+      "Read-only preflight before booking navigation"
+    ]
+  },
+  "limits": [
+    "H5/mini runtime use local API fixtures; notifications mocked as declined in simulator to verify booking still opens. Production notification code unchanged.",
+    "008 real holder6538 preparation passed in a read-only transaction; no actual production booking submitted.",
+    "Legacy local booking reader fingerprint differs from008; production reader separately exercised successfully. V3 create/confirm/lifecycle fingerprints match008.",
+    "No commit, push, deployment or mini-program upload in this round."
+  ],
+  "status": "开发与自测完成，待产品经理确认固定版本验收"
+}
