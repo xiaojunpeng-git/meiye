@@ -1,0 +1,19 @@
+{
+  "site": "008",
+  "regressions": {
+    "basic_employee_summary": {
+      "total": 0,
+      "summaries_sha256": "0ef50d777f08403e683e6326bfce276d980a44d2790024317e972cc0e14ea37e"
+    },
+    "basic_salary_realtime": {
+      "total": 7,
+      "summaries_sha256": "b36537178b6efc9410322180f1e57442618d85b00a698e927d73869f89d6134a"
+    },
+    "basic_cross_store_settlement": {
+      "total": 0,
+      "summaries_sha256": "d4420eef304c4cd3e92f4ec567d17e67548772fa4496c5aa0d870f1750ffd98a"
+    }
+  },
+  "business_writes": 0,
+  "candidate_equals_existing": true
+}

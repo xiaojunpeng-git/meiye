@@ -169,7 +169,7 @@ final class CashierV3CheckoutOrderCouponServices
                 throw self::failure('order_coupon_binding_store_changed');
             }
             $coupon = $this->lockCoupon((int)$row['coupon_user_id'], (int)$header['member_id'],
-                (int)$header['store_id'], $now);
+                (int)$header['store_id'], $now, (string)$header['order_id']);
             if ((int)$coupon['use_mode'] !== StoreCouponOrderRule::ORDER
                 || (int)$coupon['category'] !== 1 || (int)$coupon['type'] !== 0
                 || (int)$coupon['coupon_type'] !== 1
@@ -214,17 +214,18 @@ final class CashierV3CheckoutOrderCouponServices
             'lineIds' => array_keys($lineTotals)];
     }
 
-    private function lockCoupon(int $id, int $memberId, int $storeId, int $now): array
+    private function lockCoupon(int $id, int $memberId, int $storeId, int $now, string $excludeOrderId = ''): array
     {
         $row = (array)Db::name('store_coupon_user')->alias('cu')
             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')->where('cu.id', $id)
-            ->field('cu.id,cu.uid,cu.cid,cu.coupon_title,cu.coupon_price,cu.status,cu.is_fail,cu.use_time,cu.start_time,cu.end_time,ci.category,ci.type,ci.coupon_type,ci.use_mode,ci.order_tiers_json,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id')
+            ->field('cu.original_recipient_uid,cu.issuance_store_id,ci.usage_target,ci.new_user_only,cu.id,cu.uid,cu.cid,cu.coupon_title,cu.coupon_price,cu.status,cu.is_fail,cu.use_time,cu.start_time,cu.end_time,ci.category,ci.type,ci.coupon_type,ci.use_mode,ci.order_tiers_json,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id')
             ->lock(true)->find();
         if (!$row || (int)$row['uid'] !== $memberId || (int)$row['status'] !== 0
             || (int)$row['is_fail'] !== 0 || (int)$row['use_time'] !== 0
             || (int)$row['start_time'] > $now
             || ((int)$row['end_time'] > 0 && (int)$row['end_time'] < $now)
             || !$this->allowsStore($row, $storeId)) throw self::failure('order_coupon_unavailable');
+        (new \app\services\activity\coupon\StoreCouponEligibilityServices())->assertUsable($row, $memberId, $storeId, $excludeOrderId);
         return $row;
     }
 

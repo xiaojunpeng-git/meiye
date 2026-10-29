@@ -1,0 +1,306 @@
+{
+  "round": 12,
+  "task": "010-R12-SURVEY",
+  "status": "awaiting_PM_supplementary_acceptance",
+  "base_head": "a7a5411b450e4ec3275dad64d825189c15ed3256",
+  "files": [
+    {
+      "path": "scripts/member-survey/build-admin-local.cjs",
+      "sha256": "45895d181f2cc1ec2c24dd77fbef4c96471945113b0bfc00df37a1f8a6746589"
+    },
+    {
+      "path": "scripts/member-survey/build-local.cjs",
+      "sha256": "f2cd26c08391c979defd1c40c3072b576b326425c974dc8a3acb2e6d12ed4d07"
+    },
+    {
+      "path": "scripts/member-survey/build-targets.cjs",
+      "sha256": "f8206541c18b16d49267034763da6cad8fe1c122416769be49f72b3f093bc6d6"
+    },
+    {
+      "path": "scripts/member-survey/install.php",
+      "sha256": "30eb9b8650d4b814268d9357ac9d7f11e851efadc194c087ea98bde0d2b90461"
+    },
+    {
+      "path": "scripts/member-survey/release-preflight.php",
+      "sha256": "2a49ec37ba6c0da922daac085d25f44113d4a5a1ade0b8314c0f193892e2cfba"
+    },
+    {
+      "path": "scripts/member-survey/release-prepare.py",
+      "sha256": "25e2062cb94bfd3887d303835dd259f8693900b9c75a4e2d11c6d068e2dcb99c"
+    },
+    {
+      "path": "scripts/member-survey/test-local.cjs",
+      "sha256": "2ed4f3620d66a578e7c98ccddd1d3ba0b5e78fa547164d7b36c5c55f72a35ba5"
+    },
+    {
+      "path": "tests/member-survey/callback-baseline.php",
+      "sha256": "fa5bf53f2613c45cb919273b9ea46ced6ad5abc4454eb606c69587a983b03201"
+    },
+    {
+      "path": "tests/member-survey/js/browser.cjs",
+      "sha256": "698e52336fc37ee008fb71303c4ecf44f2e2f1263624b50b47d5c9df475368cc"
+    },
+    {
+      "path": "tests/member-survey/js/decode-qr.m",
+      "sha256": "5b1c9bdb557a9875ae4e6624463e3f6bc46213f03a263aab3225f69d3dba6d61"
+    },
+    {
+      "path": "tests/member-survey/js/export.cjs",
+      "sha256": "446378bc09f62db3cbaf3a3fcba437de0e6f96c2db7ab0f0393b82f65d58ca7e"
+    },
+    {
+      "path": "tests/member-survey/js/h5-runtime.cjs",
+      "sha256": "8eaa2614aab39b2a9d2e2cdcbbe4d467a7f185c936a1e73ae55c1fdb2a338c62"
+    },
+    {
+      "path": "tests/member-survey/php/concurrent-worker.php",
+      "sha256": "ec4b2e050741925c852ac1600dc0becbd3d8f2e56a5d03a58236f98b78027096"
+    },
+    {
+      "path": "tests/member-survey/php/local-business.php",
+      "sha256": "b56533900d330464d2cfd317594648ec5d9cbef6f030813f63f505f5c8b36dd0"
+    },
+    {
+      "path": "前端代码/admin/src/api/memberSurvey.js",
+      "sha256": "f70dbcc0e60fcc990c34f435ec2b084badc76f5dd529d1c7966669ad5095bf38"
+    },
+    {
+      "path": "前端代码/admin/src/components/memberSurveyReward/index.vue",
+      "sha256": "d01ce645c4aaaee91d295e46f0622a2df13b73822644e7e66b3ac907c7752184"
+    },
+    {
+      "path": "前端代码/admin/src/pages/user/survey/index.vue",
+      "sha256": "8d2d775d091ef86528088fd24965ce1914ee9299263bc3cef01d1d225cd8e015"
+    },
+    {
+      "path": "前端代码/admin/src/router/modules/user.js",
+      "sha256": "d71d9812268f07938a797f61a9630e69c4225454a7ffedb8349f4ec4801552d6"
+    },
+    {
+      "path": "前端代码/admin/src/utils/memberSurveyExcel.js",
+      "sha256": "fb01242e316ad6ecb15ae03a6a0b424291d38dbfdb29152e4aef231b136c2fee"
+    },
+    {
+      "path": "前端代码/admin/src/utils/requiredGuidance.js",
+      "sha256": "d6d9128aab08dbe1bc32f7778655924f1dc11bca66be0ef387d3f2e2878035a6"
+    },
+    {
+      "path": "前端代码/uniapp/App.vue",
+      "sha256": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6"
+    },
+    {
+      "path": "前端代码/uniapp/api/memberSurvey.js",
+      "sha256": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca"
+    },
+    {
+      "path": "前端代码/uniapp/components/requiredFieldGuide/index.vue",
+      "sha256": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b"
+    },
+    {
+      "path": "前端代码/uniapp/libs/login.js",
+      "sha256": "c6f290a5bb8b032c03e27673fb960f966ebb69e2324b4b699f8cbcfb7ab7c9a1"
+    },
+    {
+      "path": "前端代码/uniapp/pages.json",
+      "sha256": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56"
+    },
+    {
+      "path": "前端代码/uniapp/pages/users/survey/index.vue",
+      "sha256": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167"
+    },
+    {
+      "path": "前端代码/uniapp/utils/memberPhoneGate.js",
+      "sha256": "f3080bf7f35086444a9420e20a3bcdb4d2f3f83e91717f215df1a290832fc1da"
+    },
+    {
+      "path": "前端代码/uniapp/utils/memberSurveyReminder.js",
+      "sha256": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/user/MemberSurvey.php",
+      "sha256": "4d08141a9b315ff014733e32479168b4fc8aa46393b4645f69f436fdc2887e4e"
+    },
+    {
+      "path": "后端代码/app/controller/api/v1/user/MemberSurvey.php",
+      "sha256": "30db202ea17323469ce321a0a2eb19931a4e98f43c381a0bfcfc169369c0920f"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeGiftIssuanceServices.php",
+      "sha256": "2e8e45a40118adb98c9eef441d78794e7ace839a111f068a74bd5394dc522dcc"
+    },
+    {
+      "path": "后端代码/app/services/user/MemberSurveyAccessPolicy.php",
+      "sha256": "b1b9eb49b41ad739c34af38dbc796b3df7558cb9f3a5fe2131ddc767bdc9ee03"
+    },
+    {
+      "path": "后端代码/app/services/user/MemberSurveyGiftServices.php",
+      "sha256": "f96b30ecc997ee91718461bf70ffda39e45bcf4ba3638cb4f7aa369d8bb24d8b"
+    },
+    {
+      "path": "后端代码/app/services/user/MemberSurveyRewardConfigurationServices.php",
+      "sha256": "c1bc93bd5273f593f8b66c22dded60ba70419a8774ac7760f559a7788d404f36"
+    },
+    {
+      "path": "后端代码/app/services/user/MemberSurveyServices.php",
+      "sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca"
+    },
+    {
+      "path": "后端代码/config/member_survey.php",
+      "sha256": "23091410d41d7f145f847dfa49de642387e1fe0f0cd57f184e6d683654bd61f3"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-29-会员调查/01-schema.sql",
+      "sha256": "d89607d1a89fd0abfaf4ddfacc5c834381ede1031d2a2a98045daa0d9cae28f5"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-29-会员调查/02-menu.sql",
+      "sha256": "7878814547646fdb9fa5e22173eac61b4b059846b3503fd8ed8b52cb0088e673"
+    },
+    {
+      "path": "后端代码/route/admin.php",
+      "sha256": "0f2568fdc11cc2dd4d6d932552e4d62349eb123d544b35c18dbe8c7bcf490f60"
+    },
+    {
+      "path": "后端代码/route/api.php",
+      "sha256": "bae05392b488bc3c7b21ea1b7b85bd8377127fad095152bcedd6218b03453b44"
+    }
+  ],
+  "builds": {
+    "admin": {
+      "proof": "tests/customer-010/evidence/round12-member-survey/admin-build.json",
+      "proof_sha256": "289c182cfac29ddfa859fe5bdcfa1d63577882fa42e1facd9118dcafb0da7365",
+      "output": "/tmp/r12-survey-admin-final",
+      "files": 1234,
+      "source_inputs": {
+        "src/pages/user/survey/index.vue": "8d2d775d091ef86528088fd24965ce1914ee9299263bc3cef01d1d225cd8e015",
+        "src/components/memberSurveyReward/index.vue": "d01ce645c4aaaee91d295e46f0622a2df13b73822644e7e66b3ac907c7752184",
+        "src/utils/memberSurveyExcel.js": "fb01242e316ad6ecb15ae03a6a0b424291d38dbfdb29152e4aef231b136c2fee",
+        "src/utils/requiredGuidance.js": "d6d9128aab08dbe1bc32f7778655924f1dc11bca66be0ef387d3f2e2878035a6",
+        "src/api/memberSurvey.js": "f70dbcc0e60fcc990c34f435ec2b084badc76f5dd529d1c7966669ad5095bf38",
+        "src/router/modules/user.js": "d71d9812268f07938a797f61a9630e69c4225454a7ffedb8349f4ec4801552d6"
+      }
+    },
+    "rh": {
+      "proof": "tests/customer-010/evidence/round12-member-survey/member-build-h5-rh.json",
+      "proof_sha256": "350bce801bfff620a29dbb50fd776d7700fd626603eb9c248c957801f0fe0b1e",
+      "output": "/tmp/r12-survey-member-h5-rh",
+      "files": 511,
+      "source_inputs": {
+        "App.vue": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6",
+        "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+        "api/memberSurvey.js": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca",
+        "pages/users/survey/index.vue": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167",
+        "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+        "utils/memberPhoneGate.js": "f3080bf7f35086444a9420e20a3bcdb4d2f3f83e91717f215df1a290832fc1da",
+        "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+        "libs/login.js": "c6f290a5bb8b032c03e27673fb960f966ebb69e2324b4b699f8cbcfb7ab7c9a1"
+      }
+    },
+    "008": {
+      "proof": "tests/customer-010/evidence/round12-member-survey/member-build-h5-008.json",
+      "proof_sha256": "048ff1c2bece7e7e6f65ff5674221932b94e127e9621445b833cf4b440b90834",
+      "output": "/tmp/r12-survey-member-h5-008",
+      "files": 511,
+      "source_inputs": {
+        "App.vue": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6",
+        "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+        "api/memberSurvey.js": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca",
+        "pages/users/survey/index.vue": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167",
+        "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+        "utils/memberPhoneGate.js": "f3080bf7f35086444a9420e20a3bcdb4d2f3f83e91717f215df1a290832fc1da",
+        "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+        "libs/login.js": "c6f290a5bb8b032c03e27673fb960f966ebb69e2324b4b699f8cbcfb7ab7c9a1"
+      }
+    },
+    "010": {
+      "proof": "tests/customer-010/evidence/round12-member-survey/member-build-h5-010.json",
+      "proof_sha256": "11a540e733c2abbec86bbd6eb3300ce4abcbaaf7bc025274268b9ec5e135a09c",
+      "output": "/tmp/r12-survey-member-h5-010",
+      "files": 511,
+      "source_inputs": {
+        "App.vue": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6",
+        "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+        "api/memberSurvey.js": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca",
+        "pages/users/survey/index.vue": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167",
+        "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+        "utils/memberPhoneGate.js": "f3080bf7f35086444a9420e20a3bcdb4d2f3f83e91717f215df1a290832fc1da",
+        "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+        "libs/login.js": "c6f290a5bb8b032c03e27673fb960f966ebb69e2324b4b699f8cbcfb7ab7c9a1"
+      }
+    }
+  },
+  "asset_manifest_sha256": "46b45cb8c2f73d240ffc78d0a41c1c919bfb5862dc944f4d434dda7f5fa1b604",
+  "checks": {
+    "business": {
+      "passed": true,
+      "count": 52,
+      "evidence_sha256": "636342e94e5b739dd589ec663fb893199b69dee72f89b4cfd8bf3570421a6d93"
+    },
+    "browser": {
+      "passed": true,
+      "count": 14,
+      "evidence_sha256": "56ab432baf2583310aebe1043b7d5b9956bf891127c8e6c8682b795cf711fccc"
+    },
+    "export": {
+      "passed": true,
+      "count": 6,
+      "evidence_sha256": "3636dce398d1af2e94d9832e54ebedf18902701fe9e4cf8927e2f9cf51e52e7c"
+    },
+    "h5-runtime": {
+      "passed": true,
+      "count": 4,
+      "evidence_sha256": "e443c700408b3b906953f28ea39974492a6f6cb3d5e99a8dac2056572ea52bf2"
+    }
+  },
+  "preserved_baselines": [
+    "R72商品库存/停用卡项编辑",
+    "R65已上线富友回调路由",
+    "R68已上线会员拼团入口路由及控制器",
+    "保留现有joined_count聚合修复"
+  ],
+  "supplement_changes": [
+    "preserve deployed accepted baseline",
+    "installer local scope and native MySQL compatibility; restricted fixture DB account",
+    "independent entry parameter, login return URL and draft preservation",
+    "clean own stale build output and wait for full H5 compilation"
+  ],
+  "scope": [
+    "007会员调查完整功能迁移",
+    "任务专属二维码公开填写，提交按会员认证和轮次防重",
+    "010项目、实物、优惠券赠送权威，失败待发可重试"
+  ],
+  "instances_configuration": [
+    {
+      "site": "rh",
+      "env_section": "MEMBER_SURVEY",
+      "key": "MEMBER_H5_URL",
+      "value": "https://rh.cc3798.com",
+      "reason": "明确会员H5入口，不能误用008带/admin的平台site_url"
+    },
+    {
+      "site": "008",
+      "env_section": "MEMBER_SURVEY",
+      "key": "MEMBER_H5_URL",
+      "value": "https://008.cc3798.com",
+      "reason": "明确会员H5入口，不能误用008带/admin的平台site_url"
+    },
+    {
+      "site": "010",
+      "env_section": "MEMBER_SURVEY",
+      "key": "MEMBER_H5_URL",
+      "value": "https://010.cc3798.com",
+      "reason": "明确会员H5入口，不能误用008带/admin的平台site_url"
+    }
+  ],
+  "deployment_order": [
+    "rh verify",
+    "push",
+    "008 verify",
+    "010 verify"
+  ],
+  "online_writes_performed": false,
+  "feature_commit": null,
+  "mini_program_uploads_authorized": false,
+  "local_ruihao_recovery": "Still pending user choice; source schema-only synthetic tests do not replace or restore that data.",
+  "fingerprint": "b47316466b858c6e8583f22c5fac01f28f49574d55d7f7e2cfe79367fe400729"
+}

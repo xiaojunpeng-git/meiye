@@ -1,0 +1,19 @@
+{
+  "reported_ui": "Creating a task appears to fail and task list remains empty",
+  "captured_request": "GET /adminapi/user/survey?page=1&limit=20",
+  "http_status": 500,
+  "api_status": 400,
+  "error": "Unknown column 'source' in 'where clause'",
+  "root_cause": "total_answer_count queried a nonexistent source column on member_survey_answer; source belongs only to member_survey_target",
+  "save_was_successful": true,
+  "existing_010_task_ids": [
+    1,
+    2
+  ],
+  "no_user_tasks_deleted_or_recreated": true,
+  "regression_test_red": {
+    "query": "listTasks after first saved draft",
+    "error_reproduced": true,
+    "original_backend_sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca"
+  }
+}

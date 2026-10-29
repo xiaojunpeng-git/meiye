@@ -178,7 +178,8 @@ class StoreProductDao extends BaseDao
                     $query->where('type', '<>', 2);
                 }
             })->when(isset($where['choose_type']) && $where['choose_type'], function ($query) use ($where) {
-                $query->where('is_presale_product', 0)->where('is_vip_product', 0);
+                // 优惠券选品继承原券选择器的商品范围，不额外排除预售/会员商品。
+                if ((int)$where['choose_type'] !== 98) $query->where('is_presale_product', 0)->where('is_vip_product', 0);
                 switch ($where['choose_type']) {
                     case 1://秒杀
                     case 2://砍价
@@ -215,6 +216,9 @@ class StoreProductDao extends BaseDao
                         break;
                     case 96://院装配方项目选择：仅项目（预约）商品
                         $query->where('product_type', 6);
+                        break;
+                    case 98://优惠券绑定商品主数据，类型与分页总数由后端同一查询限定
+                        $query->whereIn('product_type', [0, 4, 5, 6]);
                         break;
                     case 97://平台卡项项目选择：只取平台项目主数据，不混入产品或其他卡项
                         $query->where('product_type', 6);

@@ -1,0 +1,44 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+  "files": 1271,
+  "survey_tables": 7,
+  "existing_grants_unchanged": true,
+  "application_privileges_unchanged": true,
+  "empty_task_query": {
+    "list": [],
+    "count": 0
+  },
+  "empty_questionnaire_query": {
+    "list": [],
+    "count": 0
+  },
+  "unauthorized_management_denied": true,
+  "business_rows_written": 0,
+  "backup": "/www/backups/010/round12-d76a8ce44b96-20261029120726",
+  "http_checks": [
+    "public/system.html",
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.942a6c40.js",
+    "/view_admin/js/app.2aa59cde.js",
+    "public/index.html",
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.d15b3443.js",
+    "/static/js/index.5ff73196.js",
+    {
+      "url": "/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff",
+      "status": 400
+    },
+    {
+      "url": "/api/survey/1",
+      "status": 410000
+    },
+    {
+      "url": "/adminapi/user/survey",
+      "status": 410000
+    }
+  ],
+  "frontend_entries_verified": true
+}

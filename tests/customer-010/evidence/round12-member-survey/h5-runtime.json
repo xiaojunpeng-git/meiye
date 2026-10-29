@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "checks": [
+    "实际H5微信浏览器环境公开任务可打开",
+    "未登录浏览不抢先OAuth",
+    "真实必填定位可用",
+    "填写后提交进入登录"
+  ],
+  "browser_errors": [],
+  "api_requests": [
+    "/api/wechat/get_logo",
+    "/api/get_copyright",
+    "/api/v2/diy/color_change/color_change",
+    "/api/v2/diy/product_detail",
+    "/api/agent/brokerage",
+    "/api/survey/entry/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "/api/get_copyright"
+  ]
+}

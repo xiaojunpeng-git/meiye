@@ -1,0 +1,109 @@
+{
+  "result": "PASS",
+  "rows": 8,
+  "existing_values_unchanged": true,
+  "visible_columns": [
+    "门店",
+    "职务",
+    "姓名",
+    "现金业绩",
+    "劳动业绩",
+    "客数",
+    "客单价",
+    "项目数",
+    "指定客",
+    "服务总新客",
+    "成交总新客",
+    "新客成交率%"
+  ],
+  "complete": false,
+  "new_customer_gap_messages": {
+    "原销售客源不能与原统计客源唯一核实": 7
+  },
+  "remote_writes": 0,
+  "deployed": false,
+  "source_baseline_sha256": "6a25e4476941341f2675438f3cc45fe8746645e1a40ef977f1cb909bdd06ad6e",
+  "query_plans": {
+    "cashier_v3_sale_fact": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "eb_cashier_v3_sale_fact",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "uk_tenant_natural,idx_scope_date_status,idx_org_date,idx_member_date,idx_order_line,idx_item_date,idx_reversal,idx_business_source_date,idx_tenant_source_line_order",
+        "key": "idx_order_line",
+        "key_len": "100",
+        "ref": null,
+        "rows": 50,
+        "filtered": 1.0000001192092896,
+        "Extra": "Using index condition; Using where"
+      }
+    ],
+    "cashier_v3_performance_fact": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "eb_cashier_v3_performance_fact",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "uk_tenant_natural,idx_scope_type_date,idx_org_date,idx_member_date,idx_employee_date,idx_order_line,idx_reversal,idx_business_source_date,idx_tenant_source_line_type_status,idx_group_dashboard_daily_rebuild,idx_service_employee_project_count,idx_service_employee_project_decimal",
+        "key": "idx_order_line",
+        "key_len": "100",
+        "ref": null,
+        "rows": 154,
+        "filtered": 1.0000001192092896,
+        "Extra": "Using index condition; Using where"
+      }
+    ],
+    "cashier_v3_payment_fact": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "eb_cashier_v3_payment_fact",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "uk_tenant_natural,idx_scope_method_date,idx_org_date,idx_member_date,idx_order_line,idx_payment_authority,idx_reversal,idx_business_source_date",
+        "key": "idx_order_line",
+        "key_len": "100",
+        "ref": null,
+        "rows": 37,
+        "filtered": 1.0000001192092896,
+        "Extra": "Using index condition; Using where"
+      }
+    ],
+    "cashier_v3_card_sale_item_allocation_fact": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "eb_cashier_v3_card_sale_item_allocation_fact",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "uk_tenant_item_natural,uk_tenant_receipt_item,idx_scope_item,idx_scope_category,idx_sale_fact,idx_order_line",
+        "key": "idx_scope_item",
+        "key_len": "42",
+        "ref": "const,const",
+        "rows": 1,
+        "filtered": 25,
+        "Extra": "Using index condition; Using where"
+      }
+    ],
+    "cashier_v3_sales_order_line": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "eb_cashier_v3_sales_order_line",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "uk_tenant_natural,uk_order_checkout_line,uk_checkout_line,idx_order_line,idx_scope_item,idx_member_order,idx_reversal",
+        "key": "uk_order_checkout_line",
+        "key_len": "100",
+        "ref": null,
+        "rows": 50,
+        "filtered": 1.0000001192092896,
+        "Extra": "Using index condition; Using where"
+      }
+    ]
+  },
+  "elapsed_seconds_including_ssh": 1.272
+}

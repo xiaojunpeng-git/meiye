@@ -116,7 +116,9 @@ class StoreCouponIssue extends AuthController
             ['applicable_type', 1],//适用门店类型
             ['applicable_store_id', []],//适用门店IDS
             ['rule', ''],
-            ['allow_transfer', 0],//是否允许会员转赠
+            ['allow_transfer', 0],
+            ['usage_target', 0],
+            ['new_user_only', 0],//仅限无历史消费的实际用券人
             ['use_mode', StoreCouponOrderRule::DETAIL],//明细券或整单门槛券
             ['order_tiers', []],//整单应收档位与全单张数
         ]);
@@ -263,6 +265,7 @@ class StoreCouponIssue extends AuthController
             ['allow_transfer', 0],
         ], true);
         $allowTransfer = (int)$allowTransfer === 1 ? 1 : 0;
+        if (!$allowTransfer && (int)($info->usage_target ?? 0) === 1) return $this->fail('他人券必须保留会员转赠');
         // Generic transfer has no allowance ledger ownership transition.
         if ((int)$info->coupon_type === 3 && $allowTransfer) return $this->fail('多次抵用券暂不支持转赠');
         if (!$this->services->update($id, ['allow_transfer' => $allowTransfer])) {

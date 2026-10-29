@@ -44,6 +44,9 @@ final class ThinkPhpCashierV3SalesOrderAuthorityWriter implements CashierV3Sales
             return $this->result($plan, $existing, true, 0, 0);
         }
 
+        // All purchases serialize on the member before writing a first-consumption fact.
+        // This also prevents two concurrent new-user coupon sales from both qualifying.
+        (new \app\services\activity\coupon\StoreCouponEligibilityServices())->lockMember((int)$header['member_id']);
         $headerRow = $header;
         $headerRow['add_time'] = (int)$header['recorded_at'];
         $headerRow['update_time'] = (int)$header['recorded_at'];

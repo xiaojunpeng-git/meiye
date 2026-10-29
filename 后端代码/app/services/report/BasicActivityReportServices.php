@@ -91,6 +91,24 @@ final class BasicActivityReportServices
                 'summable'=>($isMoney && !in_array($key,['employee_balance_performance','balance_amount','labor_unit_price'],true)) || in_array($key, ['quantity','project_count','sales_quantity','service_visits','point_visits'], true),
             ];
         }
+        // 仅员工统计表按007固定列名/顺序展示；旧键保留给既有筛选与表达式，不扩散到其他报表。
+        if ($kind === 'employee') {
+            $order = ['store_name'=>'门店','position_name'=>'职务','employee_name'=>'姓名',
+                'sales_performance'=>'现金业绩','labor_performance'=>'劳动业绩','service_visits'=>'客数',
+                'labor_unit_price'=>'客单价','project_count'=>'项目数','point_visits'=>'指定客',
+                'new_customer_total'=>'服务总新客','new_customer_converted'=>'成交总新客','new_customer_conversion_rate'=>'新客成交率%'];
+            $byKey = array_column($fields, null, 'key'); $ordered = [];
+            foreach ($order as $key=>$label) {
+                $field = $byKey[$key] ?? ['key'=>$key,'type'=>$key==='new_customer_conversion_rate'?'integer':'decimal','defaultQuick'=>false,'width'=>150,
+                    'money'=>false,'summable'=>$key!=='new_customer_conversion_rate'];
+                $field['label']=$label; $field['defaultVisible']=true;
+                $field['fixed']=in_array($key,['store_name','position_name','employee_name'],true)?'left':'';
+                if($field['fixed']==='left')$field['width']=['store_name'=>100,'position_name'=>100,'employee_name'=>130][$key];
+                $ordered[]=$field; unset($byKey[$key]);
+            }
+            foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
+            $fields=$ordered;
+        }
         return $fields;
     }
 
@@ -135,7 +153,14 @@ final class BasicActivityReportServices
             if ($field['key']==='labor_commission') foreach ($rows as $row) if ($row['labor_commission']===null) $field['summable']=false;
         }
         unset($field);
+        $newCustomerGaps=[];
+        if ($kind==='employee') {
+            foreach($rows as$row)foreach($row['new_customer_gaps']??[]as$message)$newCustomerGaps[]=['row_id'=>$row['row_id'],'code'=>'EMPLOYEE_NEW_CUSTOMER_SOURCE_UNAVAILABLE','message'=>$message];
+            if($newCustomerGaps)foreach($fields as&$field)if(in_array($field['key'],['new_customer_total','new_customer_converted'],true))$field['summable']=false;
+            unset($field);
+        }
         return ['rows'=>$rows, 'fields'=>$fields, 'field_sources'=>$sources,
+            'complete'=>$newCustomerGaps===[], 'gaps'=>$newCustomerGaps,
             'sum_fields'=>array_column(array_filter($fields, static function ($f) { return $f['summable']; }), 'key'),
             'metric_version'=>'r51-activity-v1', 'coverage_start'=>StoreUnifiedReportServices::COVERAGE_START,
             'data_as_of'=>date('c'), 'scope'=>['store_ids'=>$stores, 'date_range'=>$range],
@@ -271,10 +296,12 @@ final class BasicActivityReportServices
     {
         $rows = [];
         if (in_array($kind, ['employee','employee_item','performance'], true)) {
-            $sales = (new StoreSalespersonNetReadServices())->detail($stores, $range, $employees, 0, 1, 20, true)['records'];
+            $sales = (new StoreSalespersonNetReadServices())->detail($stores, $range, $kind==='employee'?[]:$employees, 0, 1, 20, true)['records'];
             $this->checkSize($sales);
             $enriched = $this->salesPersonnelSnapshots($stores, array_column($sales, 'fact_id'));
             foreach ($sales as $fact) {
+                // 新客均分先保留所有同单员工；已有金额行仍只投影认证范围内的本人。
+                if ($kind==='employee' && $employees && !in_array((int)$fact['employee_id'],$employees,true)) continue;
                 $extra = $enriched[$fact['fact_id']] ?? [];
                 if ($kind === 'employee_item' && (($extra['source_type'] ?? '') !== 'project' || $fact['performance_type'] !== 'sales_performance_allocated')) continue;
                 $row = $this->person($fact) + $this->item($extra + $fact) + [
@@ -307,7 +334,7 @@ final class BasicActivityReportServices
                 $this->appendPersonnel($rows, $row, $kind);
             }
         }
-        if ($kind === 'employee') return $this->employeeSummary($rows, $stores, $range, $employees);
+        if ($kind === 'employee') return $this->employeeSummary($rows, $stores, $range, $employees, $sales ?? []);
         if ($kind === 'employee_home') return $this->homeStores(array_values($rows), $stores);
         return array_values($rows);
     }
@@ -318,7 +345,7 @@ final class BasicActivityReportServices
      * before the Reader has determined their shares. Zero-value services can introduce
      * a legitimate employee row even without a monetary performance fact.
      */
-    private function employeeSummary(array $rows, array $stores, array $range, array $employees): array
+    private function employeeSummary(array $rows, array $stores, array $range, array $employees, array $sales): array
     {
         $reader = new RegisteredMetricReadServices(null, null, null, null, true);
         $visits = [];
@@ -341,6 +368,7 @@ final class BasicActivityReportServices
             $pair = ['store_id'=>(int)$row['store_id'], 'employee_id'=>(int)$row['employee_id']];
             $pairs[] = $pair; $byStore[$pair['store_id']][] = $pair;
         }
+        $newCustomers = (new EmployeeSummaryNewCustomerReadServices())->read($stores, $range, $sales);
         $positions = (new EmployeeCurrentPositionDimensionServices())->resolve($pairs);
         $levels = PayrollAlgorithmPolicy::independentPositions() ? [] : $this->employeeCurrentLevels($pairs);
         $commissions=PayrollAlgorithmPolicy::calculated() ? (new ProjectLaborCommissionReadServices($reader))->read($stores,$range,$employees)['totals'] : [];
@@ -355,6 +383,12 @@ final class BasicActivityReportServices
         }
         foreach ($rows as $key=>&$row) {
             $pairKey = $row['store_id'].'|'.$row['employee_id'];
+            $cohort=$newCustomers[$row['store_id'].':'.$row['employee_id']] ?? ['total_hundredths'=>0,'converted_hundredths'=>0,'gaps'=>[]];
+            $row['new_customer_gaps']=$cohort['gaps'];
+            $row['new_customer_total']=$cohort['gaps'] ? null : $cohort['total_hundredths']/100;
+            $row['new_customer_converted']=$cohort['gaps'] ? null : $cohort['converted_hundredths']/100;
+            $row['new_customer_conversion_rate']=$cohort['gaps']
+                ? null : EmployeeSummaryNewCustomerReadServices::rate($cohort['converted_hundredths'],$cohort['total_hundredths']);
             $row['position_name'] = $positions[$pairKey] ?? null;
             $row['position_level_name'] = $levels[$pairKey] ?? null;
             if (PayrollAlgorithmPolicy::calculated()) {
@@ -665,6 +699,9 @@ final class BasicActivityReportServices
             'labor_commission'=>'按本人本门店自然月净销售业绩匹配各项目配置比例，乘该项目已分配劳动业绩后汇总；跨月分别计算。仅为预计，不代表锁薪。',
             'commission_status'=>'所有项目规则均明确时显示预计完成；缺配置、重复配置或项目关联缺失时显示具体待核对原因。',
             'project_count'=>'服务完成时最终分给该员工的项目数，保留小数；非金额数字。',
+            'new_customer_total'=>'本表沿用原员工统计口径：纳入原客源范围、排除合作项目及旧卡录入/纯欠款的有效销售客。会员在同店同日去重后按销售参与人均分；游客与朋友按每条人员销售记录计次。与工资表首次全款疗程卡新客不同。历史原客源、卡内项目或服务对象缺少可核实事实时显示“-”，不把缺失当作0。',
+            'new_customer_converted'=>'上述客源范围内会员订单初次成功记账收款达到298元的成交客，按同店同日与销售参与人分配；退款或作废订单排除，不用后续补交把原成交日重新落档。',
+            'new_customer_conversion_rate'=>'本行成交总新客除以服务总新客乘100，沿用原公式取整数百分数；没有新客时为0，来源待核对时显示“-”，不相加或取平均作为合计。',
             'sales_quantity'=>'直接销售项目数量乘原销售分配权重；只计有效销售分配，不把补交或退款当成再次销售；非金额数字。',
             'category_path'=>'由已核实的品项身份关联平台商品当前分类；无法核实则留空，不按名称猜测。',
             'cash_amount'=>'查询业务日期内成功记账收款分给该销售明细的金额，不按人数重复显示。',

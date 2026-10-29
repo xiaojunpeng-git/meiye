@@ -45,7 +45,7 @@ function prePage() {
 
 export const toLogin = Debounce(_toLogin, 800)
 
-function _toLogin(push, pathLogin) {
+function _toLogin(push, pathLogin, returnUrl) {
 	// #ifdef H5
 	if (isWeixin()) {
 		if (!uni.getStorageSync('authIng')) {
@@ -66,7 +66,16 @@ function _toLogin(push, pathLogin) {
 
 	if (!pathLogin)
 		pathLogin = '/page/users/login/index'
+	// 公开任务登录后返回原深链；只接收应用内路径，不允许外站跳转。
+	if (typeof returnUrl === 'string' && /^\/pages\/[a-zA-Z0-9_/?=&%.-]+$/.test(returnUrl)) path = returnUrl;
 	Cache.set('login_back_url', path);
+	// #ifdef H5
+	// 显式深链返回的业务先到标准微信登录页；不要在问卷URL上附加OAuth code或覆盖任务参数。
+	if (returnUrl && /^\/pages\/[a-zA-Z0-9_/?=&%.-]+$/.test(returnUrl) && isWeixin()) {
+		uni.navigateTo({ url: '/pages/users/wechat_login/index' });
+		return;
+	}
+	// #endif
 	let wechatStatus = uni.getStorageSync('wechatStatus');
 	const BASIC_CONFIG = Cache.get('BASIC_CONFIG')
 	// #ifdef H5
@@ -94,7 +103,10 @@ function _toLogin(push, pathLogin) {
 
 	// #ifdef MP
 	let url
-	if (!BASIC_CONFIG.wechat_auth_switch) {
+	// 问卷提交要求已授权手机号，显式返回问卷时统一走现有强制手机号授权页。
+	if (returnUrl && /^\/pages\/[a-zA-Z0-9_/?=&%.-]+$/.test(returnUrl)) {
+		url = '/pages/users/wechat_login/index'
+	} else if (!BASIC_CONFIG.wechat_auth_switch) {
 		url = '/pages/users/binding_phone/index?pageType=0'
 	} else {
 		url = '/pages/users/wechat_login/index'

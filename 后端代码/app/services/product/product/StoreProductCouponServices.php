@@ -131,7 +131,8 @@ class StoreProductCouponServices extends BaseServices
             if ($couponIds) {
                 /** @var StoreCouponIssueServices $storeCoupon */
                 $storeCoupon = app()->make(StoreCouponIssueServices::class);
-                $list = $storeCoupon->orderPayGiveCoupon($uid, $couponIds);
+                // Order gifts inherit the order store even for platform-issued templates.
+                $list = $storeCoupon->orderPayGiveCoupon($uid, $couponIds, (int)($order['store_id'] ?? 0));
                 if ($list) {
                     $ids = array_column($list, 'cid');
                     $coupons = $storeCoupon->getColumn(['id' => $ids], 'id,coupon_type', 'id');

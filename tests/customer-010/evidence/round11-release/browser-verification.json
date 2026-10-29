@@ -1,0 +1,15 @@
+{
+  "010": {
+    "authenticated_user": "A0751",
+    "new_report_without_leaf_grant": "not listed in menu / direct route refuses data",
+    "store_grant_tree": "基础报表→门店对账单 exists and unchecked",
+    "platform_grant_tree": "报表→门店统计→门店对账单 exists and unchecked; legacy same-name entry remains separate",
+    "changes_saved": false,
+    "cancelled_editor": true,
+    "existing_employee_report_actual_query_click": "PASS"
+  },
+  "rh": {
+    "existing_browser_session_direct_new_route": "403, independent permission preserved"
+  },
+  "limitation": "No real account was granted new report access for this release; authorized positive business behavior verified through real deployed Host/Reader and export, not claimed as an authorized-account full UI test."
+}

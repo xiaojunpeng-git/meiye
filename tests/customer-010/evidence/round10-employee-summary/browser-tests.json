@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "checks": {
+    "headersExact": true,
+    "extraColumnsHidden": true,
+    "pageTwo": true,
+    "tenRowsOnSecondPage": true,
+    "nextDisabled": true,
+    "sourceGuide298": true,
+    "originalIntegerRate": true,
+    "missingSourceExplained": true
+  },
+  "scope": "real Vue + real PHP/SQL/Host anonymous fixture; not production deployment"
+}

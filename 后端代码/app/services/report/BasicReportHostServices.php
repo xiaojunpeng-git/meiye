@@ -36,7 +36,11 @@ final class BasicReportHostServices
     {
         return array_map(static function ($entry) {
             $business = $entry['code'] !== BasicRegistrationQueryProvider::PAGE_CODE;
-            return $entry + ['available' => true, 'queryFields' => $business ? BasicBusinessReportServices::fields($entry['code']) : []];
+            // 门店对账的授权后动态门店/逐日列由独立Provider声明，不冒充固定粒度Reader。
+            $fields = $entry['code'] === StoreReconciliationReportServices::CODE
+                ? (new StoreReconciliationReportServices())->definitions($entry['code'])
+                : ($business ? BasicBusinessReportServices::fields($entry['code']) : []);
+            return $entry + ['available' => true, 'queryFields' => $fields];
         }, BasicReportCatalogServices::entries());
     }
 

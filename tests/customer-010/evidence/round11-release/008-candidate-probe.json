@@ -1,0 +1,32 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "candidate": true,
+  "report": "basic_store_reconciliation",
+  "matrix_rows": 10,
+  "matrix_columns": 132,
+  "daily_columns": 32,
+  "detail_checks": 1,
+  "export_rows": 10,
+  "query_seconds": 0.03656816482543945,
+  "matrix_sha256": "d38c3ef2bae4e8018226087e00d1bab84fb1fe8412ec663708fb6cba6c6c5867",
+  "regressions": {
+    "basic_employee_summary": {
+      "total": 0,
+      "summaries_sha256": "0ef50d777f08403e683e6326bfce276d980a44d2790024317e972cc0e14ea37e"
+    },
+    "basic_salary_realtime": {
+      "total": 7,
+      "summaries_sha256": "b36537178b6efc9410322180f1e57442618d85b00a698e927d73869f89d6134a"
+    },
+    "basic_cross_store_settlement": {
+      "total": 0,
+      "summaries_sha256": "d4420eef304c4cd3e92f4ec567d17e67548772fa4496c5aa0d870f1750ffd98a"
+    }
+  },
+  "mode": 0,
+  "position_model": "legacy",
+  "cutover": "",
+  "business_writes": 0,
+  "authenticated_http_session": false
+}

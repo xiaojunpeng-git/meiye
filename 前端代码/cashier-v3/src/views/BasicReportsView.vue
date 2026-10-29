@@ -10,6 +10,7 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
 import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
@@ -39,6 +40,8 @@ const salaryDraft = ref(null)
 const salarySaving = ref(false)
 const freezeDialog = ref(null)
 const salaryReport = computed(() => active.value?.code === 'basic_salary_realtime')
+const reconciliationReport = computed(() => active.value?.code === 'basic_store_reconciliation')
+const reconciliationModal = ref(false)
 const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
 const today = ['year', 'month', 'day'].map(type => todayParts.find(part => part.type === type).value).join('-')
 const dates = ref({ start_date: today.slice(0, 7) + '-01', end_date: today, as_of_date: today })
@@ -74,6 +77,8 @@ function resetReportDates(code) {
 /** 在途旧响应不能覆盖新的组织筛选、页码或已退出的报表。 */
 async function run(next = query.value) {
   if (!active.value?.available) return
+  // 动态门店/逐日列由专用展示组件消费同一后端契约，避免宿主重复发起通用表查询。
+  if (reconciliationReport.value) return
   const id = ++requestId
   controller?.abort()
   controller = new AbortController()
@@ -285,7 +290,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </script>
 
 <template>
-  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog ? '' : null">
+  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog || reconciliationModal ? '' : null">
     <header class="basic-reports__header">
       <div><button v-if="route.params.report" type="button" class="basic-reports__icon" aria-label="返回基础报表" title="返回基础报表" @click="router.push({ name: route.name })"><ArrowLeft :size="18" /></button><h1>{{ active?.name || '基础报表' }}</h1></div>
       <button v-if="active?.available && data.can_edit" type="button" class="button button--primary" @click="edit()">新增登记</button>
@@ -302,6 +307,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         </div>
       </section>
     </template>
+    <StoreReconciliationReport v-else-if="active?.available && reconciliationReport" :platform="platform" @modal-change="reconciliationModal = $event" />
     <template v-else-if="active?.available">
       <UnifiedReportQueryToolbar :fields="fields" :page-code="active.code"
         :is-query-loading="loading || salarySaving" :executed-query="executedQuery" @query="submitQuery">

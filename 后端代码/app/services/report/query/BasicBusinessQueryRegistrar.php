@@ -13,6 +13,7 @@ final class BasicBusinessQueryRegistrar implements UnifiedQueryPageRegistrar
     {
         foreach (BasicReportCatalogServices::entries() as $report) {
             if ($report['code'] === BasicRegistrationQueryProvider::PAGE_CODE) continue;
+            if ($report['code'] === \app\services\report\StoreReconciliationReportServices::CODE) continue;
             $fields = []; $keywords = [];
             foreach (BasicBusinessReportServices::fields($report['code']) as $field) {
                 $fields[] = UnifiedQueryPageRegistry::field($field['key'], $field['label'], $field['type'],

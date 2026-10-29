@@ -1,0 +1,11 @@
+{
+  "round": 11,
+  "candidate_sha256": "ee145ff001190bb120c5e569c8067cec48b97058a644cf5fca5b99f6cc714e3e",
+  "base_head": "2762e0234510b0f897277d628a8f5a903d1f3855",
+  "product_manager_acceptance": "确认验收通过",
+  "accepted_date": "2026-10-29",
+  "authorization": "固定候选验收及按项目规则本地提交；不包含部署、远程写库或push",
+  "scope": "门店对账单；31个候选源码/测试/迁移/脚本文件；私有来源及派生包不提交",
+  "verification": "提交前31个文件SHA256与固定候选一致，HEAD一致，暂存区为空",
+  "tests": "沿用已验收固定版本的完整自测证据；未修改业务代码，无新增测试条件"
+}

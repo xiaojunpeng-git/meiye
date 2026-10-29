@@ -1,0 +1,12 @@
+{
+  "accepted_fingerprint": "ee52b2b5d540334ceebf1637bb7713f6118443f51361c7f56d630d90b15619d6",
+  "product_manager_reply": "confirmed",
+  "date": "2026-10-28",
+  "selftest": {
+    "summary_cases": 15,
+    "local_browser": "PASS: two zero-valued totals render 0, 12 columns and paging visible using anonymous SQL fixture",
+    "vite_build": "PASS, temporary output only",
+    "git_diff_check": "PASS"
+  },
+  "deployment_authorized": false
+}

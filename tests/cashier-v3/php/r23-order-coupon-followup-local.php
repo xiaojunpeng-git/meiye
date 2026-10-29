@@ -1,0 +1,54 @@
+<?php
+/** 本地事务/只读回归：已使用券隐藏、部分额度保留、范围提示、充值赠送和精确详情权限。 */
+require '/var/www/html/vendor/autoload.php';
+(new think\App())->initialize();
+use think\facade\Db;
+use app\services\cashier\v3\CashierV3DataScopeContext as Scope;
+use app\services\cashier\v3\CashierV3OperatorScope as Operator;
+use app\services\cashier\v3\order\CashierV3SalesOrderQueryServices as Sales;
+use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices as Records;
+use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices as Workspace;
+set_exception_handler(function(Throwable $e){file_put_contents('php://stderr',$e->getMessage()."\n");exit(1);});
+$config=Db::connect()->getConfig();
+if (getenv('R23_LOCAL_ONLY') !== '1' || $config['hostname'] !== 'mysql' || $config['database'] !== 'ruihao') throw new RuntimeException('local-only guard');
+$n=0;$check=function($ok,$message)use(&$n){if(!$ok)throw new RuntimeException($message);$n++;echo 'PASS '.$message."\n";};
+$invoke=function($object,$method,...$args){$m=new ReflectionMethod($object,$method);$m->setAccessible(true);return $m->invoke($object,...$args);};
+$workspace=(new ReflectionClass(Workspace::class))->newInstanceWithoutConstructor();
+Db::startTrans();
+try {
+    $uid=2147000023;$now=time();
+    $product=(array)Db::name('store_product')->where('product_type',6)->find();
+    $issue=Db::name('store_coupon_issue')->insertGetId(['title'=>'R23-followup','coupon_title'=>'R23-followup','coupon_price'=>100,'use_min_price'=>0,'coupon_type'=>1,'type'=>2,'product_id'=>(string)$product['id'],'use_mode'=>0,'category'=>1,'applicable_type'=>1,'coupon_issue_type'=>0,'status'=>1,'is_del'=>0]);
+    $id=Db::name('store_coupon_user')->insertGetId(['cid'=>$issue,'uid'=>$uid,'coupon_title'=>'R23-followup','coupon_price'=>100,'use_min_price'=>0,'start_time'=>$now-10,'end_time'=>$now+86400,'use_time'=>$now,'status'=>1,'is_fail'=>0,'add_time'=>$now,'type'=>'send']);
+    $read=function()use($invoke,$workspace,$uid,$id){return $invoke($workspace,'couponOptions',$uid,23,['threshold'=>19800,'base'=>19800,'cap'=>19800],false,'r23-followup','line',$id,[],0,0,0);};
+    $r=$read();$check(!$r['available']&&!$r['belowMinimum'],'used one-time coupon hidden');
+    Db::name('store_coupon_user')->where('id',$id)->update(['status'=>0]);
+    $r=$read();$check(!$r['available']&&!$r['belowMinimum'],'legacy used timestamp hidden');
+    Db::name('store_coupon_user')->where('id',$id)->update(['use_time'=>0]);
+    $r=$read();$check(count($r['belowMinimum'])===1,'unavailable unused coupon retained');
+    $check(strpos($r['belowMinimum'][0]['productScopeText'],$product['store_name'])!==false,'scope contains configured product name');
+    Db::name('store_coupon_issue')->where('id',$issue)->update(['coupon_type'=>3,'type'=>0]);
+    Db::name('store_coupon_user')->where('id',$id)->update(['use_time'=>$now]);
+    $r=$read();$check(count($r['available'])===1,'partially used allowance remains selectable');
+    Db::name('store_coupon_user')->where('id',$id)->update(['status'=>1]);
+    $r=$read();$check(!$r['available']&&!$r['belowMinimum'],'exhausted allowance hidden');
+} finally {Db::rollback();}
+$row=(array)Db::name('user_recharge')->where('order_id','CZ26102900002')->find();
+$reader=new Records();$gifts=$invoke($reader,'readRechargeGiftSummaries',[$row],'0');
+$check(strpos($gifts[(int)$row['id']]??'','四选一 × 2张')!==false && strpos($gifts[(int)$row['id']]??'','5折券 × 2张')!==false,'actual recharge gifts returned');
+$check($invoke($reader,'readRechargeGiftSummaries',[$row],'not-this-tenant')===[],'gift tenant isolation');
+$wrong=$row;$wrong['uid']++;
+$check($invoke($reader,'readRechargeGiftSummaries',[$wrong],'0')===[],'gift member isolation');
+$order=(array)Db::name('cashier_v3_sales_order')->where('order_no','XS26102900030')->find();
+$store=(int)$order['store_id'];$tenant=(string)$order['tenant_id'];
+$scope=new Scope(71,701,$store,$tenant,'organization:test',[$store],Scope::MODE_ALL,[],true,'test','permission-v2',['cashier.v3.order_center'],[]);
+$operator=new Operator($store,71,'organization:test',$tenant);$sales=new Sales();
+$t=microtime(true);$detail=$sales->salesOrderDetail(['orderId'=>$order['order_id']],$operator,$scope);$seconds=microtime(true)-$t;
+$check(($detail['salesOrderNo']??'')==='XS26102900030' && count($detail['items'])===1,'actual sale detail returns complete item');
+$check($seconds<10,'detail stays below 10 seconds');
+$check($sales->salesOrderDetail(['orderId'=>$order['order_id'],'storeIds'=>[$store+10000]],$operator,$scope)===null,'detail cannot widen store scope');
+$service=(array)Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id',$tenant)->where('store_id',$store)->where('service_status','completed')->where('checkout_request_id','<>','')->find();
+$c=$invoke($sales,'detailCriteria',['orderId'=>'service:'.$service['checkout_request_id']],$operator,$scope);
+$sql=$invoke($sales,'salesAndServiceHeaders',$c);
+$check(strpos($sql,(string)$service['checkout_request_id'])!==false && strpos($sql,'1=0')!==false,'service detail source retains exact request group');
+echo "$n checks passed; read seconds=".round($seconds,3)."; peak bytes=".memory_get_peak_usage(true)."\n";

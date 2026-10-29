@@ -1,0 +1,24 @@
+{
+  "separate_baseline_commits": [
+    "b4dc8fb5",
+    "a7a5411b"
+  ],
+  "sources": {
+    "product_stock_and_inactive_card_edit": "806bb12e/90b697e5 accepted main merge",
+    "payment_callback_routes": "9c3bd6de accepted R65",
+    "member_combination_controller_and_route": "eca9c914 accepted R68"
+  },
+  "preserved_newer_member_service": "HEAD retained, including joined_count aggregate fix; original older R68 implementation was not used",
+  "notes": "These are existing deployed features, not Round12 product scope. Survey work remained unstaged during baseline commits.",
+  "baseline_unit_checks": [
+    "R68 member combination records contract PASS",
+    "R65 callback URL contract 7 cases PASS"
+  ],
+  "deployment_authorized_order": [
+    "rh",
+    "push",
+    "008",
+    "010"
+  ],
+  "runtime_publish_started": false
+}

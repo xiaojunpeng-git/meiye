@@ -698,13 +698,16 @@ const visibleFields = computed(() => {
 })
 const detailFields = computed(() => {
   // 混合页详情始终使用原业务字段，不能把整张联合字段表塞进一笔充值/退款。
-  if (activeTabKey.value === 'all') return orderPresentationFields(recordTab(genericDetailRecord.value).fields)
+  const recharge = recordType(genericDetailRecord.value) === 'recharge'
+  // 充值赠送来自后端该笔充值事实；只在详情加展示项，不改变列表字段配置。
+  const giftFields = recharge ? [field('giftContentSummary', '赠送信息')] : []
+  if (activeTabKey.value === 'all') return [...orderPresentationFields(recordTab(genericDetailRecord.value).fields), ...giftFields]
   // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
   if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
     return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
       field('cancelReason', '取消原因'), field('cancelOperator', '取消操作人'), field('cancelledAt', '取消时间')]
   }
-  if (activeTabKey.value !== 'service') return visibleFields.value
+  if (activeTabKey.value !== 'service') return [...visibleFields.value, ...giftFields]
   const present = new Set(visibleFields.value.map((item) => item.key))
   const detailOnlyKeys = genericDetailRecord.value?.voidedAt
     ? ['detail_remark', 'voided_at', 'void_reason', 'void_operator']

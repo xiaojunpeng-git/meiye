@@ -59,7 +59,8 @@ class StorePromotionsJob extends BaseJobs
 
         }
         $give_coupon = $promotions_give['give_coupon'] ?? [];
-        $this->giveCoupon($uid, $give_coupon);
+        // Freeze the actual sale store, not the platform coupon template owner.
+        $this->giveCoupon($uid, $give_coupon, (int)($orderInfo['store_id'] ?? 0));
         return true;
     }
 
@@ -69,13 +70,13 @@ class StorePromotionsJob extends BaseJobs
      * @param array $give_coupon
      * @return bool
      */
-    public function giveCoupon(int $uid, array $give_coupon)
+    public function giveCoupon(int $uid, array $give_coupon, int $businessStoreId = 0)
     {
         if ($give_coupon) {
             try {
                 /** @var StoreCouponIssueServices $storeCoupon */
                 $storeCoupon = app()->make(StoreCouponIssueServices::class);
-                $storeCoupon->orderPayGiveCoupon($uid, $give_coupon);
+                $storeCoupon->orderPayGiveCoupon($uid, $give_coupon, $businessStoreId);
             } catch (\Throwable $e) {
                 Log::error('优惠活动下单赠送优惠券失败,失败原因:' . $e->getMessage());
             }

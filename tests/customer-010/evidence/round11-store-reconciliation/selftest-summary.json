@@ -1,0 +1,776 @@
+{
+  "round": 11,
+  "feature": "门店对账单",
+  "date": "2026-10-29",
+  "status": "开发与自测完成，待产品经理确认固定版本验收",
+  "passed": true,
+  "scope": [
+    "按007实际功能：多门店支付矩阵、单店自然月逐日矩阵",
+    "独立菜单/单表权限，门店仅当前登录门店",
+    "精确下钻、明细分页、完整导出、列名取值来源",
+    "旧业务复用原收款资格和金额表达式，新业务读取统一成功收款事实",
+    "查询内容变化时拒绝过期下钻/导出并提示刷新"
+  ],
+  "boundaries": [
+    "本轮未向007/010补写、覆盖或重算业务数据",
+    "未执行菜单安装，不自动授予原岗位",
+    "本轮功能未提交/push/部署；基线合并单独记录",
+    "不修复R10员工事实或品项关联，不改工资算法"
+  ],
+  "validation": {
+    "source_replay_checks": 969,
+    "source_replay_passed": true,
+    "new_page_checks": 80,
+    "new_page_cases": 4,
+    "new_page_passed": true,
+    "existing_reports": {
+      "pass": true,
+      "results": [
+        {
+          "code": "basic_store_summary",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_cross_store_settlement",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_item_sales",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_item_consumption",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_writeoff_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_product_sales",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_salary_realtime",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_summary",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_item_sales",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_home_store",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_store",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_performance_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_summary",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_daily_reconciliation",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_summary",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_followup_employee_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_customer_entitlements",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_as_of_detail",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_brush_registration",
+          "mode": "platform",
+          "width": 1515,
+          "checks": 4,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_summary",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_cross_store_settlement",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_item_sales",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_item_consumption",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_writeoff_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_product_sales",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_salary_realtime",
+          "mode": "platform",
+          "width": 610,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_summary",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_item_sales",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_home_store",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_store",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_performance_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_summary",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_daily_reconciliation",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_summary",
+          "mode": "platform",
+          "width": 610,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_followup_employee_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_customer_entitlements",
+          "mode": "platform",
+          "width": 610,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_as_of_detail",
+          "mode": "platform",
+          "width": 610,
+          "checks": 21,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_brush_registration",
+          "mode": "platform",
+          "width": 610,
+          "checks": 4,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_summary",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_cross_store_settlement",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_item_sales",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_item_consumption",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_writeoff_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_product_sales",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_salary_realtime",
+          "mode": "store",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_summary",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_item_sales",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_home_store",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_store",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_performance_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_summary",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_daily_reconciliation",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_summary",
+          "mode": "store",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_followup_employee_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_customer_entitlements",
+          "mode": "store",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_as_of_detail",
+          "mode": "store",
+          "width": 1515,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_brush_registration",
+          "mode": "store",
+          "width": 1515,
+          "checks": 2,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_summary",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_cross_store_settlement",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_store_item_sales",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_item_consumption",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_writeoff_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_product_sales",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_salary_realtime",
+          "mode": "store",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_summary",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_item_sales",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_home_store",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_service_store",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_employee_performance_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_balance_order_summary",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_daily_reconciliation",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_summary",
+          "mode": "store",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_followup_employee_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 19,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_customer_entitlements",
+          "mode": "store",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_unconsumed_as_of_detail",
+          "mode": "store",
+          "width": 610,
+          "checks": 20,
+          "pass": true,
+          "mock_api": true
+        },
+        {
+          "code": "basic_brush_registration",
+          "mode": "store",
+          "width": 610,
+          "checks": 2,
+          "pass": true,
+          "mock_api": true
+        }
+      ],
+      "limitation": "Real metadata/components with synthetic API; not authenticated business acceptance."
+    },
+    "pure_matrix": "PASS",
+    "unified_query_checks": 24,
+    "permission_checks": 8,
+    "runtime_checks": 24,
+    "catalog_checks": 54,
+    "navigation_checks": 262,
+    "store_group_grant": "PASS",
+    "brush_registration_checks": 42,
+    "checkout_snapshot_checks": 70,
+    "R71_source_guidance": "PASS",
+    "php74_lint": {
+      "passed": true,
+      "runtime": "PHP 7.4 Docker mohe-app:local",
+      "files": 13,
+      "output": "No syntax errors detected in /var/www/html/app/services/report/StoreReconciliationReceiptReader.php\nNo syntax errors detected in /var/www/html/app/services/report/StoreReconciliationMatrix.php\nNo syntax errors detected in /var/www/html/app/services/report/StoreReconciliationReportServices.php\nNo syntax errors detected in /var/www/html/app/services/report/query/BasicStoreReconciliationQueryProvider.php\nNo syntax errors detected in /var/www/html/app/services/report/query/BasicStoreReconciliationQueryRegistrar.php\nNo syntax errors detected in /var/www/html/app/services/report/query/BasicStoreReconciliationWorkerContextResolver.php\nNo syntax errors detected in /var/www/html/app/controller/admin/v1/report/UnifiedReport.php\nNo syntax errors detected in /var/www/html/app/services/order/ValidCashOrderServices.php\nNo syntax errors detected in /var/www/html/app/services/organization/StorePermissionCatalogServices.php\nNo syntax errors detected in /var/www/html/app/services/report/BasicReportCatalogServices.php\nNo syntax errors detected in /var/www/html/app/services/report/BasicReportHostServices.php\nNo syntax errors detected in /var/www/html/app/services/report/query/BasicBusinessQueryRegistrar.php\nNo syntax errors detected in /var/www/html/config/unified_query.php"
+    },
+    "temporary_databases_remaining": 0,
+    "diff_check": "PASS"
+  },
+  "datasets": [
+    {
+      "site": "007",
+      "source_orders": 12362,
+      "raw_receipts": 2425,
+      "query_seconds": 2.16454815864563
+    },
+    {
+      "site": "010",
+      "source_orders": 12362,
+      "raw_receipts": 2426,
+      "query_seconds": 3.994107961654663
+    }
+  ],
+  "reconciliation": {
+    "month": "2026-09",
+    "scope": "两站分别固定只读来源，本地隔离MySQL运行真实Reader/统一查询和原服务逐格比较",
+    "archived_010_orders_verified": 2283,
+    "only_cross_instance_difference": {
+      "original_order_id": 108177,
+      "refund_status_007": 2,
+      "refund_status_010": 0,
+      "difference_cents": 98000,
+      "payment": "银联扫码",
+      "total_007_exact": "933352.50",
+      "total_010_exact": "934332.50",
+      "action": "只记录；未修改退款状态或伪造冲销"
+    },
+    "other_payment_and_brush_totals": "一致",
+    "native_september_lifecycle_check": {
+      "read_only": true,
+      "month": "2026-09",
+      "sales_operations": [],
+      "imported_card_operations": []
+    }
+  },
+  "code_quality": [
+    "新Reader、矩阵、投影、Provider/Registrar、权限及共享查询补充职责和业务约束注释；前端说明已执行条件及下钻/导出边界",
+    "已删除开发过程未使用的codes、dynamicFields、平行buildDaily实现；保留仍有调用的旧服务和原21表",
+    "抽取原服务共用查询，其默认算法与原只读服务180格验证一致"
+  ],
+  "import_plan": {
+    "path": "/Users/xiaojunpeng/Documents/Codex/2026-10-23/009-2/outputs/007导入010数据方案.md",
+    "section": "31.31",
+    "sha256": "759c117efb648cbe23568c4bb3c8acc2f306a23cd8e7a17300ab4f9563a05b9a"
+  },
+  "limitations": [
+    "本地真实Vue+PHP使用脱敏来源和测试登录/传输；尚未远程安装新菜单后做认证页面验证",
+    "010支付目录额外的支付宝行保留，不并入007旧方式",
+    "单次最多50000条，超限明确拒绝，不静默截断；未持久化客户业务快照",
+    "本地核验构建不是正式8080集成发布；正式构建须验收后核对18091/18081固定源及逐实例现网",
+    "原生收款/生命周期由真实本地数据库合成事实覆盖，不冒充010线上原生收款全量验收"
+  ]
+}

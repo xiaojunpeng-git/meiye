@@ -112,7 +112,7 @@
             </FormItem>
             <FormItem label="会员转赠：">
               <RadioGroup v-model="formData.allow_transfer">
-                <Radio :label="0">不允许</Radio>
+                <Radio :label="0" :disabled="formData.usage_target === 1">不允许</Radio>
                 <Radio :label="1" :disabled="formData.coupon_type == 3">允许</Radio>
               </RadioGroup>
               <Button
@@ -205,6 +205,18 @@
               <div v-if="[0, 2].includes(type)" class="info">
                 选择商品的品牌
               </div>
+            </FormItem>
+            <!-- 他人券必须允许转赠；多次抵用券不支持一次性新客资格。 -->
+            <FormItem label="使用对象：">
+              <RadioGroup v-model="formData.usage_target" @on-change="usageTargetChanged">
+                <Radio :label="0" :disabled="type === 1">全部</Radio>
+                <Radio :label="1" :disabled="type === 1 || formData.coupon_type === 3">他人</Radio>
+              </RadioGroup>
+              <div class="info">他人：原领取人不可使用，只能转赠给其他会员使用。</div>
+            </FormItem>
+            <FormItem label="新用户：">
+              <i-switch v-model="formData.new_user_only" :true-value="1" :false-value="0" :disabled="type === 1 || formData.coupon_type === 3" />
+              <div class="info">仅限系统内从未消费的实际用券人使用；充值不计消费，多次抵用券暂不支持。</div>
             </FormItem>
             <FormItem v-if="formData.use_mode !== 1" label="使用门槛：">
               <RadioGroup v-model="isMinPrice">
@@ -327,12 +339,13 @@
                   <Radio :label="2" :disabled="[1].includes(type)"
                     >部分门店</Radio
                   >
-                  <Radio :label="0" :disabled="[1].includes(type)"
-                    >仅平台适用</Radio
+                  <Radio v-if="type === 1 && formData.applicable_type === 0" :label="0" disabled
+                    >仅平台适用（历史规则）</Radio
                   >
+                  <Radio :label="3" :disabled="type === 1">发放门店用</Radio>
                 </RadioGroup>
                 <div class="tips">
-                  全部/部分门店：选择优惠券在哪些门店使用（门店自建商品不可使用该优惠券）；仅平台适用：购买门店商品（平台同步商品+门店自建商品）均不享受该优惠。
+                  发放门店用：赠送按赠送门店、充值赠送按充值门店、领取按会员领取时所属门店自动记录；转赠后门店不变。
                 </div>
               </Col>
               <Col span="24" class="mt20" v-if="formData.applicable_type == 2">
@@ -457,12 +470,14 @@
       width="900"
       @on-cancel="cancel"
     >
-      <goods-list
+      <goods-attr
+        :chooseType="98"
+        :flatSelect="true"
         ref="goodslist"
         v-if="modals"
         :ischeckbox="true"
         @getProductId="getProductId"
-      ></goods-list>
+      ></goods-attr>
     </Modal>
     <Modal
       v-model="storeModals"
@@ -484,7 +499,7 @@
 <script>
 import { mapState } from 'vuex';
 import storeList from '@/components/storeList';
-import goodsList from '@/components/goodsList/index';
+import goodsAttr from '@/components/goodsAttr';
 import {
   couponCategoryApi,
   couponSaveApi,
@@ -496,7 +511,7 @@ import Setting from '@/setting';
 export default {
   name: 'storeCouponCreate',
   components: {
-    goodsList,
+    goodsAttr,
     storeList,
   },
   watch: {
@@ -544,6 +559,8 @@ export default {
         rule: '',
         category: 1,
         allow_transfer: 0,
+        usage_target: 0,
+        new_user_only: 0,
         use_mode: 0,
         order_tiers: [],
       },
@@ -578,6 +595,10 @@ export default {
     }
   },
   methods: {
+    // 他人券自动开启转赠，避免创建无人可以使用的券。
+    usageTargetChanged(value) {
+      if (Number(value) === 1) this.formData.allow_transfer = 1;
+    },
     //删除门店
     delte(row) {
       if ([1].includes(this.type)) {
@@ -617,6 +638,8 @@ export default {
       if (item.id === 3) {
         this.formData.use_mode = 0;
         this.formData.allow_transfer = 0;
+        this.formData.usage_target = 0;
+        this.formData.new_user_only = 0;
       }
     },
     // 品类
@@ -655,6 +678,8 @@ export default {
           this.formData.coupon_time = data.coupon_time;
           this.formData.receive_type = data.receive_type;
           this.formData.allow_transfer = Number(data.allow_transfer || 0);
+          this.formData.usage_target = Number(data.usage_target || 0);
+          this.formData.new_user_only = Number(data.new_user_only || 0);
           this.formData.use_mode = Number(data.use_mode || 0);
           try {
             const tiers = JSON.parse(data.order_tiers_json || '[]');
@@ -816,7 +841,9 @@ export default {
     // 选择的商品
     getProductId(productList) {
       this.modals = false;
-      this.productList = this.unique(this.productList.concat(productList));
+      // 共用选择器平铺返回商品主数据；优惠券仍以商品主键绑定，兼容既有详情返回的 product_id。
+      const products = productList.map(item => ({ ...item, product_id: Number(item.product_id || item.id) }));
+      this.productList = this.unique(this.productList.concat(products));
       this.formData.product_id = '';
       this.productList.forEach((value) => {
         if (this.formData.product_id) {
