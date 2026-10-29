@@ -1,0 +1,7 @@
+{
+  "result": "PASS",
+  "checks": [
+    "Actual deployed public H5 deep link renders invalid-link message without redirecting to login or /admin"
+  ],
+  "no_test_business_rows_created": true
+}

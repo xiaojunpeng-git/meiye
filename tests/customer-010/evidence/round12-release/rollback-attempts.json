@@ -1,0 +1,21 @@
+{
+  "rh": [
+    {
+      "backup": "/www/backups/rh/round12-d76a8ce44b96-20261029115528",
+      "result": "ROLLED_BACK",
+      "subsequent_preflight_restored_baseline": true
+    }
+  ],
+  "010": [
+    {
+      "backup": "/www/backups/010/round12-d76a8ce44b96-20261029120322",
+      "result": "ROLLED_BACK",
+      "subsequent_preflight_restored_baseline": true
+    },
+    {
+      "backup": "/www/backups/010/round12-d76a8ce44b96-20261029120521",
+      "result": "ROLLED_BACK",
+      "subsequent_preflight_restored_baseline": true
+    }
+  ]
+}
