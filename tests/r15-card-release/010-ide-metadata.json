@@ -1,0 +1,74 @@
+{
+  "changedByProjectImport": [],
+  "appid": "wxce4f61fc9c4eaaa6",
+  "businessFilesUnchanged": true,
+  "configuration": {
+    "description": "项目配置文件。",
+    "packOptions": {
+      "ignore": [
+        {
+          "type": "folder",
+          "value": "static/design-preview"
+        },
+        {
+          "type": "folder",
+          "value": "static/design-system"
+        },
+        {
+          "type": "folder",
+          "value": "static/mall"
+        },
+        {
+          "type": "folder",
+          "value": "static/html"
+        },
+        {
+          "type": "folder",
+          "value": "static/fonts"
+        },
+        {
+          "type": "folder",
+          "value": "static/css"
+        },
+        {
+          "type": "file",
+          "value": "static/iconfont/iconfont.woff2"
+        },
+        {
+          "type": "file",
+          "value": "static/iconfont/iconfont.css"
+        }
+      ]
+    },
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true,
+      "newFeature": true,
+      "bigPackageSizeSupport": true
+    },
+    "compileType": "miniprogram",
+    "libVersion": "",
+    "appid": "wxce4f61fc9c4eaaa6",
+    "projectname": "会员服务",
+    "condition": {
+      "search": {
+        "current": -1,
+        "list": []
+      },
+      "conversation": {
+        "current": -1,
+        "list": []
+      },
+      "game": {
+        "current": -1,
+        "list": []
+      },
+      "miniprogram": {
+        "current": -1,
+        "list": []
+      }
+    }
+  }
+}

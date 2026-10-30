@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "structuredErrors": true,
+  "stringAndNetworkErrors": true,
+  "safeFallback": true,
+  "inFlightGuard": true,
+  "successRoute": true,
+  "synchronousFailure": true,
+  "retry": true,
+  "validationAndPayloadPreserved": true,
+  "productionRequests": 0
+}

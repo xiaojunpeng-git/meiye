@@ -1,0 +1,41 @@
+{
+  "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+  "candidateTree": "a9b865759a2279ca9c2ab04a18ea3bd6f395eb44",
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "branch": "release/r15-card-occupancy-publish-20261030",
+  "acceptedFiles": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "035cb239684c85437c537bf9fab57b17654a986a366e140a3cdc9ccf52ad1d41",
+    "前端代码/uniapp/pages/users/user_card/index.vue": "1c694775fd634e6689ef5b775ecc85d4d8f4bed42aa93aa3ac71ce518a91f94a",
+    "后端代码/app/services/order/StoreOrderCartInfoServices.php": "0b92d94622ee7933303b6c9fe813fb62572bfb4e8d84ed64477831f6775f0f7a",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "af389c91cbc7d807bf0c23fb7ec499efe8fc1163ac6acfb5cde49d7b53af8b6d"
+  },
+  "backendFiles": [
+    "app/services/order/StoreOrderCartInfoServices.php",
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "supplementalAccepted": true,
+  "acceptedPatches": [
+    "535f20f8"
+  ],
+  "apps": {
+    "008": {
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.83"
+    },
+    "010": {
+      "appid": "wxce4f61fc9c4eaaa6",
+      "version": "3.0.83"
+    }
+  },
+  "memberOutputs": {
+    "008": "/private/tmp/r15-card-occupancy-final-008-h5/output",
+    "rh": "/private/tmp/r15-card-release-rh-h5/output",
+    "010": "/private/tmp/r15-card-release-010-h5/output"
+  },
+  "miniOutputs": {
+    "008": "/private/tmp/r15-card-occupancy-final-008-mp-weixin/output",
+    "010": "/private/tmp/r15-card-release-010-mp-weixin/output"
+  },
+  "scope": "two backend files and member H5; protect platform/cashier/settings/business data",
+  "preservedPrerequisite": "b90b741d6dbb36b276cedbb21c611925be17a686"
+}

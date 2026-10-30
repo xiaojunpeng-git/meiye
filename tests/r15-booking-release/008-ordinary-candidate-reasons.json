@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "ordinaryCandidates": {
+    "16664": {
+      "available": 0,
+      "rawRemaining": 1,
+      "issuedRemaining": 1
+    },
+    "16651": {
+      "available": 0,
+      "rawRemaining": 1,
+      "issuedRemaining": null
+    },
+    "16626": {
+      "available": 0,
+      "rawRemaining": 1,
+      "issuedRemaining": 1
+    },
+    "16624": {
+      "available": 0,
+      "rawRemaining": 1,
+      "issuedRemaining": 1
+    }
+  },
+  "writes": 0
+}

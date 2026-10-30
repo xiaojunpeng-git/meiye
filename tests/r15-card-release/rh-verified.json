@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+  "tree": "a9b865759a2279ca9c2ab04a18ea3bd6f395eb44",
+  "backups": {
+    "admin": "/www/backups/rh/combination-group-cb29510a",
+    "member": "/www/backups/rh/store-address-cb29510a"
+  },
+  "businessWrites": 0,
+  "configurationChanged": false,
+  "migration": false
+}

@@ -42,13 +42,14 @@ walk(template);
 const button = elements.find(node => node.staticClass === '"addon-add-btn"');
 assert.ok(button && !button.if, 'historical add-project button must not be hidden');
 const allTab = elements.find(node => node.attrsMap && node.attrsMap['@click'] === 'switchAddonTab(2)');
-assert.equal(allTab.if, '!historicalStorePicker', 'historical flow may only add owned rights');
+assert.equal(allTab, undefined, 'catalog tab removed; picker only exposes owned rights');
+assert(!elements.some(n=>n.staticClass==='"addon-picker-tabs acea-row"'), 'both tabs removed');
 
 (async () => {
   const tips = [];
   const ctx = {
     historicalStorePicker: true, storeId: 0, orderId: 5338, cartInfoId: 13967,
-    addonItems: [], addonPickerOptions: [], historicalStoreOptions: [{ id: 11, name: '隔离测试门店' }],
+    addonItems: [], addonPickerOptions: [], addonPickerRequestId: 0, collapsedAddonGroups: [], historicalStoreOptions: [{ id: 11, name: '隔离测试门店' }],
     $util: { Tips: value => tips.push(value.title) },
     buildBookUidParams: value => value,
     parsePurchasedAddonOptions: value => value,
@@ -62,7 +63,7 @@ assert.equal(allTab.if, '!historicalStorePicker', 'historical flow may only add 
   ctx.openAddonPicker();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(ctx.addonPickerVisible, true);
-  assert.deepEqual(calls[0], { store_id: 11, historical_order_id: 5338, main_detail_id: 13967 });
+  assert.deepEqual(calls[0], { store_id: 11, main_order_id: 5338, main_detail_id: 13967, main_quantity: 1 });
   assert.equal(ctx.addonPickerOptions.length, 1);
   ctx.addonPickerOptions = [{ _key: 'chosen' }];
   ctx.addonPickerSelected = ['chosen'];
@@ -75,6 +76,6 @@ assert.equal(allTab.if, '!historicalStorePicker', 'historical flow may only add 
   ctx.historicalStorePicker = false;
   ctx.openAddonPicker();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls[1], { store_id: 11 }, 'ordinary picker contract must remain unchanged');
+  assert.deepEqual(calls[1], { store_id: 11, main_order_id: 5338, main_detail_id: 13967, main_quantity: 1 }, 'ordinary main also uses owned rights authority');
   console.log('historical add-project Vue methods and visibility: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

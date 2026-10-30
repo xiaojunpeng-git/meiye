@@ -1,10 +1,10 @@
 <template>
-  <view class="content">
+  <view class="content" :class="{ 'content--expanded': expandTimeSlots, 'content--filled-dates': filledDateTabs }">
     <view class="container">
       <scroll-view class="scroll-view_H b-t b-b" scroll-x>
         <block v-for="(item,index) in dateArr" :key="index">
-          <view class="flex-box" @click="selectDateEvent(index,item)" :class="{ borderb: index==dateActive}" :style="index==dateActive ? ('border-bottom-color:' + selectedTabColor) : ''">
-            <view class="date-box" :style="'color:' + (index==dateActive ? selectedTabColor : '#333')">
+          <view class="flex-box" @click="selectDateEvent(index,item)" :class="{ borderb: index==dateActive}" :style="filledDateTabs ? ('background-color:' + (index==dateActive ? selectedTabColor : '#f4f5f7')) : (index==dateActive ? ('border-bottom-color:' + selectedTabColor) : '')">
+            <view class="date-box" :style="'color:' + (index==dateActive ? (filledDateTabs ? '#fff' : selectedTabColor) : '#333')">
               <text>{{item.title}}</text>
               <text class="fontw">{{item.week}}</text>
             </view>
@@ -12,7 +12,7 @@
         </block>
       </scroll-view>
 
-      <scroll-view scroll-y="true" class="scroll_view_time" v-if="!isSection || isQuantum">
+      <scroll-view :scroll-y="!expandTimeSlots" class="scroll_view_time" v-if="!isSection || isQuantum">
         <view class="time-box">
           <template v-for="(item,_index) in timeArr">
             <view class="item" :key="_index" v-if="!item.is_hide">
@@ -49,6 +49,10 @@ export default {
   name: 'ChooseTime',
   props: {
     embedded: { type: Boolean, default: false },
+    // Opt-in presentation for the reservation page. Other picker consumers
+    // retain their bounded scrolling and underline date styles by default.
+    expandTimeSlots: { type: Boolean, default: false },
+    filledDateTabs: { type: Boolean, default: false },
     isWhere: { type: Boolean, default: false },
     isQuantum: { type: Boolean, default: true },
     isMultiple: { type: Boolean, default: false },
@@ -255,6 +259,43 @@ export default {
 .scroll_view_time{
   height: 540rpx !important;
 }
+// The outer reservation page owns vertical scrolling; intrinsic content height
+// prevents the last time row being clipped inside a second fixed-height scroller.
+.content--expanded .container .scroll_view_time {
+  height: auto !important;
+  max-height: none;
+  white-space: normal;
+  padding-top: 0;
+}
+// #ifdef H5
+// uni-scroll-view's internal 100% height can retain a viewport-sized clip
+// even when its outer element is auto. Only the opt-in expanded layout unwraps it.
+.content--expanded .scroll_view_time ::v-deep .uni-scroll-view,
+.content--expanded .scroll_view_time ::v-deep .uni-scroll-view-content {
+  height: auto !important;
+  overflow: visible !important;
+}
+// #endif
+.content--filled-dates .container .scroll-view_H {
+  height: 136rpx;
+  padding: 16rpx 12rpx;
+  box-sizing: border-box;
+}
+.content--filled-dates .container .scroll-view_H .flex-box {
+  height: 104rpx;
+  width: 150rpx;
+  margin: 0 6rpx;
+  border: 0;
+  border-radius: 16rpx;
+  vertical-align: top;
+}
+.content--filled-dates .container .scroll-view_H .date-box {
+  height: 104rpx;
+  line-height: 1.5;
+  justify-content: center;
+  font-size: 28rpx;
+}
+
 .bottom_choose {
   text-align: center;
   width: 100%;

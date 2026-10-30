@@ -1,0 +1,24 @@
+{
+  "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+  "tree": "1f76afda5525ab55f61ec3ef3b8627a1281f9a96",
+  "ref": "refs/heads/release/r15-occupied-publish-20261030",
+  "message": "M014 第15轮 已预约占用权益可见禁选闭环",
+  "files": [
+    "scripts/r15-occupied-addon-build.cjs",
+    "tests/r15-occupied-addon/browser.cjs",
+    "tests/r15-occupied-addon/evidence/baseline.json",
+    "tests/r15-occupied-addon/evidence/build-plan.json",
+    "tests/r15-occupied-addon/evidence/fixed.json",
+    "tests/r15-occupied-addon/evidence/native.json",
+    "tests/r15-occupied-addon/evidence/occupied-320.png",
+    "tests/r15-occupied-addon/evidence/occupied-375.png",
+    "tests/r15-occupied-addon/evidence/occupied-430.png",
+    "tests/r15-occupied-addon/evidence/review.md",
+    "tests/r15-occupied-addon/model.cjs",
+    "tests/r15-owned-addon/mixed-booking.php",
+    "前端代码/uniapp/pages/activity/reservation/index.vue",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "indexUnchanged": true,
+  "sharedHEADUnchanged": true
+}

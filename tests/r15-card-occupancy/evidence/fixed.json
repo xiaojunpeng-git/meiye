@@ -1,0 +1,76 @@
+{
+  "patchFingerprint": "535f20f813e9bcb3c423ce343c9435398572d41eeb1b3aaa93dc39d9b30a65b9",
+  "base": "08e54654ab8082aac3cd556d2803e6fd55e8a293",
+  "candidateTree": "59070608d32775405fb4ffe2938592cf018edb42",
+  "preservedPrerequisiteTree": "857314321d75b37b294ef5836b3a43882b5d7450",
+  "preservedFeature": {
+    "commit": "1f914d3e",
+    "feature": "existing entitlement image fallback",
+    "unchanged": true
+  },
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "035cb239684c85437c537bf9fab57b17654a986a366e140a3cdc9ccf52ad1d41",
+    "前端代码/uniapp/pages/users/user_card/index.vue": "1c694775fd634e6689ef5b775ecc85d4d8f4bed42aa93aa3ac71ce518a91f94a",
+    "后端代码/app/services/order/StoreOrderCartInfoServices.php": "0b92d94622ee7933303b6c9fe813fb62572bfb4e8d84ed64477831f6775f0f7a",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "af389c91cbc7d807bf0c23fb7ec499efe8fc1163ac6acfb5cde49d7b53af8b6d",
+    "tests/r15-booking-submit/model.cjs": "335d1c402275e0d836cea9b6da7417e31e0a3559cfd035b5b23a861464309965",
+    "tests/r15-booking-submit/browser.cjs": "dac5170926139145f0549beac85a43b86f0cd998c667de8ed1f235f4fe2ccb4d",
+    "tests/r15-card-occupancy/backend.php": "d4d51fb6c70f5f657047f1ae2fda7dbfe875035b72ae98374ac20424f6868354",
+    "tests/r15-card-occupancy/harness.cjs": "dd7f4cb1549aaf8b46b9f6aa85bf5fb770bceff550e7a613068c882b2f7eb8b8",
+    "tests/r15-card-occupancy/model.cjs": "8dc79085503b14458c9c07c59b1cb47639ef04008e79444090a23bfd41825c40",
+    "tests/r15-card-occupancy/browser.cjs": "94d7513824acd59285da509f9e6461207b3e45c2cdfb8e80facede3f4813b9a5",
+    "tests/r15-owned-addon/card-types.php": "044d399f7c7cda0e0d48b09385a7184f30bac8d8b6d93f28cafe0f64f6f4cc96",
+    "scripts/r15-booking-submit-build.cjs": "c6da0824ea351cb6a860e74c446dbf0f3ec2cf76e21ee878680b7af3b0a4dc5e",
+    "scripts/r15-card-occupancy-build.cjs": "ea61cb000b387acb252aa8d986c753267f20990f359fcc8a7a6a0c82e04f6979",
+    "scripts/r15-card-occupancy-test.py": "d02f428f039e88b2190338ece4f45287cc49036c1ddeb8c9a6290298fad9c4ab",
+    "scripts/r15-card-occupancy-readonly.py": "a040004e4b93c0a9b0b9c89f001228f6de8331b14bdec187a580f055a1c58a61"
+  },
+  "groups": {
+    "frontend": [
+      "前端代码/uniapp/pages/activity/reservation/index.vue",
+      "前端代码/uniapp/pages/users/user_card/index.vue"
+    ],
+    "backend": [
+      "后端代码/app/services/order/StoreOrderCartInfoServices.php",
+      "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+    ],
+    "migrations": [],
+    "tests": [
+      "tests/r15-booking-submit/model.cjs",
+      "tests/r15-booking-submit/browser.cjs",
+      "tests/r15-card-occupancy/backend.php",
+      "tests/r15-card-occupancy/harness.cjs",
+      "tests/r15-card-occupancy/model.cjs",
+      "tests/r15-card-occupancy/browser.cjs",
+      "tests/r15-owned-addon/card-types.php"
+    ],
+    "scripts": [
+      "scripts/r15-booking-submit-build.cjs",
+      "scripts/r15-card-occupancy-build.cjs",
+      "scripts/r15-card-occupancy-test.py",
+      "scripts/r15-card-occupancy-readonly.py"
+    ]
+  },
+  "retainedPendingFix": "a7b18a11 booking failure feedback",
+  "verification": {
+    "database": "PASS active/released states, quantity sum, tenant/generation/member boundary, expired right, read immutability, rollback",
+    "fiveCardTypes": "PASS independent, choice count/kind, time, combination",
+    "browsers": [
+      320,
+      375,
+      430
+    ],
+    "H5": "PASS",
+    "mini": "PASS",
+    "nativeTemplatesAndWxs": 419,
+    "readonly008": "holder6550, actual remaining1, occupied2, bookable0, no writes",
+    "regressions": "PASS 22 remove/payload/race; occupied picker and grouped cards; submit feedback"
+  },
+  "limitations": [
+    "No real-device acceptance",
+    "No deployment/push/upload",
+    "No production booking/cancellation or entitlement mutation"
+  ],
+  "headUnchanged": true,
+  "indexUnchanged": true
+}

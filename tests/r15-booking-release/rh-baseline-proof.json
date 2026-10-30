@@ -1,0 +1,11 @@
+{
+  "site": "rh",
+  "memberMatchesLastRelease": true,
+  "adminMatchesLastRelease": true,
+  "backendDrift": {},
+  "migration": {
+    "upgrade_key": "20261030_r25_legacy_receipt_order_index",
+    "code_version": "b1398fb93a3c92869daf1d363ce7b42817ab532d",
+    "executed_at": "2026-10-30 01:20:13"
+  }
+}

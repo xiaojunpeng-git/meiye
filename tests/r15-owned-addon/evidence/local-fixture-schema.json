@@ -1,0 +1,6 @@
+{
+  "target": "m008-rights-isolate/mohe_008 only",
+  "canonicalMigration": "2026-10-14-组合卡权益组/02-正式升级.sql",
+  "subsetSHA256": "12b095f789c1b07250d2b8b9e691fb27fe76a42ec27ef42330ce9f0d6ed17b1d",
+  "productionMigrations": false
+}

@@ -1,0 +1,19 @@
+{
+  "site": "008",
+  "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+  "previewAuthorized": false,
+  "backendAllowlist": [
+    "app/services/order/StoreOrderCartInfoServices.php",
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "targets": {
+    "formal/app/services/order/StoreOrderCartInfoServices.php": {
+      "before": "7aec53358a04bf64dbf701ae1fb9953983001da1e04e0d07567d2cd1fdafd769",
+      "after": "0b92d94622ee7933303b6c9fe813fb62572bfb4e8d84ed64477831f6775f0f7a"
+    },
+    "formal/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": {
+      "before": "5f9ae5486f9e6fa5866c7955b160915f4715ed502b2ced80829d9a7cbc753128",
+      "after": "af389c91cbc7d807bf0c23fb7ec499efe8fc1163ac6acfb5cde49d7b53af8b6d"
+    }
+  }
+}

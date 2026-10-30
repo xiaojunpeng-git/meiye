@@ -1,0 +1,65 @@
+{
+  "sourceBaseline": "96953d21f10a2331193e0e3c138bac5dc1b37c4d",
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "candidateTree": "d12d2410aba35321811568656f517b99e6d93a7d",
+  "patchSHA256": "047c2edf6b8cf92bcdf093e57453a19429c55a5c885928e14fa6b87852ce623a",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "1cd13344daae2ef656a692010a3c01509b0f5d69f99ef8eaabe597c3fbb766e1",
+    "后端代码/app/controller/api/v1/order/StoreReservationOrder.php": "36293a108f1502845764412f6ac854044b196046c1968bc3dd3b68c559e6b6d7",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "ff09570bbbf1a02bd05981f8ae3af61fa44c6d1a800d228d79450b0b54b89d4f",
+    "后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php": "a1a1bb36a58542b7e85ce32453f2b3c4d8ba51d28624229fb2e29c2981cc83c2",
+    "tests/member-reservation-v3/historical-addon-contract.cjs": "1ca8768ad754903ff99c45644b5cb54d865e85401da7e8aabe9659bdc532515d",
+    "tests/customer-008/php/historical-reservation-store-isolated.php": "c7bf4e926e5a1b6d764e0b36d2dd6362add44429ebd5f897839604e9d887d602",
+    "tests/r15-reservation-picker/model.cjs": "9ce6ad524036be35a40df7d33b5b52ddabb702d170a56f7cf9121aa4a6dc92e0",
+    "tests/r15-owned-addon/mixed-booking.php": "1629d3f66559f12eed90f0e8061949a956c6e2cc6af68857c2475d34f9dba4fe",
+    "tests/r15-owned-addon/card-types.php": "c0cc03df90d7077bd4c40d1d7149cee70f071297f8d82f7efd358c0ce420c2a5",
+    "tests/r15-owned-addon/model.cjs": "8f56496a17ec37e30c2eaaec305f3e6f2565617512667f3ab167f355adbac3c7",
+    "tests/r15-owned-addon/browser.cjs": "1cded55cc596af4749e21bb2d380bb829936270023dcd2c06a0561800f43550f",
+    "scripts/r15-owned-addon-test.py": "701ff05a76941521cb77d54d36159417754b21cce3fdd7f72b41d9542bd0bebf",
+    "scripts/r15-owned-addon-build.cjs": "3528791062f8121cdee9f6b4b61bbf1a4ded514f0570cfd57d603e7696cc3f53"
+  },
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE",
+  "scope": {
+    "frontendFiles": 1,
+    "backendFiles": 3,
+    "databaseMigrations": 0,
+    "tests": 7,
+    "scripts": 2
+  },
+  "productionOperations": false,
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "uploaded": false,
+  "verification": {
+    "realLocalMysql": "PASS; historical, ordinary/imported mixed booking and five issued rules",
+    "ownershipStoreExpiryQuota": "PASS",
+    "sharedPoolAndChoiceKindCombinedDemand": "PASS",
+    "occupiedSiblingDeniedCancelReleases": "PASS",
+    "idempotentReplay": "PASS",
+    "failedBookingNoPartialWrite": "PASS",
+    "businessFixtureRollback": "PASS",
+    "fiveCardTypesPresentation": "PASS",
+    "browserWidths": [
+      320,
+      375,
+      430
+    ],
+    "scrollRows": 40,
+    "foldAndSearch": "PASS",
+    "standaloneArrayCardCompatibility": "PASS",
+    "errorRetryAndStaleResponses": "PASS",
+    "priorRemovalChecks": 22,
+    "H5Build": "PASS",
+    "miniBuild": "PASS",
+    "nativeTemplates": 419,
+    "realDeviceTested": false,
+    "multiProcessConcurrencyTested": false
+  },
+  "commentsUpdated": [
+    "前端代码/uniapp/pages/activity/reservation/index.vue",
+    "后端代码/app/controller/api/v1/order/StoreReservationOrder.php",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php",
+    "后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php"
+  ]
+}
