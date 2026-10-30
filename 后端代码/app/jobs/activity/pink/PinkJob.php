@@ -65,9 +65,12 @@ class PinkJob extends BaseJobs
             $pinkServices = app()->make(StorePinkServices::class);
             /** @var StoreOrderServices $orderServices */
             $orderServices = app()->make(StoreOrderServices::class);
-            $resPink = $pinkServices->createPink($orderServices->tidyOrder($orderInfo, true));//创建拼团
+            $resPink = $pinkServices->createPink($orderServices->tidyOrder($orderInfo, true));
+            // 返回 false 才能让队列按现有次数重试；不能把未生成参团事实的付款单当作建团成功。
+            if (!$resPink) throw new \RuntimeException('参团事实尚未生成');
         } catch (\Throwable $e) {
-            Log::error('创建拼团失败失败，原因：' . $e->getMessage());
+            Log::error('创建拼团失败 oid=' . (int)($orderInfo['id'] ?? 0) . ' ' . $e->getMessage());
+            return false;
         }
         return true;
     }

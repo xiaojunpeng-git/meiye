@@ -21,10 +21,14 @@
                     <view class="record-progress">{{ detail.status_name }} · {{ detail.role }}</view>
                     <view class="record-progress">已参团 {{ detail.joined_people }}/{{ detail.target_people }} 人</view></view>
             </view>
-            <view class="record-card detail-facts"><view>团号：{{ detail.group_id }}</view>
-                <view>购买门店：{{ detail.store_name || '历史订单未记录' }}</view>
-                <view>订单号：{{ detail.order_no || '历史订单未记录' }}</view>
-                <view>参团时间：{{ detail.started_at || '--' }}</view><view>截止时间：{{ detail.expires_at || '--' }}</view></view>
+            <!-- 详情事实逐行排列，长订单号只在值区域换行，不挤压字段标题。 -->
+            <view class="detail-facts">
+                <view class="detail-fact"><text class="detail-label">团号</text><text class="detail-value">{{ detail.group_id }}</text></view>
+                <view class="detail-fact"><text class="detail-label">购买门店</text><text class="detail-value">{{ detail.store_name || '历史订单未记录' }}</text></view>
+                <view class="detail-fact"><text class="detail-label">订单号</text><text class="detail-value">{{ detail.order_no || '历史订单未记录' }}</text></view>
+                <view class="detail-fact"><text class="detail-label">参团时间</text><text class="detail-value">{{ detail.started_at || '--' }}</text></view>
+                <view class="detail-fact"><text class="detail-label">截止时间</text><text class="detail-value">{{ detail.expires_at || '--' }}</text></view>
+            </view>
         </view>
         <view v-if="detailError" class="records-loading" role="status">{{ detailError }}</view>
 		<view class="records-list" v-if="!detailId && records.length">
@@ -49,7 +53,8 @@
 			</view>
 		</view>
 		<view class="records-empty" v-else-if="!detailId && !loading">
-			<emptyPage title="暂无拼团记录～"></emptyPage>
+			<emptyPage :title="emptyTitle"></emptyPage>
+            <view v-if="status === 'pending'" class="records-empty-hint">已超时的未成团记录，请到“未成团”查看</view>
 		</view>
 		<view class="records-loading" v-if="loading || records.length">
 			<text>{{ loading ? '加载中…' : (loadEnd ? '没有更多了' : '上拉加载更多') }}</text>
@@ -86,10 +91,18 @@
 				limit: 20,
 				loading: false,
 				loadEnd: false,
-				homeHide: false
+				requestId: 0,
+                homeHide: false
 			};
 		},
-		computed: mapGetters(['isLogin']),
+		computed: {
+            ...mapGetters(['isLogin']),
+            // 空状态明确当前筛选范围，不能把历史已超时记录伪装成正在拼团。
+            emptyTitle() {
+                const names = { pending: '暂无拼团中的记录', success: '暂无已成团记录', failed: '暂无未成团记录', refunded: '暂无已退款记录' };
+                return names[this.status] || '暂无拼团记录～';
+            }
+        },
 		onLoad(options) {
             this.detailId = Number(options.record_id) || 0;
 			if (!this.isLogin) {
@@ -124,26 +137,32 @@
 				this.status = status;
 				this.page = 1;
 				this.records = [];
-				this.loadEnd = false;
-				this.loadRecords();
+                this.loadEnd = false;
+                // 新筛选可立即发起查询，旧请求只能结束自身，不能阻塞或覆盖新页签。
+                this.loading = false;
+                this.loadRecords();
 			},
 			/** 后端返回当前会员范围内的权威分页，前端只负责追加展示。 */
 			loadRecords() {
 				if (this.detailId || this.loading || this.loadEnd || !this.isLogin) return;
-				this.loading = true;
-				getMemberCombinationRecords({ status: this.status, page: this.page, limit: this.limit })
+                const requestId = ++this.requestId;
+                const status = this.status, page = this.page;
+                this.loading = true;
+                getMemberCombinationRecords({ status, page, limit: this.limit })
 					.then(({ data }) => {
-						const list = Array.isArray(data.list) ? data.list : [];
-						this.records = this.page === 1 ? list : this.records.concat(list);
+                        if (requestId !== this.requestId || status !== this.status) return;
+                        const list = Array.isArray(data.list) ? data.list : [];
+						this.records = page === 1 ? list : this.records.concat(list);
 						this.loadEnd = this.records.length >= Number(data.count || 0) || list.length < this.limit;
 						if (!this.loadEnd) this.page += 1;
 					})
 					.catch((error) => {
-						uni.showToast({ title: error.msg || '拼团记录加载失败', icon: 'none' });
+                        if (requestId !== this.requestId || status !== this.status) return;
+                        uni.showToast({ title: error.msg || '拼团记录加载失败', icon: 'none' });
 					})
-					.finally(() => { this.loading = false; });
+					.finally(() => { if (requestId === this.requestId) this.loading = false; });
 			},
-			/** 团详情继续复用既有页面，避免记录入口产生第二套团状态口径。 */
+			/** 详情使用同一只读参与事实接口，不调用参团或退款命令。 */
 			openGroup(item) {
 				uni.navigateTo({ url: '/pages/activity/user_combination_records/index?record_id=' + item.record_id });
 			},
@@ -155,7 +174,13 @@
 </script>
 
 <style lang="scss" scoped>
-    .detail-facts { display: block; line-height: 2.2; font-size: 26rpx; color: #666; overflow-wrap: anywhere; }
+    /* 与列表横排卡片分离，避免后声明的 .record-card flex 布局覆盖详情。 */
+    .detail-facts { padding: 8rpx 24rpx; margin-bottom: 20rpx; background: #fff; border-radius: 20rpx; font-size: 26rpx; color: #555; }
+    .detail-fact { display: flex; align-items: flex-start; padding: 20rpx 0; line-height: 1.6; border-bottom: 1rpx solid #f2f2f2; }
+    .detail-fact:last-child { border-bottom: 0; }
+    .detail-label { flex: none; width: 128rpx; margin-right: 20rpx; color: #999; }
+    .detail-value { flex: 1; min-width: 0; word-break: break-all; overflow-wrap: anywhere; }
+    .records-empty-hint { padding: 0 36rpx; text-align: center; line-height: 1.6; font-size: 24rpx; color: #999; }
 	.records-page { min-height: 100vh; background: #f5f5f5; }
 	.records-head { position: sticky; top: 0; z-index: 20; background: #fff; }
 	.records-nav { height: 88rpx; padding: 0 30rpx; display: flex; align-items: center; justify-content: space-between; }

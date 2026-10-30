@@ -389,7 +389,8 @@ class StorePinkServices extends BaseServices
     public function createPink(array $orderInfo)
     {
         $late = false;
-        $result = \think\facade\Db::transaction(function () use ($orderInfo, &$late) {
+        $notices = [];
+        $result = \think\facade\Db::transaction(function () use ($orderInfo, &$late, &$notices) {
             $order = \think\facade\Db::name('store_order')->where('id', (int)$orderInfo['id'])->lock(true)->find();
             if (!$order || !(int)$order['paid'] || (int)$order['refund_status'] !== 0) return false;
             if ($this->dao->getOne(['order_id_key' => (int)$orderInfo['id']])) return true;
@@ -407,14 +408,22 @@ class StorePinkServices extends BaseServices
                     return false;
                 }
             }
-            return $this->createPinkLocked($orderInfo);
+            return $this->createPinkLocked($orderInfo, $notices);
         });
+        // 通知不属于参团事实，必须离开建团事务后发送；通知故障不得撤销已付款的参团记录。
+        // 已存在记录的支付重放不会填充 notices，因此不会重复发送开团/参团通知。
+        foreach ($notices as $notice) {
+            try { event('notice.notice', $notice); }
+            catch (\Throwable $error) {
+                \think\facade\Log::error('拼团记录已保存，通知失败 oid=' . (int)$orderInfo['id'] . ' ' . get_class($error));
+            }
+        }
         if ($late) (new CombinationRefundServices())->refundOrder((int)$orderInfo['id'], '支付完成时拼团已结束', 0, false);
         return $result;
     }
 
-    /** Root/order locks serialize payment callback replay and concurrent final participants. */
-    private function createPinkLocked(array $orderInfo)
+    /** 根团/订单锁保护参团幂等；仅收集通知，通知不参与本方法的建团事务。 */
+    private function createPinkLocked(array $orderInfo, array &$notices)
     {
         /** @var StoreCombinationServices $services */
         $services = app()->make(StoreCombinationServices::class);
@@ -425,6 +434,8 @@ class StorePinkServices extends BaseServices
         /** @var UserServices $userServices */
         $userServices = app()->make(UserServices::class);
         $userInfo = $userServices->get($orderInfo['uid']);
+        // 队列延迟或已付款补建都沿用原付款时点，不通过重试延长开团有效期。
+        $joinedAt = (int)($orderInfo['pay_time'] ?? 0) ?: time();
         if ($orderInfo['pink_id']) {
             //拼团存在
             $res = false;
@@ -443,11 +454,11 @@ class StorePinkServices extends BaseServices
                 $pink['people'] = $product['people'];//几人拼团
                 $pink['price'] = $v['productInfo']['price'];//单价
                 $pink['stop_time'] = 0;//结束时间
-                $pink['add_time'] = time();//开团时间
+                $pink['add_time'] = $joinedAt;//原付款参团时间
                 $res = $this->save($pink);
             }
             // 拼团团成功发送模板消息
-            event('notice.notice', [['orderInfo' => $orderInfo, 'title' => $product['title'], 'pink' => $pink], 'can_pink_success']);
+            $notices[] = [['orderInfo' => $orderInfo, 'title' => $product['title'], 'pink' => $pink], 'can_pink_success'];
             //处理拼团完成
             [$pinkAll, $pinkT, $count, $idAll, $uidAll] = $this->getPinkMemberAndPinkK($pink);
             if ($pinkT['status'] == 1) {
@@ -477,8 +488,8 @@ class StorePinkServices extends BaseServices
                 $pink['pid'] = $v['product_id'];//商品id
                 $pink['people'] = $product['people'];//几人拼团
                 $pink['price'] = $v['productInfo']['price'];//单价
-                $pink['stop_time'] = time() + $product->effective_time * 3600;//结束时间
-                $pink['add_time'] = time();//开团时间
+                $pink['stop_time'] = $joinedAt + $product->effective_time * 3600;//原付款起算的截止时间
+                $pink['add_time'] = $joinedAt;//原付款参团时间
                 $res1 = $this->dao->save($pink);
                 // Snapshot the original deadline before completion changes stop_time into completion time.
                 \think\facade\Db::name('combination_group_origin')->insert(['group_id' => (int)$res1['id'],
@@ -490,8 +501,8 @@ class StorePinkServices extends BaseServices
             $number = (int)bcsub((string)$product['people'], '1', 0);
             if ($number) CacheService::setStock(md5((string)$pink['id']), $number, 3);
 
-            PinkJob::dispatchSece(($product->effective_time * 3600) + 60, [$pink['id']]);
-            event('notice.notice', [['orderInfo' => $orderInfo, 'title' => $product['title'], 'pink' => $pink], 'open_pink_success']);
+            PinkJob::dispatchSece(max(0, (int)$pink['stop_time'] - time()) + 60, [$pink['id']]);
+            $notices[] = [['orderInfo' => $orderInfo, 'title' => $product['title'], 'pink' => $pink], 'open_pink_success'];
             if ($res) return true;
             else return false;
         }
