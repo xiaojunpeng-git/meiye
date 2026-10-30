@@ -161,7 +161,9 @@
                   v-for="item in productList"
                   :key="item.product_id"
                 >
-                  <img :src="item.image" />
+                  <img :src="item.image" :alt="item.store_name || '已选商品'" />
+                  <!-- 名称仅用于核对选择结果；优惠券适用范围仍以 product_id 保存。 -->
+                  <span class="upload-list__name" :title="item.store_name">{{ item.store_name || '商品名称未提供' }}</span>
                   <Icon
                     type="ios-close-circle"
                     size="16"
@@ -1074,21 +1076,34 @@ export default {
 }
 
 .upload-list {
-  width: 58px;
-  height: 58px;
+  width: 112px;
+  min-height: 92px;
   border: 1px dotted rgba(0, 0, 0, 0.1);
   border-radius: 4px;
   margin-right: 15px;
   display: inline-block;
   position: relative;
-  cursor: pointer;
-  vertical-align: middle;
+  vertical-align: top;
+  text-align: center;
+  padding: 4px;
 }
 
 .upload-list img {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  margin: 0 auto;
+}
+
+.upload-list__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 17px;
+  max-height: 34px;
+  overflow-wrap: anywhere;
 }
 
 .ivu-icon-ios-close-circle {
