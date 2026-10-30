@@ -2951,6 +2951,38 @@ Route::group('adminapi', function () {
      * 用户模块 相关路由
      */
     Route::group('user', function () {
+        Route::get('survey/gift-options', 'v1.user.MemberSurvey/giftOptions')->option(['real_name'=>'调查奖励目录']);
+        Route::get('survey/gift-catalog', 'v1.user.MemberSurvey/giftCatalog')->option(['real_name'=>'调查奖励门店商品目录']);
+
+        // 第12轮会员调查：静态子路径先于任务ID路径，沿用后台会话及单功能授权。
+        Route::get('survey/questionnaire-options', 'v1.user.MemberSurvey/questionnaireOptions')->option(['real_name'=>'调查问卷选择目录']);
+        Route::get('survey/questionnaires', 'v1.user.MemberSurvey/questionnaireList')->option(['real_name' => '会员调查问卷列表']);
+        Route::post('survey/questionnaires', 'v1.user.MemberSurvey/questionnaireSave')->option(['real_name' => '创建会员调查问卷']);
+        Route::get('survey/questionnaires/:id/export-data', 'v1.user.MemberSurvey/questionnaireExportData')->option(['real_name' => '导出会员调查问卷数据']);
+        Route::get('survey/questionnaires/:id/analysis/text', 'v1.user.MemberSurvey/questionnaireTextAnswers')->option(['real_name' => '会员调查问卷文字回答']);
+        Route::get('survey/questionnaires/:id/analysis', 'v1.user.MemberSurvey/questionnaireAnalysis')->option(['real_name' => '会员调查问卷题目分析']);
+        Route::get('survey/questionnaires/:id', 'v1.user.MemberSurvey/questionnaireRead')->option(['real_name' => '会员调查问卷详情']);
+        Route::put('survey/questionnaires/:id', 'v1.user.MemberSurvey/questionnaireUpdate')->option(['real_name' => '编辑会员调查问卷']);
+        Route::get('survey', 'v1.user.MemberSurvey/index')->option(['real_name' => '会员调查列表']);
+        Route::post('survey', 'v1.user.MemberSurvey/save')->option(['real_name' => '创建会员调查']);
+        Route::post('survey/preview', 'v1.user.MemberSurvey/preview')->option(['real_name' => '预览调查名单']);
+        Route::get('survey/members', 'v1.user.MemberSurvey/members')->option(['real_name' => '查找调查指定会员']);
+        Route::get('survey/:id/gifts', 'v1.user.MemberSurvey/gifts')->option(['real_name' => '查看调查完成赠送配置']);
+        Route::put('survey/:id/gifts', 'v1.user.MemberSurvey/updateGifts')->option(['real_name' => '设置调查完成赠送']);
+        Route::get('survey/:id', 'v1.user.MemberSurvey/read')->option(['real_name' => '会员调查详情']);
+        Route::put('survey/:id', 'v1.user.MemberSurvey/update')->option(['real_name' => '修改会员调查']);
+        Route::delete('survey/:id', 'v1.user.MemberSurvey/delete')->option(['real_name' => '删除会员调查任务']);
+        Route::post('survey/:id/copy', 'v1.user.MemberSurvey/copy')->option(['real_name' => '复制会员调查任务']);
+        Route::get('survey/:id/targets', 'v1.user.MemberSurvey/targets')->option(['real_name' => '调查目标会员设置']);
+        Route::put('survey/:id/targets', 'v1.user.MemberSurvey/updateTargets')->option(['real_name' => '设置调查目标会员']);
+        Route::post('survey/:id/publish', 'v1.user.MemberSurvey/publish')->option(['real_name' => '发布会员调查']);
+        Route::post('survey/:id/stop', 'v1.user.MemberSurvey/stop')->option(['real_name' => '停止会员调查']);
+        Route::post('survey/:id/resend', 'v1.user.MemberSurvey/resend')->option(['real_name' => '再次发送会员调查']);
+        Route::get('survey/:id/results', 'v1.user.MemberSurvey/results')->option(['real_name' => '会员调查结果']);
+        Route::get('survey/:id/export-data', 'v1.user.MemberSurvey/exportData')->option(['real_name' => '导出调查任务结果']);
+        Route::get('survey/:id/qr', 'v1.user.MemberSurvey/qr')->option(['real_name'=>'调查任务二维码']);
+        Route::post('survey/:id/retry-rewards', 'v1.user.MemberSurvey/retryRewards')->option(['real_name'=>'重试调查奖励']);
+
         // 平台会员模块明确白名单，服务层沿用会员列表/新增/编辑/注销功能授权。
         Route::get('member-center/bootstrap', 'v1.user.MemberCenter/bootstrap')->option(['real_name' => '平台会员初始化']);
         Route::post('member-center/action', 'v1.user.MemberCenter/action')->option(['real_name' => '平台会员操作']);

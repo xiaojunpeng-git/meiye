@@ -8,7 +8,13 @@
 					<Cascader :data="treeSelect" placeholder="请选择商品分类" change-on-select filterable v-width="'200px'"
 						@on-change="treeSearchs"></Cascader>
 				</FormItem>
-        <FormItem label="商品标签：" label-for="pid">
+        <!-- 问卷奖励仅从总部项目/产品中选择，其他入口仍保留原标签筛选。 -->
+        <FormItem v-if="Number(chooseType) === 99" label="商品类型：">
+          <Select v-model="formValidate.product_type" clearable @on-change="userSearchs">
+            <Option :value="6">项目</Option><Option :value="0">产品</Option>
+          </Select>
+        </FormItem>
+        <FormItem v-else label="商品标签：" label-for="pid">
 					<Select v-model="formValidate.store_label_id" clearable
 						@on-change="userSearchs">
 						<Option v-for="item in labelSelect" :value="item.id" :key="item.id">{{ item.label_name }}
@@ -29,7 +35,7 @@
 						style="width: 240px" @on-search="userSearchs" />
 				</FormItem>
 				<!-- 平台卡项选项目时，状态筛选与左侧商品标签处于同一行。 -->
-				<FormItem v-if="Number(chooseType) === 97" label="商品状态：">
+				<FormItem v-if="[97, 99].includes(Number(chooseType))" label="商品状态：">
 					<Select v-model="formValidate.type" @on-change="userSearchs">
 						<Option :value="1">销售中</Option>
 						<Option :value="2">仓库中</Option>
@@ -41,7 +47,7 @@
 
 		<div class="vxeTable">
 			<vxe-table border="inner" ref="xTree" :column-config="{resizable: true}" row-id="id"
-				:tree-config="flatSelect ? null : {children: 'attrValue',reserve:true}" :data="tableList" max-height="400" :checkbox-config="{reserve: true}">
+				:tree-config="flatSelect ? null : {children: 'attrValue',reserve:true}" :data="tableList" :loading="loading" max-height="400" :checkbox-config="{reserve: true}">
 				<vxe-column type="checkbox" title="多选" width="90" :tree-node="!flatSelect"></vxe-column>
 				<vxe-column field="id" title="商品ID" width="80"></vxe-column>
 				<vxe-column field="image" title="图片" min-width="90">
@@ -70,7 +76,7 @@
 						<span v-if="row.product_type==3">虚拟商品</span>
             <span v-if="row.product_type==4">次卡商品</span>
             <span v-if="row.product_type==5">卡项</span>
-            <span v-if="row.product_type==6">预约商品</span>
+            <span v-if="row.product_type==6">{{ Number(chooseType) === 99 ? '项目' : '预约商品' }}</span>
 					</template>
 				</vxe-column>
 				<vxe-column field="cate_name" title="商品分类" min-width="150">
@@ -98,13 +104,13 @@
             show-total
             @on-change="pageChange"
             :page-size="formValidate.limit"
-            @on-page-size-change="pageChange"
+            @on-page-size-change="pageSizeChange"
             show-sizer
         />
       </div>
 		</div>
 		<div class="footer" slot="footer">
-			<Button type="primary" size="large" long @click="ok">提交</Button>
+			<Button type="primary" size="large" long :disabled="loading" @click="ok">提交</Button>
 		</div>
 	</div>
 </template>
@@ -129,7 +135,7 @@ export default {
        * 选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、
 	   * 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、
 	   * 94：库存管理选品（仅产品）、95：院装耗材（仅产品）、96：院装项目（仅预约）、
-	   * 97：平台卡项选项目（仅平台项目主数据）
+	   * 97：平台卡项选项目（仅平台项目主数据）、99：问卷赠送项目/产品
        */
     chooseType: {
       type: Number,
@@ -169,7 +175,9 @@ export default {
     flatSelect: {
       type: Boolean,
       default: false
-    }
+    },
+    // 问卷选品使用其专用受控目录，不改变其他业务选择器的数据来源。
+    giftListProvider: { type: Function, default: null }
   },
   data() {
     return {
@@ -178,7 +186,7 @@ export default {
       treeSelect: [],
       formValidate: {
         page: 1,
-        limit: 10,
+        limit: Number(this.chooseType) === 99 ? 20 : 10,
         cate_id: '',
         store_name: '',
         is_new: this.is_new,
@@ -186,10 +194,11 @@ export default {
         product_type: '',
         choose_type: this.chooseType,
         // 卡项项目选择默认只读销售中商品，2 与商品列表“仓库中”使用同一后端状态口径。
-        type: Number(this.chooseType) === 97 ? 1 : ''
+        type: [97, 99].includes(Number(this.chooseType)) ? 1 : ''
       },
       total: 0,
       loading: false,
+      listRequestSequence: 0,
       grid: {
         xl: 10,
         lg: 10,
@@ -232,9 +241,14 @@ export default {
   mounted() {
     this.goodsCategory();
     this.getList();
-    this.getAllLabelApi();
+    if (Number(this.chooseType) !== 99) this.getAllLabelApi();
   },
   methods: {
+    pageSizeChange(size) {
+      this.formValidate.limit = size;
+      this.formValidate.page = 1;
+      this.getList();
+    },
     applyInventoryProductTypeLock() {
       const ct = Number(this.chooseType);
       if (ct === 94 || ct === 95) {
@@ -270,6 +284,8 @@ export default {
     },
     // 列表
     getList() {
+      // 快速切换类型或分页时只接受最后一次查询结果。
+      const sequence = ++this.listRequestSequence;
       this.loading = true;
       this.applyInventoryProductTypeLock();
       if (this.goodsType) {
@@ -285,11 +301,12 @@ export default {
       } else if (Number(this.chooseType) === 97) {
         this.formValidate.is_card = 0;
       }
-      changeListApi(this.formValidate)
+      (this.giftListProvider || changeListApi)(this.formValidate)
         .then(async(res) => {
+          if (sequence !== this.listRequestSequence) return;
           const list = res.data.list;
           list.forEach(item => {
-            item.attrValue.forEach(j => {
+            (item.attrValue || []).forEach(j => {
               j.store_name = j.suk;
               j.store_names = item.store_name;
               j.cate_name = item.cate_name;
@@ -302,11 +319,13 @@ export default {
           this.loading = false;
         })
         .catch((res) => {
+          if (sequence !== this.listRequestSequence) return;
           this.loading = false;
           this.$Message.error(res.msg);
         });
     },
     ok() {
+      if (this.loading) return;
       const selectRecords = this.$refs.xTree.getCheckboxRecords();
       const selectRecords2 = this.$refs.xTree.getCheckboxReserveRecords();
       const selected = [...selectRecords, ...selectRecords2];
@@ -315,6 +334,8 @@ export default {
         const ids = [];
         selected.forEach(item => {
           if (item.product_id) return;
+          // 问卷只能选择项目或实物产品，不允许整卡或其他商品类型。
+          if (Number(this.chooseType) === 99 && ![0, 6].includes(Number(item.product_type))) return;
           if (!ids.includes(item.id)) {
             goodsattr.push(item);
             ids.push(item.id);
