@@ -130,7 +130,8 @@ try {
     await page.addScriptTag({ path: path.join(admin, 'node_modules/vue/dist/vue.js') });
     await page.addScriptTag({ path: path.join(admin, 'node_modules/view-design/dist/iview.js') });
     await page.evaluate(({ script, compiled, fixture }) => {
-        window.fromSubmit = { render(h) { return h('div', { attrs: { 'data-unrelated-settings': 'retained' } }); } };
+        // Render the real named slot; the surrounding base form is unrelated to this settings test.
+        window.fromSubmit = { render(h) { return h('div', { attrs: { 'data-unrelated-settings': 'retained' } }, this.$slots['store-settings']); } };
         window.buildData = {};
         window.requests = [];
         window.request = config => { window.requests.push(config); return Promise.resolve({ data: fixture }); };
@@ -142,24 +143,29 @@ try {
         window.component = new window.Vue(window.pageOptions).$mount('#app');
     }, { script, compiled, fixture: fixture() });
     const section = page.locator('section[aria-label="业务来源设置"]');
-    await section.locator('.ivu-select').waitFor();
-    equal(await section.locator('.ivu-select').count(), 1, 'enabled mode shows only inherit select');
-    equal(await section.locator('.ivu-select-selected-value').innerText(), '不默认上次选择', 'zero inherit renders without accidental default');
+    await section.locator('.ivu-select').first().waitFor();
+    equal(await section.locator('.ivu-select').count(), 3, 'enabled mode keeps member purchase primary and child visible');
+    check((await section.innerText()).includes('手机端购买来源'), 'member purchase source is visible in manual mode');
+    await page.evaluate(() => { window.component.commerce.purchase_primary_id = 0; });
+    check(await section.getByRole('status').isVisible(), 'missing member purchase source has actionable inline guidance');
+    await page.evaluate(() => { window.component.commerce.purchase_primary_id = 11; window.component.commerce.purchase_secondary_id = 12; });
+    check(await section.getByRole('status').count() === 0, 'configured source clears missing guidance');
+    equal(await section.locator('.ivu-select-selected-value').first().innerText(), '不默认上次选择', 'zero inherit renders without accidental default');
     await section.locator('.ivu-switch').click();
     equal(await page.evaluate(() => window.component.commerce.source_enabled), 0, 'real switch writes integer zero');
     equal(await section.locator('.ivu-select').count(), 5, 'closed mode shows three primaries and required children');
     equal(await section.getByText('默认方式', { exact: false }).count(), 0, 'inherit control hidden while disabled');
-    for (const label of ['消费固定来源', '充值固定来源', '补交固定来源']) {
+    for (const label of ['手机端购买来源', '充值固定来源', '补交固定来源']) {
         check((await section.innerText()).includes(label), `${label} is visible`);
     }
-    const purchase = section.locator('label').filter({ hasText: '消费固定来源' });
+    const purchase = section.locator('label').filter({ hasText: '手机端购买来源' });
     await purchase.locator('.ivu-select').first().click();
     await purchase.getByText('老客首护', { exact: true }).click();
     equal(await page.evaluate(() => window.component.commerce.purchase_primary_id), 21, 'real primary select changes ID');
     equal(await page.evaluate(() => window.component.commerce.purchase_secondary_id), 0, 'primary change clears old child');
     equal(await purchase.locator('.ivu-select').count(), 1, 'no-child primary hides child select');
     await section.locator('.ivu-switch').click();
-    await section.locator('.ivu-select').click();
+    await section.locator('.ivu-select').first().click();
     await section.getByText('默认上次选择', { exact: true }).click();
     equal(await page.evaluate(() => window.component.commerce.inherit_previous), 1, 'real mode select writes integer one');
     await page.evaluate(() => { window.component.commerceLoaded = false; window.component.commerceLoadFailed = true; });

@@ -91,6 +91,9 @@ final class MemberCommerceSettingsServices
         if (!in_array($kind, ['purchase','recharge','repayment'], true)) throw new ValidateException('交易类型无效。');
         $row = Db::name('member_commerce_settings')->where('id', 1)->lock(true)->find();
         if (!$row) throw new ValidateException('会员交易默认来源尚未配置。');
+        // 手机端没有选择来源的步骤；缺少后台购买来源时，在生成订单和支付单前明确阻断。
+        if ($kind === 'purchase' && (int)$row['purchase_primary_id'] <= 0)
+            throw new ValidateException('请先在后台门店设置中配置手机端购买来源，再提交订单。');
         return $this->validateSource((int)$row[$kind . '_primary_id'], (int)$row[$kind . '_secondary_id']);
     }
 
