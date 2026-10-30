@@ -495,6 +495,13 @@
 			wechatPayFun(jsConfig, backUrl){
 				let that = this;
 				// #ifdef MP
+				// 拼团由渠道异步回调落账；微信收银台返回只表示授权结束，
+				// 必须查询本订单的后端支付事实，不能凭 SDK 回调显示已支付。
+				if (that.isGroupOrder) {
+					that.awaitingPaymentConfirmation = true;
+					that.paying = false;
+					uni.hideLoading();
+				}
 				uni.requestPayment({
 					timeStamp: jsConfig.timestamp,
 					nonceStr: jsConfig.nonceStr,
@@ -503,10 +510,12 @@
 					paySign: jsConfig.paySign,
 					success: function(res) {
 						console.log("success");
+						if (that.isGroupOrder) return that.checkPaymentAfterReturn();
 						that.pageReject('支付成功',backUrl);
 					},
 					fail: function(e) {
 						console.log("fail");
+						if (that.isGroupOrder) return that.checkPaymentAfterReturn();
 						that.pageReject('支付失败',backUrl);
 					},
 				})

@@ -441,6 +441,12 @@ class StoreOrderCreateServices extends BaseServices
 				if ($data['is_group_order']) {
 					$data['offline_pay_status'] = 2;
 					$data['yue_pay_status'] = 2;
+					// 支付渠道只为新支付请求选一次；原路退款由订单支付凭据决定。
+					$provider = PayServices::groupOnlineProvider();
+					$data['online_provider'] = $provider;
+					$data['pay_weixin_open'] = (int)($provider === 'fuyou'
+						|| ($provider === 'suixingpay' && request()->isRoutine()));
+					$data['ali_pay_status'] = (int)($provider === 'fuyou' && !request()->isRoutine());
 				}
 				//系统预设取消订单时间段
 				/** @var StoreOrderServices $storeOrderServices */

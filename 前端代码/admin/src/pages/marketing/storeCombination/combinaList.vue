@@ -109,6 +109,9 @@
                 ],
                 refundResultColumns: [
                     { title: '订单ID', key: 'order_id_key', width: 100 },
+                    { title: '原支付渠道', width: 105,
+                        render: (h, { row }) => h('span', row.provider === 'suixingpay' ? '随行付'
+                            : (row.provider === 'balance' ? '余额' : (row.provider === 'fuyou' ? '富友' : '—'))) },
                     { title: '退款状态', key: 'message', minWidth: 180, render: (h, { row }) => h('span', { style: { whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: '1.5' } }, row.message) },
                     { title: '退款金额', key: 'amount', width: 100, render: (h, { row }) => h('span', formatBusinessMoney(row.amount)) },
                     { title: '退款单号', key: 'refund_no', minWidth: 220 }
@@ -158,9 +161,12 @@
                         title: '退款状态及操作',
                         slot: 'action', width: 190
                     },
+                    { title: '原支付渠道', width: 105,
+                        render: (h, { row }) => h('span', row.provider === 'suixingpay' ? '随行付'
+                            : (row.provider === 'balance' ? '余额' : (row.provider === 'fuyou' ? '富友' : '—'))) },
                     ...[
-                        ['富友订单号', 'fuyou_order_no'], ['富友支付交易号', 'fuyou_transaction_id'],
-                        ['富友退款流水号', 'channel_refund_id'], ['富友退款追踪号', 'fuyou_refund_trace_no'],
+                        ['原渠道订单号', 'channel_order_no'], ['原支付交易号', 'channel_transaction_id'],
+                        ['渠道退款流水号', 'channel_refund_id'], ['富友退款追踪号', 'fuyou_refund_trace_no'],
                         ['商户退款单号', 'refund_no']
                     ].map(([title, key]) => ({
                         title, key, width: 205,

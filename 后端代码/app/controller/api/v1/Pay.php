@@ -17,6 +17,7 @@ use mohe\services\AliPayService;
 use mohe\services\wechat\HwcPayService;
 use mohe\services\wechat\Payment;
 use app\services\pay\SuixingPayMemberService;
+use app\services\pay\SuixingPayProductServices;
 use think\facade\Log;
 use think\Response;
 
@@ -34,7 +35,12 @@ class Pay
     {
         try {
             $fields = json_decode((string)$request->getContent(), true);
-            $success = is_array($fields) && (new SuixingPayMemberService())->notify($fields);
+            // Different order families share the signed endpoint but settle through
+            // their own authority. Each handler independently verifies the signature.
+            $orderNo = is_array($fields) ? (string)($fields['ordNo'] ?? '') : '';
+            $success = strpos($orderNo, 'SP_') === 0
+                ? (new SuixingPayProductServices())->notify($fields)
+                : (is_array($fields) && (new SuixingPayMemberService())->notify($fields));
         } catch (\Throwable $exception) {
             Log::error('随行付支付回调处理失败：' . $exception->getMessage());
             $success = false;

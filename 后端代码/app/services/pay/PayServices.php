@@ -96,6 +96,20 @@ class PayServices
     }
 
     /**
+     * 拼团新订单只接受一个在线收单方。随行付当前仅支持会员微信小程序，
+     * 且其子 AppID 必须与本实例会员端一致；历史退款不使用此开关选择渠道。
+     */
+    public static function groupOnlineProvider(): string
+    {
+        $fuyou = self::fuyouPayReady();
+        $suixing = SuixingPayGateway::ready()
+            && trim((string)sys_config('suixingpay_sub_appid', ''))
+                === trim((string)sys_config('routine_appId', ''));
+        if ($fuyou === $suixing) return '';
+        return $suixing ? 'suixingpay' : 'fuyou';
+    }
+
+    /**
      * 设置二维码条码值
      * @param string $authCode
      * @return $this

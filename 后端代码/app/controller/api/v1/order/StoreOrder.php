@@ -18,6 +18,7 @@ use app\model\user\User;
 use app\Request;
 use app\services\pay\IntegralPayServices;
 use app\services\pay\PayServices;
+use app\services\pay\SuixingPayProductServices;
 use app\services\other\ExpressServices;
 use app\services\product\product\StoreProductCouponServices;
 use app\services\product\product\StoreProductServices;
@@ -472,11 +473,6 @@ class StoreOrder
             ['quitUrl', '']
         ], true);
         if (!$uni) return app('json')->fail('参数错误!');
-        if ($from != 'pc') {
-            if (!$this->services->checkPaytype($paytype)) {
-                return app('json')->fail('暂不支持该支付方式，请刷新页面或者联系管理员');
-            }
-        }
         $uid = (int)$request->uid();
         $order = $this->services->getUserOrderDetail($uni, $uid);
         if (!$order)
@@ -487,15 +483,52 @@ class StoreOrder
             return app('json')->fail('该订单已失效!');
         }
         $order = $order->toArray();
+		// 所有拼团支付入口均须拒绝余额、线下等非第三方渠道，防止绕过会员端显隐。
+		if ((int)($order['type'] ?? 0) === 3 && !in_array($paytype, [PayServices::WEIXIN_PAY, PayServices::ALIAPY_PAY], true)) {
+			return app('json')->fail('拼团订单仅支持微信或支付宝支付');
+		}
+		// 拼团的新支付按当前唯一已就绪渠道路由；已支付退款另查原订单渠道凭据。
+		$groupProvider = (int)($order['type'] ?? 0) === 3 ? PayServices::groupOnlineProvider() : '';
+		if ((int)($order['type'] ?? 0) === 3 && $groupProvider === '')
+			return app('json')->fail('拼团在线支付尚未配置完成，请联系管理员');
+		if ($groupProvider === 'suixingpay') {
+			if ($paytype !== PayServices::WEIXIN_PAY || $from !== 'routine' || !$request->isRoutine())
+				return app('json')->fail('随行付拼团当前仅支持会员微信小程序支付');
+			$jsConfig = (new SuixingPayProductServices())->create($order, $uid);
+			return app('json')->status('wechat_pay', ['jsConfig' => $jsConfig, 'order_id' => $order['order_id']]);
+		}
+		if ($from !== 'pc' && !$this->services->checkPaytype($paytype))
+			return app('json')->fail('暂不支持该支付方式，请刷新页面或者联系管理员');
         $isChannel = $this->getChennel[$from] ?? ($request->isApp() ? 4 : 1);
-        $updateData = ['is_channel' => $isChannel];
-        //只要重新支付就更新订单号
-        if (in_array($paytype, [PayServices::ALIAPY_PAY, PayServices::WEIXIN_PAY])) {
-			$newOrderId = $this->services->getUniqueId();
-            $order['order_id'] = $newOrderId;
-			$updateData['order_id'] = $newOrderId;
+        if ($groupProvider === 'fuyou') {
+            // 锁定同一订单后检查两个渠道的在途凭据，再换业务单号。
+            // 并发请求拿着旧单号会失败，随行付预约也必须核对这行锁后的单号。
+            $order = \think\facade\Db::transaction(function () use ($order, $isChannel) {
+                $locked = \think\facade\Db::name('store_order')->where('id', (int)$order['id'])->lock(true)->find();
+                if (!$locked || (int)$locked['paid'] !== 0 || (int)$locked['type'] !== 3
+                    || (string)$locked['order_id'] !== (string)$order['order_id'])
+                    throw new \think\exception\ValidateException('拼团订单支付状态已变化，请刷新订单');
+                $suixingPending = \think\facade\Db::name('suixingpay_product_payment_attempt')
+                    ->where('order_id_key', (int)$order['id'])
+                    ->whereIn('status', ['created', 'pending', 'paid'])->count();
+                $fuyouPending = \think\facade\Db::name('fuyou_payment_attempt')
+                    ->where('business_type', 'product')->where('business_order_no', (string)$locked['order_id'])
+                    ->whereIn('status', ['created', 'pending', 'paid'])->count();
+                if ($suixingPending || $fuyouPending)
+                    throw new \think\exception\ValidateException('原支付结果待确认，请先核对原订单，勿重复付款');
+                $order['order_id'] = $this->services->getUniqueId();
+                $this->services->update($order['id'], ['is_channel' => $isChannel, 'order_id' => $order['order_id']], 'id');
+                return $order;
+            });
+        } else {
+            $updateData = ['is_channel' => $isChannel];
+            // 普通订单沿用原重试单号策略；本轮只修改拼团渠道边界。
+            if (in_array($paytype, [PayServices::ALIAPY_PAY, PayServices::WEIXIN_PAY])) {
+                $order['order_id'] = $this->services->getUniqueId();
+                $updateData['order_id'] = $order['order_id'];
+            }
+            $this->services->update($order['id'], $updateData, 'id');
         }
-        $this->services->update($order['id'], $updateData, 'id');
         //积分兑换订单
         if ($order['type'] == 4 && isset($order['pay_integral']) && $order['pay_integral']) {
             /** @var IntegralPayServices $integralPayServices */

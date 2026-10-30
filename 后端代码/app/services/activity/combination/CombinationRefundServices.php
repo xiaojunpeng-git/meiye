@@ -6,6 +6,7 @@ namespace app\services\activity\combination;
 use app\services\order\StoreOrderRefundDomainServices;
 use app\services\pay\FuyouCombinationRefundGateway;
 use app\services\pay\PayServices;
+use app\services\pay\SuixingPayCombinationRefundGateway;
 use think\exception\ValidateException;
 use think\facade\Db;
 
@@ -25,6 +26,15 @@ class CombinationRefundServices
     private function gateway(): FuyouCombinationRefundGateway
     {
         return $this->gateway ?: FuyouCombinationRefundGateway::instance();
+    }
+
+    /** 退款回执固定原收单方；切换当前支付开关不能改变历史订单的退款去向。 */
+    private function gatewayForReceipt(array $receipt)
+    {
+        $provider = (string)($receipt['provider'] ?? 'fuyou');
+        if ($provider === 'fuyou') return $this->gateway();
+        if ($provider === 'suixingpay') return new SuixingPayCombinationRefundGateway();
+        throw new ValidateException('原支付渠道凭据异常，不能发起退款');
     }
 
     public static function isGroupOrder(int $orderId): bool
@@ -181,6 +191,7 @@ class CombinationRefundServices
                 $row = ['order_id' => $orderId, 'refund_no' => $prefix . str_pad((string)random_int(0, 999999999999999), 15, '0', STR_PAD_LEFT),
                     'attempt' => $attempt, 'state' => $mapping['channel'] === 'balance' ? 'confirmed' : 'sending',
                     'channel_order_no' => $mapping['channel_order_no'], 'channel' => $mapping['channel'],
+                    'provider' => $mapping['provider'],
                     'merchant_id' => $mapping['merchant_id'], 'amount_cents' => (int)bcmul((string)$order['pay_price'], '100', 0),
                     'channel_refund_id' => '', 'fuyou_refund_trace_no' => '', 'channel_transaction_id' => $mapping['channel'] === 'balance' ? '' : (string)($order['trade_no'] ?? ''),
                     'settled_on' => (string)($mapping['settled_on'] ?? ''), 'operator_id' => $operatorId, 'kick_group_id' => $kickGroupId, 'reason' => $reason,
@@ -214,12 +225,12 @@ class CombinationRefundServices
         try {
             if ($send) {
                 // Persist sending BEFORE calling; a crash can only query, never send again blindly.
-                try { $this->gateway()->apply($receipt); }
+                try { $this->gatewayForReceipt($receipt)->apply($receipt); }
                 catch (\Throwable $error) { /* Unknown is not failure; query the same refund number below. */ }
                 Db::name('combination_order_refund')->where('order_id', $orderId)->where('refund_no', $receipt['refund_no'])->update(['state' => 'pending']);
             }
             if (in_array($receipt['state'], ['sending','pending'], true)) {
-                $result = $this->gateway()->query($receipt);
+                $result = $this->gatewayForReceipt($receipt)->query($receipt);
                 $channelHint = (string)($result['channel_hint'] ?? '');
                 unset($result['channel_hint']); // Not a database field or state transition.
                 Db::transaction(function () use ($orderId, $result, $receipt) {
@@ -227,7 +238,7 @@ class CombinationRefundServices
                     Db::name('combination_order_refund')->where('order_id', $orderId)
                         ->where('refund_no', $receipt['refund_no'])->update($result + ['updated_at' => time()]);
                     if ($result['state'] === 'failed') {
-                        // Only a signed PAYERROR releases use. Unknown/invalid replies stay frozen.
+                        // Only the original provider's verified terminal failure releases use.
                         Db::name('store_order')->where('id', $orderId)->where('refund_status', 1)->update(['refund_status' => 0]);
                     }
                 });
@@ -256,7 +267,7 @@ class CombinationRefundServices
         } catch (\Throwable $error) {
             // Never expose raw gateway errors or infer failure from an unsigned/unknown reply.
             if (in_array($receipt['state'], ['sending', 'pending'], true)) {
-                $channelHint = '退款结果暂未确认，请稍后查询或联系富友核对原退款单，勿重复退款';
+                $channelHint = '退款结果暂未确认，请稍后查询或联系原支付渠道核对原退款单，勿重复退款';
             }
             // Channel success survives local errors and is retried through the existing terminal domain.
             \think\facade\Log::warning('拼团退款待查询或收口 oid=' . $orderId . ' ' . get_class($error));
@@ -324,22 +335,37 @@ class CombinationRefundServices
             throw new ValidateException('卡项已有升级、替换或转余额操作，不能快捷全额退款');
     }
 
-    /** Match successful channel mapping and original merchant proof; never infer FuYou from pay_type alone. */
+    /** 用已支付的渠道尝试及订单金额、交易号确定唯一原渠道，不按当前开关猜测。 */
     private function paymentOrigin(array $order): array
     {
         if ($order['pay_type'] === PayServices::YUE_PAY)
-            return ['channel' => 'balance', 'channel_order_no' => '', 'merchant_id' => ''];
+            return ['provider' => 'balance', 'channel' => 'balance', 'channel_order_no' => '', 'merchant_id' => ''];
+        $amount = (int)bcmul((string)$order['pay_price'], '100', 0);
         $mappings = Db::name('fuyou_payment_attempt')->alias('p')
             ->join('combination_payment_origin o', 'o.channel_order_no=p.channel_order_no')
             ->where('p.business_order_no', (string)$order['order_id'])->where('p.business_type', 'product')
             ->where('p.status', 'paid')->where('p.transaction_id', (string)$order['trade_no'])
-            ->where('p.amount_cents', (int)bcmul((string)$order['pay_price'], '100', 0))
+            ->where('p.amount_cents', $amount)
             ->field('p.channel,p.channel_order_no,o.merchant_id,o.settled_on')->select()->toArray();
-        if (count($mappings) !== 1 || !in_array($mappings[0]['channel'], ['wechat','alipay'], true))
-            throw new ValidateException('原支付渠道凭据不完整，不能直接调用富友退款');
+        $suixing = Db::name('suixingpay_product_payment_attempt')
+            ->where('order_id_key', (int)$order['id'])->where('business_order_no', (string)$order['order_id'])
+            ->where('status', 'paid')->where('transaction_id', (string)$order['trade_no'])
+            ->where('amount_cents', $amount)->select()->toArray();
+        if (count($mappings) + count($suixing) !== 1)
+            throw new ValidateException('原支付渠道凭据不唯一或不完整，不能直接退款');
+        if ($suixing) {
+            $origin = $suixing[0];
+            if ((string)$origin['merchant_id'] !== (new SuixingPayCombinationRefundGateway())->merchantId())
+                throw new ValidateException('原随行付商户与当前配置不一致，不能跨商户退款');
+            return ['provider' => 'suixingpay', 'channel' => 'wechat',
+                'channel_order_no' => (string)$origin['channel_order_no'],
+                'merchant_id' => (string)$origin['merchant_id'], 'settled_on' => ''];
+        }
+        if (!in_array($mappings[0]['channel'], ['wechat', 'alipay'], true))
+            throw new ValidateException('原富友支付渠道凭据不完整，不能直接退款');
         if ((string)$mappings[0]['merchant_id'] !== $this->gateway()->merchantId())
-            throw new ValidateException('原支付商户与当前配置不一致，不能跨商户退款');
-        return $mappings[0];
+            throw new ValidateException('原富友商户与当前配置不一致，不能跨商户退款');
+        return ['provider' => 'fuyou'] + $mappings[0];
     }
 
     public function present(array $row): array
@@ -347,6 +373,8 @@ class CombinationRefundServices
         $state = (string)($row['state'] ?? '');
         $participant = !empty($row['order_id']) ? Db::name('store_pink')->where('order_id_key', (int)$row['order_id'])->find() : null;
         return ['state' => $state, 'group_id' => $participant ? ((int)$participant['k_id'] ?: (int)$participant['id']) : 0, 'refund_no' => (string)($row['refund_no'] ?? ''),
+            'provider' => (string)($row['provider'] ?? ''), 'channel_order_no' => (string)($row['channel_order_no'] ?? ''),
+            'channel_transaction_id' => ($row['channel'] ?? '') === 'balance' ? '' : (string)($row['channel_transaction_id'] ?? ''),
             'channel_refund_id' => (string)($row['channel_refund_id'] ?? ''),
             'fuyou_refund_trace_no' => (string)($row['fuyou_refund_trace_no'] ?? ''),
             'amount' => bcdiv((string)($row['amount_cents'] ?? 0), '100', 2),
@@ -370,7 +398,12 @@ class CombinationRefundServices
         elseif (!$receipt || $receipt['state'] === 'failed') {
             try {
                 Db::transaction(function () use ($order) { $this->assertUnused($order); });
-                $this->paymentOrigin($order);
+                $origin = $this->paymentOrigin($order);
+                if (!$receipt) {
+                    $view['provider'] = $origin['provider'];
+                    $view['channel_order_no'] = $origin['channel_order_no'];
+                    $view['channel_transaction_id'] = $origin['channel'] === 'balance' ? '' : (string)($order['trade_no'] ?? '');
+                }
                 $view['refund_action'] = $receipt ? 'retry' : 'refund';
             } catch (\Throwable $error) {
                 $view['refund_block_reason'] = $error instanceof ValidateException ? $error->getMessage() : '订单暂不满足直接退款条件';
