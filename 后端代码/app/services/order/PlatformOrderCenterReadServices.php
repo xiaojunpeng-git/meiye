@@ -5,8 +5,10 @@ namespace app\services\order;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryContract;
 use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices;
 use app\services\cashier\v3\order\CashierV3SalesOrderQueryServices;
+use app\services\cashier\v3\query\UnifiedQueryModule;
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
@@ -75,10 +77,16 @@ final class PlatformOrderCenterReadServices
         }
         [$operator, $scope, $scopeMeta] = $context;
         $type = trim((string)($payload['recordType'] ?? $payload['record_type'] ?? 'sales'));
-        if ($type === 'sales') {
-            $payload['recordType'] = 'sales';
-            $page = $this->salesQueries->querySalesOrders($payload, $operator, $scope);
+        if (isset(CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE[$type])) {
+            // 平台与门店端共用同一订单查询执行器：授权门店候选、筛选、
+            // 排序、分页和导出必须保持同一口径，不得因平台入口改走旧 Reader。
+            $runtime = UnifiedQueryModule::runtime();
+            $payload['pageCode'] = CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE[$type];
+            $queryContext = $runtime['contextFactory']->make($operator, $scope, $payload);
+            $provider = clone $runtime['providers']->resolve($payload['pageCode']);
+            $page = $provider->queryPage($queryContext, $payload, $operator, $scope);
         } else {
+            // 未知类型仍返回无数据权限页，不将非白名单输入交给统一查询注册表。
             $payload['recordType'] = $type;
             $page = $this->recordQueries->queryRecords($payload, $operator, $scope);
         }
@@ -272,6 +280,7 @@ final class PlatformOrderCenterReadServices
     private function businessTypes(): array
     {
         return [
+            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
             ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
             ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
