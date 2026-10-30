@@ -2126,7 +2126,9 @@ WSS;
         $data = $this->getConfigAllField([
             'balance_func_status', 'yue_pay_status', 'is_cashier_yue_pay_verify', 'offline_pay_status', 'offline_pay_type',
             'fuyou_id', 'fuyou_key', 'fuyou_pay_status', 'fuyou_name',
-            'fuyou_sub_appid'
+            'fuyou_sub_appid', 'suixingpay_pay_status', 'suixingpay_org_id',
+            'suixingpay_mno', 'suixingpay_gateway_url', 'suixingpay_platform_public_key',
+            'suixingpay_sub_appid'
         ]);
         if (!empty($data['fuyou_key']['value'])) {
             $data['fuyou_key']['value'] = '';
@@ -2139,13 +2141,22 @@ WSS;
         }
         $build->rule([
             Build::tabs()->option('在线支付（富友）', [
-                Build::alert('会员端仍显示“微信支付”和“支付宝支付”，两种方式实际都由富友统一收单；系统不使用原生微信支付、支付宝支付商户接口。', Alert::WARNING)->showIcon(true),
+                Build::alert('选择富友时，会员端“微信支付”和“支付宝支付”由富友统一收单。切换到随行付后，新订单使用随行付；历史订单仍按原渠道核对。', Alert::WARNING)->showIcon(true),
                 Build::switch('fuyou_pay_status', $data['fuyou_pay_status']['info'], (int)$data['fuyou_pay_status']['value'])->control(1, [
                     Build::input('fuyou_id', $data['fuyou_id']['info'], $data['fuyou_id']['value'])->info($data['fuyou_id']['desc']),
                     Build::input('fuyou_key', $data['fuyou_key']['info'], $data['fuyou_key']['value'])->type('password')->info($data['fuyou_key']['desc']),
                     Build::input('fuyou_sub_appid', $data['fuyou_sub_appid']['info'], $data['fuyou_sub_appid']['value'])->info($data['fuyou_sub_appid']['desc']),
                     Build::input('fuyou_name', $data['fuyou_name']['info'], $data['fuyou_name']['value'])->info($data['fuyou_name']['desc']),
                 ])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['fuyou_pay_status']['desc'])
+            ])->option('在线支付（随行付）', [
+                Build::alert('会员微信小程序使用随行付收单。商户私钥由各客户实例环境变量 SUIXINGPAY_PRIVATE_KEY_FILE 指向站点外文件；此处只填写机构、商户与平台公钥。', Alert::WARNING)->showIcon(true),
+                Build::switch('suixingpay_pay_status', $data['suixingpay_pay_status']['info'], (int)$data['suixingpay_pay_status']['value'])->control(1, [
+                    Build::input('suixingpay_org_id', $data['suixingpay_org_id']['info'], $data['suixingpay_org_id']['value'])->info($data['suixingpay_org_id']['desc']),
+                    Build::input('suixingpay_mno', $data['suixingpay_mno']['info'], $data['suixingpay_mno']['value'])->info($data['suixingpay_mno']['desc']),
+                    Build::input('suixingpay_gateway_url', $data['suixingpay_gateway_url']['info'], $data['suixingpay_gateway_url']['value'])->info($data['suixingpay_gateway_url']['desc']),
+                    Build::input('suixingpay_platform_public_key', $data['suixingpay_platform_public_key']['info'], $data['suixingpay_platform_public_key']['value'])->type('textarea')->info($data['suixingpay_platform_public_key']['desc']),
+                    Build::input('suixingpay_sub_appid', $data['suixingpay_sub_appid']['info'], $data['suixingpay_sub_appid']['value'])->info($data['suixingpay_sub_appid']['desc']),
+                ])->trueValue('开启', 1)->falseValue('关闭', 0)->info('与富友只能开启一种；当前支持会员微信小程序支付')
             ])->option('余额支付', [
                 Build::switch('balance_func_status', $data['balance_func_status']['info'], (int)$data['balance_func_status']['value'])->falseValue('关闭', 0)->trueValue('开启', 1)->control(1, [
                     Build::switch('yue_pay_status', $data['yue_pay_status']['info'], (int)$data['yue_pay_status']['value'])->trueValue('开启', 1)->falseValue('关闭', 2)->info($data['yue_pay_status']['desc']),
@@ -2292,7 +2303,7 @@ WSS;
                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
                 // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
-                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('可修改沿用现有算法；计算法按项目提成档位计算预计劳动提成，原手工费与历史业务事实独立保留'),
+                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),

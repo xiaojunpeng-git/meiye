@@ -7,10 +7,11 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use think\facade\Db;
 
-/** Confirmed Fuyou collection enters the existing recharge/balance/fact transaction. */
+/** Confirmed provider collection enters the existing recharge/balance/fact transaction. */
 final class MemberCommerceRechargeSettlement
 {
-    public function settleInTx(array $row, array $snapshot, array $scope, string $transactionId): array
+    public function settleInTx(array $row, array $snapshot, array $scope, string $transactionId,
+                               string $merchantNo = ''): array
     {
         if ($transactionId === '' || (int)$row['balance_cents'] !== 0 || (int)$row['external_cents'] !== (int)$row['amount_cents']) {
             throw new \RuntimeException('Recharge requires a confirmed external payment');
@@ -34,7 +35,8 @@ final class MemberCommerceRechargeSettlement
                 'principalAmount' => (string)intdiv((int)$row['amount_cents'], 100),
                 'bonusAmount' => (string)intdiv((int)$snapshot['bonusCents'], 100),
                 'balanceVersion' => (int)Db::name('user')->where('uid', $row['member_id'])->value('balance_version'),
-                'businessDate' => $snapshot['businessDate'], 'rechargeRemark' => '会员自助充值 ' . $row['public_id'],
+                'businessDate' => $snapshot['businessDate'], 'rechargeRemark' => '会员自助充值 ' . $row['public_id']
+                    . ($merchantNo !== '' ? '；' . ($snapshot['onlineProvider'] ?? 'fuyou') . '商户号：' . $merchantNo : ''),
                 'paymentMethod' => $snapshot['paymentMethod'], 'collectionReference' => $transactionId]]);
         $recharge = $response['data']['recharge'];
         return ['orderId' => 'RCH:' . (int)$recharge['rechargeId'], 'orderNo' => $recharge['rechargeOrderNo'], 'recharge' => $recharge];

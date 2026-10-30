@@ -16,6 +16,7 @@ use app\Request;
 use mohe\services\AliPayService;
 use mohe\services\wechat\HwcPayService;
 use mohe\services\wechat\Payment;
+use app\services\pay\SuixingPayMemberService;
 use think\facade\Log;
 use think\Response;
 
@@ -26,6 +27,21 @@ use think\Response;
  */
 class Pay
 {
+
+    /** Tianque sends a signed JSON success notification. A failed validation
+     * must return non-success so the provider can retry after reconciliation. */
+    public function suixingNotify(Request $request): Response
+    {
+        try {
+            $fields = json_decode((string)$request->getContent(), true);
+            $success = is_array($fields) && (new SuixingPayMemberService())->notify($fields);
+        } catch (\Throwable $exception) {
+            Log::error('随行付支付回调处理失败：' . $exception->getMessage());
+            $success = false;
+        }
+        return Response::create($success ? ['code' => 'success', 'msg' => '成功']
+            : ['code' => 'fail', 'msg' => '处理失败'], 'json', $success ? 200 : 500);
+    }
 
     /**
      *   富友支付回调

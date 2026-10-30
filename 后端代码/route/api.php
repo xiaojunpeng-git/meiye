@@ -22,6 +22,7 @@ use think\Response;
 $paymentAdminPrefix = trim((string)config('admin.admin_prefix'), '/');
 if ($paymentAdminPrefix !== '') {
     Route::group($paymentAdminPrefix . '/api/pay', function () {
+        Route::post('suixingnotify', 'v1.Pay/suixingNotify');
         Route::any('fynotify/:channel/:type', 'v1.Pay/fyNotify');
         Route::any('fynotify/:type', 'v1.Pay/fyNotifyLegacy');
     })->prefix('api.')->middleware([
@@ -32,13 +33,14 @@ if ($paymentAdminPrefix !== '') {
 }
 
 Route::group('api', function () {
-    // 公开二维码只读题目，提交和领取奖励仍由下方会员认证组保护。
-    Route::get('survey/entry/:token', 'v1.user.MemberSurvey/entry')->pattern(['token'=>'[a-f0-9]{48}'])->middleware(AuthTokenMiddleware::class,false);
+	// 会员调查公开入口仅返回题目；提交和奖励接口继续走下方会员认证。
+	Route::get('survey/entry/:token', 'v1.user.MemberSurvey/entry')->pattern(['token' => '[a-f0-9]{48}'])->middleware(AuthTokenMiddleware::class, false);
 
 	Route::any('wechat/serve', 'v1.wechat.Wechat/serve');//公众号服务
 	Route::any('wechat/miniServe', 'v1.wechat.Wechat/miniServe');//小程序服务
 	Route::any('work/serve', 'v1.wechat.Wechat/work');//企业微信服务
 	Route::any('pay/notify/:type', 'v1.Pay/notify');//支付回调
+	Route::post('pay/suixingnotify', 'v1.Pay/suixingNotify');//随行付已验签支付回调
 	Route::any('pay/fynotify/:channel/:type', 'v1.Pay/fyNotify');//富友支付回调
 	Route::any('pay/fynotify/:type', 'v1.Pay/fyNotifyLegacy');//兼容修复前已生成的回调地址
 	Route::any('pay/mchNotify/:type', 'v1.Pay/mchNotify');//商户转账回调
@@ -359,12 +361,13 @@ Route::group('api', function () {
 	 * 会员授权接口
 	 */
     Route::group(function () {
-        Route::get('survey/pending', 'v1.user.MemberSurvey/pending');
-        Route::post('survey/:id/claim', 'v1.user.MemberSurvey/claim');
-        Route::get('survey/:id/reward', 'v1.user.MemberSurvey/reward');
-        Route::post('survey/:id/reward/retry', 'v1.user.MemberSurvey/retry');
-        Route::get('survey/:id', 'v1.user.MemberSurvey/detail');
-        Route::post('survey/:id/submit', 'v1.user.MemberSurvey/submit');
+		// 已上线调查深链必须随支付路由合并，避免 010 小程序升级后失去调查提交能力。
+		Route::get('survey/pending', 'v1.user.MemberSurvey/pending');
+		Route::post('survey/:id/claim', 'v1.user.MemberSurvey/claim');
+		Route::get('survey/:id/reward', 'v1.user.MemberSurvey/reward');
+		Route::post('survey/:id/reward/retry', 'v1.user.MemberSurvey/retry');
+		Route::get('survey/:id', 'v1.user.MemberSurvey/detail');
+		Route::post('survey/:id/submit', 'v1.user.MemberSurvey/submit');
 		//用户修改手机号
 		Route::post('user/updatePhone', 'v1.Login/update_binding_phone')->name('updateBindingPhone');
 		//设置登录code

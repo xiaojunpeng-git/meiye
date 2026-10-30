@@ -399,7 +399,44 @@ class SystemConfig extends AuthController
 			@copy($from, $toPublic);
 		}
 
-        if (isset($post['fuyou_pay_status']) && (int)$post['fuyou_pay_status'] === 1) {
+        // Resolve both switches from submitted values or existing instance
+        // config. A partial form post may not leave two live collectors.
+        $paymentKeys = ['fuyou_pay_status', 'fuyou_id', 'fuyou_key', 'fuyou_sub_appid', 'fuyou_name',
+            'suixingpay_pay_status', 'suixingpay_org_id', 'suixingpay_mno', 'suixingpay_gateway_url',
+            'suixingpay_platform_public_key', 'suixingpay_sub_appid'];
+        $touchesPayment = (bool)array_intersect($paymentKeys, array_keys($post));
+        $fuyouOn = (int)($post['fuyou_pay_status'] ?? sys_config('fuyou_pay_status', 0)) === 1;
+        $suixingOn = (int)($post['suixingpay_pay_status'] ?? sys_config('suixingpay_pay_status', 0)) === 1;
+        if ($touchesPayment && $fuyouOn && $suixingOn) return $this->fail('富友与随行付只能开启一种，请先关闭另一种。');
+        if ($touchesPayment && $suixingOn) {
+            $required = ['suixingpay_org_id' => '随行付机构号', 'suixingpay_mno' => '随行付商户号',
+                'suixingpay_gateway_url' => '随行付接口地址',
+                'suixingpay_platform_public_key' => '随行付平台公钥',
+                'suixingpay_sub_appid' => '随行付小程序 AppID'];
+            foreach ($required as $key => $label) {
+                $value = trim((string)($post[$key] ?? sys_config($key, '')));
+                if ($value === '') return $this->fail($label . '不能为空');
+            }
+            $gateway = trim((string)($post['suixingpay_gateway_url'] ?? sys_config('suixingpay_gateway_url', '')));
+            $host = (string)parse_url($gateway, PHP_URL_HOST);
+            if (parse_url($gateway, PHP_URL_SCHEME) !== 'https'
+                || !preg_match('/(^|\.)(tianquetech\.com|suixingpay\.com)$/D', $host))
+                return $this->fail('随行付接口地址必须是官方 HTTPS 域名');
+            $appid = trim((string)($post['suixingpay_sub_appid'] ?? sys_config('suixingpay_sub_appid', '')));
+            if ($appid !== (string)sys_config('routine_appId'))
+                return $this->fail('随行付小程序 AppID 与当前会员端不一致');
+            $callbackBase = trim((string)sys_config('site_url', ''));
+            $callbackParts = parse_url($callbackBase);
+            if (!$callbackParts || strtolower((string)($callbackParts['scheme'] ?? '')) !== 'https'
+                || empty($callbackParts['host']))
+                return $this->fail('请先配置本站 HTTPS 回调域名');
+            $keyFile = trim((string)env('SUIXINGPAY_PRIVATE_KEY_FILE', ''));
+            if ($keyFile === '' || !is_file($keyFile) || !is_readable($keyFile)
+                || (fileperms($keyFile) & 0007) !== 0)
+                return $this->fail('请先在本实例服务器安全配置随行付私钥文件');
+        }
+
+        if ($touchesPayment && $fuyouOn) {
             $required = [
                 'fuyou_id' => '富友商家ID',
                 'fuyou_key' => '富友支付Key',
