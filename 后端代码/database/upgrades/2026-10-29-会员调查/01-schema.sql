@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS `eb_member_survey_popup` (
   KEY `idx_task` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会员每日问卷弹窗记录';
 
--- 第12轮：二维码是任务公开入口；名单只负责提醒。任务发布后固定奖励门店与内容。
+-- 第12轮：二维码是任务公开入口；名单只负责提醒。任务发布后固定奖励内容，门店在提交时按会员归属冻结。
 CREATE TABLE IF NOT EXISTS eb_member_survey_reward_config (
  id bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, gift_type tinyint unsigned NOT NULL, relation_id int unsigned NOT NULL, config mediumtext NOT NULL, created_at int unsigned NOT NULL, updated_at int unsigned NOT NULL, UNIQUE KEY uq_survey_reward_config(gift_type,relation_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

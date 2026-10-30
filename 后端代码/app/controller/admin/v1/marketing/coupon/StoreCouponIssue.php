@@ -361,11 +361,13 @@ class StoreCouponIssue extends AuthController
             $productIds = explode(',', $info['product_id']);
             /** @var StoreProductServices $product */
             $product = app()->make(StoreProductServices::class);
-            $productImages = $product->getColumn([['id', 'in', $productIds]], 'image', 'id');
+            // 编辑/复制券时回传所选商品名称供页面核对；适用范围仍由原 product_id 决定。
+            $products = $product->getColumn([['id', 'in', $productIds]], 'id,image,store_name', 'id');
             foreach ($productIds as $item) {
                 $info['productInfo'][] = [
                     'product_id' => $item,
-                    'image' => $productImages[$item] ?? ''
+                    'image' => $products[$item]['image'] ?? '',
+                    'store_name' => $products[$item]['store_name'] ?? ''
                 ];
             }
         }
@@ -441,7 +443,8 @@ class StoreCouponIssue extends AuthController
      */
     public function issue_log($id)
     {
-        $list = $this->services->issueLog($id);
+        $filters = $this->request->getMore([['member_name', ''], ['phone', '']]);
+        $list = $this->services->issuedRecordList((int)$id, $filters);
         return $this->success($list);
     }
 }

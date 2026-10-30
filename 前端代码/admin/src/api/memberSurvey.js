@@ -8,8 +8,6 @@ export const questionnaireExportData = id => request({ url: `user/survey/questio
 export const questionnaireTextAnswers = (id, params) => request({ url: `user/survey/questionnaires/${id}/analysis/text`, method: 'get', params });
 export const questionnaireCreate = data => request({ url: 'user/survey/questionnaires', method: 'post', data });
 export const questionnaireUpdate = (id, data) => request({ url: `user/survey/questionnaires/${id}`, method: 'put', data });
-export const questionnaireGifts = id => request({ url: `user/survey/questionnaires/${id}/gifts`, method: 'get' });
-export const questionnaireUpdateGifts = (id, data) => request({ url: `user/survey/questionnaires/${id}/gifts`, method: 'put', data });
 
 export const surveyList = params => request({ url: 'user/survey', method: 'get', params });
 export const surveyRead = id => request({ url: `user/survey/${id}`, method: 'get' });
@@ -17,6 +15,8 @@ export const surveyGifts = id => request({ url: `user/survey/${id}/gifts`, metho
 export const surveyUpdateGifts = (id, data) => request({ url: `user/survey/${id}/gifts`, method: 'put', data });
 export const surveyCreate = data => request({ url: 'user/survey', method: 'post', data });
 export const surveyUpdate = (id, data) => request({ url: `user/survey/${id}`, method: 'put', data });
+export const surveyCopy = id => request({ url: `user/survey/${id}/copy`, method: 'post' });
+export const surveyDelete = id => request({ url: `user/survey/${id}`, method: 'delete' });
 export const surveyTargets = id => request({ url: `user/survey/${id}/targets`, method: 'get' });
 export const surveyUpdateTargets = (id, filters) => request({ url: `user/survey/${id}/targets`, method: 'put', data: { filters }});
 export const surveyPreview = filters => request({ url: 'user/survey/preview', method: 'post', data: { filters }});

@@ -262,8 +262,14 @@
       closable
       title="领取记录"
       :mask-closable="false"
-      width="700"
+      width="1260"
     >
+      <div class="acea-row row-middle mb15">
+        <Input v-model="receiveDraft.member_name" placeholder="会员姓名" clearable style="width: 180px; margin-right: 10px" @on-enter="receiveSearch" />
+        <Input v-model="receiveDraft.phone" placeholder="手机号" clearable style="width: 180px; margin-right: 10px" @on-enter="receiveSearch" />
+        <Button type="primary" @click="receiveSearch">查询</Button>
+        <Button style="margin-left: 8px" @click="receiveReset">重置</Button>
+      </div>
       <Table
         :columns="columns2"
         :data="receiveList"
@@ -275,17 +281,12 @@
         no-filtered-userFrom-text="暂无筛选结果"
         :max-height="600"
       >
-        <template slot-scope="{ row, index }" slot="avatar">
-          <viewer>
-            <div class="tabBox_img">
-              <img v-lazy="row.avatar" />
-            </div>
-          </viewer>
-        </template>
+        <template slot-scope="{ row }" slot="is_used">{{ row.is_used ? '是' : '否' }}</template>
       </Table>
       <div class="acea-row row-right page">
         <Page
           :total="total2"
+          :current="receiveFrom.page"
           show-elevator
           show-total
           @on-change="receivePageChange"
@@ -475,31 +476,54 @@ export default {
       loading2: false,
       columns2: [
         {
-          title: 'ID',
-          key: 'uid',
-          minWidth: 80,
-        },
-        {
-          title: '用户名',
-          key: 'nickname',
+          title: '发放门店',
+          key: 'issuance_store_name',
           minWidth: 150,
         },
         {
-          title: '用户头像',
-          slot: 'avatar',
+          title: '会员',
+          key: 'member_name',
+          minWidth: 150,
+        },
+        {
+          title: '手机',
+          key: 'phone',
+          minWidth: 140,
+        },
+        {
+          title: '转让人',
+          key: 'sender_name',
+          minWidth: 140,
+        },
+        {
+          title: '转让人手机',
+          key: 'sender_phone',
+          minWidth: 140,
+        },
+        {
+          title: '领取/发放时间',
+          key: 'issued_at',
+          minWidth: 170,
+        },
+        {
+          title: '是否使用',
+          slot: 'is_used',
           minWidth: 100,
         },
         {
-          title: '领取时间',
-          key: 'add_time',
-          minWidth: 140,
+          title: '状态',
+          key: 'status_label',
+          minWidth: 110,
         },
       ],
       total2: 0,
       receiveFrom: {
         page: 1,
         limit: 15,
+        member_name: '',
+        phone: '',
       },
+      receiveDraft: { member_name: '', phone: '' },
       rows: {},
       staffData: [],
       couponHeader: [],
@@ -552,7 +576,23 @@ export default {
     receive(row) {
       this.modals2 = true;
       this.rows = row;
+      // 切换优惠券时回第一页，避免沿用上一个券的页码造成有记录却显示空白。
+      this.receiveFrom.page = 1;
+      this.receiveFrom.member_name = '';
+      this.receiveFrom.phone = '';
+      this.receiveDraft = { member_name: '', phone: '' };
       this.getReceivelist(row);
+    },
+    // 查询与分页共用已提交筛选值，输入框草稿不会悄悄改变翻页条件。
+    receiveSearch() {
+      this.receiveFrom.member_name = this.receiveDraft.member_name.trim();
+      this.receiveFrom.phone = this.receiveDraft.phone.trim();
+      this.receiveFrom.page = 1;
+      this.getReceivelist(this.rows);
+    },
+    receiveReset() {
+      this.receiveDraft = { member_name: '', phone: '' };
+      this.receiveSearch();
     },
     getReceivelist(row) {
       this.loading2 = true;

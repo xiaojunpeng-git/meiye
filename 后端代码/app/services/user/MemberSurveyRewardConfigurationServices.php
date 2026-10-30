@@ -9,7 +9,6 @@ use think\exception\ValidateException;
 final class MemberSurveyRewardConfigurationServices
 {
     public const GIFT_TYPE_SURVEY = 1;
-    public const GIFT_TYPE_SURVEY_QUESTIONNAIRE = 2;
     /** 未配置奖励也允许答卷，不以默认赠品补写奖励。 */
     public function emptyConfig(): array { return ['store_id'=>0,'reward_each_round'=>true,'product'=>[],'coupon'=>[]]; }
 

@@ -8,11 +8,12 @@
       <Tabs v-model="activeTab">
         <TabPane label="调查任务" name="tasks">
           <p class="section-hint">发布后可生成二维码；设置目标会员条件时，仅发布名单内的会员可扫码答卷。未设置条件的任务向所有会员开放。题目和奖励在发布时固定。</p>
+          <div class="task-filters"><span>状态：</span><Select v-model="taskStatus" style="width:140px" @on-change="changeTaskStatus"><Option value="normal">正常</Option><Option value="stopped">停止</Option></Select></div>
           <Table :height="tableHeight" :columns="columns" :data="tasks" :loading="loading" border />
           <span class="paging-label">共 {{ total }} 条 · 每页 20 条 · 第 {{ page }} / {{ Math.max(1, Math.ceil(total / 20)) }} 页</span><Page class="pager" :total="total" :current="page" :page-size="20" @on-change="changePage" />
         </TabPane>
         <TabPane label="问卷管理" name="questionnaires">
-          <p class="section-hint">问卷可独立编辑并用于多个任务。修改后供新发布的任务使用；已发布任务保留原题目。</p>
+          <p class="section-hint">问卷可独立编辑并用于多个任务。修改后供新发布的任务使用；已发布任务保留原题目。奖励在调查任务中设置。</p>
           <Table :height="tableHeight" :columns="questionnaireColumns" :data="questionnaires" :loading="questionnaireLoading" border />
           <span class="paging-label">共 {{ questionnaireTotal }} 条 · 每页 20 条 · 第 {{ questionnairePage }} / {{ Math.max(1, Math.ceil(questionnaireTotal / 20)) }} 页</span><Page class="pager" :total="questionnaireTotal" :current="questionnairePage" :page-size="20" @on-change="changeQuestionnairePage" />
         </TabPane>
@@ -176,8 +177,8 @@
       <Table :columns="analysisTextColumns" :data="analysisTextData ? analysisTextData.list : []" :loading="analysisTextLoading" border />
       <Page v-if="analysisTextData" class="pager" :total="analysisTextData.total" :current="analysisTextPage" :page-size="20" @on-change="showTextAnswers(analysisTextQuestionId, $event)" />
     </Modal>
-    <member-survey-reward :visible="giftOpen" :survey-id="giftTaskId" :questionnaire-id="giftQuestionnaireId" :readonly="giftReadOnly" :inherited="giftInherited"
-      @close="giftOpen = false" @saved="giftQuestionnaireId ? loadQuestionnaires() : loadTasks()" />
+    <member-survey-reward :visible="giftOpen" :survey-id="giftTaskId" :readonly="giftReadOnly"
+      @close="giftOpen = false" @saved="loadTasks" />
     <Modal v-model="qrOpen" title="调查任务二维码" :footer-hide="true" width="450">
       <p>{{ qrKind === 'miniprogram' ? '微信扫码打开会员小程序。' : '扫码打开会员问卷。' }}已设置目标条件的任务仅允许发布名单内会员答卷；完成前须授权手机号，无所属门店时须先选择门店。</p>
       <img v-if="qrKind === 'miniprogram' && qrUrl" :src="qrUrl" alt="调查任务小程序码" style="display:block;margin:20px auto;width:260px;height:260px" />
@@ -190,7 +191,7 @@
 </template>
 
 <script>
-import { surveyList, surveyRead, surveyCreate, surveyUpdate, surveyTargets, surveyUpdateTargets, surveyPreview, surveySearchMembers, surveyPublish, surveyStop, surveyResend, surveyResults, surveyExportData, questionnaireList, questionnaireRead, questionnaireCreate, questionnaireUpdate, questionnaireAnalysis, questionnaireTextAnswers, questionnaireExportData } from '@/api/memberSurvey';
+import { surveyList, surveyRead, surveyCreate, surveyUpdate, surveyCopy, surveyDelete, surveyTargets, surveyUpdateTargets, surveyPreview, surveySearchMembers, surveyPublish, surveyStop, surveyResend, surveyResults, surveyExportData, questionnaireList, questionnaireRead, questionnaireCreate, questionnaireUpdate, questionnaireAnalysis, questionnaireTextAnswers, questionnaireExportData } from '@/api/memberSurvey';
 import { guideRequired, clearRequiredGuidance } from '@/utils/requiredGuidance';
 import { surveyQr, surveyRetryRewards, questionnaireOptions } from '@/api/memberSurvey';
 import MemberSurveyReward from '@/components/memberSurveyReward';
@@ -212,12 +213,12 @@ export default {
   data() {
     return {
       qrOpen: false, qrUrl: '', qrError: '', qrEpoch: 0, qrEnvironment: '', qrKind: '',
-      activeTab: 'tasks', tasks: [], total: 0, page: 1, loading: false, saving: false,
+      activeTab: 'tasks', tasks: [], total: 0, page: 1, taskStatus: 'normal', loading: false, saving: false,
       questionnaireOptions: [], questionnaireTotal: 0, questionnairePage: 1, tableHeight: Math.max(220, window.innerHeight - 340), questionnaires: [], questionnaireLoading: false, questionnaireSaving: false, exportingQuestionnaireId: 0,
       exportingTaskId: 0,
       questionForm: emptyQuestionnaire(), selectedQuestionnaire: null, previewQuestionnaire: emptyQuestionnaire(), questionnaireEditorOpen: false,
       editorOpen: false, targetsOpen: false, audienceOpen: false, memberPickerOpen: false, questionPreviewOpen: false, resultsOpen: false,
-      giftOpen: false, giftTaskId: 0, giftQuestionnaireId: 0, giftReadOnly: false, giftInherited: false,
+      giftOpen: false, giftTaskId: 0, giftReadOnly: false, copyingTaskId: 0, deletingTaskId: 0,
       previewLoading: false, previewData: null, resultData: null, resultId: 0, resultPage: 1,
       analysisOpen: false, analysisLoading: false, analysisData: null, analysisId: 0, analysisGroupKey: '',
       analysisTextOpen: false, analysisTextLoading: false, analysisTextData: null, analysisTextPage: 1, analysisTextQuestionId: '',
@@ -231,21 +232,29 @@ export default {
           ? (row.targets_configured ? '待发布' : '公开扫码') : (row.targets_configured ? String(row.target_count) : '公开扫码')) },
         { title: '已填写', key: 'answer_count', width: 100 },
         { title: '截止', width: 120, render: (h, { row }) => h('span', row.deadline ? this.dateText(row.deadline) : '无') },
-        { title: '操作', width: 640, render: (h, { row }) => h('div', [
-          row.status === 'published' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.showQr(row) } }, '二维码') : null,
-          row.status !== 'draft' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.retryRewards(row) } }, '重试待发奖励') : null,
-          row.status === 'draft' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.editTask(row.id) } }, '编辑') : null,
-          row.status === 'draft' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.openTargets(row) } }, '添加目标会员') : null,
-          h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.openGiftConfig(row) } },
-            `${row.status === 'draft' ? '赠送配置' : '查看赠送'}${row.gift_count ? '（' + row.gift_count + '）' : ''}`),
-          row.status === 'draft' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.publishTask(row) } }, '发布') : null,
-          row.status === 'published' ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.stopTask(row.id) } }, '停止') : null,
-          h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.loadResults(1, row.id) } }, '查看结果'),
-          // 独立的任务导出只下载该任务，不改动查看结果、发送及赠送配置行为。
-          h('Button', { props: { type: 'text', size: 'small', loading: this.exportingTaskId === Number(row.id), disabled: Boolean(this.exportingTaskId) },
-            on: { click: () => this.exportTask(row) } }, '导出结果'),
-          row.status === 'published' && (!row.deadline || row.deadline >= Date.now() / 1000)
-            ? h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.resendTask(row) } }, '发送') : null
+        { title: '操作', width: 620, render: (h, { row }) => h('div', { class: 'survey-task-actions' }, [
+          h('div', { class: 'survey-task-actions__row' }, [
+            row.status === 'published' ? h('Button', { props: { size: 'small' }, on: { click: () => this.showQr(row) } }, '二维码') : null,
+            row.status !== 'draft' ? h('Button', { props: { size: 'small' }, on: { click: () => this.retryRewards(row) } }, '重试待发奖励') : null,
+            row.status === 'draft' ? h('Button', { props: { size: 'small' }, on: { click: () => this.editTask(row.id) } }, '编辑') : null,
+            row.status === 'draft' ? h('Button', { props: { size: 'small' }, on: { click: () => this.openTargets(row) } }, '添加目标会员') : null,
+            h('Button', { props: { size: 'small' }, on: { click: () => this.openGiftConfig(row) } },
+              `${row.status === 'draft' ? '赠送设置' : '查看赠送'}${row.gift_count ? '（' + row.gift_count + '）' : ''}`),
+            row.status === 'draft' ? h('Button', { props: { type: 'primary', size: 'small' }, on: { click: () => this.publishTask(row) } }, '发布') : null,
+            row.status === 'published' ? h('Button', { props: { size: 'small' }, on: { click: () => this.stopTask(row.id) } }, '停止') : null
+          ]),
+          h('div', { class: 'survey-task-actions__row' }, [
+            h('Button', { props: { size: 'small' }, on: { click: () => this.loadResults(1, row.id) } }, '查看结果'),
+            // 任务导出只下载该任务，不能混入问卷跨任务结果。
+            h('Button', { props: { size: 'small', loading: this.exportingTaskId === Number(row.id), disabled: Boolean(this.exportingTaskId) },
+              on: { click: () => this.exportTask(row) } }, '导出结果'),
+            row.status === 'published' && (!row.deadline || row.deadline >= Date.now() / 1000)
+              ? h('Button', { props: { size: 'small' }, on: { click: () => this.resendTask(row) } }, '发送') : null,
+            h('Button', { props: { size: 'small', loading: this.copyingTaskId === Number(row.id) }, on: { click: () => this.copyTask(row) } }, '复制'),
+            h('Button', { props: { type: 'error', ghost: true, size: 'small', disabled: row.status === 'published', loading: this.deletingTaskId === Number(row.id) },
+              attrs: { title: row.status === 'published' ? '请先停止任务，再检查能否删除' : '删除无答卷、无奖励记录的任务' },
+              on: { click: () => this.deleteTask(row) } }, '删除')
+          ])
         ]) }
       ],
       questionnaireColumns: [
@@ -254,14 +263,12 @@ export default {
         { title: '题数', key: 'question_count', width: 85 },
         { title: '版本', width: 85, render: (h, { row }) => h('span', `第 ${row.revision} 版`) },
         { title: '关联任务', key: 'task_count', width: 100 },
-        { title: '操作', width: 385, render: (h, { row }) => h('div', { style: { whiteSpace: 'nowrap' } }, [
+        { title: '操作', width: 310, render: (h, { row }) => h('div', { style: { whiteSpace: 'nowrap' } }, [
           h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.editQuestionnaire(row.id) } }, '编辑'),
           h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.showQuestionPreview(row.id) } }, '预览'),
           h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.openQuestionnaireAnalysis(row.id) } }, '分析'),
           h('Button', { props: { type: 'text', size: 'small', loading: this.exportingQuestionnaireId === Number(row.id), disabled: Boolean(this.exportingQuestionnaireId) },
-            on: { click: () => this.exportQuestionnaire(row) } }, '导出Excel'),
-          h('Button', { props: { type: 'text', size: 'small' }, on: { click: () => this.openQuestionnaireGiftConfig(row) } },
-            `赠送设置${row.gift_count ? '（' + row.gift_count + '）' : ''}`)
+            on: { click: () => this.exportQuestionnaire(row) } }, '导出Excel')
         ]) }
       ],
       audienceColumns: [
@@ -334,9 +341,10 @@ export default {
     questionTypeName(type) { return { single: '单选', multiple: '多选', text: '文字问答' }[type] || type; },
     optionPercent(count, total) { return total ? Math.round(Number(count) * 1000 / Number(total)) / 10 : 0; },
     changePage(page) { this.page = page; this.loadTasks(); },
+    changeTaskStatus() { this.page = 1; this.loadTasks(); },
     async loadTasks() {
       this.loading = true;
-      try { const res = await surveyList({ page: this.page, limit: 20 }); this.tasks = res.data.list || []; this.total = res.data.count || 0; }
+      try { const res = await surveyList({ page: this.page, limit: 20, status: this.taskStatus }); this.tasks = res.data.list || []; this.total = res.data.count || 0; }
       finally { this.loading = false; }
     },
     async loadQuestionnaires() {
@@ -354,6 +362,34 @@ export default {
       this.form = { id: item.id, title: item.title, description: item.description,
         deadline: item.deadline ? this.dateText(item.deadline) : '', questionnaire_id: Number(item.questionnaire_id) };
       await this.changeQuestionnaire(this.form.questionnaire_id); this.editorOpen = true;
+    },
+    /** 复制生成独立草稿；发布名单和二维码不能随原任务复用。 */
+    async copyTask(row) {
+      if (this.copyingTaskId) return;
+      this.copyingTaskId = Number(row.id);
+      try {
+        await surveyCopy(row.id);
+        this.page = 1; await this.loadTasks();
+        this.$Message.success('已复制为草稿，请核对奖励和目标会员后发布');
+      } catch (error) { this.$Message.error(error.msg || error.message || '复制失败'); }
+      finally { this.copyingTaskId = 0; }
+    },
+    /** 删除前确认；后端仍检查任务状态、答卷和奖励事实。 */
+    deleteTask(row) {
+      if (this.deletingTaskId || row.status === 'published') return;
+      this.$Modal.confirm({
+        title: '删除调查任务',
+        content: '仅无答卷、无奖励记录的草稿或已停止任务可删除。确定删除此任务吗？删除后二维码和目标名单失效。',
+        onOk: async () => {
+          this.deletingTaskId = Number(row.id);
+          try {
+            await surveyDelete(row.id);
+            if (this.page > 1 && this.tasks.length === 1) this.page--;
+            await this.loadTasks(); this.$Message.success('任务已删除');
+          } catch (error) { this.$Message.error(error.msg || error.message || '删除失败'); }
+          finally { this.deletingTaskId = 0; }
+        }
+      });
     },
     async changeQuestionnaire(id) {
       this.selectedQuestionnaire = id ? (await questionnaireRead(id)).data : null;
@@ -398,16 +434,7 @@ export default {
     },
     openGiftConfig(row) {
       this.giftTaskId = Number(row.id);
-      this.giftQuestionnaireId = 0;
       this.giftReadOnly = row.status !== 'draft';
-      this.giftInherited = Boolean(row.gift_inherited);
-      this.giftOpen = true;
-    },
-    openQuestionnaireGiftConfig(row) {
-      this.giftQuestionnaireId = Number(row.id);
-      this.giftTaskId = 0;
-      this.giftReadOnly = false;
-      this.giftInherited = false;
       this.giftOpen = true;
     },
     targetPayload() {
@@ -544,6 +571,7 @@ export default {
 .member-survey-page .toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
 .member-survey-page .pager { margin-top:18px; text-align:right; }
 .member-survey-page .section-hint { color:#808695; margin-bottom:16px; }
+.member-survey-page .task-filters { display:flex; align-items:center; gap:8px; margin:0 0 12px; }
 .editor { max-height:70vh; overflow:auto; padding-right:8px; }
 .editor .filter-row { margin:14px 0; }
 .hint { color:#808695; margin:10px 0; }
@@ -567,3 +595,10 @@ export default {
 .required { color:#ed4014; }
 </style>
 <style scoped>.paging-label{display:inline-block;margin-top:14px;color:#65758c;font-size:12px}.member-survey-page .pager{float:right;margin-top:12px}</style>
+<style>
+.member-survey-page .survey-task-actions { display:flex; flex-direction:column; gap:9px; padding:5px 0; }
+.member-survey-page .survey-task-actions__row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.member-survey-page .survey-task-actions__row .ivu-btn { margin:0; min-height:27px; border-radius:5px; padding:0 10px; }
+.member-survey-page .survey-task-actions__row .ivu-btn-default { background:#fff; border-color:#d6e0ec; color:#365778; }
+.member-survey-page .survey-task-actions__row .ivu-btn-default:hover { border-color:#2d8cf0; color:#2d8cf0; }
+</style>

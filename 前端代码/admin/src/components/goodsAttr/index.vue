@@ -362,6 +362,8 @@ export default {
           if (item.product_id) return;
           // 优惠券绑定商品主键，不把规格主键传给发券规则。
           if (Number(this.chooseType) === 98 && ![0, 4, 5, 6].includes(Number(item.product_type))) return;
+          // 问卷奖励只能选择项目和实物产品，保持与服务端奖励目录的类型边界一致。
+          if (this.giftPicker && !this.giftPickerTypes.includes(Number(item.product_type))) return;
           if (!ids.includes(item.id)) {
             goodsattr.push(item);
             ids.push(item.id);

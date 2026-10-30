@@ -73,23 +73,10 @@ class MemberSurvey extends AuthController
         return app('json')->success(['id' => $service->saveQuestionnaire((array)$this->request->post(), (int)$this->adminId, (int)$id)]);
     }
 
-    public function questionnaireGifts($id, MemberSurveyGiftServices $service)
-    {
-        $this->headquartersOnly();
-        return app('json')->success($service->questionnaireConfig((int)$id));
-    }
-
-    public function updateQuestionnaireGifts($id, MemberSurveyGiftServices $service)
-    {
-        $this->headquartersOnly();
-        $service->saveQuestionnaireConfig((int)$id, (array)$this->request->post('sendAll', []));
-        return app('json')->success('问卷赠送配置已保存');
-    }
-
     public function index(MemberSurveyServices $service)
     {
         $this->headquartersOnly();
-        return app('json')->success($service->listTasks((int)$this->request->get('page', 1), (int)$this->request->get('limit', 20)));
+        return app('json')->success($service->listTasks((int)$this->request->get('page', 1), (int)$this->request->get('limit', 20), (string)$this->request->get('status', 'normal')));
     }
 
     public function read($id, MemberSurveyServices $service)
@@ -127,6 +114,21 @@ class MemberSurvey extends AuthController
     {
         $this->headquartersOnly();
         return app('json')->success(['id' => $service->save((array)$this->request->post(), (int)$this->adminId, (int)$id)]);
+    }
+
+    /** 复制只产生草稿配置，不继承原任务的答卷、奖励和二维码。 */
+    public function copy($id, MemberSurveyServices $service)
+    {
+        $this->headquartersOnly();
+        return app('json')->success(['id' => $service->copyTask((int)$id, (int)$this->adminId)]);
+    }
+
+    /** 服务层在同一事务锁定任务并保护已发生的答卷与赠送事实。 */
+    public function delete($id, MemberSurveyServices $service)
+    {
+        $this->headquartersOnly();
+        $service->deleteTask((int)$id);
+        return app('json')->success('调查任务已删除');
     }
 
     public function targets($id, MemberSurveyServices $service)
