@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "public_entries": [
+    "system.html",
+    "index.html",
+    "/admin/user/survey",
+    "/pages/users/survey/index",
+    "/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff"
+  ],
+  "business_writes": 0
+}

@@ -1,0 +1,34 @@
+{
+  "new_baselines": [
+    "6359f9c0 010 report parity",
+    "e75263fb R15 card occupancy / member trial 3.0.83"
+  ],
+  "fixed_commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "fixed_tree": "09415ef7d1273b126e4dff219dd60251e47ff058",
+  "source_sha256": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "035cb239684c85437c537bf9fab57b17654a986a366e140a3cdc9ccf52ad1d41",
+    "前端代码/uniapp/pages/users/user_card/index.vue": "1c694775fd634e6689ef5b775ecc85d4d8f4bed42aa93aa3ac71ce518a91f94a",
+    "前端代码/uniapp/pages/users/survey/index.vue": "c7c41e6b5a1ce36f64cb4810e41bfc05b10e533f255814501b509d8648affac6",
+    "前端代码/admin/src/pages/user/survey/index.vue": "d14970be1e2b17069bf5eb4a8c8534d1285ce14bf2205791c9687bf31dc9c35c",
+    "后端代码/app/services/user/MemberSurveyServices.php": "59234c59e33ee8a9feae226ce880df823f33f6b27d7e44684cd0ca7e58511bdb"
+  },
+  "local_tests": {
+    "survey_business_84": true,
+    "survey_browser_24": true,
+    "r15_card_model": true,
+    "r15_card_browser": true,
+    "h5_rh_008_010": true,
+    "mini_008_010": true
+  },
+  "live_preflight": "preflight-current.json",
+  "mini_build": "mini-build-current.json",
+  "user_data_changes": false,
+  "release_order": [
+    "rh",
+    "push",
+    "008",
+    "010",
+    "upload008",
+    "upload010"
+  ]
+}

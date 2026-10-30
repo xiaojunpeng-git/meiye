@@ -1,0 +1,59 @@
+{
+  "site": "rh",
+  "commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "environment": "024e1b8c489328ceadbc0f62786fb8dd66b215fde80e4cea7e32c30bc988dc9d",
+  "protected": {
+    "public/view_cashier_v3/index.html": "5290ebd9ec2c30cd5e22e0ce5ae402105694f5b74ef19f3ce8a55a9fb27ca21c",
+    "public/view_mobile_v3/index.html": "93cb6f93efa9f5d775f91f52481048fec38a28bc182cc6d44312e8a665fd17aa"
+  },
+  "files": {
+    "public/index.html": {
+      "before": "e14135ddd330995ce2d1dcb8bd49449350f00ef4dc1bb85cdf959c05808c5112",
+      "after": "9a288c7a6c5964abbadcca00458244c774331dc94d7bd24873ef5cb991d11e78"
+    },
+    "public/static/js/pages-users-user_card-index.8adad234.js": {
+      "before": null,
+      "after": "a14c81baeb0581a74bf4b5e29749d14b9500b4e1ad49a47e7d9bd5ce1edc8275"
+    },
+    "public/static/js/pages-users-user_card_list-index.71875374.js": {
+      "before": null,
+      "after": "c4066027f2c0533f48e256bd4460df375995a44112e1eb7a9a829f6f4efbd591"
+    },
+    "public/static/js/pages-behalf-order_confirm-index~pages-goods-order_confirm-index~pages-order_addcart-order_addcart~p~f8a96568.aa9b7409.js": {
+      "before": null,
+      "after": "bec616dfc89f7ca80db6443cef10dfe950cad4599ab036c37340c0278b6fa119"
+    },
+    "public/static/js/pages-users-survey-index.563374b7.js": {
+      "before": null,
+      "after": "7711c565ac0eb661db4271adabf7f7ed39148d49dcdff689e3fe5b0dbd7878bc"
+    },
+    "public/static/js/pages-activity-reservation-index.378733c5.js": {
+      "before": null,
+      "after": "7f1b56c501deead2a413b56477019db3ff4c87b33b36ccd63fdc538257383375"
+    },
+    "public/static/js/pages-annex-vip_agreement-index.6642be50.js": {
+      "before": null,
+      "after": "8d4af01775d7828f91ec1bb2b2375b233b56991450aec659efde43c2bd56ba00"
+    },
+    "public/static/js/index.da70539e.js": {
+      "before": null,
+      "after": "6e673703d1c4201f4d8ed8f0b00159a27c3202ba9b2540ea8ab478aae196efa8"
+    },
+    "public/static/js/pages-store-home-index.8a092955.js": {
+      "before": null,
+      "after": "c2d442f8427a07b6aa9c23f50c2f8fee82e4f2c4f1630615c0edd9e2082f589d"
+    },
+    "public/static/js/pages-goods-member_checkout-index.213137ad.js": {
+      "before": null,
+      "after": "573f4a9ce27c437bba6b118adf370476af5ea386f917ad7e4b0f9d9f67d48ab6"
+    },
+    "public/static/js/pages-discover-discoverIndex-index.cc042ee0.js": {
+      "before": null,
+      "after": "473394f5eec655f6eeae6754645a791eea71a4ae686ab78145ab5c58a4d39e66"
+    },
+    "public/static/js/pages-user-index.6aed6eea.js": {
+      "before": null,
+      "after": "9da1a1e7b5b57d1cb0febb4a57fd63c121c457460c7ae40d782a166062b974a9"
+    }
+  }
+}

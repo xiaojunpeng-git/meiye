@@ -1,0 +1,9 @@
+{
+  "commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "dirs": {
+    "admin": "/www/backups/008/combination-group-e4e48432",
+    "member": "/www/backups/008/store-address-e4e48432"
+  },
+  "config_backup": "/www/backups/008/survey-config-e4e48432",
+  "phase": "backed_up"
+}

@@ -1,0 +1,164 @@
+{
+  "site": "010",
+  "commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "previewAuthorized": false,
+  "backendAllowlist": [
+    "app/controller/admin/v1/user/MemberSurvey.php",
+    "app/controller/api/v1/user/MemberSurvey.php",
+    "app/services/user/MemberSurveyGiftServices.php",
+    "app/services/user/MemberSurveyMiniProgramCodeServices.php",
+    "app/services/user/MemberSurveyServices.php",
+    "app/services/user/UserBelongStoreServices.php",
+    "route/admin.php"
+  ],
+  "targets": {
+    "formal/app/controller/admin/v1/user/MemberSurvey.php": {
+      "before": "4d08141a9b315ff014733e32479168b4fc8aa46393b4645f69f436fdc2887e4e",
+      "after": "8d880f009948438a1111ab8c3ca297d4e504b54b0fa931cbaa17108ff012024e"
+    },
+    "formal/app/services/user/MemberSurveyGiftServices.php": {
+      "before": "f96b30ecc997ee91718461bf70ffda39e45bcf4ba3638cb4f7aa369d8bb24d8b",
+      "after": "d4d442c6d3f9bd8b10cb39cfd893a39357057787d23e4ff3aea8f14d98153295"
+    },
+    "formal/app/services/user/MemberSurveyServices.php": {
+      "before": "9584117f5d996dafde6d5b18f4b701d41d572328995e6e0235323bdfdb80c56a",
+      "after": "59234c59e33ee8a9feae226ce880df823f33f6b27d7e44684cd0ca7e58511bdb"
+    },
+    "formal/route/admin.php": {
+      "before": "0f2568fdc11cc2dd4d6d932552e4d62349eb123d544b35c18dbe8c7bcf490f60",
+      "after": "dd51c6d75c2894d36f9448be3d028efc337e6a88d3567ca205810605fe355ad4"
+    },
+    "formal/public/system.html": {
+      "before": "b5c9b813cc81d42b613da289c85a9d068596109c74bb08038c962c761acf0095",
+      "after": "6cdc8ceadec7528307e2de6280ea5ce9a09bdcf553d8790c02829be6502a8071"
+    },
+    "formal/public/view_admin/css/chunk-0b906d7f.1f9ffdf9.css": {
+      "before": null,
+      "after": "1060cf0ae509395e81b6ea6caebd2c8c3667c86dec8f3d3a04a60ee55cf2fb00"
+    },
+    "formal/public/view_admin/css/chunk-5eec9367.cb782128.css.gz": {
+      "before": null,
+      "after": "02cebb8f8e87645d9ca4b6771f6e82e91ff3bbb912258011bb6e7b2acd61a4cf"
+    },
+    "formal/public/view_admin/css/chunk-06775f70.e67e0075.css": {
+      "before": null,
+      "after": "6b0fbeb6dd51ab02e499961da3f8c6326b62e7691b180c63d6335d9211695554"
+    },
+    "formal/public/view_admin/css/chunk-5579e0b4.f98c1507.css": {
+      "before": null,
+      "after": "1e71112f3076b1bbcfe41db3aea19633e943ee97bbc7e395e46b1fa74437b22b"
+    },
+    "formal/public/view_admin/css/chunk-0e8f5af9.cc4cfec3.css": {
+      "before": null,
+      "after": "faa776b8a7ac4976f773d18c0ccce3c3b38a4f2aad00a9bfdb0de6ab454b784a"
+    },
+    "formal/public/view_admin/css/chunk-7888cf0c.47d027b9.css": {
+      "before": null,
+      "after": "22d1b3c4f9c0d9cf331cbc115c6ec2d5ff62a3e7ffbbcdba0a370957275e57ad"
+    },
+    "formal/public/view_admin/css/chunk-0f6bfe30.10552c64.css": {
+      "before": null,
+      "after": "f54595e5127a2c23c1ac8df9902202223d8c28e3e1528cf66d7069d2e5bc2f2b"
+    },
+    "formal/public/view_admin/css/chunk-2c9571b1.5c064747.css": {
+      "before": null,
+      "after": "8d2f808f548ffdffde05e2dc70c4e5612625755177622b03c3681e9cb6ce6426"
+    },
+    "formal/public/view_admin/css/chunk-06775f70.e67e0075.css.gz": {
+      "before": null,
+      "after": "227e0d84364f762212cb5f18cfd65b0a5ccf05f3d35baa546cc34b2d3417258e"
+    },
+    "formal/public/view_admin/css/chunk-66db3f1a.22cf55d7.css.gz": {
+      "before": null,
+      "after": "cf1d2a17553cb5fb893f0eeb517a98dd55cb8ede56586e7c65df8131e70c7218"
+    },
+    "formal/public/view_admin/css/chunk-5eec9367.cb782128.css": {
+      "before": null,
+      "after": "9f76047a581145a59b0d9a993cc7d76800ced36fa643a45b2ed1a6e9174473d6"
+    },
+    "formal/public/view_admin/css/chunk-66db3f1a.22cf55d7.css": {
+      "before": null,
+      "after": "e2ad9034b8f41c319c8f7ca0d875fcdbb8af1bf4cc362e06262417c6584efa2b"
+    },
+    "formal/public/view_admin/js/chunk-06775f70.881bd1ea.js": {
+      "before": null,
+      "after": "b20713a40377f7c7506408c6b131a9b91c280756f5afa91377f4ccb58806f966"
+    },
+    "formal/public/view_admin/js/chunk-0b906d7f.d44d2af8.js.gz": {
+      "before": null,
+      "after": "a626717e456879a81829bdddb33e3a3976a31d0dbdfac16d87c6f962e500d320"
+    },
+    "formal/public/view_admin/js/chunk-66db3f1a.c8e682f0.js.gz": {
+      "before": null,
+      "after": "e002af538aaaa0d24e98b7ed1bb717daebe52d119f4d94cff4d2f40b1bfe7203"
+    },
+    "formal/public/view_admin/js/chunk-5eec9367.26bdf180.js.gz": {
+      "before": null,
+      "after": "486a91d39616e356c278d11a3955d4592a193e20b227193b49232ec08d68946b"
+    },
+    "formal/public/view_admin/js/chunk-5579e0b4.d8fe6ebf.js": {
+      "before": null,
+      "after": "f3bd98009ce02cf6af204cddc190d6f57b197556633c22b2b8998abeb868fcfe"
+    },
+    "formal/public/view_admin/js/chunk-0e8f5af9.0d1abe03.js": {
+      "before": null,
+      "after": "84ea969c0348821ff9442c4115f684ad61c08b7f76e3adc35ff5decfcbcf479e"
+    },
+    "formal/public/view_admin/js/chunk-7888cf0c.87b39063.js": {
+      "before": null,
+      "after": "4ef4fcd52f2abb700b6ada8053072b98aaeede94ddaa504ea292d548a64e74d9"
+    },
+    "formal/public/view_admin/js/app.b497aa9a.js": {
+      "before": null,
+      "after": "711198d27e5bafda17c8c3741f53e0c22e410b2ebc18fcadf0b89e1e60d70bfb"
+    },
+    "formal/public/view_admin/js/app.b497aa9a.js.gz": {
+      "before": null,
+      "after": "12354ae2fecada08b2b7f954a410720743b263d8a995aa40fd09d50e403931c7"
+    },
+    "formal/public/view_admin/js/chunk-7888cf0c.87b39063.js.gz": {
+      "before": null,
+      "after": "a52a6c28c30348a397a2bf4121939c1b526c5393dde6cd73061959cd9f289ddd"
+    },
+    "formal/public/view_admin/js/chunk-0e8f5af9.0d1abe03.js.gz": {
+      "before": null,
+      "after": "c35912c336884c13f5e60bdeabd4dc6431f97e3861392547eb1b97786b241b1f"
+    },
+    "formal/public/view_admin/js/chunk-5579e0b4.d8fe6ebf.js.gz": {
+      "before": null,
+      "after": "f44cfb3d176ef8f89e169ea09e1c618e2346284fd718841d1d7287b931b3a627"
+    },
+    "formal/public/view_admin/js/chunk-2c9571b1.7aa4c1b2.js.gz": {
+      "before": null,
+      "after": "731b6e77a864ecd733039a2bf222d648b9c4e81710cf10f17da4a5d776a651dd"
+    },
+    "formal/public/view_admin/js/chunk-2c9571b1.7aa4c1b2.js": {
+      "before": null,
+      "after": "4fd1a7f6391c44e021571ad0f54bb98c4913b83908a5ca801bca2b92f81adc77"
+    },
+    "formal/public/view_admin/js/chunk-0b906d7f.d44d2af8.js": {
+      "before": null,
+      "after": "30eb1c49572ad3360fdbb874726e2fde130119834c2b7ce972b29ec12d2c4ab0"
+    },
+    "formal/public/view_admin/js/chunk-66db3f1a.c8e682f0.js": {
+      "before": null,
+      "after": "957cc18614622696003ab15aeb860d19040c80757f5edff9461c72b370161970"
+    },
+    "formal/public/view_admin/js/chunk-0f6bfe30.9e4bf834.js": {
+      "before": null,
+      "after": "6bb86f5581c9d91a03e5b8d48a5aded0def0bbff1a768ab14d559a28288cd000"
+    },
+    "formal/public/view_admin/js/chunk-5eec9367.26bdf180.js": {
+      "before": null,
+      "after": "f44f7f40114700281a95a7147e81ee1984f755ce5a41c2de3d6ef2794cbdcd55"
+    },
+    "formal/public/view_admin/js/chunk-06775f70.881bd1ea.js.gz": {
+      "before": null,
+      "after": "ee259b1e766c633b19a77fae763b18c96d5f22fe25f2f77a75bdedf60c88121d"
+    },
+    "formal/public/view_admin/js/chunk-0f6bfe30.9e4bf834.js.gz": {
+      "before": null,
+      "after": "82052ea5718aaa393ba059a9766389f104802319293a50c5bd475882cc5c8bec"
+    }
+  }
+}

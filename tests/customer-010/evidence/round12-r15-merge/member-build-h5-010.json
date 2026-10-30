@@ -16,10 +16,10 @@
     "libs/login.js": "abb4008b2d7f7b7e32b63e1e62fc51923fbb3a20ffb621ccb91e5ac8c1af69df",
     "utils/memberSurveyScene.js": "317927eb453a64c850dddfce0107184852c2609cce33c2f3802531c9ebc5d138",
     "pages/discover/discoverIndex/index.vue": "f92eebbf2a97a5c461e874e969dc3a65bfff1c26820d9e03d4ba0c4781cc9f12",
-    "pages/users/user_card/index.vue": "bfdb75d3cb3524262634aa8c409edd1216bd41e3e44dd50ddb715ebd4152da6a",
+    "pages/users/user_card/index.vue": "1c694775fd634e6689ef5b775ecc85d4d8f4bed42aa93aa3ac71ce518a91f94a",
     "pages/users/user_card_list/index.vue": "49cef8438e99cd4d0e3c1d08cf3204cfdf76e092bb11b82f1f15a25fabdfc504"
   },
-  "output": "/tmp/r12-survey-member-h5-010-r15merge",
-  "entry_sha256": "30c34f2b2d2ca59b6b25c99fe0a3f75b17b6237ad7bcd59693a09d4c047cabc3",
+  "output": "/tmp/r12-survey-member-h5-010-r15m014",
+  "entry_sha256": "9c5ffa6d68c87d54423effde82f912959e328044e56c67c2688a84a72a173325",
   "release": false
 }
