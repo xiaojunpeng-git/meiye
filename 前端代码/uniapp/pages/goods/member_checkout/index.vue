@@ -26,7 +26,7 @@
           <text class="goods-price">¥{{ yuan(item.amountCents) }}</text>
         </view>
         <view class="summary-row"><text>余额支付</text><text>¥{{ yuan(order.balanceCents) }}</text></view>
-        <view class="summary-row"><text>富友支付</text><text>¥{{ yuan(order.externalCents) }}</text></view>
+        <view v-if="order.externalCents" class="summary-row"><text>{{ onlineName(order.onlineProvider) }}</text><text>¥{{ yuan(order.externalCents) }}</text></view>
       </view>
       <view class="checkout-card result-actions">
         <button v-if="pendingOrder" class="primary-button" :loading="paying" @click="payOnline">继续支付</button>
@@ -110,15 +110,15 @@
           <!-- Reuse packaged glyphs: decoration must not change payment values,
                availability or the provider handoff for purchase/recharge. -->
           <radio-group @change="changePayment">
-            <label v-if="kind === 'purchase'" class="payment-row">
+            <label v-if="kind === 'purchase' && quote.balanceEnabled" class="payment-row">
               <view class="payment-label"><text class="iconfont icon-ic_money payment-icon"></text><view><text>余额支付</text><text class="payment-note">可用 ¥{{ yuan(quote.balanceCents) }}</text></view></view>
               <radio value="balance" :checked="paymentMode === 'balance'" :color="themeColor" />
             </label>
-            <label class="payment-row">
-              <view class="payment-label"><text class="iconfont icon-ic_card payment-icon"></text><text>在线支付（富友）</text></view>
+            <label v-if="quote.onlineProvider" class="payment-row">
+              <view class="payment-label"><text class="iconfont icon-ic_card payment-icon"></text><text>在线支付（{{ onlineName(quote.onlineProvider) }}）</text></view>
               <radio value="fuyou" :checked="paymentMode === 'fuyou'" :color="themeColor" />
             </label>
-            <label v-if="kind === 'purchase'" class="payment-row">
+            <label v-if="kind === 'purchase' && quote.balanceEnabled && quote.onlineProvider" class="payment-row">
               <view class="payment-label"><text class="iconfont icon-ic_switch payment-icon"></text><text>余额＋在线支付</text></view>
               <radio value="combined" :checked="paymentMode === 'combined'" :color="themeColor" />
             </label>
@@ -139,7 +139,7 @@
 
       <view class="checkout-footer">
         <view class="footer-total"><text>合计</text><text class="amount">¥{{ yuan(quote.amountCents) }}</text></view>
-        <button class="submit-button" :disabled="loading || submitting || !quote.canSubmit" :loading="submitting" @click="submit">提交订单</button>
+        <button class="submit-button" :disabled="loading || submitting || !quote.canSubmit || !paymentAvailable" :loading="submitting" @click="submit">提交订单</button>
       </view>
     </template>
 
@@ -219,6 +219,10 @@ export default {
     storeName() { const store = (this.quote.stores || []).find(item => item.id === this.storeId); return store ? store.name : ''; },
     residualYuan() { return Math.max(0, Math.round((this.quote.amountCents || 0) / 100) - (Number(this.balanceYuan) || 0)); },
     pendingOrder() { return this.order && ['pending', 'payment_requested', 'payment_unknown'].indexOf(this.order.status) !== -1; },
+    paymentAvailable() {
+      return this.paymentMode === 'balance' ? !!this.quote.balanceEnabled :
+        !!this.quote.onlineProvider && (this.paymentMode !== 'combined' || !!this.quote.balanceEnabled);
+    },
     canChangeQuantity() { return this.kind === 'purchase' && !this.cartIds && this.items.length === 1; },
     purchaseQuantity() { return this.canChangeQuantity ? Number(this.items[0].quantity || 1) : 1; },
     couponSummary() {
@@ -246,6 +250,8 @@ export default {
   onShow() { if (this.order && this.order.id) this.refreshOrder(); },
   methods: {
     yuan(cents) { return Math.round(Number(cents || 0) / 100); },
+    // Provider is display-only here; the server freezes the collector per order.
+    onlineName(provider) { return provider === 'suixingpay' ? '随行付' : '富友'; },
     goBack() { uni.navigateBack(); },
     // A command key is stable across transport retries and changes whenever
     // the customer edits an order-defining choice.
@@ -270,6 +276,10 @@ export default {
         if (revision !== this.quoteRevision) return;
         this.quote = res.data;
         this.storeId = res.data.storeId;
+        if (this.kind === 'purchase' && !res.data.balanceEnabled && res.data.onlineProvider && this.paymentMode === 'balance') {
+          this.paymentMode = 'fuyou';
+          this.newIntent();
+        }
       } catch (error) {
         if (revision === this.quoteRevision) {
           this.error = error.msg || '读取交易信息失败';

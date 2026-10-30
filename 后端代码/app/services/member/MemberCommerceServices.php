@@ -8,6 +8,9 @@ use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
+use app\services\pay\PayServices;
+use app\services\pay\SuixingPayGateway;
+use app\services\pay\SuixingPayMemberService;
 use think\exception\ValidateException;
 use think\facade\Db;
 
@@ -43,6 +46,7 @@ final class MemberCommerceServices
             if (!isset($valid[$storeId])) $storeId = 0;
             $result = ['stores' => $stores, 'storeId' => $storeId,
                 'balanceCents' => max(0, self::cents((string)$member['now_money']) - self::heldBalanceCents($uid)),
+                'balanceEnabled' => self::balanceEnabled(), 'onlineProvider' => self::onlineProvider(),
                 'items' => [], 'salespeople' => [], 'amountCents' => 0, 'canSubmit' => false];
             if ($storeId === 0) return $result;
             $scope = MemberCommerceScope::create($uid, $storeId);
@@ -104,8 +108,21 @@ final class MemberCommerceServices
             }
             $amount = $built['amountCents'];
             $mode = $intent['payment_mode'];
-            if ($built['kind'] === 'recharge' && $mode !== 'fuyou') throw new ValidateException('充值只能使用富友支付。');
+            if ($built['kind'] === 'recharge' && $mode !== 'fuyou') throw new ValidateException('充值只能使用在线支付。');
             if (!in_array($mode, ['balance','fuyou','combined'], true)) throw new ValidateException('请选择支付方式。');
+            // The balance tab controls member checkout as well as the admin
+            // switch. A hidden radio alone would not protect direct API calls.
+            if (in_array($mode, ['balance','combined'], true) && !self::balanceEnabled())
+                throw new ValidateException('余额支付已关闭，请选择在线支付。');
+            $provider = self::onlineProvider();
+            if ($mode !== 'balance' && $provider === '') throw new ValidateException('在线支付暂不可用。');
+            if (!in_array($intent['external_method'], ['wechat','alipay'], true))
+                throw new ValidateException('在线支付渠道无效。');
+            // WeChat mini programs cannot launch an Alipay cashier. Keep that
+            // channel unavailable until a separate supported client exists.
+            if ($mode !== 'balance' && $provider === 'suixingpay'
+                && ($channel !== 'routine' || $intent['external_method'] !== 'wechat'))
+                throw new ValidateException('随行付当前仅支持微信小程序支付。');
             $balance = $mode === 'balance' ? $amount : ($mode === 'combined' ? self::yuan($intent['balance_yuan']) : 0);
             if ($balance < 0 || $balance > $amount || ($mode === 'combined' && ($balance === 0 || $balance === $amount))) {
                 throw new ValidateException('组合支付金额无效。');
@@ -122,7 +139,11 @@ final class MemberCommerceServices
                 'benefits' => $built['benefitSelection'],
                 'packageId' => (int)($input['package_id'] ?? 0), 'businessDate' => date('Y-m-d'),
                 'giftConfig' => $built['giftConfig'] ?? [],
-                'paymentMethod' => ($input['external_method'] ?? '') === 'alipay' ? 'alipay' : 'wechat'];
+                'paymentMethod' => $intent['external_method'],
+                // Keep provider choice in this one authoritative business snapshot.
+                'onlineProvider' => $mode === 'balance' ? '' : $provider,
+                'onlineMerchantNo' => $mode === 'balance' ? '' : (string)sys_config(
+                    $provider === 'suixingpay' ? 'suixingpay_mno' : 'fuyou_id', '')];
             $now = time();
             $id = (int)Db::name('member_commerce_order')->insertGetId([
                 'public_id' => $publicId, 'member_id' => $uid, 'store_id' => $intent['store'],
@@ -142,6 +163,18 @@ final class MemberCommerceServices
     {
         $row = Db::name('member_commerce_order')->where('public_id', $id)->where('member_id', $uid)->find();
         if (!$row) throw new ValidateException('订单不存在。');
+        $snapshot = json_decode((string)$row['snapshot_json'], true);
+        if (($snapshot['onlineProvider'] ?? '') === 'suixingpay'
+            && in_array($row['status'], ['payment_requested','payment_unknown'], true)) {
+            try {
+                // Provider query is signed and read outside the settlement lock.
+                (new SuixingPayMemberService())->reconcile($row);
+                $row = Db::name('member_commerce_order')->where('id', $row['id'])->find();
+            } catch (\Throwable $ignored) {
+                // A network error is an unknown payment, never permission to
+                // release held balance or create another provider order.
+            }
+        }
         return $this->publicOrder($row);
     }
 
@@ -197,9 +230,10 @@ final class MemberCommerceServices
     }
 
     /** Confirmed provider success is the only online entry to final settlement. */
-    public function paid(string $id, int $externalCents, string $transactionId, string $channel = ''): bool
+    public function paid(string $id, int $externalCents, string $transactionId, string $channel = '',
+                         string $provider = 'fuyou', string $merchantNo = ''): bool
     {
-        return Db::transaction(function () use ($id, $externalCents, $transactionId, $channel): bool {
+        return Db::transaction(function () use ($id, $externalCents, $transactionId, $channel, $provider, $merchantNo): bool {
             $row = Db::name('member_commerce_order')->where('public_id', $id)->find();
             if (!$row) throw new ValidateException('支付订单不存在。');
             $this->member((int)$row['member_id'], true);
@@ -207,31 +241,36 @@ final class MemberCommerceServices
             if ($externalCents !== (int)$row['external_cents'] || $transactionId === '') throw new ValidateException('支付金额不匹配。');
             $snapshot = json_decode($row['snapshot_json'], true);
             if ($channel !== '' && $snapshot['paymentMethod'] !== $channel) throw new ValidateException('支付渠道不匹配。');
+            if (($snapshot['onlineProvider'] ?? 'fuyou') !== $provider || $merchantNo === '')
+                throw new ValidateException('收款商户与订单支付渠道不匹配。');
+            if (!empty($snapshot['onlineMerchantNo']) && !hash_equals((string)$snapshot['onlineMerchantNo'], $merchantNo))
+                throw new ValidateException('支付商户号与订单不一致。');
             if ($row['status'] === 'paid') {
                 if (!hash_equals($row['transaction_id'], $transactionId)) throw new ValidateException('订单已由其他支付交易完成。');
                 return true;
             }
             if (!in_array($row['status'], ['pending','payment_requested','payment_unknown'], true)) throw new ValidateException('订单支付状态无效。');
             Db::name('member_commerce_order')->where('id', $row['id'])->update(['status' => 'settling']);
-            $this->settleInTx($row, $transactionId);
+            $this->settleInTx($row, $transactionId, $merchantNo);
             return true;
         });
     }
 
-    private function settleInTx(array $row, string $transactionId): array
+    private function settleInTx(array $row, string $transactionId, string $merchantNo = ''): array
     {
         $snapshot = json_decode($row['snapshot_json'], true);
         $scope = MemberCommerceScope::create((int)$row['member_id'], (int)$row['store_id']);
         $key = self::checkoutKey((string)$row['public_id']);
         if ($row['kind'] === 'recharge') {
-            $result = (new MemberCommerceRechargeSettlement())->settleInTx($row, $snapshot, $scope, $transactionId);
+            $result = (new MemberCommerceRechargeSettlement())->settleInTx($row, $snapshot, $scope, $transactionId, $merchantNo);
         } else {
             $lines = $snapshot['lines'];
             if ((int)$row['amount_cents'] === 0) $lines[] = ['lineRole' => 'payment', 'paymentMethod' => 'wechat', 'amount' => '0'];
             if ((int)$row['balance_cents'] > 0) $lines[] = ['lineRole' => 'balance_payment', 'amount' => self::money((int)$row['balance_cents'])];
             if ((int)$row['external_cents'] > 0) $lines[] = ['lineRole' => 'payment',
                 'paymentMethod' => $snapshot['paymentMethod'], 'amount' => self::money((int)$row['external_cents']),
-                'externalTransactionNo' => $transactionId];
+                'externalTransactionNo' => $transactionId,
+                'remark' => ($snapshot['onlineProvider'] ?? 'fuyou') . '商户号：' . $merchantNo];
             $stateId = 'MSC-' . substr(hash('sha256', $row['public_id']), 0, 32);
             $recorder = new CashierV3BusinessEventRecorder();
             $execution = $recorder->newExecution('submit-checkout', $key, $scope['operator'], $scope['data'], $stateId);
@@ -334,7 +373,15 @@ final class MemberCommerceServices
                     'originalLineAmountCents' => $originalUnit * $quantity,
                     'salespeople' => $people, 'craftsmen' => [],
                     'serviceObject' => (int)$product['product_type'] === 6 ? '本人' : '',
-                    'cardPurchaseSnapshot' => $server['authority_snapshot']['cardPurchase'] ?? [],
+                    // Member checkout owns the same immutable original-row proof
+                    // as cashier catalog selection. Seal the complete server
+                    // definition here: preparation deliberately reads a light
+                    // draft and cannot reconstruct this card's component floor.
+                    // The proof strips versions and never edits issued cards.
+                    'cardPurchaseSnapshot' => \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::seal(
+                        (array)($server['authority_snapshot']['cardPurchase'] ?? []),
+                        (int)$scope['store']['id'], (int)$skus[0]['id'], $unit
+                    ),
                     'inventoryOutboundRequired' => (int)$product['product_type'] === 0 ? 1 : 0];
                 $items[] = ['productId' => (int)$product['id'], 'name' => $product['store_name'],
                     'image' => $product['image'], 'quantity' => $quantity, 'amountCents' => $lineAmount];
@@ -426,7 +473,24 @@ final class MemberCommerceServices
             'integralDiscountCents' => (int)($snapshot['benefits']['integralDiscountCents'] ?? 0),
             'integralUsed' => (int)($snapshot['benefits']['integralUsed'] ?? 0),
             'balanceCents' => (int)$row['balance_cents'],
-            'externalCents' => (int)$row['external_cents'], 'items' => $snapshot['items'], 'createdAt' => (int)$row['created_at']];
+            'externalCents' => (int)$row['external_cents'], 'onlineProvider' => $snapshot['onlineProvider'] ?? 'fuyou',
+            'items' => $snapshot['items'], 'createdAt' => (int)$row['created_at']];
+    }
+
+    /** Shared member payment switches are server authority, including retries. */
+    private static function balanceEnabled(): bool
+    {
+        return (int)sys_config('balance_func_status', 0) === 1
+            && (int)sys_config('yue_pay_status', 0) === 1;
+    }
+
+    /** Both switches on is invalid; config save also rejects that state. */
+    private static function onlineProvider(): string
+    {
+        $fuyou = PayServices::fuyouPayReady();
+        $suixing = SuixingPayGateway::ready();
+        if ($fuyou === $suixing) return '';
+        return $suixing ? 'suixingpay' : 'fuyou';
     }
 
     public static function checkoutKey(string $id): string

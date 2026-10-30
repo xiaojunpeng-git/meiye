@@ -275,7 +275,8 @@ class HwcPayService
         // Member commerce settles through V3 authorities, never through the
         // legacy product/recharge listener that would create a second ledger.
         $settled = $successAction === 'member_commerce'
-            ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'], $tradeNo, $channel)
+            ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'],
+                $tradeNo, $channel, 'fuyou', (string)$data['mchnt_cd'])
             : (bool)Event::until('pay.notify', [$notify, $eventChannel]);
         if ($settled) {
             // The signed callback's settlement date is authoritative for refunds beyond 30 days.

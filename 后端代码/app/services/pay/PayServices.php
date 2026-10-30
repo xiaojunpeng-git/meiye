@@ -77,10 +77,10 @@ class PayServices
     protected $authCode;
 
     /**
-     * 会员端在线支付统一由富友收单。
+     * 富友就绪口径。会员统一结账可按订单快照改走随行付。
      *
      * 前端仍沿用 pay_weixin_open / ali_pay_status 两个兼容字段展示“微信支付、支付宝支付”，
-     * 因此这里提供唯一的就绪口径，避免各业务页面继续读取已经停用的原生支付配置。
+     * 旧业务页面仍据此判断富友是否可用，不据此选择随行付。
      */
     public static function fuyouPayReady(): bool
     {

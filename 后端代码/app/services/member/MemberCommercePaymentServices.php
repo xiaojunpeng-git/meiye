@@ -3,6 +3,8 @@ declare(strict_types=1);
 namespace app\services\member;
 
 use app\services\pay\PayServices;
+use app\services\pay\SuixingPayGateway;
+use app\services\pay\SuixingPayMemberService;
 use app\services\wechat\WechatUserServices;
 use think\exception\ValidateException;
 use think\facade\Db;
@@ -22,7 +24,18 @@ final class MemberCommercePaymentServices
                 throw new ValidateException('支付结果待确认，请勿重复付款，请稍后查询订单。');
             }
             if ($row['status'] !== 'pending') throw new ValidateException('订单当前不能支付。');
-            if (!PayServices::fuyouPayReady()) throw new ValidateException('富友支付配置尚未完成，请联系门店。');
+            $snapshot = json_decode((string)$row['snapshot_json'], true);
+            $provider = (string)($snapshot['onlineProvider'] ?? 'fuyou');
+            // The provider is frozen in the order snapshot. A config switch
+            // cannot redirect an already created order to another merchant.
+            $currentMerchant = (string)sys_config($provider === 'suixingpay' ? 'suixingpay_mno' : 'fuyou_id', '');
+            if (!empty($snapshot['onlineMerchantNo'])
+                && !hash_equals((string)$snapshot['onlineMerchantNo'], $currentMerchant))
+                throw new ValidateException('订单原收款商户配置已变化，请联系门店核对。');
+            if ($provider === 'suixingpay' && !SuixingPayGateway::ready())
+                throw new ValidateException('随行付配置尚未完成，请联系门店。');
+            if ($provider === 'fuyou' && !PayServices::fuyouPayReady())
+                throw new ValidateException('富友支付配置尚未完成，请联系门店。');
             Db::name('member_commerce_payment_session')->insert(['commerce_id' => $row['id'],
                 'response_json' => '{}', 'status' => 'requesting', 'created_at' => time(), 'updated_at' => time()]);
             Db::name('member_commerce_order')->where('id', $row['id'])->update(['status' => 'payment_requested', 'updated_at' => time()]);
@@ -32,6 +45,12 @@ final class MemberCommercePaymentServices
         $row = $claim['order'];
         $snapshot = json_decode($row['snapshot_json'], true);
         try {
+            if (($snapshot['onlineProvider'] ?? 'fuyou') === 'suixingpay') {
+                $response = (new SuixingPayMemberService())->create($row, $uid);
+                Db::name('member_commerce_payment_session')->where('commerce_id', $row['id'])->update([
+                    'response_json' => json_encode($response), 'status' => 'ready', 'updated_at' => time()]);
+                return $response;
+            }
             $channel = $row['channel'];
             $method = $snapshot['paymentMethod'];
             $payType = $method === 'alipay' ? 'alipay'
@@ -44,9 +63,11 @@ final class MemberCommercePaymentServices
                 'response_json' => json_encode($response), 'status' => 'ready', 'updated_at' => time()]);
             return $response;
         } catch (\Throwable $error) {
-            // An explicit provider decline is terminal. A timeout or malformed
-            // response cannot release the hold or trigger a second charge.
-            $attempt = Db::name('fuyou_payment_attempt')->where('business_order_no', $row['public_id'])->order('id desc')->find();
+            // Only a recorded Fuyou decline is terminal. A timeout or an
+            // unconfirmed SuixingPay response must keep the balance hold.
+            $attempt = ($snapshot['onlineProvider'] ?? 'fuyou') === 'fuyou'
+                ? Db::name('fuyou_payment_attempt')->where('business_order_no', $row['public_id'])->order('id desc')->find()
+                : null;
             $status = $attempt && $attempt['status'] === 'failed' ? 'failed' : 'payment_unknown';
             Db::name('member_commerce_order')->where('id', $row['id'])->where('status', 'payment_requested')
                 ->update(['status' => $status, 'updated_at' => time()]);
