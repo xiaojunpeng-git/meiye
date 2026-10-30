@@ -4930,44 +4930,44 @@ html.group-dashboard-document #app {
 .personnel-full-table__head,
 .personnel-full-table__row {
   display: grid;
-  grid-template-columns: 1.15fr .95fr .8fr .75fr .8fr .85fr .6fr;
+  grid-template-columns: 1.15fr .95fr .75fr .8fr .85fr .6fr;
 }
 
-/* 售前列关闭时，销售人的表头与行同步收紧，保留其余分配字段的对齐。 */
+/* 职级不在完整分配表展示；售前列关闭时再收紧一列，表头与行始终对齐。 */
 .personnel-full-table--without-presale .personnel-full-table__head,
 .personnel-full-table--without-presale .personnel-full-table__row {
-  grid-template-columns: 1.15fr .95fr .8fr .8fr .85fr .6fr;
+  grid-template-columns: 1.15fr .95fr .8fr .85fr .6fr;
 }
 
 .personnel-full-table--craftsmen {
-  min-width: 988px;
+  min-width: 918px;
 }
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 84px 102px 118px 126px 102px 64px;
+  grid-template-columns: minmax(112px, 1.1fr) 92px 84px 102px 118px 126px 102px 64px;
 }
 
 .personnel-full-table--history {
-  min-width: 988px;
+  min-width: 918px;
 }
 
 .personnel-full-table--history .personnel-full-table__head,
 .personnel-full-table--history .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .65fr .75fr .8fr 1fr .85fr .75fr .55fr;
+  grid-template-columns: 1.15fr .8fr .75fr .8fr 1fr .85fr .75fr .55fr;
 }
 
 /* 计算法隐藏一列时同步收紧网格，保证项目数和操作仍与表头对齐。 */
 .personnel-full-table--craftsmen.personnel-full-table--without-labor {
-  min-width: 862px;
+  min-width: 792px;
 }
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 84px 102px 118px 102px 64px;
+  grid-template-columns: minmax(112px, 1.1fr) 92px 84px 102px 118px 102px 64px;
 }
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .65fr .75fr .8fr 1fr .75fr .55fr;
+  grid-template-columns: 1.15fr .8fr .75fr .8fr 1fr .75fr .55fr;
 }
 
 .personnel-full-table__head > *,

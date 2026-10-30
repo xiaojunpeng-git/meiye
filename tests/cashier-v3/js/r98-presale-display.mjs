@@ -30,7 +30,7 @@ try {
       const Wrapped = { ...Component, setup(props, ctx) {
         return Component.setup(props, { ...ctx, expose(value) { exposed = value } })
       } }
-      const salesperson = { id: 98, employeeId: 98, name: '售前验证员工', selected: true, marked: true, performance: 100 }
+      const salesperson = { id: 98, employeeId: 98, name: '售前验证员工', level: '验证职级', selected: true, marked: true, performance: 100 }
       const html = await renderToString(createSSRApp({ render: () => h(Wrapped, {
         initialMode, initialTab: 'salespeople', showCraftsmen: false, showSalespeople: true,
         showPreSale, selectedSalespeople: [salesperson], salespersonCandidates: [salesperson],
@@ -40,6 +40,7 @@ try {
       if (initialMode === 'full') {
         assert.equal(html.includes('personnel-full-table--without-presale'), !showPreSale)
         assert.ok(html.includes('>业绩比例</span>'))
+        assert.ok(!html.includes('>职级</span>') && !html.includes('>验证职级</span>'), '完整销售人表格不显示职级')
       }
       exposed.confirm()
       assert.ok(confirmed, '两态均可提交原分配')
@@ -49,6 +50,14 @@ try {
     }
     assert.deepEqual(snapshots[0], snapshots[1], '隐藏售前不得清空原售前快照')
   }
+  // 手艺人的点客、比例与金额仍可见，职级仅从完整表格移除。
+  const craftsman = { id: 99, employeeId: 99, name: '手艺人验证员工', level: '验证职级', selected: true, marked: false, performance: 100, projectCount: 1 }
+  const craftsmenHtml = await renderToString(createSSRApp({ render: () => h(Component, {
+    initialMode: 'full', initialTab: 'craftsmen', showSalespeople: false,
+    selectedCraftsmen: [craftsman], craftsmenCandidates: [craftsman], performanceBaseAmountCents: 10000
+  }) }))
+  assert.ok(craftsmenHtml.includes('>是否点客</span>') && craftsmenHtml.includes('>业绩比例</span>'))
+  assert.ok(!craftsmenHtml.includes('>职级</span>') && !craftsmenHtml.includes('>验证职级</span>'), '完整手艺人表格不显示职级')
   for (const name of ['CashierWorkbenchView.vue', 'OrderCenterView.vue']) {
     const view = join(frontend, 'src/views', name)
     const { descriptor: d } = parse(readFileSync(view, 'utf8'), { filename: view })
