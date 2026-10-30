@@ -4933,6 +4933,12 @@ html.group-dashboard-document #app {
   grid-template-columns: 1.15fr .95fr .8fr .75fr .8fr .85fr .6fr;
 }
 
+/* 售前列关闭时，销售人的表头与行同步收紧，保留其余分配字段的对齐。 */
+.personnel-full-table--without-presale .personnel-full-table__head,
+.personnel-full-table--without-presale .personnel-full-table__row {
+  grid-template-columns: 1.15fr .95fr .8fr .8fr .85fr .6fr;
+}
+
 .personnel-full-table--craftsmen {
   min-width: 988px;
 }

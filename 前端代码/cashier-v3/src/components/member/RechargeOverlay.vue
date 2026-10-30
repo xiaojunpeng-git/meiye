@@ -5,6 +5,8 @@ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerforman
 
 const props = defineProps({
   session: { type: Object, default: () => ({}) },
+  // 充值的销售人也复用业务分配弹窗；显示开关不改原有售前归属快照。
+  showPreSale: { type: Boolean, default: true },
   // 充值日期是本次充值的业务快照。打开弹窗时从收银工具栏带入，
   // 点击下一步后与人员分配一同冻结；不能在正式收款阶段回读工具栏。
   businessDate: { type: String, default: '' },
@@ -288,6 +290,7 @@ function createPaymentLine(paymentMethod) {
     </section>
     <PersonnelPerformanceOverlay
       v-if="isSalespersonSelectorOpen"
+      :show-pre-sale="showPreSale"
       initial-tab="salespeople"
       :show-craftsmen="false"
       :show-salespeople="true"

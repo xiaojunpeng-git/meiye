@@ -2260,7 +2260,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2297,7 +2297,9 @@ WSS;
                 Build::switch('cashier_custom_card_entry_switch', '开启定制卡', ($data['cashier_custom_card_entry_switch']['value'] ?? '') === '' ? 1 : (int)$data['cashier_custom_card_entry_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info('仅控制收银页定制卡入口显示，不影响已有定制卡及其他卡项操作'),
                 // 默认关闭，仅允许本次普通卡销售逐项增额、增次，不改商品配置或历史权益。
                 Build::switch('cashier_ordinary_card_sale_edit_switch', '普通卡销售可修改', (int)($data['cashier_ordinary_card_sale_edit_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后普通卡销售可逐项修改总金额和次数，均不得低于原配置'),
-                // 两个开关仅控制门店端入口和订单列表列；历史归属与体验事实仍保留。
+                // 售前只控制人员分配中的标记入口与列，不能清空已保存的销售人售前事实。
+                Build::switch('cashier_presale_switch', '售前', (int)($data['cashier_presale_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银和订单管理业务分配中的售前选项及是否售前列，历史标记保留'),
+                // 其他开关仅控制门店端入口和订单列表列；历史归属与体验事实仍保留。
                 Build::switch('cashier_sales_attribution_switch', '销售经理/导购', (int)($data['cashier_sales_attribution_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银归属入口及订单管理中的销售经理、导购列'),
                 Build::switch('cashier_experience_switch', '体验', (int)($data['cashier_experience_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的体验按钮'),
                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。

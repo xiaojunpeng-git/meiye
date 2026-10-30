@@ -6,6 +6,8 @@ const props = defineProps({
   initialTab: { type: String, default: 'craftsmen' },
   // 显隐不清空、不重算人员金额；隐藏的手工费仍随原有唯一业务快照提交。
   showLaborFee: { type: Boolean, default: true },
+  // 售前开关仅隐藏勾选控件和表格列；已选销售人的标记仍随原分配快照保留。
+  showPreSale: { type: Boolean, default: true },
   showCraftsmen: { type: Boolean, default: true },
   showSalespeople: { type: Boolean, default: true },
   showGuides: { type: Boolean, default: false },
@@ -1154,7 +1156,7 @@ function searchGroupPersonnel(scope) {
           </div>
           <button v-for="item in filteredSalespeople" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
-            <label @click.stop><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)">售前</label>
+            <label v-if="showPreSale" @click.stop><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)">售前</label>
           </button>
           <p v-if="!filteredSalespeople.length" class="personnel-empty">暂无可选择的销售人</p>
         </section>
@@ -1209,11 +1211,11 @@ function searchGroupPersonnel(scope) {
           <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
         <div class="personnel-full-table-scroll">
-          <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen', 'personnel-full-table--without-labor': !showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance }" role="table" aria-label="完整人员分配">
-            <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
+          <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen', 'personnel-full-table--without-labor': !showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--without-presale': !showPreSale && activeTab === 'salespeople' && !activeIsNonPerformance }" role="table" aria-label="完整人员分配">
+            <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance && (activeTab === 'craftsmen' || showPreSale)">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
             <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
               <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
-              <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
+              <label v-if="!activeIsNonPerformance && (activeTab === 'craftsmen' || showPreSale)" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
               <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" @input="markPerformanceTouched(item)"><b>%</b></label>
               <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
               <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint()" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>

@@ -6,6 +6,8 @@ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerforman
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 
 const props = defineProps({
+  // 补交欠款的销售人分配遵循同一售前显隐，旧欠款归属不清空。
+  showPreSale: { type: Boolean, default: true },
   businessSourcePolicy: { type: Object, default: () => ({}) },
   sourceDefaults: { type: Object, default: () => ({}) },
   member: {
@@ -617,6 +619,7 @@ async function searchAttributions({ scope, keyword, target } = {}) {
     />
     <PersonnelPerformanceOverlay
       v-if="isSalespersonSelectorOpen"
+      :show-pre-sale="showPreSale"
       initial-tab="salespeople"
       :show-craftsmen="false"
       :show-salespeople="true"

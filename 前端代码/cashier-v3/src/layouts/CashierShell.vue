@@ -2815,6 +2815,7 @@ onBeforeUnmount(() => {
     </div>
     <RechargeOverlay
       v-if="rechargeSession && !rechargeSourceSelector && !isCashierPage"
+      :show-pre-sale="state.storeDisplayOptions?.preSaleEnabled !== false"
       :session="rechargeSession"
       :business-date="toolbarBusinessDate"
       :submitting="isRechargeSubmitting"
@@ -3159,6 +3160,7 @@ onBeforeUnmount(() => {
 
   <MemberDebtOverlay
     v-if="isMemberDebtOpen && activeDebtMember"
+    :show-pre-sale="state.storeDisplayOptions?.preSaleEnabled !== false"
     :member="activeDebtMember"
     :snapshot="memberDebtSnapshot"
     :business-source-policy="state.businessSourcePolicy || {}"

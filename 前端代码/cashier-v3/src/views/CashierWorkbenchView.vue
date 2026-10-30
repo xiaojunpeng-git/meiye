@@ -193,6 +193,8 @@ const member = computed(() => cashier.value.member || null)
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 // 只隐藏新操作入口，草稿与历史归属、体验及服务对象标记仍由权威快照保留。
 const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+// 仅控制两种业务分配模式里的售前操作展示，不删除草稿中的既有标记。
+const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled !== false)
 const experienceEnabled = computed(() => state.storeDisplayOptions?.experienceEnabled !== false)
 const craftsmanExcludeCountsEnabled = computed(() => state.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false)
 function initialBusinessSource(kind) {
@@ -7994,6 +7996,7 @@ onBeforeUnmount(() => {
   >
     <RechargeOverlay
       v-if="rechargeSession && !rechargeAwaitingSource"
+      :show-pre-sale="preSaleEnabled"
       :session="rechargeSession"
       :business-date="localCheckoutBusinessDate"
       :submitting="isRechargeSubmitting"
@@ -8657,6 +8660,7 @@ onBeforeUnmount(() => {
         v-if="personnelOverlay"
         :initial-tab="personnelOverlay.initialTab"
         :show-labor-fee="state.storeDisplayOptions?.laborFeeVisible !== false"
+        :show-pre-sale="preSaleEnabled"
         :show-craftsmen="personnelOverlay.showCraftsmen"
         :show-salespeople="personnelOverlay.showSalespeople"
         :show-guides="personnelOverlay.showGuides"

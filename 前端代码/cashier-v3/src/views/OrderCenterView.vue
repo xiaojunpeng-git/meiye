@@ -447,6 +447,8 @@ const state = useCashierV3State()
 const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
 // 归属入口关闭仅影响订单管理展示，既有订单事实和退款归属不清除。
 const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+// 订单中心共用业务分配弹窗，售前关闭仅收起编辑入口，历史标记保持原值。
+const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled !== false)
 // 本轮只调整全部订单、消费订单；服务记录及其他入口保留既有展示和业务事实。
 const orderLaborFeeVisible = computed(() => state.storeDisplayOptions?.laborFeeVisible !== false || !['all', 'sales'].includes(activeTabKey.value))
 const hiddenSalesAttributionKeys = new Set(['sales_manager', 'guide', 'refund_attribution', 'supplement_attribution'])
@@ -4306,6 +4308,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
       :show-labor-fee="orderLaborFeeVisible"
@@ -4344,6 +4347,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="!isPlatformReadOnly && recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
       initial-tab="salespeople"
       initial-mode="full"
@@ -4366,6 +4370,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="!isPlatformReadOnly && supplementAttributionEditorOpen && supplementAttributionEntry"
       initial-tab="guides"
       :show-craftsmen="false"
@@ -4386,6 +4391,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="!isPlatformReadOnly && refundAttributionEditorOpen && refundAttributionEntry"
       initial-tab="guides"
       :show-craftsmen="false"
@@ -4574,6 +4580,7 @@ onBeforeUnmount(() => {
     </div>
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="unifiedRefundPersonnelEditorOpen && unifiedRefundPersonnel"
       initial-tab="salespeople"
       initial-mode="full"
@@ -4594,6 +4601,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="unifiedRefundAttributionEditorOpen && unifiedRefundPersonnel"
       initial-tab="guides"
       :show-craftsmen="false"
@@ -4659,6 +4667,7 @@ onBeforeUnmount(() => {
     </p>
 
     <PersonnelPerformanceOverlay
+      :show-pre-sale="preSaleEnabled"
       v-if="!isPlatformReadOnly && serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
       :show-labor-fee="orderLaborFeeVisible"
       initial-tab="craftsmen"

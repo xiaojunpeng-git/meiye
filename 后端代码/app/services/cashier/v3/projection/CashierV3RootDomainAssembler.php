@@ -147,6 +147,8 @@ class CashierV3RootDomainAssembler
             'navigationRules' => (new \app\services\organization\StorePermissionCatalogServices())->snapshot()['rules'],
             // 实例级展示开关随每次权威根投影下发；缺少配置时保持原有入口可见。
             'storeDisplayOptions' => [
+                // 缺省为开，仅下发显示策略；人员快照里的售前标记仍按原业务事实保留。
+                'preSaleEnabled' => (int)sys_config('cashier_presale_switch', 1) === 1,
                 'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
                 'experienceEnabled' => (int)sys_config('cashier_experience_switch', 1) === 1,
                 'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
