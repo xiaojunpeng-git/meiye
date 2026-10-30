@@ -128,9 +128,8 @@ export function saveStoreStaff(staffId, values) {
       status_version: Number(values.statusVersion),
       cashier_salesperson_enabled: normalizedBoolean(values.salespersonEnabled),
       cashier_craftsman_enabled: normalizedBoolean(values.craftsmanEnabled),
-      craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String(values.craftsmanPerformanceType || ''))
-        ? String(values.craftsmanPerformanceType)
-        : 'commission',
+      // 新保存统一启用两项业绩；旧档案类型只保留作历史追溯，不再限制收银分配。
+      craftsman_performance_type: 'commission_labor',
       mobile_enabled: normalizedBoolean(values.mobileEnabled),
       is_customer: normalizedBoolean(values.isCustomer),
       customer_url: String(values.customerUrl || '').trim(),

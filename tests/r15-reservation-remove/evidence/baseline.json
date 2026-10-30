@@ -1,0 +1,9 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "sourceBaseline": "6c4e21387e1e531f8982eac07ed1c4e77cd5c810",
+  "file": "前端代码/uniapp/pages/activity/reservation/index.vue",
+  "sha256": "0fc3e639f05920c6b970a2d3d608b050aa54fe0230ef3d7070abcd08c5fe383c",
+  "indexSHA256": "39c996f91a98d6da47e4837549beca0239ddde08b5a9ad993b3ecf76e0ee0cef",
+  "businessRule": "Main project retained; only addon selections may be removed",
+  "remote": "not applicable; local development only"
+}

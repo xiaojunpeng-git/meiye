@@ -1,0 +1,43 @@
+{
+  "sharedHEAD": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "sourceBaseline": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+  "candidateTree": "73acab7e658953fa280c5d111f73d946376783da",
+  "patchSHA256": "99b0c5f2f738120d20a640fb92b0786c4fe44c49ba9cebcee140b76dd60c9364",
+  "files": {
+    "前端代码/admin/src/components/memberMenuMedia/index.vue": "fa00389c3346fe2b6310e235465605f63b50f2a552a8ad39a011ff9be7637b43",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/OrderConfig.vue": "402945aad538b170f3857f5e08b8164cfc49ab60b5ddd8ece29bb64d6e85830f",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template1.vue": "8a07ad6a80bc6c209100396c039142ccdfba278f63402b441338d72a4d1e1c41",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template2.vue": "f2106bb8fa638c6a85f77e787083481dc2822be1fdf35ec8c200bb35d2821a4e",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template3.vue": "8a07ad6a80bc6c209100396c039142ccdfba278f63402b441338d72a4d1e1c41",
+    "tests/r15-all-orders/editor.cjs": "6d3dd53d80325dc87c079a4bea449cee4349d4039846eb8242148199733b494c",
+    "tests/r15-order-icons/browser.cjs": "5a2f1dd4524a4ffc7227b6637ef6ac0abc04442e9eb3cbd0e3153e5794f4226c",
+    "scripts/r15-order-icons-build.cjs": "0155bdfe3a3cd763f9a674f852d0c85f6cf629aa54e116e50f63d3184f8b5390"
+  },
+  "sourceFiles": 5,
+  "tests": 2,
+  "buildScripts": 1,
+  "checks": {
+    "adminProductionBuild": "PASS",
+    "realVue2iViewBrowser": "PASS",
+    "realFontOptions": 7,
+    "previewStyles": 3,
+    "orderFallbackChecks": 15,
+    "previousMenuChecks": 49,
+    "orderEditorRegression": "PASS",
+    "businessASTUnchangedComponents": 4,
+    "eslint": "PASS"
+  },
+  "commentsUpdated": [
+    "前端代码/admin/src/components/memberMenuMedia/index.vue",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/OrderConfig.vue",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template1.vue",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template2.vue",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template3.vue"
+  ],
+  "removedReplacedCode": "Replaced old order icon spans and unused font-size styles; preserved header arrow font.",
+  "scope": "Platform decoration order icons only. Saving, defaults, visibility, sorting, names and navigation unchanged; no member source change.",
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE",
+  "committed": false,
+  "deployed": false,
+  "onlineDecorationSaved": false
+}

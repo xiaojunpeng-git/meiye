@@ -1,8 +1,12 @@
 <script>
-import { resolveMemberMenuIcon } from '@/utils/memberMenuIcon';
+import { visibleMemberServices } from '../../../../../shared/memberMenuMedia';
+import MemberMenuMedia from '@/components/memberMenuMedia';
 
 export default {
+	components: { MemberMenuMedia },
 	inject: ['goMenuPage'],
+	// 只过滤展示副本，保留完整配置及原有客服与跳转分支。
+	computed: { visibleServices() { return visibleMemberServices(this.menuData); } },
 	props: {
 		menuData: {
 			type: Array,
@@ -13,33 +17,28 @@ export default {
 			default: 0
 		}
 	},
-	methods: {
-		menuIcon(item) {
-			return resolveMemberMenuIcon(item);
-		}
-	}
 };
 </script>
 
 <template>
 	<view class="">
 		<view class="service">
-			<view v-for="(item, index) in menuData" :key="index">
+			<view v-for="(item, index) in visibleServices" :key="index">
 				<!-- #ifdef MP -->
 				<view class="acea-row row-middle item" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)" @click="goMenuPage(item.url, item.name)">
-					<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+					<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="30" /></view>
 					<view class="name">{{ item.name }}</view>
 					<text class="iconfont icon-ic_rightarrow"></text>
 				</view>
 				<button class="acea-row row-middle item" open-type='contact' v-if="item.url=='/pages/extension/customer_list/chat' && routineContact == 1">
-				  <view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+				  <view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="30" /></view>
 				  <view class="name">{{ item.name }}</view>
 				  <text class="iconfont icon-ic_rightarrow"></text>
 				</button>
 				<!-- #endif -->
 				<!-- #ifndef MP -->
 				<view class="acea-row row-middle item" @click="goMenuPage(item.url, item.name)">
-					<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+					<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="30" /></view>
 					<view class="name">{{ item.name }}</view>
 					<text class="iconfont icon-ic_rightarrow"></text>
 				</view>
@@ -70,11 +69,6 @@ export default {
 		align-items: center;
 		justify-content: center;
 
-		.iconfont {
-			font-size: 30rpx;
-			line-height: 1;
-			color: var(--view-theme, #7b2941);
-		}
 	}
 
 	.name {

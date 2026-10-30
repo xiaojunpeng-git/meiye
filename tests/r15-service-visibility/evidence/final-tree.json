@@ -1,0 +1,6 @@
+{
+  "builtSourceTree": "dec4d2d3d36b6b626d2c30bd1af652aff8133717",
+  "candidateTree": "db3d845b2d35cc0df14ab6c2759d864d9821ae60",
+  "businessSourcesIdentical": true,
+  "testOnlyRefinement": "Scope fixture CSS to match Vue scoped component styles"
+}

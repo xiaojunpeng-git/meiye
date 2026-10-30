@@ -8,7 +8,7 @@ const evidence=process.env.R12_EVIDENCE_DIR?path.resolve(root,process.env.R12_EV
 const files=['src/pages/user/survey/index.vue','src/components/memberSurveyReward/index.vue','src/components/rechargeGiftConfig/index.vue','src/components/goodsAttr/index.vue','src/utils/memberSurveyExcel.js','src/utils/requiredGuidance.js','src/api/memberSurvey.js','src/router/modules/user.js','src/pages/setting/staff/add.vue','src/pages/setting/staff/index.vue'];
 const inputs=()=>Object.fromEntries(files.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(app,file))).digest('hex')]));const startInputs=inputs();
 if(!process.version.startsWith('v16.'))throw Error('Use accepted Node16 platform toolchain');
-// 只清本脚本的生成目录，防止旧资源混入候选；与现网R22保持同一无缓存生产编译链。
+// Rebuild the complete platform bundle from the merged source, including already deployed R15 pages.
 fs.rmSync(output,{recursive:true,force:true});
 Object.assign(process.env,{NODE_ENV:'production',ANALYZE:'false',VUE_CLI_CONTEXT:app});process.chdir(app);
 const Service=require(path.join(app,'node_modules/@vue/cli-service/lib/Service')),service=new Service(app);service.init('production');service.projectOptions.parallel=false;

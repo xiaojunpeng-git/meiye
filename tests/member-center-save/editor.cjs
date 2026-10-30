@@ -23,8 +23,8 @@ function pageOptions(memberSave) {
   return evaluate(script, {...Object.fromEntries(names.map(n => [n, {}])), mapState: () => ({}), memberSave});
 }
 (async () => {
-  let saved = 0;
-  const options = pageOptions(async payload => { saved++; return {msg: 'ok'}; });
+  let saved = 0, lastPayload;
+  const options = pageOptions(async payload => { saved++; lastPayload = JSON.parse(JSON.stringify(payload)); return {msg: 'ok'}; });
   const messages = [];
   const state = {member: {style: 2}, menu: fixture, poster: {is_show: 0, list: []},
     merMenu: {list: []}, agentMenu: {list: []}, storeMenu: {list: []}};
@@ -44,6 +44,28 @@ function pageOptions(memberSave) {
   options.methods.submit.call(page);
   assert.equal(saved, 1, 'duplicate click submitted twice');
   assert.match(source, /:disabled="!configurationLoaded"/);
+  // Automatic name matching and its generic fallback are both valid saved choices.
+  page.loadingExist = false;
+  const originalMenu = state.menu;
+  for (const item of [
+    {name:'我的预约',pic:'',icon:''}, {name:'自定义入口',pic:'',icon:''},
+    {name:'我的卡包',pic:[]}, {name:'我的余额'},
+    {name:'我的收藏',pic:'https://assets.example/custom.png',icon:''}
+  ]) {
+    state.menu = {...fixture,list:[{...item,url:'/original-route'}]};
+    const before = JSON.stringify(state.menu); const count = saved;
+    await options.methods.submit.call(page);
+    assert.equal(saved,count+1,'renderable automatic/image entry must save');
+    assert.equal(JSON.stringify(state.menu),before,'save must not synthesize an icon/image');
+    assert.equal(JSON.stringify(lastPayload.member.menu),before,'submitted visual choice unchanged');
+  }
+  for (const [key,message] of [['name','标题'],['url','链接']]) {
+    state.menu={...fixture,list:[{name:'我的预约',url:'/original-route',pic:'',icon:'',[key]:''}]};
+    const count=saved;options.methods.submit.call(page);assert.equal(saved,count);
+    assert(messages[messages.length-1].includes(message),'existing required checks preserved');
+  }
+  state.menu=originalMenu;
+
 
   const loaded = {member: {...state, member: {style: 2}},
     routine_my_menus: fixture.list.map((m, i) => ({...m, pic: i ? '' : 'https://assets.example/icon.png'})),

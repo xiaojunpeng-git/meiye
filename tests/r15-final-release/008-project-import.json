@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "tool": "project_import",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "alreadyImported": false,
+    "projectPath": "/private/tmp/r15-reservation-picker-008-mp-weixin/output",
+    "projectName": "uniapp"
+  }
+}

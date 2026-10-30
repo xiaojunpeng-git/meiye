@@ -78,7 +78,7 @@ assert.match(component, /attributionSearchLoading/, '集团人员检索期间必
 assert.match(component, /attributionSearchError/, '集团人员检索失败必须给出可重试的错误信息')
 assert.match(orderCenter, /@search-personnel="searchSalesPersonnelAttributions"/, '订单中心导购和销售经理调整必须接收集团检索事件')
 assert.match(orderCenter, /function searchSalesPersonnelAttributions\([\s\S]*selectorEntry: 'order_center'[\s\S]*scope: 'group_attributions'/, '订单中心检索必须使用服务端授权的集团人员入口')
-assert.match(orderCenter, /role === 'guide' \? \{ guides: records \} : \{ salesManagers: records \}/, '集团检索只能更新当前归属角色候选')
+assert.match(orderCenter, /role === 'guide' \? \{ guides: records \}[\s\S]*role === 'salesperson' \? \{ otherSalespersonCandidates: records \} : \{ salesManagers: records \}/, '集团检索只能更新当前归属角色候选')
 assert.match(orderCenter, /salesPersonnelSearchSerial !== serial/, '较早的搜索响应不得覆盖新弹窗或新检索结果')
 assert.match(orderCenter, /function salesPersonnelPayload\(\)[\s\S]*performanceAmountCents: Math\.max\(0, Math\.trunc\(Number\(item\.performanceAmountCents \|\| 0\)\)\),[\s\S]*performanceAmountManual: Boolean\(item\.performanceAmountManual\)/, '订单中心确认必须把手工业绩金额及标记提交给后端')
 assert.match(component, /setMarked\(item, \$event\.target\.checked\)">点客/, '手艺人必须支持点客标记')
@@ -96,10 +96,10 @@ assert.doesNotMatch(component, /if \(item\.role === 'salespeople' && checked\)[\
 assert.match(component, /item\.role === 'salespeople' && checked && !item\.selected/, '售前复选框可直接加入未选中的销售人')
 assert.doesNotMatch(component, /<input :checked="item\.marked" type="checkbox" :disabled="!item\.selected"[^>]*>售前/, '售前复选框不得因未先点整行而禁用')
 assert.doesNotMatch(component, /业绩比例合计必须为 100%/, '普通结账不得再用比例合计拦截')
-assert.match(component, /function historyAllocationIsValid\(records\)[\s\S]*craftsmanType\(record\) === PERFORMANCE_TYPES\.LABOR && allocationAmountCentsFor\(record\) !== 0/, '历史调整必须拒绝纯手工费人员录入消耗业绩')
+assert.doesNotMatch(component, /craftsmanType\(record\) === PERFORMANCE_TYPES\.LABOR && allocationAmountCentsFor\(record\) !== 0/, '旧类型不得阻断历史调整消耗业绩')
 assert.match(component, /function historyAllocationIsValid\(records\)[\s\S]*allocationAmountCentsFor\(record\) % 100 !== 0/, '历史调整的消耗业绩必须按整元保存')
 assert.doesNotMatch(component, /commissionSelected\.reduce/, '历史调整不得再按项目金额强制平衡最终手工录入的消耗业绩')
-assert.match(component, /仅手工费，不记录消耗业绩/, '纯手工费历史调整必须显示准确的分配说明')
+assert.doesNotMatch(component, /仅手工费，不记录消耗业绩/, '本次调整不再按员工旧类型屏蔽消耗业绩')
 assert.match(component, /if \(props\.showSalespeople\) \{[\s\S]*assignment\.salespeople/, '未启用销售人时确认事件不得携带销售人')
 assert.equal((component.match(/>应用全部人<\/button>/g) || []).length, 1, '应用全部人只能位于底部操作区')
 assert.match(component, /saving: \{ type: Boolean, default: false \}/, '人员弹窗必须接收保存中状态')
@@ -108,7 +108,7 @@ assert.equal((component.match(/v-for="item in selectedRecords"/g) || []).length,
 assert.match(component, /craftsmen: selectedCraftsmenPayload\(\)[\s\S]*salespeople: selectedSalespersonPayload\(\)/, '应用全部必须同时发送当前手艺人和销售人分配')
 assert.match(component, /selectedCraftsmen\.length && selectedSalespeople\.length[\s\S]*\? 'personnel'/, '双角色均已选择时必须提交统一人员意图')
 assert.doesNotMatch(component, /records\.forEach\(\(item\) => \{ item\.selected = true \}\)/, '应用全部人不得全选员工')
-assert.match(component, /function allocationIsValid\(records, role = ''\)[\s\S]*role !== 'craftsmen'/, '仅手工费的零比例限制只能作用于手艺人，不能误伤销售人')
+assert.match(component, /function allocationIsValid\(records\)/, '双项业绩统一校验比例')
 const applyAllHandler = component.slice(
   component.indexOf('function applySelectionToAll()'),
   component.indexOf('\nfunction confirm()', component.indexOf('function applySelectionToAll()'))
@@ -154,7 +154,7 @@ assert.doesNotMatch(component, />导购 \/ 销售经理</, '左右分栏后不�
 assert.match(component, /records\.filter\(\(item\) => matchesGroupKeyword\(item\)[\s\S]*attributionRoleAllows\(item, attributionSearchRole\.value/, '集团查询按导购与销售经理各自资格展示可结账人员')
 assert.match(workbench, /class="cart-line__meta-slot cart-line__meta-slot--attribution"/, '购物车必须展示导购/销售经理按钮')
 assert.match(workbench, /loadPersonnelOverlay\(line, 'guides', isEntitlementLine\(line\) \? 'guide' : 'attribution'\)/, '权益只打开导购，销售行继续打开导购/销售经理')
-assert.match(workbench, /\['group_attributions', 'cashier_other_craftsmen'\]\.includes\(scope\)/, '导购/销售经理必须共用一个集团搜索范围')
+assert.match(workbench, /\['group_attributions', 'cashier_other_craftsmen', 'cashier_other_salespeople'\]\.includes\(scope\)/, '导购/销售经理必须共用一个集团搜索范围')
 assert.match(workbench, /target === 'salesManager'[\s\S]*salesManagerCandidates: records/, '销售经理查询结果必须回填销售经理列表')
 assert.match(workbench, /target === 'guide'[\s\S]*guideCandidates: records/, '导购查询结果必须回填导购列表')
 assert.match(workbench, /const showGuides = \['guide', 'attribution'\]/, '权益和销售行都必须显示导购候选')
@@ -164,8 +164,8 @@ assert.match(workbench, /v-if="!isEntitlementLine\(line\)" class="cart-line__met
 assert.match(workbench, /if \(!isEntitlementLine\(line\)\) payload\.salespeople = salespeople/, '权益行确认载荷不得携带销售人')
 assert.match(
   workbench,
-  /craftsmanPerformanceType: record\.craftsmanPerformanceType \|\| record\.craftsman_performance_type,[\s\S]*laborFeeCents: Number\(record\.laborFeeCents \?\? record\.labor_fee_cents \?\? 0\)/,
-  '确认手艺人分配时不得丢失服务业绩类型和每人手工费'
+  /craftsmanPerformanceType: 'commission_labor',[\s\S]*laborFeeCents: Number\(record\.laborFeeCents \?\? record\.labor_fee_cents \?\? 0\)/,
+  '确认手艺人分配时必须携带双项业绩与每人手工费'
 )
 assert.match(
   workbench,
@@ -183,7 +183,7 @@ assert.match(
   '双角色应用全部的请求标识前缀必须在后端登记'
 )
 assert.match(workbench, /const isSavingPersonnelAssignment = ref\(false\)/, '人员写操作必须共享互斥状态')
-assert.match(workbench, /const craftsmanAllocation = weightKey === 'laborWeight'[\s\S]*if \(craftsmanAllocation && isLabor\)/, '工作台提交校验只能将仅手工费限制作用于手艺人')
+assert.doesNotMatch(workbench, /if \(craftsmanAllocation && isLabor\)/, '旧员工类型不能阻断手艺人业绩比例')
 assert.match(workbench, /async function confirmPersonnelAssignment[\s\S]*if \(isSavingPersonnelAssignment\.value\) return/, '单行确认必须拒绝重复提交')
 assert.match(workbench, /async function applyPersonnelAssignmentToAll[\s\S]*if \(isSavingPersonnelAssignment\.value\) return/, '应用全部人必须拒绝与确认并发提交')
 assert.match(workbench, /:saving="isSavingPersonnelAssignment"/, '人员弹窗必须展示权威保存中状态')
@@ -225,7 +225,7 @@ assert.match(component, /laborDefaultFee/, '手工费默认值必须接收项目
 assert.match(workbench, /projectId: line\.projectId/, '人员候选查询必须携带当前项目 ID')
 assert.match(component, /candidateDefault/, '手艺人候选返回的项目固定手工费必须作为默认值')
 // 两个入口共用已做行为测试的主项目解析器；租户仍由各入口的后端上下文传入。
-assert.match(selector, /CashierV3ProjectLaborDefault::cents\(\$projectId, \$dataScope->tenantId\(\)\)/, '手艺人候选必须按当前租户读取统一的项目固定手工费')
+assert.match(selector, /CashierV3ProjectLaborDefault::entitlementCents\([\s\S]*\$dataScope->tenantId\(\)/, '手艺人候选必须按当前租户及权益身份读取统一的项目固定手工费')
 assert.match(
   workspace,
   /private function projectLaborDefaultCents\(int \$projectId\)[\s\S]*?CashierV3ProjectLaborDefault::cents\(\$projectId, CashierV3ScopeResolver::TENANT_SCOPE_ID\)/,
@@ -237,7 +237,7 @@ assert.match(
   '历史项目行缺少 project_id 时必须用项目产品 ID 回读固定手工费'
 )
 assert.doesNotMatch(component, /laborFeeDirty\.value/, '完整模式不再提交独立的临时手工费覆盖值')
-assert.match(component, /服务业绩类型/, '完整模式必须展示手艺人服务业绩类型')
+assert.doesNotMatch(component, /<span v-if="!activeIsNonPerformance">服务业绩类型<\/span>/, '完整模式不再展示固定的员工类型列')
 assert.match(component, /手工费/, '完整模式必须固定展示手工费栏')
 assert.match(craftsmanSnapshot, /craftsmanPerformanceType/, '结账快照必须保留手艺人服务业绩类型')
 assert.match(craftsmanSnapshot, /laborFeeCents/, '结账快照必须保留每人手工费')

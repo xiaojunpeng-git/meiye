@@ -170,7 +170,9 @@ class StoreCouponUserServices extends BaseServices
      */
     public function getUsableCouponList(int $uid, array $cartGroup, int $store_id = 0)
     {
-        $userCoupons = $this->dao->getUserAllCoupon($uid);
+        $userCoupons = $this->dao->getUserAllCoupon($uid, true);
+        $eligibility = new StoreCouponEligibilityServices();
+        $hasConsumed = $eligibility->hasConsumed($uid);
         $result = [];
         if ($userCoupons) {
             $cartInfo = $cartGroup['valid'];
@@ -179,14 +181,14 @@ class StoreCouponUserServices extends BaseServices
             if ($promotions) {
                 $promotionsList = array_combine(array_column($promotions, 'id'), $promotions);
             }
-            //验证是否适用门店
-            $isApplicableStore = function ($couponInfo) use ($store_id) {
-//                if (isset($couponInfo['applicable_type']) && isset($couponInfo['applicable_store_id']) && isset($couponInfo['coupon_issue_type']) && isset($couponInfo['relation_id'])) {
-//                    $applicable_store_id = is_array($couponInfo['applicable_store_id']) ? $couponInfo['applicable_store_id'] : explode(',', $couponInfo['applicable_store_id']);
-//                    if (!$store_id && in_array($couponInfo['coupon_issue_type'], [1, 2]) || $store_id && ($couponInfo['applicable_type'] == 0 || ($couponInfo['applicable_type'] == 2 && !in_array($store_id, $applicable_store_id)) || ($couponInfo['coupon_issue_type'] == 1 && $couponInfo['relation_id'] != $store_id))) {
-//                        return false;
-//                    }
-//                }
+            // Store restrictions are independent from product/threshold matching.
+            $isApplicableStore = function ($coupon) use ($store_id) {
+                if ((int)($coupon['coupon_issue_type'] ?? 0) === 1 && (int)$coupon['relation_id'] !== $store_id) return false;
+                if ($store_id > 0 && (int)$coupon['applicable_type'] === 0) return false;
+                if ((int)$coupon['applicable_type'] === 2) {
+                    $ids = is_array($coupon['applicable_store_id']) ? $coupon['applicable_store_id'] : explode(',', (string)$coupon['applicable_store_id']);
+                    return in_array($store_id, array_map('intval', $ids), true);
+                }
                 return true;
             };
             $isOverlay = function ($cart) use ($promotionsList) {
@@ -217,9 +219,13 @@ class StoreCouponUserServices extends BaseServices
             /** @var StoreBrandServices $storeBrandServices */
             $storeBrandServices = app()->make(StoreBrandServices::class);
             foreach ($userCoupons as $coupon) {
-                if (!$isApplicableStore($coupon)) {//不适用门店跳过
-                    continue;
-                }
+                $reasons = StoreCouponEligibilityRule::reasons($coupon, $uid, $store_id, $hasConsumed);
+                if (!$isApplicableStore($coupon)) $reasons[] = '不适用于当前门店';
+                if (!empty($coupon['is_fail'])) $reasons[] = '已作废';
+                if (($coupon['status'] ?? '') === '已使用' || !empty($coupon['use_time'])) $reasons[] = '已使用';
+                if (($coupon['status'] ?? '') === '已过期' || ((int)$coupon['end_time'] > 0 && (int)$coupon['end_time'] < time())) $reasons[] = '已过期';
+                if ((int)$coupon['start_time'] > time()) $reasons[] = '尚未到使用时间';
+                if ((int)$coupon['coupon_type'] === 3) $reasons[] = '多次抵用券请在门店收银使用';
                 $price = 0;
                 $count = 0;
                 switch ($coupon['coupon_applicable_type']) {
@@ -267,7 +273,12 @@ class StoreCouponUserServices extends BaseServices
                         }
                         break;
                 }
-                if ($count && $coupon['use_min_price'] <= $price) {
+                if (!$count) $reasons[] = '不适用于当前商品或优惠活动';
+                if ($coupon['use_min_price'] > $price) $reasons[] = '未达到使用门槛';
+                // Preserve unavailable rows as disabled choices, with every known reason.
+                $coupon['canUse'] = !$reasons;
+                $coupon['unavailableReasons'] = array_values(array_unique($reasons));
+                {
                     $coupon['start_time'] = $coupon['start_time'] ? date('Y/m/d', $coupon['start_time']) : date('Y/m/d', $coupon['add_time']);
                     $coupon['add_time'] = date('Y/m/d', $coupon['add_time']);
                     $coupon['end_time'] = date('Y/m/d', $coupon['end_time']);
@@ -279,6 +290,7 @@ class StoreCouponUserServices extends BaseServices
                 }
             }
         }
+        usort($result, static function ($a, $b) { return (int)$b['canUse'] <=> (int)$a['canUse']; });
         return $result;
     }
 
@@ -306,6 +318,8 @@ class StoreCouponUserServices extends BaseServices
             $data['end_time'] = $issueCouponInfo['end_use_time'];
         }
         $data['type'] = $type;
+        // Self-claim fixes the member's belonging store at receipt, not at redemption.
+        $data += (new StoreCouponEligibilityServices())->issuance((int)$uid, (int)($issueCouponInfo['relation_id'] ?? 0), $type === 'get');
         return $this->dao->save($data);
     }
 
@@ -327,6 +341,8 @@ class StoreCouponUserServices extends BaseServices
         $data['start_time'] = strtotime(date('Y-m-d 00:00:00', time()));
         $data['end_time'] = strtotime(date('Y-m-d 23:59:59', strtotime('+30 day')));
         $data['type'] = $type;
+        // Self-claim fixes the member's belonging store at receipt, not at redemption.
+        $data += (new StoreCouponEligibilityServices())->issuance((int)$uid, (int)($issueCouponInfo['relation_id'] ?? 0), $type === 'get');
         return $this->dao->save($data);
     }
 

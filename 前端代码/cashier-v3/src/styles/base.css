@@ -2331,26 +2331,20 @@ html.group-dashboard-document #app {
 
 .cart-line__secondary-meta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(10em, 1fr));
+  grid-template-columns: minmax(10em, 1fr) max-content minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: repeat(2, minmax(26px, auto));
   gap: 4px 6px;
   min-height: 56px;
 }
 
-/* 第一排操作顺序固定；体验与欠款共用第二列左边界。 */
+/* 固定两个操作间距：优惠券到欠款 150px，欠款到人员归属 100px（含 6px 网格间隔）。 */
 .cart-line__meta-slot--salesperson { grid-area: 1 / 1; }
-.cart-line__meta-slot--debt { grid-area: 1 / 2; }
-.cart-line__meta-slot--attribution { grid-area: 1 / 3; }
-.cart-line__meta-slot--coupon { grid-area: 1 / 4; }
+.cart-line__meta-slot--financial { grid-area: 1 / 2; gap: 150px; max-width: 260px; }
+.cart-line__meta-slot--financial .cart-line__meta-slot--coupon { flex: 0 1 auto; }
+.cart-line__meta-slot--financial .cart-line__meta-slot--debt { flex: 0 0 auto; }
+.cart-line__meta-slot--attribution { grid-area: 1 / 3 / 2 / 5; margin-left: 94px; }
 .cart-line__meta-slot--craftsmen { grid-area: 2 / 1; }
 .cart-line__meta-slot--service-object { grid-area: 2 / 2; }
-/* 导购与优惠券共移左半列；较窄的四列布局为欠款高亮保留文字间隙。 */
-.cart-line__meta-slot--attribution,
-.cart-line__meta-slot--coupon { transform: translateX(calc(-50% + 20px)); }
-@container (min-width: 750px) {
-  .cart-line__meta-slot--attribution,
-  .cart-line__meta-slot--coupon { transform: translateX(-50%); }
-}
 /* 产品出库方式单独贴右，与标题行数量、备注、删除控件共用右边界。 */
 .cart-line__meta-slot--inventory { grid-area: 2 / 3 / 3 / 5; justify-self: end; }
 .cart-line__right-controls {
@@ -2413,13 +2407,11 @@ html.group-dashboard-document #app {
   width: auto;
   max-width: none;
   overflow: visible;
-  padding-left: 24px;
   white-space: nowrap;
 }
 
-/* 欠款只在草稿行确有金额时高亮；红块与体验选中块保持同一文字起点。 */
+/* 欠款只在草稿行确有金额时高亮；高亮块也保持与优惠券的 150px 间隔。 */
 .cart-line__meta-slot--debt .cart-line__meta-action--has-amount {
-  margin-left: 16px;
   padding-right: 8px;
   padding-left: 8px;
   background: #dc2626;
@@ -2430,7 +2422,7 @@ html.group-dashboard-document #app {
   color: #fff;
 }
 
-/* 第二列文字共用红线起点；体验的绿色选中块保留 8px 左内边距。 */
+/* 体验入口保留第二列原有缩进，避免这一排调整影响服务选项。 */
 .cart-line__meta-slot--service-object:not(.cart-line__meta-slot--inventory) {
   padding-left: 16px;
 }
@@ -2495,22 +2487,19 @@ html.group-dashboard-document #app {
   }
 
   .cart-line__secondary-meta {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(4, minmax(26px, auto));
+    grid-template-columns: max-content max-content minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: repeat(3, minmax(26px, auto));
   }
 
   .cart-line__meta-slot--salesperson { grid-area: 1 / 1; }
-  .cart-line__meta-slot--debt { grid-area: 1 / 2; }
-  .cart-line__meta-slot--attribution { grid-area: 2 / 1; }
-  .cart-line__meta-slot--coupon { grid-area: 2 / 2; }
-  .cart-line__meta-slot--attribution,
-  .cart-line__meta-slot--coupon { transform: none; }
-  .cart-line__meta-slot--craftsmen { grid-area: 3 / 1; }
-  .cart-line__meta-slot--service-object { grid-area: 3 / 2; }
-  .cart-line__meta-slot--inventory { grid-area: 3 / 1 / 4 / 3; justify-self: end; }
+  .cart-line__meta-slot--financial { grid-area: 1 / 2; }
+  .cart-line__meta-slot--attribution { grid-area: 1 / 3 / 2 / 5; }
+  .cart-line__meta-slot--craftsmen { grid-area: 2 / 1; }
+  .cart-line__meta-slot--service-object { grid-area: 2 / 2; }
+  .cart-line__meta-slot--inventory { grid-area: 2 / 3 / 3 / 5; justify-self: end; }
   .cart-line__right-controls,
-  .cart-line__service-object--footer { grid-area: 4 / 1 / 5 / 3; }
-  .cart-line__upgrade-entitlement-quantity { grid-area: 5 / 1 / 6 / 3; }
+  .cart-line__service-object--footer { grid-area: 3 / 1 / 4 / 5; }
+  .cart-line__upgrade-entitlement-quantity { grid-area: 4 / 1 / 5 / 5; }
 
   .cart-line__service-controls {
     flex-wrap: wrap;
@@ -4941,38 +4930,38 @@ html.group-dashboard-document #app {
 .personnel-full-table__head,
 .personnel-full-table__row {
   display: grid;
-  grid-template-columns: 1.15fr .95fr .8fr .95fr .75fr .8fr .85fr .6fr;
+  grid-template-columns: 1.15fr .95fr .8fr .75fr .8fr .85fr .6fr;
 }
 
 .personnel-full-table--craftsmen {
-  min-width: 1120px;
+  min-width: 988px;
 }
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 132px 84px 102px 118px 126px 102px 64px;
+  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 84px 102px 118px 126px 102px 64px;
 }
 
 .personnel-full-table--history {
-  min-width: 1120px;
+  min-width: 988px;
 }
 
 .personnel-full-table--history .personnel-full-table__head,
 .personnel-full-table--history .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .65fr 1fr .75fr .8fr 1fr .85fr .75fr .55fr;
+  grid-template-columns: 1.15fr .8fr .65fr .75fr .8fr 1fr .85fr .75fr .55fr;
 }
 
 /* 计算法隐藏一列时同步收紧网格，保证项目数和操作仍与表头对齐。 */
 .personnel-full-table--craftsmen.personnel-full-table--without-labor {
-  min-width: 994px;
+  min-width: 862px;
 }
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 132px 84px 102px 118px 102px 64px;
+  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 84px 102px 118px 102px 64px;
 }
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .65fr 1fr .75fr .8fr 1fr .75fr .55fr;
+  grid-template-columns: 1.15fr .8fr .65fr .75fr .8fr 1fr .75fr .55fr;
 }
 
 .personnel-full-table__head > *,

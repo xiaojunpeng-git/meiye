@@ -184,7 +184,7 @@ final class CashierV3RechargeGiftIssuanceServices
         $itemNo = (int)$item['itemNo'];
         $itemId = $giftId . '-' . str_pad((string)$itemNo, 3, '0', STR_PAD_LEFT);
         $projection = $item['kind'] === 'coupon'
-            ? $this->issueCouponInTx($item, $memberId, $now)
+            ? $this->issueCouponInTx($item, $memberId, $now, 'cashier_v3_recharge_gift', $operatorScope->storeId())
             : $this->issueProductInTx($itemId, $item, $memberId, $member, $rechargeId, $rechargeOrderNo, $now, $operatorScope, $dataScope);
         $row = [
             'gift_id' => $giftId,
@@ -329,7 +329,7 @@ final class CashierV3RechargeGiftIssuanceServices
     ): array {
         CashierV3TransactionGuard::assertInTransaction('directGift.issueProjectionInTx');
         if (($item['kind'] ?? '') === 'coupon') {
-            return $this->issueCouponInTx($item, $memberId, $now, 'cashier_v3_direct_gift');
+            return $this->issueCouponInTx($item, $memberId, $now, 'cashier_v3_direct_gift', $operatorScope->storeId());
         }
         if (($item['kind'] ?? '') === 'product') {
             // Direct product gifts are an issuance record, not a zero-price
@@ -352,7 +352,7 @@ final class CashierV3RechargeGiftIssuanceServices
         );
     }
 
-    private function issueCouponInTx(array $item, int $memberId, int $now, string $projectionSource = 'cashier_v3_recharge_gift'): array
+    private function issueCouponInTx(array $item, int $memberId, int $now, string $projectionSource = 'cashier_v3_recharge_gift', int $issuanceStoreId = 0): array
     {
         $coupon = (array)Db::name('store_coupon_issue')->where('id', (int)$item['couponIssueId'])->where('status', 1)->where('is_del', 0)->lock(true)->find();
         if (!$coupon) throw self::failure('recharge_gift_coupon_unavailable', '充值套餐中的优惠券已停用或删除。');
@@ -366,6 +366,8 @@ final class CashierV3RechargeGiftIssuanceServices
                 if ((int)$updated !== 1) throw self::failure('recharge_gift_coupon_stock_exhausted', '充值套餐赠送优惠券库存不足，本次操作已取消。');
             }
             $couponUserId = (int)Db::name('store_coupon_user')->insertGetId([
+                // Freeze gifting/recharge store; recipient transfers never rewrite it.
+                'original_recipient_uid' => $memberId, 'issuance_store_id' => $issuanceStoreId,
                 'cid' => (int)$coupon['id'], 'uid' => $memberId, 'coupon_title' => (string)$coupon['title'],
                 'coupon_price' => (string)$coupon['coupon_price'], 'use_min_price' => (string)$coupon['use_min_price'],
                 'add_time' => $now, 'start_time' => (int)$item['validityStart'], 'end_time' => (int)$item['validityEnd'],

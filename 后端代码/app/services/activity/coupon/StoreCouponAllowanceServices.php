@@ -48,6 +48,8 @@ final class StoreCouponAllowanceServices
             || !$this->allowsProduct($issue, (int)($identity['product_id'] ?? 0))) {
             throw self::failure('该多次抵用券当前不可使用，请重新选择。');
         }
+        (new StoreCouponEligibilityServices())->assertUsable(array_merge($issue, $coupon),
+            (int)$identity['member_id'], (int)$identity['store_id'], (string)($identity['order_id'] ?? ''));
         $total = self::wholeCents($coupon['coupon_price']);
         $account = (array)Db::name(self::ACCOUNT)->where('coupon_user_id', $couponId)->lock(true)->find();
         // The claim row lock serializes first use, subsequent uses, and reversal.

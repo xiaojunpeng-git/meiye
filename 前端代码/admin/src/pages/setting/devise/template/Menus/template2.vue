@@ -1,5 +1,8 @@
 <script>
+import { visibleMemberServices } from '../../../../../../../shared/memberMenuMedia';
+import MemberMenuMedia from "@/components/memberMenuMedia";
 export default {
+  components: { MemberMenuMedia },
   props: {
     MyMenus: {
       type: Array,
@@ -8,6 +11,8 @@ export default {
       },
     },
   },
+  // 只过滤展示副本，保留完整配置及原有客服与跳转分支。
+  computed: { visibleServices() { return visibleMemberServices(this.MyMenus); } },
   methods: {
     intoPage(url) {
       this.$emit("intoPage", url);
@@ -26,11 +31,11 @@ export default {
     <div class="service">
       <div
         class="acea-row row-middle item"
-        v-for="item in MyMenus"
+        v-for="item in visibleServices"
         :key="item.id"
         @click="goMenuPage(item.url, item.name)"
       >
-        <img :src="item.pic" class="image"></img>
+        <MemberMenuMedia :item="item" :size="20" class="image" />
         <div class="name">{{ item.name }}</div>
         <span class="mobiconfont icon-ic_rightarrow"></span>
       </div>

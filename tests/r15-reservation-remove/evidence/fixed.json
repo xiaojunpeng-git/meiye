@@ -1,0 +1,49 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "sourceBaseline": "6c4e21387e1e531f8982eac07ed1c4e77cd5c810",
+  "candidateTree": "f39edb7f56d3437b04936b653dd7ab69879fba91",
+  "patchSHA256": "727d33e35a6ec096e2d9cbdbaa970eed50d44ccd0ee0a98d191b32b22e7d0e02",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "152111811565ba4c7f23e7b3456a5285998d98c55f66f272aabde3764ddb77ee",
+    "tests/r15-reservation-remove/harness.cjs": "7673125516f15eeb8577593ebf8db24a32472a94c1341b4aadfed35d4ee71de9",
+    "tests/r15-reservation-remove/model.cjs": "d78851b25cff6279f2291d064bebb70d57c02be11bd94ab6a079ccfbba5ec03e",
+    "tests/r15-reservation-remove/browser.cjs": "16399c1a5bdb166c7e56d99a03ba96854c5da969205aa986e3e02d7c0f053c99",
+    "scripts/r15-reservation-remove-build.cjs": "447105b34a9daf656518f0ed36bfea11e95ac42829a65a2c6f7302ac3a271b78"
+  },
+  "scope": {
+    "memberSourceFiles": 1,
+    "testFiles": 3,
+    "buildScripts": 1,
+    "businessRuleConfirmed": "Main project retained; only addon selections removable.",
+    "sourceIdentity": "Only selected addon stable keys are removed. Same-name/different-owned-detail selections remain independent.",
+    "duration": "Recompute from remaining selections; clear old chosen time; reload staff and availability; ignore stale responses.",
+    "backendChanged": false,
+    "databaseMigration": false
+  },
+  "verification": {
+    "modelChecks": 22,
+    "realBrowserWidths": [
+      320,
+      375,
+      430
+    ],
+    "deleteReaddAllAddons": true,
+    "capturedSubmitPayloadChecked": true,
+    "mainIdentityRetained": true,
+    "originalCreateUpdateMethodsUnchanged": true,
+    "historicalAddonRegression": "PASS",
+    "H5Build": "PASS",
+    "miniBuild": "PASS",
+    "nativeTemplates": 419,
+    "realDeviceTested": false
+  },
+  "commentsUpdated": [
+    "前端代码/uniapp/pages/activity/reservation/index.vue"
+  ],
+  "productionWrites": 0,
+  "createdAppointments": 0,
+  "committed": false,
+  "deployed": false,
+  "uploaded": false,
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE"
+}

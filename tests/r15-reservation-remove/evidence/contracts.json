@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "unchangedMethods": [
+    "buildAddonPayload",
+    "reservationOrderCreate",
+    "reservationButlerUpdate",
+    "confirmAddonPicker",
+    "parseCartAddonRows",
+    "getExcludeReservationId"
+  ],
+  "backendChanged": false,
+  "ownedRightsChanged": false
+}

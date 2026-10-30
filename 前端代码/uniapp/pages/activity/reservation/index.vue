@@ -12,7 +12,10 @@
 			   <text class="booking-header-count">{{ selectedItems.length }} 个项目</text>
 		   </view>
 		   <view class="selected-items acea-row">
-			   <view class="item-tag" v-for="(item, idx) in selectedItems" :key="idx">{{ item.label }}</view>
+			   <view class="item-tag" :class="{ 'item-tag--removable': item.removable }" v-for="item in selectedItems" :key="item.key">
+                   <text>{{ item.label }}</text>
+                   <button v-if="item.removable" class="item-remove" :aria-label="'移除' + item.label" @click.stop="removeSelectedAddon(item.key)"><text aria-hidden="true">×</text></button>
+               </view>
 		   </view>
 		   <view class="service-duration acea-row row-between-wrapper" v-if="totalServiceDuration > 0">
 			   <text>预计服务时长</text>
@@ -370,9 +373,15 @@
 		</view>
 
 		<!-- 加项选择 -->
-		<view class="staff-mask" v-if="addonPickerVisible" @click="addonPickerVisible = false">
+		<view class="staff-mask addon-picker-mask" v-if="addonPickerVisible" @click="addonPickerVisible = false">
 			<view class="staff-panel addon-picker-panel" @click.stop="">
-				<view class="staff-panel-title">添加项目</view>
+				<!-- 全屏弹层只关闭本次选择，不返回预约页；为小程序状态栏和原生胶囊保留空间。 -->
+				<view class="addon-picker-heading" :style="{ paddingTop: addonPickerTop + 'px' }">
+					<view class="addon-picker-titlebar">
+						<button class="addon-picker-close" aria-label="关闭添加项目" @click="addonPickerVisible = false">取消</button>
+						<view class="staff-panel-title">添加项目</view>
+					</view>
+				</view>
 				<view class="addon-picker-tabs acea-row">
 					<view
 						class="addon-picker-tab"
@@ -395,26 +404,29 @@
 						confirm-type="search"
 					/>
 				</view>
-				<scroll-view scroll-y class="staff-list">
+				<scroll-view scroll-y class="staff-list addon-picker-list">
 					<view v-if="addonPickerLoading" class="staff-empty">加载中...</view>
 					<view v-else-if="!filteredAddonPickerOptions.length" class="staff-empty">暂无可选项目</view>
 					<view
 						v-else
-						class="staff-item"
+						class="staff-item addon-picker-item"
 						v-for="item in filteredAddonPickerOptions"
 						:key="item._key"
 						@click="toggleAddonItem(item)"
 					>
 						<view class="acea-row row-between-wrapper">
 							<view class="flex-1 min-w-0">
-								<view class="line1">{{ item.label }}</view>
-								<view class="addon-item-meta" v-if="item.durationText">{{ item.durationText }}</view>
+								<view class="addon-item-name">{{ item.displayName || item.product_name || item.label }}</view>
+								<view class="addon-item-meta">
+									<text>{{ item.durationText }}</text>
+									<text>{{ item.remainingText || '剩余次数：—' }}</text>
+								</view>
 							</view>
 							<text class="iconfont ml-12" :class="isAddonSelected(item._key) ? 'icon-a-ic_CompleteSelect text-color' : 'icon-ic_unselect'"></text>
 						</view>
 					</view>
 				</scroll-view>
-				<view class="addon-confirm-btn" @click="confirmAddonPicker">确定</view>
+				<view class="addon-picker-footer"><view class="addon-confirm-btn" @click="confirmAddonPicker">确定</view></view>
 			</view>
 		</view>
 	</view>
@@ -465,6 +477,8 @@ export default {
 			customServiceLoading: false,
 			customServiceError: '',
 			customServiceEpoch: 0,
+            staffAvailabilityEpoch: 0,
+            timeAvailabilityEpoch: 0,
 			unique:'',
 			attrList:[],
 			storeName:'',
@@ -492,6 +506,7 @@ export default {
 			disableTimeSlot:[],
 			addonItems:[],
 			addonPickerVisible:false,
+			addonPickerTop:0,
 			addonPickerSelected:[],
 			addonPickerTab: 1,
 			addonPickerSearch: '',
@@ -592,13 +607,17 @@ export default {
 			if (this.mainItemLabel) {
 				const dur = resolveProjectDuration(this.projectServiceDuration);
 				items.push({
-					label: `${this.mainItemLabel} (${dur}分钟)`,
+					key: `main_${this.orderId || 0}_${this.cartInfoId || 0}`,
+                    removable: false,
+                    label: `${this.mainItemLabel} (${dur}分钟)`,
 				});
 			}
 			this.addonItems.forEach(item => {
 				const dur = resolveAddonDuration(item.addon_service_duration);
 				items.push({
-					label: `${item.product_name} (${dur}分钟)`,
+					key: item._key,
+                    removable: !!item._key,
+                    label: `${item.product_name} (${dur}分钟)`,
 				});
 			});
 			return items;
@@ -983,10 +1002,16 @@ export default {
 					if (sku) label += ` / ${sku}`;
 					if (item.write_surplus_times != null) label += `（余${item.write_surplus_times}次）`;
 				}
+				// 展示名称和余次分别来自同一权益明细，不从拼接文案反解析；label仍供原搜索使用。
+				const displayName = item.display_name
+					? `${item.display_name}${sku ? ' / ' + sku : ''}`
+					: this.buildServiceLabel(storeName, cardName, sku, null);
 				const addonDur = resolveAddonDuration(pinfo.addon_service_duration || item.addon_service_duration || this.addonServiceDuration);
 				options.push({
 					_key: `addon_${order.id}_${item.id}`,
 					label,
+					displayName,
+					remainingText: `剩余${item.write_surplus_times}次`,
 					product_id: item.product_id,
 					unique: item.sku_unique || attrInfo.unique || '',
 					oid: order.id,
@@ -1026,6 +1051,9 @@ export default {
 						return {
 							_key: `addon_all_${item.id}`,
 							label: item.store_name,
+							displayName: item.store_name,
+							// 目录项目没有已购权益次数，不能伪造为0次。
+							remainingText: '剩余次数：—',
 							product_id: item.id,
 							unique: '',
 							cart_info_id: 0,
@@ -1063,6 +1091,13 @@ export default {
 			this.addonPickerTab = 1;
 			this.addonPickerSearch = '';
 			this.addonPickerSelected = this.addonItems.map(item => item._key);
+			// 状态栏高度仅用于原生容器布局，不参与预约业务或权益提交。
+			this.addonPickerTop = 0;
+			// #ifdef MP || APP-PLUS
+			if (typeof uni !== 'undefined' && typeof uni.getSystemInfoSync === 'function') {
+				this.addonPickerTop = Number(uni.getSystemInfoSync().statusBarHeight) || 0;
+			}
+			// #endif
 			this.addonPickerVisible = true;
 			this.loadAddonPickerOptions();
 		},
@@ -1082,6 +1117,16 @@ export default {
 				this.addonPickerSelected.push(item._key);
 			}
 		},
+        removeSelectedAddon(key) {
+            // 只移除当前附加权益的稳定键；同名/同链接项目独立，主权益及已持有权益不变。
+            const index = this.addonItems.findIndex(item => item._key === key);
+            if (!key || index < 0) return false;
+            this.addonItems.splice(index, 1);
+            this.addonPickerSelected = this.addonPickerSelected.filter(selected => selected !== key);
+            // 时长由剩余项目重算，旧时间选择不能继续提交；沿用原老师与时段刷新流程。
+            this.selectedTimeRange = null;
+            return this.loadStaffList();
+        },
 		confirmAddonPicker() {
 			const merged = [...this.addonItems];
 			this.addonPickerOptions.forEach(item => {
@@ -1387,6 +1432,9 @@ export default {
 			this.staffList = list;
 		},
 		loadStaffList() {
+            // 连续删除/加项时仅接收最新上下文的老师及时段响应，避免旧时长结果覆盖新选择。
+            const epoch = ++this.staffAvailabilityEpoch;
+            ++this.timeAvailabilityEpoch;
 			if (!this.storeId) return Promise.resolve();
 			const params = {
 				store_id: this.storeId,
@@ -1399,11 +1447,13 @@ export default {
 				params.service_time = query.reservation_start;
 			}
 			return getReservationStaffList(params).then(res => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = this.filterReservationStaffList(res.data?.list || res.data || []);
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
 				this.loadAvailableTime();
 			}).catch(() => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = [];
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
@@ -1411,6 +1461,7 @@ export default {
 			});
 		},
 		loadAvailableTime() {
+            const epoch = ++this.timeAvailabilityEpoch;
 			if (!this.storeId || !this.targetDay) return;
 			const staffIds = this.selectedStaffIds;
 			getStaffAvailableTime({
@@ -1421,12 +1472,14 @@ export default {
 				service_duration: this.totalServiceDuration,
 				exclude_reservation_id: this.getExcludeReservationId(),
 			}).then(res => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				const data = res.data || {};
 				this.timeBegin = data.begin_time || '09:00:00';
 				this.timeEnd = data.end_time || '22:00:00';
 				this.disableTimeSlot = data.disable_time_slot || [];
 				this.validateSelectedTimeRange();
 			}).catch(() => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				this.disableTimeSlot = [];
 				this.validateSelectedTimeRange();
 			});
@@ -1823,11 +1876,17 @@ export default {
 		opacity: 0.9;
 	}
 	.selected-items{
+        padding-top: 10rpx;
+        align-items: flex-start;
 		flex-wrap: wrap;
 		margin-top: 16rpx;
 		gap: 12rpx;
 	}
 	.item-tag{
+        position: relative;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-wrap: break-word;
 		background: rgba(255,255,255,0.25);
 		padding: 12rpx 24rpx;
 		border-radius: 30rpx;
@@ -1835,6 +1894,28 @@ export default {
 		margin-right: 12rpx;
 		margin-bottom: 12rpx;
 	}
+    .item-tag--removable { padding-right: 40rpx; }
+    .item-remove {
+        position: absolute;
+        top: -10rpx;
+        right: -8rpx;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40rpx;
+        height: 40rpx;
+        min-height: 0;
+        padding: 0;
+        margin: 0;
+        border: 2rpx solid rgba(255,255,255,.65);
+        border-radius: 50%;
+        background: #fff;
+        color: var(--view-theme, #7B2941);
+        font-size: 30rpx;
+        line-height: 1;
+        &::after { border: 0; }
+        &:focus-visible { outline: 2rpx solid #fff; outline-offset: 3rpx; }
+    }
 	.service-duration{
 		margin-top: 20rpx;
 		padding-top: 20rpx;
@@ -2050,9 +2131,32 @@ export default {
 		border-radius: 40rpx;
 		font-size: 28rpx;
 	}
+	/* 只改变加项弹层：确定高度的纵向布局保证长列表独立滚动，其他人员弹层保持原样。 */
+	.addon-picker-mask{ overflow: hidden; }
 	.addon-picker-panel{
-		max-height: 78vh;
+		height: 100%;
+		max-height: 100%;
+		min-height: 0;
+		box-sizing: border-box;
+		border-radius: 0;
+		padding: 0 24rpx;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		.addon-picker-heading, .addon-picker-tabs, .addon-search-wrap, .addon-picker-footer{ flex-shrink: 0; }
+		.addon-picker-list{ flex: 1; height: 0; min-height: 0; max-height: none; }
+		.addon-picker-item{ box-sizing: border-box; }
+		.addon-picker-item .flex-1{ flex: 1; min-width: 0; }
+		.addon-picker-item .iconfont{ flex-shrink: 0; margin-left: 24rpx; }
 	}
+	.addon-picker-titlebar{ position: relative; height: 44px; display: flex; align-items: center; justify-content: center; }
+	.addon-picker-titlebar .staff-panel-title{ margin: 0; }
+	.addon-picker-close{ position: absolute; left: 0; top: 0; height: 44px; margin: 0; padding: 0 12rpx; border: 0; background: transparent; font-size: 28rpx; color: #333; display: flex; align-items: center; }
+	.addon-picker-close::after{ border: 0; }
+	.addon-item-name{ white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; overflow-wrap: anywhere; line-height: 1.5; }
+	.addon-item-meta{ display: flex; flex-wrap: wrap; gap: 24rpx; margin-top: 10rpx; line-height: 1.5; color: #999; font-size: 24rpx; }
+	.addon-picker-footer{ padding: 20rpx 0; padding-bottom: calc(20rpx + env(safe-area-inset-bottom)); background: #fff; }
+	.addon-picker-footer .addon-confirm-btn{ margin-top: 0; display: flex; align-items: center; justify-content: center; line-height: 1.4; }
 	.addon-picker-tabs{
 		margin-bottom: 20rpx;
 		gap: 16rpx;
@@ -2106,11 +2210,6 @@ export default {
 		border-radius: 12rpx;
 		color: #333;
 		line-height: 1.5;
-	}
-	.addon-item-meta{
-		font-size: 22rpx;
-		color: #999;
-		margin-top: 6rpx;
 	}
 </style>
 

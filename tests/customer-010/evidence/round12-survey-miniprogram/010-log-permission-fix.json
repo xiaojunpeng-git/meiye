@@ -1,0 +1,14 @@
+{
+  "before": {
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644"
+  },
+  "after": {
+    "uid": 1000,
+    "gid": 1000,
+    "mode": "0o640"
+  },
+  "content_unchanged": true,
+  "only_010": true
+}

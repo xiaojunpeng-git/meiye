@@ -1,0 +1,6 @@
+{
+  "app/services/diy/DiyServices.php": "e9aecf33ceb9a7d1a9223cb6c665ba4e99b1a1c920413959e2cef05755194c2a",
+  "app/services/user/UserCardHolderServices.php": "01399c7a304232e4ae22dd270bbd9083a73b0b01e7375c183b7c031902c1d587",
+  "app/services/user/UserServices.php": "d35cde18715337fca30c9346ad5d131bfa75293ca95267116b913847da2cf29a",
+  "app/services/user/WechatUserServices.php": null
+}

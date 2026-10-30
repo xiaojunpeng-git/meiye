@@ -1,0 +1,40 @@
+{
+  "result": "PASS",
+  "database": "mohe_010_app",
+  "source_commit": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+  "files": 143,
+  "existing_data_and_roles_unchanged": true,
+  "task_count": 2,
+  "qr_appid": "wxce4f61fc9c4eaaa6",
+  "qr_environment": "trial",
+  "qr_kind": "miniprogram",
+  "qr_mime": "data:image/jpeg",
+  "only_010": true,
+  "backup": "/www/backups/010/round12-mini-8949a12e9e04-20261029172857",
+  "http_checks": [
+    "public/system.html",
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.942a6c40.js",
+    "/view_admin/js/app.42c1640b.js",
+    "public/index.html",
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.d15b3443.js",
+    "/static/js/index.bb24b022.js",
+    {
+      "url": "/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff",
+      "status": 400
+    },
+    {
+      "url": "/api/survey/1",
+      "status": 410000
+    },
+    {
+      "url": "/adminapi/user/survey",
+      "status": 410000
+    }
+  ],
+  "member_api_origin": "https://010.cc3798.com",
+  "production_007_unchanged": true,
+  "push": false
+}

@@ -1,0 +1,63 @@
+{
+  "member": {
+    "result": "PASS",
+    "site": "rh",
+    "allOrdersEntry": true,
+    "serviceVisibilityProjection": true,
+    "warmCache": true,
+    "configurationUnchanged": true,
+    "businessWrites": 0
+  },
+  "login": {
+    "site": "rh",
+    "files": {
+      "app/services/wechat/RoutineServices.php": "80f202ae1010421a0ae1a69cf92bd353713410afcee768379449b7711c17cd8c",
+      "app/services/wechat/WechatUserServices.php": "07ada74b8222bce018312d9686db3b2cc384e9e33bb591f921300615ccc86af6",
+      "app/services/user/UserServices.php": "d35cde18715337fca30c9346ad5d131bfa75293ca95267116b913847da2cf29a",
+      "app/services/user/LoginServices.php": "979c0af516dc53166b7991188826a30f96133d78efb954dce67c7ed6e097894d",
+      "app/services/user/MemberPhoneResetServices.php": "98089ecf5bba3623d4113c690317bf0e5972cec19466709de31a39f28df817c5",
+      "app/services/user/CanonicalUserIdentityServices.php": "c1463ed416ec7cc6759d9ce8d552248c5962d058737cd0f5571ecfc9571894ef",
+      "app/services/cashier/v3/member/CashierV3MemberModule.php": "8aa04f587c706ac775dc3692d261a3652b73deb8846099fc467a784790d2dcdd",
+      "app/controller/api/v2/wechat/Routine.php": "64de88d74fa8538daaf51a2f520ae6dd895d13af075a6fa272a3e7bb3c615ce1",
+      "public/index.html": "613e101f4d96a7b1a05f4602ab6413f78e345b3feb738fc8c4a7d35c30b7a162",
+      "public/view_cashier_v3/index.html": "f430c20bf506c5e7be2f961da71b9c03a7dfa3f3f8d443d571219c69e2f1b88e"
+    },
+    "schema": {
+      "user": "3f06cb2dc01c1c60f0bc09defd858bc0e3e284041576ee8c9c4ae4c093e0c8bb",
+      "wechat_user": "c0476517cdb4ce4f54050edf76b08244ce5464122a7d5ffb6c0528fa0652e0f3",
+      "user_phone_identity": "15e75119ff9c8a1e269ceddae7a0ebb294c4c71e6caa89595587b064ca200cec",
+      "user_phone_identity_audit": "99e0a0a224e49c23d9412e2692833e8c9fb9176710d09fd2773e3aa500dd3076",
+      "member_phone_login_reset": "d1b83c98a33e7033ee1c2f2f0c2d81ca9fc7fb9acda119f0c020a6447369cb44",
+      "cashier_v3_member_number_sequence": "b492e84d50e8adb9a61d55aaf8047aae63b738ffeea7d182f1a92ccd10c77731"
+    },
+    "writes": 0,
+    "sequenceCurrent": 100001039,
+    "runtimeGatePass": true,
+    "phoneSwitchIgnored": true,
+    "result": "PASS"
+  },
+  "platform": {
+    "result": "PASS",
+    "site": "rh",
+    "serverReadOnly": true,
+    "businessWrites": 0,
+    "allowedStores": 102,
+    "memberTotal": 151904,
+    "pageRows": 20,
+    "bindingField": true,
+    "loginInfoRead": true,
+    "emptyQuery": true,
+    "financialCommandDenied": true,
+    "existingOperatorEditPermission": true,
+    "existingSalaryRead": true,
+    "existingCombinationClasses": true
+  },
+  "rights": {
+    "site": "rh",
+    "result": "PASS",
+    "businessWrites": 0,
+    "backendSHA256": "33a83c0f0a03dfa27b879c5ca32c138e988788da993eddbfd584fb419268953c",
+    "holderReadVerified": true,
+    "adapterLoaded": true
+  }
+}

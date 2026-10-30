@@ -25,10 +25,10 @@
       <draggable class="entry-list" :list="orderData.list" handle=".move-icon">
         <div class="entry-item" v-for="item in orderData.list" :key="item.key">
           <span class="iconfont-diy icondrag move-icon"></span>
-          <div class="entry-key">{{ item.key }}</div>
+          <div class="entry-key"><MemberMenuMedia :item="item" kind="order" :size="22" /><span>{{ item.key }}</span></div>
           <Input v-model="item.title" class="entry-name" placeholder="入口名称" />
           <Select v-model="item.icon" class="entry-icon" placeholder="请选择图标">
-            <Option v-for="icon in orderIconOptions" :key="icon.value" :value="icon.value">{{ icon.label }}</Option>
+            <Option v-for="icon in orderIconOptions" :key="icon.value" :value="icon.value"><MemberMenuMedia :item="{ icon: icon.value }" kind="order" :size="18" class="option-icon" />{{ icon.label }}</Option>
           </Select>
           <i-switch v-model="item.is_show" :true-value="1" :false-value="0" size="large">
             <span slot="open">显示</span><span slot="close">隐藏</span>
@@ -64,54 +64,59 @@
 </template>
 
 <script>
-import uploadPictures from "@/components/uploadPictures";
-import propertyList from "@/plugins/propertyList";
-import draggable from "vuedraggable";
+import uploadPictures from '@/components/uploadPictures';
+import propertyList from '@/plugins/propertyList';
+import draggable from 'vuedraggable';
+import MemberMenuMedia from '@/components/memberMenuMedia';
 export default {
-  name: "",
+  name: '',
   components: {
     uploadPictures,
     draggable,
+    // 缩略图和选项显示真实订单字形，读取配置但不修改名称、顺序或跳转。
+    MemberMenuMedia
   },
   data() {
     return {
       styleList: [
         {
-          pic: require("@/assets/images/order-style-1.png"),
+          pic: require('@/assets/images/order-style-1.png')
         },
         {
-          pic: require("@/assets/images/order-style-2.png"),
+          pic: require('@/assets/images/order-style-2.png')
         },
         {
-          pic: require("@/assets/images/order-style-3.png"),
-        },
+          pic: require('@/assets/images/order-style-3.png')
+        }
       ],
       changeStyleModal: false,
       propertyList: propertyList,
       orderStyle: 1, // 默认选中风格
       orderEntryDefaults: [
-        { key: "unpaid", title: "待付款", url: "/pages/goods/order_list/index?status=0", icon: "icon-ic_daifukuan", is_show: 1 },
-        { key: "debt", title: "欠款", url: "/pages/users/debt/index", icon: "icon-ic_money", is_show: 1 },
-        { key: "unshipped", title: "待发货", url: "/pages/goods/order_list/index?status=1", icon: "icon-ic_daifahuo", is_show: 0 },
-        { key: "received", title: "待收货", url: "/pages/goods/order_list/index?status=10", icon: "icon-ic_daishouhuo", is_show: 0 },
-        { key: "evaluated", title: "待评价", url: "/pages/goods/order_list/index?status=3", icon: "icon-ic_daipingjia", is_show: 1 },
-        { key: "refund", title: "售后", url: "/pages/users/user_return_list/index", icon: "icon-ic_returnmoney", is_show: 1 },
+        // 同后端默认值，兼容加载尚未升级的历史装修配置。
+        { key: 'all', title: '全部订单', url: '/pages/goods/order_list/index', icon: 'icon-ic_order1', is_show: 1 },
+        { key: 'unpaid', title: '待付款', url: '/pages/goods/order_list/index?status=0', icon: 'icon-ic_daifukuan', is_show: 1 },
+        { key: 'debt', title: '欠款', url: '/pages/users/debt/index', icon: 'icon-ic_money', is_show: 1 },
+        { key: 'unshipped', title: '待发货', url: '/pages/goods/order_list/index?status=1', icon: 'icon-ic_daifahuo', is_show: 0 },
+        { key: 'received', title: '待收货', url: '/pages/goods/order_list/index?status=10', icon: 'icon-ic_daishouhuo', is_show: 0 },
+        { key: 'evaluated', title: '待评价', url: '/pages/goods/order_list/index?status=3', icon: 'icon-ic_daipingjia', is_show: 1 },
+        { key: 'refund', title: '售后', url: '/pages/users/user_return_list/index', icon: 'icon-ic_returnmoney', is_show: 1 }
       ],
       orderIconOptions: [
-        { label: "待付款", value: "icon-ic_daifukuan" },
-        { label: "欠款", value: "icon-ic_money" },
-        { label: "待发货", value: "icon-ic_daifahuo" },
-        { label: "待收货", value: "icon-ic_daishouhuo" },
-        { label: "待评价", value: "icon-ic_daipingjia" },
-        { label: "售后", value: "icon-ic_returnmoney" },
-        { label: "通用订单", value: "icon-ic_order1" },
-      ],
+        { label: '待付款', value: 'icon-ic_daifukuan' },
+        { label: '欠款', value: 'icon-ic_money' },
+        { label: '待发货', value: 'icon-ic_daifahuo' },
+        { label: '待收货', value: 'icon-ic_daishouhuo' },
+        { label: '待评价', value: 'icon-ic_daipingjia' },
+        { label: '售后', value: 'icon-ic_returnmoney' },
+        { label: '通用订单', value: 'icon-ic_order1' }
+      ]
     };
   },
   computed: {
     orderData(val) {
       return this.$store.state.admin.userTemplateConfig.order;
-    },
+    }
   },
 
   created() {},
@@ -123,7 +128,10 @@ export default {
   methods: {
     ensureOrderList() {
       if (!Array.isArray(this.orderData.list) || !this.orderData.list.length) {
-        this.$set(this.orderData, "list", this.orderEntryDefaults.map((item) => ({ ...item })));
+        this.$set(this.orderData, 'list', this.orderEntryDefaults.map((item) => ({ ...item })));
+      } else if (!this.orderData.list.some((item) => item && item.key === 'all')) {
+        // 只补新增入口，不用默认列表覆盖客户已经调整的名称、图标、顺序或隐藏状态。
+        this.$set(this.orderData, 'list', [{ ...this.orderEntryDefaults[0] }, ...this.orderData.list]);
       }
     },
     selectStyle(index) {
@@ -131,8 +139,8 @@ export default {
     },
     saveStyle() {
       this.orderData.style = this.orderStyle;
-    },
-  },
+    }
+  }
 };
 </script>
 <style lang="stylus" scoped>
@@ -145,6 +153,11 @@ export default {
     margin: -8px 0 16px;
     font-size: 12px;
     color: #999999;
+  }
+
+  .option-icon {
+    margin-right: 8px;
+    vertical-align: middle;
   }
 
   .entry-list {
@@ -169,16 +182,27 @@ export default {
 
     .entry-key {
       width: 72px;
+      display: flex;
+      flex-shrink: 0;
+      align-items: center;
+      gap: 6px;
+
+      span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
       font-size: 12px;
       color: #999999;
     }
 
     .entry-name {
       width: 130px;
+      min-width: 0;
     }
 
     .entry-icon {
       width: 150px;
+      min-width: 0;
     }
   }
 

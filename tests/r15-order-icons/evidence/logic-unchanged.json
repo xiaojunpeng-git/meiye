@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "checkedComponents": 4,
+  "retained": [
+    "defaults",
+    "route",
+    "rename",
+    "visibility",
+    "sorting",
+    "style",
+    "eventHandlers"
+  ],
+  "methodDataAndLifecycleASTUnchanged": true
+}

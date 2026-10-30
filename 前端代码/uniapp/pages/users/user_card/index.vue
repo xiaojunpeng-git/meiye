@@ -1,12 +1,13 @@
 <template>
 	<view :style="colorStyle" class="pt-24 pb-24 pr-20 pl-20">
-		<view :style="[cardBackground]" class="rd-16rpx">
-			<view :class="{'card-mask':cardData.card_cover == 1 && cardData.product_type == 5 && !cardData.card_cover_image.includes('card_cover_image')}" class="flex-col h-364 pt-24 pb-30 rd-16rpx text--w111-fff">
+		<view :style="[cardBackground]" class="rd-16rpx project-cover">
+			<image v-if="isStandaloneProject && projectCoverImage" :src="projectCoverImage" mode="aspectFill" class="project-cover__image"></image>
+			<view :class="{'card-mask':cardData.card_cover == 1 && cardData.product_type == 5 && !cardData.card_cover_image.includes('card_cover_image'), 'project-cover__shade': isStandaloneProject}" class="project-cover__content flex-col h-364 pt-24 pb-30 rd-16rpx text--w111-fff">
 				<view class="flex-1">
 					<view class="flex-y-center pr-24 pl-24">
 						<image :src="cardData.store_image" mode="" class="w-48 h-48 rd-50-p111-"></image>
 						<view class="flex-1 min-w-0 pr-16 pl-16 fw-500 fs-26">{{cardData.store_name}}</view>
-						<text v-if="cardData.status == 1 && cardData.product_type == 5" class="iconfont icon-ic_QRcode" @tap="showCodeChange"></text>
+						<text v-if="cardData.status == 1 && cardData.product_type == 5 && !isStandaloneProject" class="iconfont icon-ic_QRcode" @tap="showCodeChange"></text>
 					</view>
 					<view class="flex pr-24 pl-32 mt-48 lh-44rpx">
 						<view class="w-300 fw-500 fs-32 line2" style="flex-shrink: 0;">{{cardData.card_name}}</view>
@@ -46,7 +47,7 @@
 			</view>
 			<view class="mt-36 fw-500 fs-28 font-color text-center">{{cardData.verify_code}}</view>
 		</view>
-		<view v-else-if="cardData.product_type == 5" class="pr-14 pb-20 pl-20 rd-24rpx mt-20 bg--w111-fff">
+		<view v-else-if="cardData.product_type == 5 && !isStandaloneProject" class="pr-14 pb-20 pl-20 rd-24rpx mt-20 bg--w111-fff">
 			<view class="pt-32 fw-500 fs-28">卡项权益</view>
 			<view>
 				<view v-for="item in cardRelatedVisible" :key="item.id" class="flex-y-center p-16 pr-30 mt-20 bg--w111-f5f5f5-s111-80 rd-12rpx">
@@ -80,7 +81,7 @@
 				<view class="fs-28">核销记录</view>
 				<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999"></text>
 			</navigator>
-			<view v-if="cardData.product_type == 5 && mobileReservationOpen" @click="goReservationList" hover-class="none" class="flex-between-center pt-26 pb-26 pr-22 pl-24 lh-40rpx">
+			<view v-if="(cardData.product_type == 5 || isStandaloneProject) && mobileReservationOpen" @click="goReservationList" hover-class="none" class="flex-between-center pt-26 pb-26 pr-22 pl-24 lh-40rpx">
 				<view class="fs-28">预约单</view>
 				<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999"></text>
 			</view>
@@ -91,8 +92,9 @@
 			</view>
 		</view>
 		<view class="fixed-lb w-full pb-safe bg--w111-fff">
-			<view class="p-20">
+			<view class="p-20" :class="{ 'project-actions': isStandaloneProject && mobileReservationOpen }">
 				<navigator :url="`/pages/goods_details/index?id=${cardData.pid || cardData.product_id}`" hover-class="none" class="repurchase-button flex-center h-80 rd-40rpx fw-500 fs-28">再次购买</navigator>
+				<button v-if="isStandaloneProject && mobileReservationOpen" :disabled="!canReserveStandalone || reservationPreparing" :loading="reservationPreparing" @click="reserveStandaloneProject" class="project-reserve-button flex-center h-80 rd-40rpx fw-500 fs-28 bg-color text--w111-fff">去预约</button>
 			</view>
 		</view>
 		<verifyModal v-if="showQrcode" :qrcode="config.qrc" :qrc="qrc" :verifyCode="cardData.verify_code" :writeDay="cardData.write_day" :writeTimes="cardData.write_times" :writeOff="cardData.write_times" :productType="cardData.product_type" @closeModal="closeModal"></verifyModal>
@@ -109,7 +111,7 @@
 		cardHolder
 	} from '@/api/user.js';
 	import {
-		cardOrderBenefits
+		cardOrderBenefits, getReservationOrderInfo
 	} from '@/api/order.js';
 	import {
 		activityCodeApi
@@ -125,6 +127,7 @@
 		data() {
 			return {
 				id: 0,
+				reservationPreparing: false,
 				cardData: {},
 				cardRelated: [],
 				isExpanded: false,
@@ -144,10 +147,38 @@
 			}
 		},
 		computed: {
+			isStandaloneProject() {
+				// Gift issuance can wrap one project in a type-5 holder. Match the
+				// issued product identity, never its name, one remaining use or price.
+				if (Number(this.cardData.product_type) === 6) return true;
+				return Number(this.cardData.product_type) === 5 && this.cardRelated.length === 1
+					&& Number(this.cardRelated[0].product_type) === 6
+					&& Number(this.cardRelated[0].product_id) === Number(this.cardData.product_id);
+			},
+			standaloneProject() {
+				if (!this.isStandaloneProject) return null;
+				const rows = this.cardRelated.filter(row => Number(row.product_type) === 6
+					&& Number(row.product_id) === Number(this.cardData.product_id));
+				// Ambiguous details must not silently select another issued right.
+				return rows.length === 1 ? rows[0] : null;
+			},
+			projectCoverImage() {
+				const info = this.standaloneProject?.cart_info || {};
+				const image = info.productInfo?.attrInfo?.image || info.productInfo?.image || info.image || this.cardData.image || '';
+				return image.charAt(0) === '/' ? `${HTTP_REQUEST_URL.replace(/\/$/, '')}${image}` : image;
+			},
+			canReserveStandalone() {
+				return this.mobileReservationOpen && Number(this.cardData.status) === 1
+					&& !this.cardData.is_card_upgraded && Number(this.writeSurplusTimes) > 0
+					&& Number(this.standaloneProject?.id) > 0
+					&& Number(this.standaloneProject?.write_surplus_times) > 0;
+			},
 			cardBackground() {
 				if (!Object.keys(this.cardData).length) {
 					return {}
 				}
+				// A project image is media only; the themed fallback keeps white text readable.
+				if (this.isStandaloneProject) return { 'background-color': 'var(--view-theme, #7b2941)' };
 				if (this.cardData.product_type == 4 || this.cardData.card_cover == 1) {
 					// 卡封面在商品表可保存本站绝对路径；小程序背景图必须使用当前客户的完整 HTTPS 地址。
 					const cover = this.cardData.product_type == 4
@@ -205,7 +236,7 @@
 						timer = setTimeout(() => {
 							this.getCardHolder();
 						}, 30000);
-					} else if (this.cardData.product_type == 5) {
+					} else if ([5, 6].includes(Number(this.cardData.product_type))) {
 						this.getCardBenefits();
 					}
 					this.activityCodeApi();
@@ -224,6 +255,26 @@
 			// 卡项权益-展开
 			toggleExpand() {
 				this.isExpanded = !this.isExpanded;
+			},
+			/** Reuse the purchased booking reader before navigating. The server
+			 * validates ownership/SKU/quota; this action never creates a booking. */
+			async reserveStandaloneProject() {
+				if (!this.canReserveStandalone || this.reservationPreparing) return;
+				this.reservationPreparing = true;
+				const orderId = this.cardData.oid;
+				const detailId = this.standaloneProject.id;
+				try {
+					const res = await getReservationOrderInfo(orderId, { cart_info_id: detailId });
+					const data = res.data || {};
+					if (Number(data.cart_info_id) !== Number(detailId) || Number(data.cart_num) <= 0) {
+						return this.$util.Tips({ title: '该项目暂无可预约次数，请刷新权益后重试' });
+					}
+					goWithYuyueSubscribe(`/pages/activity/reservation/index?orderId=${orderId}&cartInfoId=${detailId}`);
+				} catch (err) {
+					this.$util.Tips({ title: err?.msg || err || '读取预约资料失败，请重试' });
+				} finally {
+					this.reservationPreparing = false;
+				}
 			},
 			// 卡项权益-去预约
 			reserveCardRelated(id) {
@@ -265,6 +316,18 @@
 </script>
 
 <style lang="scss" scoped>
+	// Native images render in both H5 and mini-programs; shade only the project
+	// cover so names/counts remain readable without changing ordinary card skins.
+	.project-cover { position: relative; overflow: hidden; }
+	.project-cover__image { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+	.project-cover__content { position: relative; }
+	.project-cover__shade { background: linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.60)); }
+	.project-actions { display: flex; gap: 20rpx; }
+	.project-actions .repurchase-button, .project-actions .project-reserve-button { flex: 1; min-width: 0; }
+	.project-reserve-button { margin: 0; padding: 0; border: 0; line-height: normal; }
+	.project-reserve-button::after { border: 0; }
+	.project-reserve-button[disabled] { opacity: .45; }
+
 	// Keep the white action distinguishable from its white footer; include the border inside the original button size.
 	.repurchase-button {
 		box-sizing: border-box;

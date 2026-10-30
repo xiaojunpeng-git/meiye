@@ -24,8 +24,15 @@ class MemberSurveyServices
     public function qrEntry(int $id):array
     {
         $task=$this->task($id);if(!$this->isActive($task)||empty($task['entry_token']))throw new ValidateException('只有进行中的任务可以生成二维码');
-        // 真正的小程序码由微信返回，不再用H5网址绘制普通二维码。
-        return ['task_id'=>$id,'title'=>$task['title']]+app()->make(MemberSurveyMiniProgramCodeServices::class)->make((string)$task['entry_token']);
+        $mode=(string)config('member_survey.qr_mode','h5');
+        if($mode==='mini')return ['task_id'=>$id,'title'=>$task['title']]+app()->make(MemberSurveyMiniProgramCodeServices::class)->make((string)$task['entry_token']);
+        if($mode!=='h5')throw new ValidateException('问卷二维码入口配置无效');
+        // 瑞昊尚无会员小程序，继续使用本实例受控 H5 地址；资格校验仍由提交服务统一执行。
+        $base=rtrim((string)(config('member_survey.member_h5_base_url','') ?: sys_config('site_url','')),'/');
+        $parts=parse_url($base);
+        if(!$parts||empty($parts['host'])||!in_array($parts['scheme']??'',['https','http'],true)||isset($parts['user'])||isset($parts['pass'])||isset($parts['query'])||isset($parts['fragment']))throw new ValidateException('请先配置本实例会员端地址');
+        if($parts['scheme']!=='https'&&!in_array($parts['host'],['127.0.0.1','localhost'],true))throw new ValidateException('会员端地址必须使用HTTPS');
+        return ['task_id'=>$id,'title'=>$task['title'],'kind'=>'h5','url'=>$base.'/pages/users/survey/index?entry='.$task['entry_token']];
     }
     private function now(): int
     {

@@ -22,6 +22,8 @@ export default {
     order: {
       style: 1, // 风格
       list: [
+        // 全部订单不携带状态参数；显示、排序和图标仍由装修配置保存。
+        { key: 'all', title: '全部订单', url: '/pages/goods/order_list/index', icon: 'icon-ic_order1', is_show: 1 },
         { key: 'unpaid', title: '待付款', url: '/pages/goods/order_list/index?status=0', icon: 'icon-ic_daifukuan', is_show: 1 },
         { key: 'debt', title: '欠款', url: '/pages/users/debt/index', icon: 'icon-ic_money', is_show: 1 },
         { key: 'unshipped', title: '待发货', url: '/pages/goods/order_list/index?status=1', icon: 'icon-ic_daifahuo', is_show: 0 },
@@ -141,7 +143,15 @@ export default {
             url: e.url
           };
         });
-        res.data.member.menu.list = myMenu;
+        const configuredServices = res.data.member.menu && res.data.member.menu.list;
+        // 单项开关使用后以DIY完整列表读回，不能被缺少显隐字段的旧镜像覆盖而丢失隐藏项。
+        // 未使用开关的历史配置继续原镜像回填，保留既有图片兼容行为。
+        const hasVisibility = Array.isArray(configuredServices) && configuredServices.some(item => Object.prototype.hasOwnProperty.call(item, 'is_show'));
+        res.data.member.menu.list = hasVisibility ? configuredServices.map(item => ({
+          ...item,
+          pic: Array.isArray(item.pic) ? (item.pic[0] || '') : (item.pic || ''),
+          icon: item.icon || ''
+        })) : myMenu;
         if (!res.data.member.merMenu) {
           res.data.member.merMenu = state.merMenu;
         }

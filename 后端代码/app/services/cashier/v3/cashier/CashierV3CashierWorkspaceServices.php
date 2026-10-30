@@ -1688,7 +1688,8 @@ final class CashierV3CashierWorkspaceServices
                         $setting = [
                             'laborWeight' => (int)$selection['laborWeight'],
                             'isPointCustomer' => (bool)$selection['isPointCustomer'],
-                            'craftsmanPerformanceType' => (string)($selection['craftsmanPerformanceType'] ?? 'commission_labor'),
+                            // 权益待结账意图沿用本次双项口径，旧浏览器字段不改变金额。
+                            'craftsmanPerformanceType' => 'commission_labor',
                             'laborFeeCents' => max(0, (int)($selection['laborFeeCents'] ?? 0)),
                             'personnelSource' => (string)($selection['personnelSource'] ?? 'store'),
                         ];
@@ -2145,7 +2146,6 @@ final class CashierV3CashierWorkspaceServices
         $weights = [];
         $requestedPerformanceAmounts = [];
         $requestedPerformanceAmountManual = [];
-        $types = [];
         $requestedFees = [];
         $requestedProjectCounts = [];
         $hasProjectCount = false;
@@ -2154,12 +2154,6 @@ final class CashierV3CashierWorkspaceServices
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['laborWeight'] ?? 0) : 0;
-            $requestedType = is_array($selection)
-                ? trim((string)($selection['craftsmanPerformanceType'] ?? $selection['craftsman_performance_type'] ?? ''))
-                : '';
-            $normalizedType = in_array($requestedType, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)
-                ? $requestedType
-                : EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
             $duplicate = $staffId > 0 && isset($seen[$staffId]);
             if ($staffId <= 0 || $weight < 0 || $weight > 100 || $duplicate) {
                 throw new CashierV3CommandException(
@@ -2172,7 +2166,6 @@ final class CashierV3CashierWorkspaceServices
             $seen[$staffId] = true;
             $personnelSources[$staffId] = trim((string)($selection['personnelSource'] ?? $selection['personnel_source'] ?? ''));
             $weights[$staffId] = $weight;
-            $types[$staffId] = $normalizedType;
             $requestedFees[$staffId] = max(0, (int)($selection['laborFeeCents'] ?? $selection['labor_fee_cents'] ?? 0));
             if (array_key_exists('performanceAmountCents', $selection)
                 || array_key_exists('performance_amount_cents', $selection)) {
@@ -2310,20 +2303,15 @@ final class CashierV3CashierWorkspaceServices
                     ['staff_id' => $staffId, 'reason' => 'craftsman_not_active_in_store']
                 );
             }
-            $type = trim((string)($row['craftsman_performance_type'] ?? ''));
-            if (!in_array($type, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
-                $type = $types[$staffId] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
-            }
-            $effectiveWeight = $type === EmployeeCraftsmanPerformanceTypeServices::LABOR ? 0 : $weights[$staffId];
+            $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
+            $effectiveWeight = $weights[$staffId];
             $positionId = (int)($row['position_id'] ?? 0);
             $positionName = trim((string)($row['position_name'] ?? '')) ?: '在职员工';
             $performanceIndependent = (int)($row['performance_independent'] ?? 0) === 1;
             $allocationGroupKey = $performanceIndependent
                 ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
                 : 'normal';
-            $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
-                ? 0
-                : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
+            $laborFeeCents = $requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents;
             $personnelSource = ($personnelSources[$staffId] ?? '') === 'other' ? 'other' : 'store';
             // The virtual staff id is only the internal staff-resource key used to
             // avoid collisions with system_store_staff.id. Facts and snapshots
@@ -2360,15 +2348,6 @@ final class CashierV3CashierWorkspaceServices
             if (array_key_exists($staffId, $requestedPerformanceAmounts)) {
                 $performanceAmountCents = $requestedPerformanceAmounts[$staffId];
                 $performanceAmountManual = !empty($requestedPerformanceAmountManual[$staffId]);
-                if ($type === EmployeeCraftsmanPerformanceTypeServices::LABOR
-                    && ($performanceAmountCents !== 0 || $performanceAmountManual)) {
-                    throw new CashierV3CommandException(
-                        CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                        '手工费类型不支持填写业绩金额。',
-                        CashierV3ResultCode::STATUS_FAILED,
-                        ['reason' => 'labor_performance_amount_invalid']
-                    );
-                }
                 $craftsman['performanceAmountCents'] = $performanceAmountCents;
                 $craftsman['performanceAmountManual'] = $performanceAmountManual;
             }
@@ -2560,10 +2539,7 @@ final class CashierV3CashierWorkspaceServices
             $seen[$staffId] = true;
             $hasWeight = array_key_exists('laborWeight', $craftsman);
             $weight = $hasWeight ? (int)$craftsman['laborWeight'] : 0;
-            $type = trim((string)($craftsman['craftsmanPerformanceType'] ?? $craftsman['craftsman_performance_type'] ?? ''));
-            if (!in_array($type, EmployeeCraftsmanPerformanceTypeServices::TYPES, true)) {
-                $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
-            }
+            $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
             if ($hasWeight && ($weight > 100 || $weight < 0)) {
                 throw $this->incompleteLineSettings($lineKey, 'stored_craftsman_weight_invalid');
             }
@@ -3559,7 +3535,7 @@ final class CashierV3CashierWorkspaceServices
 
     /**
      * Read current member-owned coupons once for both display and the write guard.
-     * Below-minimum rows are read-only hints; the apply command consumes only
+     * Unavailable rows carry reasons as read-only hints; the apply command consumes only
      * `available` and repeats this check under a transaction lock.
      *
      * @return array{available:array<int,array<string,mixed>>,belowMinimum:array<int,array<string,mixed>>}
@@ -3580,11 +3556,8 @@ final class CashierV3CashierWorkspaceServices
         $now = time();
         $query = Db::name('store_coupon_user')->alias('cu')
             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
-            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)
-            ->where(function ($q) { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
-            ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
-            ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
-            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.product_id,ci.category_id,ci.brand_id,ci.use_mode,ci.order_tiers_json');
+            ->where('cu.uid', $memberId)
+            ->field('cu.status,cu.is_fail,cu.use_time,cu.start_time,cu.original_recipient_uid,cu.issuance_store_id,ci.usage_target,ci.new_user_only,cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.product_id,ci.category_id,ci.brand_id,ci.use_mode,ci.order_tiers_json');
         if ($onlyCouponId > 0) $query->where('cu.id', $onlyCouponId);
         if ($lock) $query->lock(true);
         $rows = $query->order('cu.end_time asc,cu.id asc')->select();
@@ -3599,19 +3572,42 @@ final class CashierV3CashierWorkspaceServices
         $allowanceIds = array_column(array_filter($rows, static fn(array $row): bool =>
             (int)($row['coupon_type'] ?? 0) === 3), 'id');
         $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($allowanceIds);
+        $eligibility = new \app\services\activity\coupon\StoreCouponEligibilityServices();
+        $hasNewUserRule = count(array_filter($rows, static fn(array $row): bool => (int)($row['new_user_only'] ?? 0) === 1)) > 0;
+        if ($lock && $hasNewUserRule) $eligibility->lockMember($memberId);
+        $hasConsumed = $hasNewUserRule && $eligibility->hasConsumed($memberId, '', $lock);
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
-            if ($id <= 0 || isset($used[$id])) continue;
-            if (!$this->couponAllowsStore($row, $storeId)) continue;
-            if ((int)($row['coupon_type'] ?? 0) === 3
-                && !(new \app\services\activity\coupon\StoreCouponAllowanceServices())->allowsProduct($row, $productId)) continue;
+            if ($id <= 0) continue;
+            // 已耗尽的一次性券退出选券；多次抵用券有使用时间仍可能有余额，不能一并隐藏。
+            if ((int)$row['status'] === 1 || ((int)$row['coupon_type'] !== 3 && (int)$row['use_time'] > 0)) continue;
+            // 其他不可用券保留原因；展示范围不替代最终后端用券校验。
+            $reasons = \app\services\activity\coupon\StoreCouponEligibilityRule::reasons($row, $memberId, $storeId, $hasConsumed);
+            if (isset($used[$id])) $reasons[] = '已在本次其他商品中选择';
+            if ((int)$row['is_fail'] !== 0) $reasons[] = '优惠券已作废';
+            if ((int)$row['status'] === 2 || ((int)$row['end_time'] > 0 && (int)$row['end_time'] < $now)) $reasons[] = '优惠券已过期';
+            if ((int)$row['start_time'] > $now) $reasons[] = '尚未到使用时间';
+            if (!$this->couponAllowsStore($row, $storeId)) $reasons[] = '当前门店不适用';
+            if (!(new \app\services\activity\coupon\StoreCouponAllowanceServices())->allowsProduct($row, $productId)) $reasons[] = '当前商品不适用';
+            if ((int)$row['coupon_type'] === 3 && (int)($remaining[$id] ?? $this->decimalMoneyToCents($row['coupon_price'] ?? 0, 'coupon_price_invalid')) <= 0) $reasons[] = '可用额度已用完';
+            $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? 0, 'coupon_use_min_price_invalid');
+            if ((int)($row['use_mode'] ?? 0) !== StoreCouponOrderRule::ORDER && $minimum > $amounts['threshold']) $reasons[] = '未达到使用门槛';
+            if ($reasons) {
+                $belowMinimum[] = ['couponId' => $id, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+                    'useMinAmountCents' => $minimum, 'shortfallCents' => max(0, $minimum - $amounts['threshold']),
+                    'unavailableReasons' => array_values(array_unique($reasons)), 'expiresAt' => (int)$row['end_time']];
+                continue;
+            }
             $orderMode = (int)($row['use_mode'] ?? 0) === StoreCouponOrderRule::ORDER;
             if ($orderMode) {
                 // Workspace draft commands still bind one coupon to one line.
                 // Order-mode multi-selection is available only to the local
                 // checkout snapshot and is always rechecked at final submit.
                 if ($orderReceivableCents <= 0 || (int)($row['category'] ?? 0) !== 1
-                    || (int)($row['type'] ?? -1) !== 0 || (int)($row['coupon_type'] ?? 0) !== 1) continue;
+                    || (int)($row['type'] ?? -1) !== 0 || (int)($row['coupon_type'] ?? 0) !== 1) {
+                    $belowMinimum[] = ['couponId' => $id, 'name' => $row['coupon_title'], 'unavailableReasons' => ['当前结账方式不支持此券']];
+                    continue;
+                }
                 $tiers = StoreCouponOrderRule::fromStored((string)($row['order_tiers_json'] ?? ''));
                 $limit = StoreCouponOrderRule::maxCount($tiers, $orderReceivableCents);
                 $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
@@ -3624,25 +3620,21 @@ final class CashierV3CashierWorkspaceServices
                     $belowMinimum[] = $option;
                 } elseif ($face <= $orderLineCapacityCents && $face > 0) {
                     $available[] = $option;
+                } else {
+                    $option['unavailableReasons'] = ['本项可抵用金额不足'];
+                    $belowMinimum[] = $option;
                 }
-                continue;
-            }
-            $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? null, 'coupon_use_min_price_invalid');
-            if ($minimum > $amounts['threshold']) {
-                $belowMinimum[] = [
-                    'couponId' => $id,
-                    'name' => trim((string)$row['coupon_title']) ?: '优惠券',
-                    'useMinAmountCents' => $minimum,
-                    'shortfallCents' => $minimum - $amounts['threshold'],
-                    'expiresAt' => (int)($row['end_time'] ?? 0),
-                ];
                 continue;
             }
             $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
             if ((int)($row['coupon_type'] ?? 0) === 3) {
                 $face = (int)($remaining[$id] ?? $face);
                 $cap = intdiv(min($face, $amounts['cap']), 100) * 100;
-                if ($cap > 0) $available[] = ['couponId' => $id, 'couponType' => 3, 'useMode' => 0,
+                if ($cap <= 0) {
+                    $belowMinimum[] = ['couponId' => $id, 'name' => $row['coupon_title'], 'unavailableReasons' => ['本项可抵用金额不足']];
+                    continue;
+                }
+                $available[] = ['couponId' => $id, 'couponType' => 3, 'useMode' => 0,
                     'name' => trim((string)$row['coupon_title']) ?: '多次抵用券',
                     'remainingAmountCents' => $face, 'discountAmountCents' => $cap,
                     'useMinAmountCents' => $minimum, 'expiresAt' => (int)($row['end_time'] ?? 0)];
@@ -3659,7 +3651,50 @@ final class CashierV3CashierWorkspaceServices
                 'useMinAmountCents' => $minimum,
                 'expiresAt' => (int)($row['end_time'] ?? 0)];
         }
+        $scopeTexts = $this->couponProductScopeTexts($rows);
+        foreach ($available as &$option) $option['productScopeText'] = $scopeTexts[(int)$option['couponId']] ?? '';
+        unset($option);
+        foreach ($belowMinimum as &$option) $option['productScopeText'] = $scopeTexts[(int)$option['couponId']] ?? '';
+        unset($option);
         return ['available' => $available, 'belowMinimum' => $belowMinimum];
+    }
+
+    /**
+     * 按规则批量解析可用范围名称，仅用于提示，不通过名称决定可用性。
+     * 多张同规则券共用读取，商品记录含停用历史项以免把明确限制误显示成全部适用。
+     */
+    private function couponProductScopeTexts(array $rows): array
+    {
+        $lookups = ['product'=>[], 'category'=>[], 'brand'=>[]];
+        foreach ($rows as $row) {
+            $type = (int)($row['type'] ?? 0);
+            $kind = [1=>'category',2=>'product',3=>'brand'][$type] ?? '';
+            if ($kind === '') continue;
+            foreach (explode(',', (string)($row[$kind . '_id'] ?? '')) as $raw) {
+                if ((int)$raw > 0) $lookups[$kind][(int)$raw] = true;
+            }
+        }
+        $names = [];
+        foreach (['product'=>['store_product','store_name'], 'category'=>['store_product_category','cate_name'],
+            'brand'=>['store_brand','brand_name']] as $kind=>$source) {
+            $names[$kind] = [];
+            foreach (array_chunk(array_keys($lookups[$kind]), 300) as $ids) {
+                $names[$kind] += Db::name($source[0])->whereIn('id', $ids)->column($source[1], 'id');
+            }
+        }
+        $result = [];
+        foreach ($rows as $row) {
+            $type = (int)($row['type'] ?? 0);
+            if ($type === 0) { $result[(int)$row['id']] = '适用：全部商品'; continue; }
+            $kind = [1=>'category',2=>'product',3=>'brand'][$type] ?? '';
+            $labels = [];
+            if ($kind !== '') foreach (explode(',', (string)($row[$kind . '_id'] ?? '')) as $id) {
+                if (trim((string)($names[$kind][(int)$id] ?? '')) !== '') $labels[] = $names[$kind][(int)$id];
+            }
+            $prefix = [1=>'适用品类：',2=>'适用商品：',3=>'适用品牌：'][$type] ?? '适用范围：';
+            $result[(int)$row['id']] = $prefix . ($labels ? implode('、', array_unique($labels)) : '指定范围信息待核对');
+        }
+        return $result;
     }
 
     private function couponAllowsStore(array $row, int $storeId): bool

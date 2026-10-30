@@ -1,8 +1,12 @@
 <script>
-import { resolveMemberMenuIcon } from '@/utils/memberMenuIcon';
+import { visibleMemberServices } from '../../../../../shared/memberMenuMedia';
+import MemberMenuMedia from '@/components/memberMenuMedia';
 
 export default {
+	components: { MemberMenuMedia },
 	inject: ['goMenuPage'],
+	// 只过滤展示副本，保留完整配置及原有客服与跳转分支。
+	computed: { visibleServices() { return visibleMemberServices(this.menuData.list); } },
 	props: {
 		menuData: {
 			type: Object,
@@ -13,11 +17,6 @@ export default {
 			default: 0
 		}
 	},
-	methods: {
-		menuIcon(item) {
-			return resolveMemberMenuIcon(item);
-		}
-	}
 };
 </script>
 
@@ -26,20 +25,20 @@ export default {
 		<view class="service-card pt-34 pb-36 bg--w111-fff rd-16rpx mt-20 service ml-20 mr-20">
 			<view class="fs-30 fw-500 lh-42rpx text--w111-333 pl-32">{{ menuData.title }}</view>
 			<view class="grid-column-4 grid-gap-x-40rpx grid-gap-y-54rpx mt-38 pl-14 pr-14">
-				<view v-for="(item, index) in menuData.list" :key="index">
+				<view v-for="(item, index) in visibleServices" :key="index">
 					<!-- #ifdef MP -->
 					<view class="flex-col flex-center" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)" @click="goMenuPage(item.url, item.name)">
-						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+						<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<button class="flex-col flex-center" open-type='contact' v-if="item.url=='/pages/extension/customer_list/chat' && routineContact == 1">
-					  <view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+					  <view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 					  <text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</button>
 					<!-- #endif -->
 					<!-- #ifndef MP -->
 					<view class="flex-col flex-center" @click="goMenuPage(item.url, item.name)">
-						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
+						<view class="menu-icon"><MemberMenuMedia :item="item" :iconSize="38" /></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<!-- #endif -->
@@ -66,11 +65,6 @@ export default {
 		align-items: center;
 		justify-content: center;
 
-		.iconfont {
-			font-size: 38rpx;
-			line-height: 1;
-			color: var(--view-theme, #7b2941);
-		}
 	}
 
 	::v-deep .text--w111-333 { color: #4d3037 !important; }

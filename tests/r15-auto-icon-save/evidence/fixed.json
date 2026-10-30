@@ -1,0 +1,35 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "sourceBaseline": "d04d613b7317b3eb514fd6c550ec58128f29774a",
+  "candidateTree": "c9d56ce2707d392fac4c17fc5b5077f7a258d869",
+  "patchSHA256": "7c6438fc296115907cb54aabefb528c559d3c8e7da9630151b5df46902ee58f1",
+  "files": {
+    "前端代码/admin/src/pages/setting/devise/users.vue": "0bbef4766cf77091639e25afff27d658f70f665be25c2341db71803b330f7d60",
+    "tests/member-center-save/editor.cjs": "b4513a3739ffb9415c960aaf8f1f052355f06960aa3e750f5366368780359b45",
+    "tests/member-center-save/mysql.php": "0f47c5cc863800c278af58523b85002bb03fba669ae17360902c719738ab19eb",
+    "scripts/r15-auto-icon-save-test.py": "1fc412862320e568bf7da806da477163b92419b7501d7ce8787c902c78e76aa4",
+    "scripts/r15-auto-icon-save-build.cjs": "2c747cf7c955bb51d5c5f873e9f5f08433c938feabc32cd21c32508020b3a2a0"
+  },
+  "scope": {
+    "businessSourceFiles": 1,
+    "testFiles": 2,
+    "engineeringScripts": 2,
+    "repair": "Allow automatic builtin icons to save without uploaded images or explicit icon; preserve original name/link validation and payload.",
+    "backendChanged": false
+  },
+  "verification": {
+    "publishedFailureReproduced": true,
+    "sameRegressionPasses": true,
+    "vue2Save": true,
+    "realLocalMysqlSaveRefresh": true,
+    "legacyMirrorAndRollback": true,
+    "productionAdminBuild": "PASS"
+  },
+  "commentsUpdated": [
+    "前端代码/admin/src/pages/setting/devise/users.vue"
+  ],
+  "productionWrites": 0,
+  "committed": false,
+  "deployed": false,
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE"
+}

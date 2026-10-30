@@ -1849,6 +1849,9 @@ class StorePromotionsServices extends BaseServices
                 throw new ValidateException('选择的优惠劵无效!');
 //				return [[], 0];
             }
+            (new \app\services\activity\coupon\StoreCouponEligibilityServices())->assertUsable(
+                is_array($couponInfo) ? $couponInfo : $couponInfo->toArray(), $uid, $store_id
+            );
             // Legacy clients have no explicit amount or allowance transaction.
             // Reject before calculating a percentage or writing an order.
             if ((int)($couponInfo['coupon_type'] ?? 0) === 3) {
@@ -1862,16 +1865,16 @@ class StorePromotionsServices extends BaseServices
             if ($promotions) {
                 $promotionsList = array_combine(array_column($promotions, 'id'), $promotions);
             }
-            //验证是否适用门店
-//            if (isset($couponInfo['applicable_type']) && isset($couponInfo['applicable_store_id']) && isset($couponInfo['coupon_issue_type']) && isset($couponInfo['relation_id'])) {
-//                $applicable_store_id = is_array($couponInfo['applicable_store_id']) ? $couponInfo['applicable_store_id'] : explode(',', $couponInfo['applicable_store_id']);
-//                if(!$store_id && in_array($couponInfo['coupon_issue_type'],[1,2])) {
-//                    throw new ValidateException('优惠劵暂不支持平台使用!');
-//                    //活动不适用该门店
-//                } elseif ($store_id && ($couponInfo['applicable_type'] == 0 || ($couponInfo['applicable_type'] == 2 && !in_array($store_id, $applicable_store_id)) || ($couponInfo['coupon_issue_type'] == 1 && $couponInfo['relation_id'] != $store_id))) {
-//                    throw new ValidateException('优惠劵暂不支持该门店使用!');
-//                }
-//            }
+            // Match selection restrictions at final validation; a client-supplied coupon ID cannot widen store scope.
+            if (isset($couponInfo['applicable_type']) && isset($couponInfo['applicable_store_id']) && isset($couponInfo['coupon_issue_type']) && isset($couponInfo['relation_id'])) {
+                $applicable_store_id = is_array($couponInfo['applicable_store_id']) ? $couponInfo['applicable_store_id'] : explode(',', $couponInfo['applicable_store_id']);
+                if(!$store_id && in_array($couponInfo['coupon_issue_type'],[1,2])) {
+                    throw new ValidateException('优惠劵暂不支持平台使用!');
+                    //活动不适用该门店
+                } elseif ($store_id && ($couponInfo['applicable_type'] == 0 || ($couponInfo['applicable_type'] == 2 && !in_array($store_id, $applicable_store_id)) || ($couponInfo['coupon_issue_type'] == 1 && $couponInfo['relation_id'] != $store_id))) {
+                    throw new ValidateException('优惠劵暂不支持该门店使用!');
+                }
+            }
             $isOverlay = function ($cart) use ($promotionsList) {
                 $productInfo = $cart['productInfo'] ?? [];
                 if (!$productInfo) {

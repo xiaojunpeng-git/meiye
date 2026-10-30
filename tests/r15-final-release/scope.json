@@ -1,0 +1,37 @@
+{
+  "commit": "f898ba3a3e46d45f32e547541c5d9834bed2e257",
+  "branch": "release/r15-final-20261030",
+  "baselineSource": "d04d613b7317b3eb514fd6c550ec58128f29774a",
+  "businessSources": [
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template1.vue",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template2.vue",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template3.vue",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/MenuConfig.vue",
+    "前端代码/admin/src/pages/setting/devise/users.vue",
+    "前端代码/admin/src/store/modules/admin/modules/userTemplateConfig.js",
+    "前端代码/shared/memberMenuMedia.js",
+    "前端代码/uniapp/pages/activity/reservation/index.vue",
+    "前端代码/uniapp/pages/user/components/menus/template1.vue",
+    "前端代码/uniapp/pages/user/components/menus/template2.vue",
+    "前端代码/uniapp/pages/user/components/menus/template3.vue",
+    "后端代码/app/services/diy/DiyServices.php"
+  ],
+  "retainedFeatures": [
+    "全部订单入口、订单中心及我的服务真实图标",
+    "既有预约/权益/问卷功能",
+    "三站现网收银入口与其他后端文件"
+  ],
+  "newClosures": [
+    "自动匹配内置图标保存不强制上传图片",
+    "每个服务独立显示/隐藏且保留配置",
+    "主项目保留、附加项目独立删除与重加",
+    "添加项目全屏、列表滚动、完整名称及分钟/余次"
+  ],
+  "notPublished": [
+    "PublicController.php未验收改动",
+    "其他任务的未验收源码"
+  ],
+  "migrations": false,
+  "productionBusinessWrites": 0,
+  "realDeviceAcceptance": false
+}

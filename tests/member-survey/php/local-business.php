@@ -41,10 +41,13 @@ try{
  $savedAgain=(new Survey())->listTasks(1,20);check12((int)$savedAgain['list'][0]['id']===$id,'刷新服务后仍能读取已保存任务');
  $survey->publish($id);$task=$survey->readTask($id);
  check12(Db::name('member_survey_target')->count()===0,'零提醒名单可发布');
+ // 未开通小程序的站点维持受控 H5 二维码，任务资格仍由统一答卷服务校验。
+ think\facade\Config::set(['qr_mode'=>'h5','member_h5_base_url'=>'https://member.example.test'],'member_survey');
+ $h5Link=$survey->qrEntry($id);check12($h5Link['kind']==='h5'&&$h5Link['url']==='https://member.example.test/pages/users/survey/index?entry='.$task['entry_token'],'未开通小程序时沿用本实例 H5 问卷入口');
  // 微信网络边界替换为合成PNG；实际scene编解码与环境参数仍使用真实业务代码。
  class SurveyCodeFixture extends app\services\user\MemberSurveyMiniProgramCodeServices {protected function appId():string{return 'wx0000000000000000';}protected function fetchCode(string $scene,string $page,string $environment):string {if(strlen($scene)!==32||$page!=='pages/users/survey/index'||$environment!=='trial')throw new RuntimeException('invalid mini code request');return base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNaIAAAAASUVORK5CYII=');}}
  $app->bind(app\services\user\MemberSurveyMiniProgramCodeServices::class,SurveyCodeFixture::class);
- think\facade\Config::set(['mini_env_version'=>'trial'],'member_survey');
+ think\facade\Config::set(['qr_mode'=>'mini','mini_env_version'=>'trial'],'member_survey');
  $link=$survey->qrEntry($id);check12($link['kind']==='miniprogram'&&strlen($link['scene'])===32&&bin2hex(base64_decode(strtr($link['scene'],'-_','+/')))===$task['entry_token']&&strpos($link['image'],'data:image/png;base64,')===0,'小程序码scene无损定位任务并固定体验环境');
  // 微信可能返回JPEG，也可能返回JSON错误；响应不能被误认图片或把上游凭据带给客户端。
  $jpegCode=new class extends SurveyCodeFixture {protected function fetchCode(string $scene,string $page,string $environment):string{return "\xff\xd8\xffsynthetic-jpeg";}};
