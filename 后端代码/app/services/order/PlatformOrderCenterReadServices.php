@@ -181,12 +181,7 @@ final class PlatformOrderCenterReadServices
                 'scope' => $result['scope'],
             ]];
         } else {
-            // 平台订单中心不开放统一查询偏好、导出或任何设置写入。
-            $data = ['unifiedQueryCapability' => [
-                'readOnly' => true,
-                'pages' => [],
-                'actions' => [],
-            ]];
+            $data = ['unifiedQueryCapability' => $this->readOnlyQueryCapability($adminInfo, $payload)];
         }
         return [
             'result' => ['status' => 'success', 'code' => '', 'message' => '查询完成。'],
@@ -199,6 +194,58 @@ final class PlatformOrderCenterReadServices
             'correlationId' => $correlationId,
             'boundCorrelationId' => $correlationId,
         ];
+    }
+
+    /**
+     * 平台端需要与门店端相同的字段白名单才能显示“更多筛选”，
+     * 但不下发 command context，也不开放偏好、导出或字段设置写入。
+     */
+    private function readOnlyQueryCapability(array $adminInfo, array $payload): array
+    {
+        $context = $this->context($adminInfo);
+        $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
+        if ($context === null || !in_array($pageCode, CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)) {
+            return [
+                'enabled' => false,
+                'readOnly' => true,
+                'pageCode' => $pageCode,
+                'disabledReason' => '当前订单页面不可查询。',
+                'fields' => [],
+                'customFields' => [],
+                'permissions' => [],
+                'export' => ['enabled' => false],
+            ];
+        }
+
+        [$operator, $scope] = $context;
+        $runtime = UnifiedQueryModule::runtime();
+        $payload['pageCode'] = $pageCode;
+        $queryContext = $runtime['contextFactory']->make($operator, $scope, $payload);
+        $settings = $runtime['preferences']->load($queryContext, $pageCode);
+        $capability = $runtime['capabilities']->build(
+            $queryContext,
+            $pageCode,
+            max(1, (int)($settings['settingsVersion'] ?? 1)),
+            time()
+        );
+        $capability['readOnly'] = true;
+        $capability['permissions'] = [
+            'createCustomField' => false,
+            'editCustomField' => false,
+            'shareCustomField' => false,
+            'changeCustomFieldStatus' => false,
+            'archiveCustomField' => false,
+            'renameFields' => false,
+            'export' => false,
+        ];
+        $capability['export'] = [
+            'enabled' => false,
+            'allowCurrentQuery' => false,
+            'allowCurrentPage' => false,
+            'allowSummary' => false,
+            'formats' => [],
+        ];
+        return $capability;
     }
 
     /** @return array{0:CashierV3OperatorScope,1:CashierV3DataScopeContext,2:array}|null */
