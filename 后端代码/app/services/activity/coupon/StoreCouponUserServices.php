@@ -56,6 +56,42 @@ class StoreCouponUserServices extends BaseServices
     }
 
     /**
+     * 平台领取记录按已发出的券实例分页；领取计数日志没有门店及使用状态，不能代替券事实。
+     * 历史券若缺少发放门店快照，仅返回“未知”，不根据会员所属门店推断。
+     */
+    public function issuedRecordList(int $issueId): array
+    {
+        [$page, $limit] = $this->getPageValue();
+        $query = Db::name('store_coupon_user')->where('cid', $issueId);
+        $count = (int)(clone $query)->count('id');
+        $list = $query->field('id,uid,add_time,start_time,end_time,use_time,status,is_fail,issuance_store_id')
+            ->order('id desc')->page($page, $limit)->select()->toArray();
+        $memberIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'uid')))));
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'issuance_store_id')))));
+        $members = $memberIds ? Db::name('user')->whereIn('uid', $memberIds)->column('uid,nickname,phone', 'uid') : [];
+        $stores = $storeIds ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id') : [];
+        $now = time();
+        foreach ($list as &$item) {
+            $member = $members[(int)$item['uid']] ?? [];
+            $storeId = (int)$item['issuance_store_id'];
+            $item['member_name'] = $member['nickname'] ?? '会员已删除';
+            $item['phone'] = $member['phone'] ?? '—';
+            $item['issuance_store_name'] = $storeId > 0 ? ($stores[$storeId] ?? '门店已删除') : '未知';
+            $item['issued_at'] = (int)$item['add_time'] > 0 ? date('Y-m-d H:i:s', (int)$item['add_time']) : '';
+            $item['is_used'] = (int)$item['use_time'] > 0 || (int)$item['status'] === 1;
+            // 状态以券实例当前事实为准；部分抵用仍可继续使用，不能标成已用完。
+            if ((int)$item['is_fail'] !== 0) $item['status_label'] = '已作废';
+            elseif ((int)$item['status'] === 1) $item['status_label'] = '已使用';
+            elseif ((int)$item['status'] === 2 || ((int)$item['end_time'] > 0 && (int)$item['end_time'] < $now)) $item['status_label'] = '已过期';
+            elseif ((int)$item['start_time'] > $now) $item['status_label'] = '未开始';
+            elseif ($item['is_used']) $item['status_label'] = '部分使用';
+            else $item['status_label'] = '可使用';
+        }
+        unset($item);
+        return compact('list', 'count');
+    }
+
+    /**
      * 获取列表
      * @param array $where
      * @return array

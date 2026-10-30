@@ -262,7 +262,7 @@
       closable
       title="领取记录"
       :mask-closable="false"
-      width="700"
+      width="1100"
     >
       <Table
         :columns="columns2"
@@ -275,17 +275,12 @@
         no-filtered-userFrom-text="暂无筛选结果"
         :max-height="600"
       >
-        <template slot-scope="{ row, index }" slot="avatar">
-          <viewer>
-            <div class="tabBox_img">
-              <img v-lazy="row.avatar" />
-            </div>
-          </viewer>
-        </template>
+        <template slot-scope="{ row }" slot="is_used">{{ row.is_used ? '是' : '否' }}</template>
       </Table>
       <div class="acea-row row-right page">
         <Page
           :total="total2"
+          :current="receiveFrom.page"
           show-elevator
           show-total
           @on-change="receivePageChange"
@@ -475,24 +470,34 @@ export default {
       loading2: false,
       columns2: [
         {
-          title: 'ID',
-          key: 'uid',
-          minWidth: 80,
-        },
-        {
-          title: '用户名',
-          key: 'nickname',
+          title: '发放门店',
+          key: 'issuance_store_name',
           minWidth: 150,
         },
         {
-          title: '用户头像',
-          slot: 'avatar',
+          title: '会员',
+          key: 'member_name',
+          minWidth: 150,
+        },
+        {
+          title: '手机',
+          key: 'phone',
+          minWidth: 140,
+        },
+        {
+          title: '领取/发放时间',
+          key: 'issued_at',
+          minWidth: 170,
+        },
+        {
+          title: '是否使用',
+          slot: 'is_used',
           minWidth: 100,
         },
         {
-          title: '领取时间',
-          key: 'add_time',
-          minWidth: 140,
+          title: '状态',
+          key: 'status_label',
+          minWidth: 110,
         },
       ],
       total2: 0,
@@ -552,6 +557,8 @@ export default {
     receive(row) {
       this.modals2 = true;
       this.rows = row;
+      // 切换优惠券时回第一页，避免沿用上一个券的页码造成有记录却显示空白。
+      this.receiveFrom.page = 1;
       this.getReceivelist(row);
     },
     getReceivelist(row) {
