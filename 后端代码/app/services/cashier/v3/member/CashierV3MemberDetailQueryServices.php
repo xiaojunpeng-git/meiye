@@ -394,7 +394,8 @@ final class CashierV3MemberDetailQueryServices
      * @param array<int,int> $memberIds
      * @return array<int,array<string,mixed>>
      */
-    public function readAiRightsSet(array $memberIds,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?callable $checkpoint=null): array
+    public function readAiRightsSet(array $memberIds,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,
+        ?callable $checkpoint=null, bool $includeExhaustedForReport=false): array
     {
         // Deny an unusable detail scope before the shared balance query.
         foreach ($memberIds as $memberId) {
@@ -417,7 +418,11 @@ final class CashierV3MemberDetailQueryServices
                 if ((int)$member['belong_store_id']>0) $storeIds[]=(int)$member['belong_store_id'];
             }
             $storeNames=$storeIds?Db::name('system_store')->whereIn('id',array_unique($storeIds))->column('name','id'):[];
-            $cardsByMember=$this->cardsForMembers($batch,$operatorScope->tenantId(),'','active','','',$operatorScope->storeId());
+            // Only the dedicated unconsumed report requests exhausted
+            // components. The default member/AI/checkout path stays active;
+            // even report mode retains member, holder and store protections.
+            $cardsByMember=$this->cardsForMembers($batch,$operatorScope->tenantId(),'',
+                $includeExhaustedForReport ? 'all' : 'active','','',$operatorScope->storeId());
             foreach ($batch as $memberId) {
                 if ($checkpoint!==null) $checkpoint();
                 $details[$memberId]=$this->readAiRightsWithBalance($memberId,$dataScope,
@@ -1602,9 +1607,15 @@ final class CashierV3MemberDetailQueryServices
         $debtByOrder = [];
         foreach ($debtRows as $debtRow) $debtByOrder[(int)$debtRow['order_id']] = $debtRow;
         $debtResolver = new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver();
+        // The former per-card resolver repeated the same four SQL reads for
+        // every card in a report batch. Read the identical V3 debt chain once
+        // for this bounded source set; null still routes to legacy debt below.
+        $v3DebtStatusByOrder = [];
+        $v3PendingByOrder = $debtResolver->pendingV3CardDebtsForOrders(
+            array_values($originOrders), $tenantId, $v3DebtStatusByOrder);
         $pendingByOrder = [];
         foreach ($originOrders as $orderId => $originOrder) {
-            $v3Pending = $debtResolver->pendingV3CardDebt($originOrder, (int)$originOrder['uid']);
+            $v3Pending = $v3PendingByOrder[(int)$orderId] ?? null;
             if ($v3Pending !== null) {
                 $pendingByOrder[(int)$orderId] = $v3Pending;
                 continue;
@@ -1615,7 +1626,24 @@ final class CashierV3MemberDetailQueryServices
             $pending = $debt && (int)$debt['status'] !== 0 ? '0.00' : bcsub($total, $repaid, 2);
             $pendingByOrder[(int)$orderId] = bccomp($pending, '0', 2) > 0 ? $pending : '0.00';
         }
+        // Shared and time cards previously reopened the same V3 debt chain
+        // once more per card. Only cancelled debt needs an exceptional audit
+        // read; normal pending values reuse the verified batch above.
+        $cancelledByOrder = []; $unavailableByOrder = [];
+        foreach ($originOrders as $orderId => $originOrder) {
+            $v3Status = $v3DebtStatusByOrder[(int)$orderId] ?? null;
+            $legacyDebt = $debtByOrder[(int)$orderId] ?? null;
+            $cancelled = '0.00';
+            if ($v3Status === 3 || ($v3Status === null && $legacyDebt && (int)$legacyDebt['status'] === 3)) {
+                $cancelled = $debtResolver->cancelledCardDebt($originOrder, (int)$originOrder['uid'], $tenantId, false);
+            }
+            $cancelledByOrder[(int)$orderId] = $cancelled;
+            $unavailableByOrder[(int)$orderId] = bccomp($cancelled, '0', 2) > 0
+                ? $cancelled : $pendingByOrder[(int)$orderId];
+        }
         $writeoff = app()->make(\app\services\order\store\WriteOffOrderServices::class);
+        $ruleLimitReader = new CashierV3CardRuleEntitlementAuthorityServices();
+        $sharedRuleLimits = [];
         foreach ($rows as $row) {
             $start = max(0, (int)($row['write_start'] ?? 0));
             $end = max(0, (int)($row['write_end'] ?? 0));
@@ -1643,11 +1671,34 @@ final class CashierV3MemberDetailQueryServices
                 $orderId = (int)$row['oid'];
                 $originOrder = (array)($originOrders[$orderId] ?? []);
                 $pending = (float)($pendingByOrder[$orderId] ?? 0);
+                $holderIdForRow = (int)($holderByOrder[$orderId]['id'] ?? 0);
+                $ruleTypeForRow = (string)($cardRulesByHolder[$holderIdForRow]['rule_type'] ?? '');
+                $authorityForRow = $ruleAuthoritiesByHolder[$holderIdForRow][(int)$row['id']] ?? null;
+                $sharedLimitVerified = false; $sharedLimit = null;
+                if (!in_array($ruleTypeForRow, ['choice_count','combination'], true)) {
+                    // The batched rule directory proves this is not a shared
+                    // count pool, so the authoritative limit is null.
+                    $sharedLimitVerified = true;
+                } elseif (is_array($authorityForRow) && (string)($authorityForRow['ruleType'] ?? '') !== 'choice_count') {
+                    $sharedLimitVerified = true;
+                } elseif (is_array($authorityForRow)) {
+                    $groupNo = (int)($authorityForRow['combinationGroupNo'] ?? 0);
+                    $groupKey = $holderIdForRow.':'.$groupNo;
+                    if (!array_key_exists($groupKey, $sharedRuleLimits)) {
+                        $sharedRuleLimits[$groupKey] = $ruleLimitReader->debtLimitForDetail(
+                            $row, $originOrder, false, $unavailableByOrder[$orderId] ?? null);
+                    }
+                    $sharedLimit = $sharedRuleLimits[$groupKey];
+                    $sharedLimitVerified = true;
+                }
                 $effective = $writeoff->calcEffectiveWriteSurplusTimes(
-                    $row, $pending, $originOrder, $amount, $rowsByOrder[$orderId] ?? [], false
+                    $row, $pending, $originOrder, $amount, $rowsByOrder[$orderId] ?? [], false,
+                    $pendingByOrder[$orderId] ?? '0.00', $cancelledByOrder[$orderId] ?? '0.00',
+                    $sharedLimit, $sharedLimitVerified
                 );
                 $amount = $writeoff->usableEntitlementAmount(
-                    $row, $originOrder, $amount, $pending, $rowsByOrder[$orderId] ?? [], false
+                    $row, $originOrder, $amount, $pending, $rowsByOrder[$orderId] ?? [], false,
+                    $cancelledByOrder[$orderId] ?? '0.00'
                 );
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
@@ -1719,8 +1770,11 @@ final class CashierV3MemberDetailQueryServices
                 if ($firstRow && $originOrder) {
                     // Member/report projections share the debt limit, but must
                     // not acquire checkout locks inside a read-only snapshot.
-                    $sharedLimit = (new CashierV3CardRuleEntitlementAuthorityServices())
-                        ->debtLimitForDetail($firstRow, $originOrder, false);
+                    $groupKey = $holderId.':0';
+                    $sharedLimit = array_key_exists($groupKey, $sharedRuleLimits)
+                        ? $sharedRuleLimits[$groupKey]
+                        : $ruleLimitReader->debtLimitForDetail($firstRow, $originOrder, false,
+                            $unavailableByOrder[(int)$orderId] ?? null);
                     if ($sharedLimit !== null) $debtLimitedRemainingTimes = $sharedLimit;
                 }
             }
@@ -1729,15 +1783,10 @@ final class CashierV3MemberDetailQueryServices
                 $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
                 // Member queries observe the same cancelled-debt facts without
                 // checkout locks, including inside a server READ ONLY snapshot.
-                $cancelled = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())->cancelledCardDebt(
-                    (array)($originOrders[(int)$orderId] ?? []),
-                    (int)($originOrders[(int)$orderId]['uid'] ?? 0), $tenantId, false
-                );
+                $cancelled = $cancelledByOrder[(int)$orderId] ?? '0.00';
                 $remainingAmount = max('0.00', bcsub($remainingAmount, $cancelled, 2));
                 // A time-card refund changes value but does not fabricate usage.
-                $refundedCents = (int)Db::name('cashier_v3_refund_adjustment')
-                    ->where('tenant_id', $tenantId)->where('card_holder_id', $holderId)
-                    ->where('status', 'effective')->sum('refund_amount_cents');
+                $refundedCents = (int)($sharedRefunds[$holderId]['returned'] ?? 0);
                 $remainingAmount = max('0.00', bcsub($remainingAmount,
                     $this->moneyFromCents($refundedCents), 2));
             }

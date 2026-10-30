@@ -32,7 +32,7 @@ try {
     Db::execute('CREATE DATABASE `'.$isolated.'` CHARACTER SET utf8mb4'); $created = true;
     foreach (Db::query('SHOW TABLES') as $entry) {
         $table = (string)reset($entry);
-        if (preg_match('/^eb_(cashier_v3_|store_product|store_order|system_store|system_business_product|staff_job_position|position)/',$table)) {
+        if (preg_match('/^eb_(cashier_v3_|cash_source|store_product|store_order|system_store|system_business_product|staff_job_position|position)/',$table)) {
             Db::execute('CREATE TABLE `'.$isolated.'`.`'.$table.'` LIKE `'.$original.'`.`'.$table.'`');
         }
     }
@@ -70,7 +70,8 @@ try {
         $base = ['tenant_id'=>'0','store_id'=>901,'store_name_snapshot'=>'历史执行门店','member_id'=>200+$i,
             'member_name_snapshot'=>'客户'.$i,'business_date'=>$day,'business_timezone'=>'Asia/Shanghai',
             'status'=>'effective','fact_direction'=>'forward','organization_id'=>'0','organization_path_snapshot'=>'/',
-            'checkout_request_id'=>'host-checkout-'.$i,'order_id'=>$order,'order_no_snapshot'=>'SALE-HOST-'.$i];
+            'checkout_request_id'=>'host-checkout-'.$i,'order_id'=>$order,'order_no_snapshot'=>'SALE-HOST-'.$i,
+            'source_document_type'=>'cashier_snapshot'];
         $insert('system_store_staff',['id'=>$staff,'employee_id'=>$employee,'store_id'=>902,'staff_name'=>'跟单'.$i,'status'=>1,'is_del'=>0,'position_level'=>$i%2===0?71:72]);
         $insert('staff_job_position',['id'=>300+$i,'employee_id'=>$employee,'store_id'=>902,'staff_id'=>$staff,
             'position_id'=>$i%2===0?61:62,'status'=>1,'is_del'=>0,'end_time'=>0,'request_token'=>'host-job-'.$i]);
@@ -112,11 +113,28 @@ try {
     $input = ['start_date'=>$day,'end_date'=>$day,'as_of_date'=>$day];
     $totals = [];
     foreach (Activity::codes() as $code) {
+        // 服务店与业绩明细按查询时本店任职；夹具原属店 902，逐表模拟现任 901。
+        if (in_array($code,['basic_employee_service_store','basic_employee_performance_detail'],true))
+            Db::name('system_store_staff')->where('store_id',902)->update(['store_id'=>901]);
         $context = Host::context([901,902],'stores',999901,'platform',false,0,$code);
         $query = static function (array $extra = []) use ($context,$input,$code) {
             return Host::query($context,array_replace($input,['pageCode'=>$code],$extra));
         };
         $first = $query(); $total = (int)$first['pagination']['total']; $totals[$code] = $total;
+        if (in_array($code,['basic_employee_item_sales','basic_employee_service_store','basic_employee_service_home_store'],true)) {
+            $visible=array_values(array_filter($first['queryFields'],static function($field){return $field['defaultVisible'];}));
+            host51check(array_column($visible,'label')===($code==='basic_employee_item_sales'
+                ? ['门店','员工','项目','销售数量'] : ['门店','员工','项目','项目数']),
+                '007 four-column employee item layout '.$code);
+            host51check($first['table_layout']['summary_position']==='none' && $visible[3]['display_precision']===2
+                && $visible[3]['display_min_precision']===2,'No false total and fixed two-decimal count '.$code);
+        }
+        if ($code==='basic_employee_performance_detail') {
+            $visible=array_values(array_filter($first['queryFields'],static function($field){return $field['defaultVisible'];}));
+            host51check(array_column($visible,'label')===['门店','员工','项目','分类','现金业绩','订单号','销售日期'],
+                '007 seven-column performance detail layout');
+            host51check($first['table_layout']['summary_position']==='none','007 performance detail has no total row');
+        }
         host51check($total>0,'Real Runtime has fixture data: '.$code);
         host51check(count($first['rows'])===min(20,$total),'First page fixed at 20: '.$code);
         host51check($first['pagination']['limit']===20,'Provider uses ordinary-list page size: '.$code);
@@ -164,8 +182,10 @@ try {
         host51check((int)$keyword['pagination']['total']===0,'Framework keyword filter runs: '.$code);
         host51reject(static function () use ($query) { $query(['filters'=>[['field'=>'not_registered','operator'=>'eq','value'=>'x']]]); },'Unknown field rejected: '.$code);
         host51reject(static function () use ($query) { $query(['start_date'=>'2026-02-30']); },'Invalid fact range rejected: '.$code);
+        if (in_array($code,['basic_employee_service_store','basic_employee_performance_detail'],true))
+            Db::name('system_store_staff')->where('store_id',901)->update(['store_id'=>902]);
     }
-    host51check($totals['basic_writeoff_detail']===45 && $totals['basic_employee_summary']===45 && $totals['basic_employee_performance_detail']===90,'Different actual report grains through Host');
+    host51check($totals['basic_writeoff_detail']===45 && $totals['basic_employee_summary']===45 && $totals['basic_employee_performance_detail']===45,'Different actual report grains through Host');
     $context = Host::context([901],'stores',999901,'platform',false,0,'basic_employee_summary');
     $summary = Host::query($context,$input+['pageCode'=>'basic_employee_summary']);
     host51near($summary['summaries']['sales_performance:sum'],3600.45,'Real Host complete sales cents, unauthorized fact excluded');

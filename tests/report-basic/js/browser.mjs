@@ -19,7 +19,7 @@ const fields = [
   ['platform', '平台', 'text', true, true, 90, 'left'],
   ['store_name', '门店', 'text', true, false, 150, 'left'],
   ['registered_date', '核销日期', 'date', true, true, 130, ''],
-  ['coupon_code', '券码', 'text', true, true, 180, ''],
+  ['coupon_code', '劵码', 'text', true, true, 180, ''],
   ['amount', '金额', 'decimal', true, true, 120, ''],
   ['registration_type', '类型', 'text', true, true, 100, '']
 ].map(([key, label, type, defaultVisible, defaultQuick, width, fixed]) => ({ key, label, type, defaultVisible, defaultQuick, width, fixed }))

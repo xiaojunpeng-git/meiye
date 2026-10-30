@@ -1387,6 +1387,13 @@ function firstValue(record, keys) {
 }
 
 function recordFieldValue(record, key) {
+  // 补交归属只读本笔后端返回的人员快照，不能从原销售单或当前员工资料猜测。
+  if (recordType(record) === 'supplement' && ['sales_manager', 'guide'].includes(key) && Array.isArray(record?.attributionPeople)) {
+    const people = record.attributionPeople.filter(person => person.role === key)
+    return key === 'guide'
+      ? (people.length ? guideRoundText(people) : '')
+      : people.map(person => String(person.employee_name_snapshot || '').trim()).filter(Boolean).join('、')
+  }
   // The service list and detail must show the same per-person snapshot; the
   // editable action still receives the untouched authority record.
   if (key === 'craftsman' && activeTabKey.value === 'service') {
@@ -1409,6 +1416,12 @@ function recordFieldValue(record, key) {
 
 function displayRecordField(record, key) {
   const value = recordFieldValue(record, key)
+  // 仅在业务支持归属时将空值显示为未分配；可编辑性仍由原有权限与命令校验决定。
+  const assignablePersonnel = (key === 'salesperson' && recordType(record) === 'recharge')
+    || (recordType(record) === 'supplement' && record?.attributionEditable === true
+      && ['salesperson', 'sales_manager', 'guide', 'supplement_attribution'].includes(key))
+  if (assignablePersonnel
+    && (Array.isArray(value) ? value.length === 0 : value === undefined || value === null || value === '')) return '未分配'
   if (Array.isArray(value)) return value.length ? value.join('、') : '—'
   if (key === 'member_name') return value || (activeTabKey.value === 'sales' || activeTabKey.value === 'refund' ? '游客' : '—')
   if (key === 'payment_method') {
@@ -4078,11 +4091,13 @@ onBeforeUnmount(() => {
             <td v-if="salesAttributionEnabled"><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改销售经理" @click="openRecordRoles(record)">{{ displayRecordField(record, 'sales_manager') }}</button><span v-else>{{ displayRecordField(record, 'sales_manager') }}</span></td>
             <td v-if="salesAttributionEnabled"><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改导购" @click="openRecordRoles(record)">{{ displayRecordField(record, 'guide') }}</button><span v-else>{{ displayRecordField(record, 'guide') }}</span></td>
             <td>{{ displayMoneyField(record, `${recordType(record)}_amount`) }}</td>
-            <td>—</td><td>—</td><td>—</td>
+            <!-- Keep the non-sales placeholders aligned with the same debt switch used by headers and sales lines. -->
+            <td>—</td><td v-if="debtPaymentEnabled">—</td><td>—</td>
             <td>{{ recordType(record) === 'recharge' ? displayMoneyField(record, 'actual_received_amount') : '—' }}</td>
             <td>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</td>
             <td>{{ displayRecordField(record, 'store') }}</td>
-            <td><span class="order-status">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status') }}</span></td>
+            <!-- 汇总行与消费明细共用状态样式映射，只统一标签外观，不修改后端状态。 -->
+            <td><span class="order-status" :class="statusClass(recordFieldValue(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status'))">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status') }}</span></td>
           </tr>
           <template v-else>
           <tr v-for="(item, itemIndex) in salesOrderItems(record)" :key="item.id || item.orderItemId || `${recordKey(record, recordIndex)}-${item.name}-${itemIndex}`">

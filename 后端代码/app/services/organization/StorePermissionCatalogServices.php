@@ -131,6 +131,11 @@ final class StorePermissionCatalogServices
     private static function basicReportNavigationIds(): array
     {
         return [
+            // 新表只新增稳定叶子编号，不改变已保存的旧表权限身份。
+            'basic_sales_data' => -33023,
+            'basic_sales_pk' => -33024,
+            'basic_sales_analysis' => -33025,
+            'basic_store_efficiency' => -33026,
             'basic_store_summary' => -33001,
             'basic_cross_store_settlement' => -33002,
             'basic_brush_registration' => -33003,

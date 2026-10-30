@@ -19,9 +19,14 @@ final class CashierV3CardRuleEntitlementAuthorityServices
      * 共享次数必须以整卡成交额扣除当前不可用债务后折算，不能用零金额子项目逃逸。
      * 返回 null 表示不是正式签发的共享次数卡；物理余次及历史成交快照不被改写。
      * 最终结账事务中读取并锁定权威池，选择器只读同一口径。
+     * 报表批读可传入同一源链已核实的不可用债务；有锁的写事务始终重读权威。
      */
-    public function debtLimitForDetail(array $detail, array $order, bool $allowRowLock = true): ?int
+    public function debtLimitForDetail(array $detail, array $order, bool $allowRowLock = true,
+        ?string $readOnlyUnavailableDebt = null): ?int
     {
+        // A write-capable caller always resolves current debt itself, even
+        // when it happens to run outside a transaction and acquires no lock.
+        if ($allowRowLock) $readOnlyUnavailableDebt = null;
         // 任选次数卡的卡级债务上限已在替换来源选择时校验；目标按自身转入
         // 次数使用，不能再被原卡同一笔欠款限制一次。
         if (CashierV3ProjectReplacementDebtPolicy::isTransferredRight($detail)) return null;
@@ -46,9 +51,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         if ((string)$state['rule_type'] === 'combination') {
             $group = $this->groupForComponent($snapshot, $component);
             return (string)($group['group_rule_type'] ?? '') === 'choice_count'
-                ? $this->debtLimitedCombinationTimes($snapshot, $group, $order, $lock) : null;
+                ? $this->debtLimitedCombinationTimes($snapshot, $group, $order, $lock, $readOnlyUnavailableDebt) : null;
         }
-        return $this->debtLimitedSharedTimes($snapshot, $order, $lock);
+        return $this->debtLimitedSharedTimes($snapshot, $order, $lock, $readOnlyUnavailableDebt);
     }
 
     /** 保留 R50 已有调用入口；取消与恢复后的待还状态均走同一整卡上限。 */
@@ -58,12 +63,15 @@ final class CashierV3CardRuleEntitlementAuthorityServices
     }
 
     /** 仅正式共享池使用整卡销售明细的成交分；债务状态切换不是收款。 */
-    private function debtLimitedSharedTimes(array $snapshot, array $order, bool $lock): int
+    private function debtLimitedSharedTimes(array $snapshot, array $order, bool $lock,
+        ?string $readOnlyUnavailableDebt = null): int
     {
         $state = $snapshot['state'];
         $remaining = (int)$state['shared_remaining_times'];
-        $unavailable = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
-            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$state['tenant_id'], $lock);
+        $unavailable = $readOnlyUnavailableDebt !== null && !$lock
+            ? $readOnlyUnavailableDebt
+            : (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+                ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$state['tenant_id'], $lock);
         if (bccomp($unavailable, '0', 2) <= 0) return $remaining;
         $line = $this->row(Db::name('cashier_v3_sales_order_line')
             ->where('order_id', (string)$state['sales_order_id'])
@@ -487,11 +495,14 @@ final class CashierV3CardRuleEntitlementAuthorityServices
     }
 
     /** 债务按整卡可收金额比例限制每组物理池，不让未收款抵扣任意组合。 */
-    private function debtLimitedCombinationTimes(array $snapshot, array $group, array $order, bool $lock): int
+    private function debtLimitedCombinationTimes(array $snapshot, array $group, array $order, bool $lock,
+        ?string $readOnlyUnavailableDebt = null): int
     {
         $remaining = (int)$group['shared_remaining_times'];
-        $unavailable = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
-            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$snapshot['state']['tenant_id'], $lock);
+        $unavailable = $readOnlyUnavailableDebt !== null && !$lock
+            ? $readOnlyUnavailableDebt
+            : (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+                ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$snapshot['state']['tenant_id'], $lock);
         if (bccomp($unavailable, '0', 2) <= 0) return $remaining;
         $line = $this->row(Db::name('cashier_v3_sales_order_line')
             ->where('order_id', (string)$snapshot['state']['sales_order_id'])

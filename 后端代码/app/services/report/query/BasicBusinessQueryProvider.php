@@ -17,12 +17,11 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
     /** 同一查询事务读取事实和维度，空授权范围不允许退化成全量查询。 */
     public function query(array $context, array $payload): array
     {
-        $stores = BasicRegistrationQueryProvider::stores($context);
-        // The historical cross-store comparison starts at the calendar year;
-        // an omitted date must not silently reduce it to the current month.
-        if (static::CODE === 'basic_cross_store_settlement' && !isset($payload['start_date'])) {
-            $payload['start_date'] = substr((string)$context['query_cutoff_date'], 0, 4) . '-01-01';
+        // 侧栏矩阵的门店列需在认证后动态登记，仍复用统一执行器而非前端筛选。
+        if (in_array(static::CODE, \app\services\report\Sidebar007ReportServices::codes(), true)) {
+            return (new \app\services\report\Sidebar007ReportServices())->query(static::CODE, $context, $payload);
         }
+        $stores = BasicRegistrationQueryProvider::stores($context);
         $input = self::dates($payload, (string)$context['query_cutoff_date']);
         $validationQuery = $payload;
         unset($validationQuery['start_date'], $validationQuery['end_date'], $validationQuery['as_of_date']);
@@ -33,22 +32,45 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
             $fields = BasicBusinessReportServices::fields(static::CODE);
             // 动态完整性只可收紧列的合计资格，不能增加未登记字段或把未知工资合计成0。
             $dynamic = array_column($source['fields'] ?? [], null, 'key');
-            $salaryReadonly=static::CODE==='basic_salary_realtime'&&!empty($source['salary_readonly']);
             foreach ($fields as &$field) {
-                if($salaryReadonly)$field['editable']=false;
                 if (isset($dynamic[$field['key']]['summable'])) $field['summable'] = $field['summable'] && $dynamic[$field['key']]['summable'];
             }
             unset($field);
-            $unresolved = !empty($source['data_gaps']);
+            // 007原表没有合计时，列表与导出都不生成额外汇总，避免只隐藏UI而保留另一套合同。
+            $withoutSummary = ($source['table_layout']['summary_position'] ?? '') === 'none';
+            $hasSummaryCards = !empty($source['summary_cards']);
+            if ($withoutSummary) foreach ($fields as &$field) $field['summable'] = false;
+            unset($field);
+            // 第4轮缺口处理仅覆盖本轮18表。工资、员工统计等既有报表继续保留
+            // 已核实列的合计，不能因其他待核指标被共享提供器一并清空。
+            $roundFourCodes = [
+                'basic_sales_data','basic_sales_pk','basic_sales_analysis','basic_store_efficiency',
+                'basic_store_summary','basic_cross_store_settlement','basic_store_item_sales',
+                'basic_item_consumption','basic_writeoff_detail','basic_product_sales',
+                'basic_balance_order_detail','basic_balance_order_summary','basic_daily_reconciliation',
+                'basic_unconsumed_summary','basic_unconsumed_detail','basic_followup_employee_detail',
+                'basic_customer_entitlements','basic_unconsumed_as_of_detail',
+            ];
+            $unresolved = in_array(static::CODE, $roundFourCodes, true)
+                && (!empty($source['data_gaps']) || (($source['complete'] ?? true) === false));
             if ($unresolved) foreach ($fields as &$field) $field['summable'] = false;
             unset($field);
             $sumFields = $source['sum_fields'] ?? [];
-            if ($unresolved) $sumFields = [];
+            if ($unresolved || ($withoutSummary && !$hasSummaryCards)) $sumFields = [];
             foreach ($fields as $field) if ($field['summable']) $sumFields[] = $field['key'];
             // 固定业务合计不能被清空的自选合计配置隐式变为0；非可加总列不生成伪合计。
             $summaries = $payload['summaries'] ?? [];
             if (!is_array($summaries)) throw new \InvalidArgumentException('合计配置格式不正确');
-            if ($unresolved) $summaries = [];
+            if ($unresolved || $withoutSummary) $summaries = [];
+            // 数值类型并不等于可加总：ID、单价和比例不能通过自选合计绕过领域声明。
+            $allowedSums = array_fill_keys(array_unique($sumFields), true);
+            foreach ($summaries as $summary) {
+                $key = is_array($summary) ? ($summary['field'] ?? $summary['fieldKey'] ?? $summary['field_key'] ?? '') : '';
+                $aggregation = is_array($summary) ? ($summary['aggregation'] ?? $summary['operator'] ?? '') : '';
+                if (!isset($allowedSums[$key]) || $aggregation !== 'sum') {
+                    throw new \InvalidArgumentException('该列不支持所选合计方式，请刷新报表查询配置');
+                }
+            }
             foreach (array_unique($sumFields) as $key) {
                 $summaries = array_values(array_filter($summaries, static function ($value) use ($key) {
                     return !is_array($value) || ($value['field'] ?? $value['fieldKey'] ?? '') !== $key;
@@ -57,11 +79,6 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
             }
             $query = $payload;
             unset($query['start_date'], $query['end_date'], $query['as_of_date']);
-            // 007 跨店结算默认按门店 ID 倒序；仅在请求未显式排序时
-            // 应用该口径，筛选、导出和分页继续共用同一执行器。
-            if (static::CODE === 'basic_cross_store_settlement' && empty($query['sorts'])) {
-                $query['sorts'] = [['fieldKey' => 'store_id', 'direction' => 'desc']];
-            }
             $query['limit'] = 20;
             $summaryChunks = array_chunk($summaries, UnifiedQueryExecutionServices::MAX_SUMMARIES);
             $query['summaries'] = $summaryChunks[0] ?? [];
@@ -80,16 +97,18 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
                 $part = $this->execution->execute(static::CODE, $rows, [], $summaryQuery, $context, static function () { return true; });
                 $result['summaries'] = array_merge($result['summaries'], $part['summaries']);
             }
+            // 工具栏指标与当前完整筛选集使用同一执行器结果，不另跑未带筛选的总数。
+            $summaryCards = [];
+            foreach ($source['summary_cards'] ?? [] as $card) {
+                $card['value'] = $unresolved ? null : ($result['summaries'][$card['key'] . ':sum'] ?? null);
+                $summaryCards[] = $card;
+            }
             return array_merge($result, ['queryFields' => $fields, 'field_sources' => $source['field_sources'],
-                'can_edit' => false, 'salary_state' => $source['salary_state'] ?? null,
-                'salary_can_edit' => static::CODE === 'basic_salary_realtime' && !$salaryReadonly && !empty($context['salary_edit'])
-                    && (strpos((string)($context['basic_actor_key'] ?? ''),'platform:')===0 || empty($source['salary_state']['frozen'])),
-                'salary_can_freeze' => static::CODE === 'basic_salary_realtime' && !$salaryReadonly && !empty($context['salary_freeze']), 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
-                'salary_readonly'=>$salaryReadonly,'realtime_start_date'=>$source['realtime_start_date']??null,'saved_at'=>$source['saved_at']??null,
-                'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => 'first_row'],
+                'summary_cards' => $summaryCards,
+                'can_edit' => false, 'source_kind' => 'unified_business_facts', 'range' => $input,
+                'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => $source['table_layout']['summary_position'] ?? 'first_row'],
                 'coverage_start' => array_key_exists('coverage_start', $source) ? $source['coverage_start'] : '2026-08-10',
-                'coverage' => $source['coverage'] ?? '',
-                'aggregation_caught_up' => true, 'data_as_of' => $source['data_as_of'] ?? time(),
+                'aggregation_caught_up' => true, 'data_as_of' => time(),
                 'complete' => $source['complete'] ?? true, 'gaps' => $source['gaps'] ?? [],
                 'data_gaps' => $source['data_gaps'] ?? [],
                 'limitations' => $source['limitations'] ?? [], 'drilldowns' => $source['drilldowns'] ?? [],

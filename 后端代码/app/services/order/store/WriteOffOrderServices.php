@@ -1402,7 +1402,11 @@ class WriteOffOrderServices extends BaseServices
         // 只对正式V3购卡读取事实；历史/替换/纯公式夹具不引入额外数据库依赖。
         $actualAmounts = $issuedRows === [] ? []
             : (new \app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices())
-                ->forOrders([(int)($orderInfo['id'] ?? 0)], $issuedRows);
+                // The read-side origin carries a verified tenant; using it
+                // keeps this fact lookup on the tenant/receipt index. Older
+                // write callers without that identity preserve their query.
+                ->forOrders([(int)($orderInfo['id'] ?? 0)], $issuedRows,
+                    isset($orderInfo['tenant_id']) ? (string)$orderInfo['tenant_id'] : null);
         $explicitDebt = '0.00';
         $candidates = [];
         foreach ($rows as $row) {
@@ -1513,7 +1517,8 @@ class WriteOffOrderServices extends BaseServices
 
     /**
      * 返回扣除欠款占用后的可核销次数。
-     * 三个覆盖值仅供同一快照的只读投影去重查询；核销提交保持默认值，重新校验来源债务和共享次数。
+     * 覆盖值仅供同一快照的只读投影去重查询；sharedLimitVerified 可表达已核实
+     * “非共享池”的 null。核销提交保持默认值，重新校验来源债务和共享次数。
      */
     public function calcEffectiveWriteSurplusTimes(
         array $cartRow,
@@ -1524,9 +1529,19 @@ class WriteOffOrderServices extends BaseServices
         bool $allowRowLock = true,
         ?string $cardPendingDebt = null,
         ?string $cancelledDebt = null,
-        ?int $sharedLimitOverride = null
+        ?int $sharedLimitOverride = null,
+        bool $sharedLimitVerified = false
     ): int
     {
+        // Only explicit read projections may reuse a prior debt/pool answer.
+        // A write-capable path rechecks all authorities regardless of supplied
+        // overrides, including before a transaction has acquired its row lock.
+        if ($allowRowLock) {
+            $cardPendingDebt = null;
+            $cancelledDebt = null;
+            $sharedLimitOverride = null;
+            $sharedLimitVerified = false;
+        }
         if ($this->cardDebtBlocksWriteoff($cartRow, $orderInfo, $allowRowLock, $cardPendingDebt)) {
             return 0;
         }
@@ -1541,17 +1556,25 @@ class WriteOffOrderServices extends BaseServices
         $effective = $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
         // 共享池按整卡核对待还/取消额，避免零金额子项目绕开逐行分摊；
         // 恢复欠款但未补交时仍占用次数，独立项目继续保留原分摊口径。
-        $sharedLimit = $sharedLimitOverride ?? (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
-            ->debtLimitForDetail($cartRow, $orderInfo, $allowRowLock);
+        $sharedLimit = $sharedLimitVerified ? $sharedLimitOverride
+            : ($sharedLimitOverride ?? (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+                ->debtLimitForDetail($cartRow, $orderInfo, $allowRowLock));
         if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
         return $effective;
     }
 
     /** 选择器和报表只读同一不可用额；报表传 false 禁止只读事务中的 FOR UPDATE。 */
-    public function usableEntitlementAmount(array $cart, array $order, ?string $remaining, float $pendingDebt = 0, array $rows = [], bool $allowRowLock = true): ?string
+    public function usableEntitlementAmount(array $cart, array $order, ?string $remaining, float $pendingDebt = 0,
+        array $rows = [], bool $allowRowLock = true, ?string $cancelledDebt = null): ?string
     {
         if ($remaining === null) return null;
-        $blocked = $this->resolveCartPendingDebtForWriteoff($cart, $pendingDebt, $order, $rows, $allowRowLock);
+        // Checkout must re-read cancellation under its existing lock; a
+        // projection's cached amount is valid only with explicit read mode.
+        if ($allowRowLock) $cancelledDebt = null;
+        // A report may reuse a cancelled amount verified earlier in the same
+        // read. Checkout omits it and re-reads the locked debt authority.
+        $blocked = $this->resolveCartPendingDebtForWriteoff($cart, $pendingDebt, $order, $rows, $allowRowLock,
+            $cancelledDebt);
         $available = bcsub($remaining, (string)$blocked, 2);
         return bccomp($available, '0', 2) > 0 ? $available : '0.00';
     }

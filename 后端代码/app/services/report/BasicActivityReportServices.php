@@ -44,19 +44,19 @@ final class BasicActivityReportServices
             'item_consumption' => ['quantity', 'consumption_amount'],
             'writeoff' => ['quantity', 'consumption_amount', 'service_object'],
             'employee' => ['position_name', 'position_level_name', 'sales_performance', 'labor_performance', 'labor_fee', 'project_count', 'service_visits', 'point_visits', 'labor_unit_price'],
-            'employee_item' => ['sales_performance', 'sales_quantity'],
+            'employee_item' => ['sales_quantity'],
             'employee_service' => ['project_count', 'labor_performance', 'labor_fee'],
             'employee_home' => ['project_count', 'labor_performance', 'labor_fee'],
             'product' => ['quantity', 'sale_amount', 'cash_amount', 'balance_amount', 'salespeople', 'salesperson_ids', 'employee_balance_performance'],
             'followup' => ['followup_staff_id', 'quantity', 'sale_amount'],
-            'performance' => ['performance_type', 'sales_performance', 'labor_performance', 'labor_fee', 'project_count'],
+            'performance' => ['sales_performance'],
         ];
         if ($kind==='employee') {
             if (PayrollAlgorithmPolicy::independentPositions()) $metrics[$kind]=array_values(array_diff($metrics[$kind],['position_level_name']));
             if (PayrollAlgorithmPolicy::calculated()) $metrics[$kind]=array_merge($metrics[$kind],['labor_commission','commission_status']);
         }
         $labels = [
-            'store_id'=>'门店ID', 'store_name'=>'门店', 'employee_id'=>'员工ID', 'employee_name'=>'员工',
+            'store_id'=>'门店ID', 'store_name'=>'门店', 'employee_id'=>'员工ID', 'employee_name'=>'姓名',
             'business_date'=>'业务日期', 'document_no'=>'业务单号', 'member_name'=>'客户名称',
             'item_id'=>'品项ID', 'item_name'=>'品项', 'category_path'=>'当前分类',
             'sale_amount'=>'销售额', 'cash_performance'=>'现金业绩', 'customer_count'=>'销售人数',
@@ -91,9 +91,47 @@ final class BasicActivityReportServices
                 'summable'=>($isMoney && !in_array($key,['employee_balance_performance','balance_amount','labor_unit_price'],true)) || in_array($key, ['quantity','project_count','sales_quantity','service_visits','point_visits'], true),
             ];
         }
-        // 仅员工统计表按007固定列名/顺序展示；旧键保留给既有筛选与表达式，不扩散到其他报表。
+        // 007 员工项目销售数只展示四列；身份键保留给授权、精确查询和稳定行键。
+        if ($kind === 'employee_item') {
+            $order = ['store_name'=>'门店','employee_name'=>'员工','item_name'=>'项目','sales_quantity'=>'销售数量'];
+            $byKey = array_column($fields, null, 'key'); $ordered = [];
+            foreach ($order as $key=>$label) {
+                $field = $byKey[$key]; $field['label'] = $label; $field['defaultVisible'] = true;
+                if ($key === 'sales_quantity') {
+                    $field['summable'] = false; $field['display_precision'] = 2; $field['display_min_precision'] = 2;
+                }
+                $ordered[] = $field; unset($byKey[$key]);
+            }
+            foreach ($byKey as $field) { $field['defaultVisible'] = false; $field['defaultQuick'] = false; $ordered[] = $field; }
+            $fields = $ordered;
+        }
+        // 007 两张项目服务数表均只展示门店、员工、项目、项目数；稳定键仍可筛选与导出。
+        if (in_array($kind, ['employee_service','employee_home'], true)) {
+            $order = ['store_name'=>'门店','employee_name'=>'员工','item_name'=>'项目','project_count'=>'项目数'];
+            $byKey = array_column($fields, null, 'key'); $ordered = [];
+            foreach ($order as $key=>$label) {
+                $field = $byKey[$key]; $field['label']=$label; $field['defaultVisible']=true;
+                if ($key==='project_count') { $field['summable']=false; $field['display_precision']=2; $field['display_min_precision']=2; }
+                $ordered[]=$field; unset($byKey[$key]);
+            }
+            foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
+            $fields=$ordered;
+        }
+        // 007 员工业绩明细仅为充值与原销售现金分配，每条有效人员事实一行。
+        if ($kind === 'performance') {
+            $order = ['store_name'=>'门店','employee_name'=>'员工','item_name'=>'项目','category_path'=>'分类',
+                'sales_performance'=>'现金业绩','document_no'=>'订单号','business_date'=>'销售日期'];
+            $byKey=array_column($fields,null,'key'); $ordered=[];
+            foreach ($order as $key=>$label) {
+                $field=$byKey[$key]; $field['label']=$label; $field['defaultVisible']=true;
+                $field['summable']=false; $ordered[]=$field; unset($byKey[$key]);
+            }
+            foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
+            $fields=$ordered;
+        }
+        // 员工统计表的列名与顺序只在本表声明；稳定字段键继续供筛选、合计及导出共用。
         if ($kind === 'employee') {
-            $order = ['store_name'=>'门店','position_name'=>'职务','employee_name'=>'姓名',
+            $order = ['store_name'=>'门店','employee_name'=>'姓名','position_name'=>'职位',
                 'sales_performance'=>'现金业绩','labor_performance'=>'劳动业绩','service_visits'=>'客数',
                 'labor_unit_price'=>'客单价','project_count'=>'项目数','point_visits'=>'指定客',
                 'new_customer_total'=>'服务总新客','new_customer_converted'=>'成交总新客','new_customer_conversion_rate'=>'新客成交率%'];
@@ -102,8 +140,8 @@ final class BasicActivityReportServices
                 $field = $byKey[$key] ?? ['key'=>$key,'type'=>$key==='new_customer_conversion_rate'?'integer':'decimal','defaultQuick'=>false,'width'=>150,
                     'money'=>false,'summable'=>$key!=='new_customer_conversion_rate'];
                 $field['label']=$label; $field['defaultVisible']=true;
-                $field['fixed']=in_array($key,['store_name','position_name','employee_name'],true)?'left':'';
-                if($field['fixed']==='left')$field['width']=['store_name'=>100,'position_name'=>100,'employee_name'=>130][$key];
+                $field['fixed']=in_array($key,['store_name','employee_name','position_name'],true)?'left':'';
+                if($field['fixed']==='left')$field['width']=['store_name'=>100,'employee_name'=>130,'position_name'=>100][$key];
                 $ordered[]=$field; unset($byKey[$key]);
             }
             foreach ($byKey as $field) { $field['defaultVisible']=false; $field['defaultQuick']=false; $ordered[]=$field; }
@@ -118,15 +156,16 @@ final class BasicActivityReportServices
      */
     public function read(string $code, array $stores, array $input): array
     {
-        $fields = $this->definitions($code);
         $kind = $this->kind($code);
         [$stores, $range, $employeeIds] = $this->scope($stores, $input);
+        $fields = $this->definitions($code);
         $rows = [];
         if ($stores) {
             // All constituent Reader calls and snapshot enrichment share one consistent DB view.
             $rows = Db::transaction(function () use ($kind, $stores, $range, $employeeIds): array {
                 $this->guardSourceSize($kind, $stores, $range, $employeeIds);
                 if ($kind === 'store_item') return $this->storeItems($stores, $range, $employeeIds);
+                if ($kind === 'employee_item') return $this->employeeItemSales($stores, $range, $employeeIds);
                 if ($kind === 'product') return $this->products($stores, $range, $employeeIds);
                 if ($kind === 'followup') return $this->followups($stores, $range, $employeeIds);
                 if (in_array($kind, ['item_consumption', 'writeoff'], true)) return $this->services($kind, $stores, $range, $employeeIds);
@@ -169,7 +208,7 @@ final class BasicActivityReportServices
                 : ($kind === 'store_item' ? ['卡内项目按已冻结金额分摊；没有可靠组件销售数量，不用整卡次数冒充项目销售数量。']
                 : ($kind === 'product' ? ['销售明细粒度，付款按明细分摊；逐人余额业绩无可靠事实，返回null，不能按比例伪造。']
                 : ($kind === 'employee_home' ? ['查询时当前唯一门店归属；只统计授权服务门店内的事实，多店任职或归属缺失时报错。']
-                : ($kind === 'employee_item' ? ['仅直接销售项目，数量使用冻结的销售分配权重；未将整卡销售次数当作卡内项目销售数。'] : [])))),
+                : ($kind === 'employee_item' ? ['仅展示当前未删除的本店员工；已离职或调店员工的历史销售保留在事实层，但不进入本表。销售数量按原订单完整销售参与人数均分，筛选不改变原分母。'] : [])))),
         ];
     }
 
@@ -231,6 +270,7 @@ final class BasicActivityReportServices
         return $rows;
     }
 
+    /** Legacy six-column projection remains active until the 007 five-column V3 reader has complete original payment evidence. */
     private function storeItems(array $stores, array $range, array $employees): array
     {
         $grouped = []; $customers = [];
@@ -295,39 +335,59 @@ final class BasicActivityReportServices
     private function personnel(string $kind, array $stores, array $range, array $employees): array
     {
         $rows = [];
-        if (in_array($kind, ['employee','employee_item','performance'], true)) {
+        // 007 员工业绩明细只显示查询时当前未删除的本店员工；历史事实不因任职变化而改写。
+        $currentStoreStaff = [];
+        if (in_array($kind,['performance','employee_service'],true)) {
+            $staffQuery=Db::name('system_store_staff')->whereIn('store_id',$stores)->where('is_del',0)->where('employee_id','>',0);
+            if ($employees) $staffQuery->whereIn('employee_id',$employees);
+            $currentStaff=$staffQuery->field('store_id,employee_id')->limit(10001)->select()->toArray();
+            $this->checkSize($currentStaff);
+            foreach ($currentStaff as $staff) $currentStoreStaff[(int)$staff['store_id'].':'.(int)$staff['employee_id']]=true;
+        }
+        if (in_array($kind, ['employee','performance'], true)) {
             $sales = (new StoreSalespersonNetReadServices())->detail($stores, $range, $kind==='employee'?[]:$employees, 0, 1, 20, true)['records'];
             $this->checkSize($sales);
             $enriched = $this->salesPersonnelSnapshots($stores, array_column($sales, 'fact_id'));
             foreach ($sales as $fact) {
+                if ($kind==='performance') {
+                    $extra=$enriched[$fact['fact_id']] ?? [];
+                    $document=(string)($extra['source_document_type'] ?? '');
+                    // 旧单迁移仅收录 007 有效 type=2 销售现金业绩，也属于该表销售人口。
+                    if ($fact['performance_type']!=='sales_performance_allocated'
+                        || !in_array($document,['cashier_snapshot','legacy_store_order','recharge'],true)
+                        || !isset($currentStoreStaff[(int)$fact['store_id'].':'.(int)$fact['employee_id']])) continue;
+                    if ($document!=='recharge' && trim((string)($extra['item_name_snapshot'] ?? ''))==='')
+                        throw new \InvalidArgumentException('员工销售业绩缺少原品项事实，请核对数据来源');
+                }
                 // 新客均分先保留所有同单员工；已有金额行仍只投影认证范围内的本人。
                 if ($kind==='employee' && $employees && !in_array((int)$fact['employee_id'],$employees,true)) continue;
                 $extra = $enriched[$fact['fact_id']] ?? [];
-                if ($kind === 'employee_item' && (($extra['source_type'] ?? '') !== 'project' || $fact['performance_type'] !== 'sales_performance_allocated')) continue;
+                if ($kind==='performance' && ($extra['source_document_type'] ?? '')==='recharge') {
+                    $extra['item_id']=0; $extra['item_name_snapshot']='充值'; $extra['category_path']='充值';
+                }
                 $row = $this->person($fact) + $this->item($extra + $fact) + [
                     'row_id'=>'performance:'.$fact['fact_id'], 'business_date'=>$fact['business_date'],
                     'document_no'=>$fact['performance_type'] === 'refund_sales_deduction' ? $fact['refund_no'] : $fact['order_no_snapshot'],
                     'member_name'=>$fact['member_name'], 'performance_type'=>$fact['performance_type'] === 'refund_sales_deduction' ? '退款冲减' : '销售分配',
                     'sales_performance'=>(int)$fact['amount_cents'], 'labor_performance'=>0, 'labor_fee'=>0, 'project_count'=>0,
-                    // Frozen allocation weight, never a count of employees currently on the order.
-                    'sales_quantity'=>$fact['performance_type'] === 'sales_performance_allocated' && isset($extra['quantity']) && (int)$extra['allocation_weight_denominator'] > 0
-                        ? (float)$extra['quantity'] * (int)$extra['allocation_weight_numerator'] / (int)$extra['allocation_weight_denominator'] : 0,
                 ];
                 $this->appendPersonnel($rows, $row, $kind);
             }
         }
-        if ($kind !== 'employee_item') {
+        if (in_array($kind, ['employee','employee_service','employee_home'], true)) {
             $reader = new RegisteredMetricReadServices();
             $labor = $reader->personnelDetailResult('staff_labor_yeji', '0', $stores, $range, $employees, 0, true)['rows'];
             $counts = [];
             foreach ($reader->personnelDetailResult('staff_project_num', '0', $stores, $range, $employees, 0, true)['rows'] as $fact) $counts[$fact['fact_id']] = $fact['metric_value'];
             $details = $this->laborSnapshots($stores, array_column($labor, 'fact_id'));
             foreach ($labor as $fact) {
+                // 服务门店表按当前本店任职收窄；不把调店前的事实当成当前店员工。
+                if ($kind==='employee_service' && !isset($currentStoreStaff[(int)$fact['store_id'].':'.(int)$fact['employee_id']])) continue;
                 $extra = $details[$fact['fact_id']] ?? [];
                 $row = $this->person($fact) + $this->item($extra + $fact) + [
                     'row_id'=>'performance:'.$fact['fact_id'], 'business_date'=>$fact['business_date'],
                     'document_no'=>$fact['order_no_snapshot'], 'member_name'=>$fact['member_name_snapshot'],
-                    'performance_type'=>'劳动分配', 'sales_performance'=>0, 'sales_quantity'=>0,
+                    'performance_type'=>'劳动分配', 'sales_performance'=>0,
                     'labor_performance'=>(int)$fact['metric_value'], 'labor_fee'=>(int)$fact['labor_fee_amount_cents'],
                     'project_count'=>(int)($counts[$fact['fact_id']] ?? 0) / 1000000,
                 ];
@@ -335,8 +395,15 @@ final class BasicActivityReportServices
             }
         }
         if ($kind === 'employee') return $this->employeeSummary($rows, $stores, $range, $employees, $sales ?? []);
-        if ($kind === 'employee_home') return $this->homeStores(array_values($rows), $stores);
-        return array_values($rows);
+        if ($kind === 'employee_home') $rows = $this->withCurrentHomeStaffWithoutService($this->homeStores(array_values($rows), $stores), $stores, $employees);
+        else $rows = array_values($rows);
+        return $this->completePersonnelStoreNames($rows, $stores);
+    }
+
+    /** 007 结果形状由专用 V3 读取器生成；通用人员业绩汇总不得再混入销售数量。 */
+    private function employeeItemSales(array $stores, array $range, array $employees): array
+    {
+        return (new EmployeeItemSalesReportReadServices())->read($stores, $range, $employees);
     }
 
     /**
@@ -363,6 +430,7 @@ final class BasicActivityReportServices
         }
         $this->checkSize($rows);
         if (!$rows) return [];
+        $rows = $this->completePersonnelStoreNames($rows, $stores, $reader, $storeNames);
         $pairs = []; $byStore = [];
         foreach ($rows as $row) {
             $pair = ['store_id'=>(int)$row['store_id'], 'employee_id'=>(int)$row['employee_id']];
@@ -452,9 +520,23 @@ final class BasicActivityReportServices
         if (!isset($rows[$key])) {
             $rows[$key] = $row;
             $rows[$key]['row_id'] = $kind.':'.$key;
-            foreach (['sales_performance','labor_performance','labor_fee','project_count','sales_quantity'] as $metric) $rows[$key][$metric] = 0;
+            foreach (['sales_performance','labor_performance','labor_fee','project_count'] as $metric) $rows[$key][$metric] = 0;
         }
-        foreach (['sales_performance','labor_performance','labor_fee','project_count','sales_quantity'] as $metric) $rows[$key][$metric] += $row[$metric];
+        foreach (['sales_performance','labor_performance','labor_fee','project_count'] as $metric) $rows[$key][$metric] += $row[$metric];
+    }
+
+    /** 员工分组各报表逐行显示门店；只补缺失的显示名，保留已冻结历史名称和业务数值。 */
+    private function completePersonnelStoreNames(array $rows, array $stores, ?RegisteredMetricReadServices $reader = null, array $names = []): array
+    {
+        foreach ($rows as &$row) {
+            if (trim((string)($row['store_name'] ?? '')) !== '') continue;
+            if (!$names) $names = ($reader ?? new RegisteredMetricReadServices())->storeNames($stores);
+            $name = trim((string)($names[(int)$row['store_id']] ?? ''));
+            if ($name === '') throw new \LogicException('员工报表门店名称缺失，无法完整展示');
+            $row['store_name'] = $name;
+        }
+        unset($row);
+        return $rows;
     }
 
     private function item(array $fact): array
@@ -495,6 +577,8 @@ final class BasicActivityReportServices
      */
     private function guardSourceSize(string $kind, array $stores, array $range, array $employees): void
     {
+        // 本表还要读取当前员工与同单完整参与人，由专用读取器分别限制每个授权数据集。
+        if ($kind === 'employee_item') return;
         $tables = in_array($kind,['store_item','product','followup'],true)
             ? ['cashier_v3_sale_fact','cashier_v3_payment_sale_allocation_fact']
             : (in_array($kind,['writeoff','item_consumption'],true)
@@ -510,7 +594,8 @@ final class BasicActivityReportServices
                 if (in_array($kind,['writeoff','item_consumption'],true)) $query->where('performance_type','consumption_performance_recorded');
                 else {
                     $types = in_array($kind,['employee_service','employee_home'],true) ? ['labor_performance_allocated']
-                        : ($kind === 'employee_item' ? ['sales_performance_allocated'] : ['sales_performance_allocated','refund_sales_deduction','labor_performance_allocated']);
+                        : ($kind==='performance' ? ['sales_performance_allocated']
+                            : ['sales_performance_allocated','refund_sales_deduction','labor_performance_allocated']);
                     $query->where('employee_id','>',0)->whereIn('performance_type',$types);
                     if ($employees) $query->whereIn('employee_id',$employees);
                 }
@@ -519,7 +604,10 @@ final class BasicActivityReportServices
         }
     }
 
-    /** Query-time staff ownership mirrors the old home-store report, with ambiguity rejected. */
+    /**
+     * 所属店只取查询时有效任职：无任职的旧服务事实按产品经理口径跳过；
+     * 多店并任时只有服务发生店也为当前任职店才归该店，避免一条事实重复计额。
+     */
     private function homeStores(array $rows, array $stores): array
     {
         if (!$rows) return [];
@@ -532,10 +620,11 @@ final class BasicActivityReportServices
         $grouped = [];
         foreach ($rows as $row) {
             $home = $homes[$row['employee_id']] ?? [];
-            if (count($home) !== 1) throw new \InvalidArgumentException('员工'.$row['employee_id'].'当前所属门店缺失或存在多店歧义');
-            $homeId = (int)array_key_first($home);
+            if (!$home) continue;
+            $serviceStore = (int)$row['store_id'];
+            if (count($home) > 1 && !isset($home[$serviceStore])) continue;
+            $homeId = count($home) === 1 ? (int)array_key_first($home) : $serviceStore;
             if (!in_array($homeId,$stores,true)) continue;
-            $serviceStore = $row['store_id'];
             $row['store_id'] = $homeId; $row['store_name'] = (string)$home[$homeId];
             $key = $this->identity([$homeId,$row['employee_id'],$row['item_id']]);
             $this->appendPersonnel($grouped,$row,'employee_home');
@@ -544,6 +633,30 @@ final class BasicActivityReportServices
             $grouped[$key]['service_store_ids'] = array_values(array_unique($grouped[$key]['service_store_ids']));
         }
         return array_values($grouped);
+    }
+
+    /** 所属门店报表以当前任职为全集；无服务员工显示空项目、0.00，不伪造服务事实。 */
+    private function withCurrentHomeStaffWithoutService(array $rows, array $stores, array $employees): array
+    {
+        $query = Db::name('system_store_staff')->alias('ss')->leftJoin('system_store st','st.id=ss.store_id')
+            ->whereIn('ss.store_id',$stores)->where('ss.status',1)->where('ss.is_del',0)->where('ss.employee_id','>',0);
+        if ($employees) $query->whereIn('ss.employee_id',$employees);
+        $staff = $query->field('ss.store_id,ss.employee_id,ss.staff_name employee_name,st.name store_name')
+            ->limit(10001)->select()->toArray();
+        $this->checkSize($staff);
+        $seen=[];
+        foreach ($rows as $row) $seen[(int)$row['store_id'].':'.(int)$row['employee_id']]=true;
+        foreach ($staff as $person) {
+            $personKey=(int)$person['store_id'].':'.(int)$person['employee_id'];
+            if (isset($seen[$personKey])) continue;
+            $rows[]=['row_id'=>'employee_home:empty:'.$personKey,'store_id'=>(int)$person['store_id'],
+                'store_name'=>(string)$person['store_name'],'employee_id'=>(int)$person['employee_id'],
+                'employee_name'=>(string)$person['employee_name'],'item_id'=>0,'item_name'=>'',
+                'category_path'=>'','project_count'=>0.0,'labor_performance'=>0,'labor_fee'=>0];
+            $seen[$personKey]=true;
+        }
+        $this->checkSize($rows);
+        return $rows;
     }
 
     /**
@@ -655,7 +768,7 @@ final class BasicActivityReportServices
         $rows = Db::name('cashier_v3_performance_fact')->alias('p')
             ->leftJoin('cashier_v3_sale_fact s', "s.tenant_id=p.tenant_id AND s.store_id=p.store_id AND s.order_id=p.order_id AND s.source_line_id=p.source_line_id AND s.fact_direction='forward' AND s.status='effective'")
             ->where('p.tenant_id','0')->whereIn('p.store_id',$stores)->whereIn('p.fact_id',$ids)
-            ->field('p.fact_id,p.store_id,s.source_type,s.item_id,s.item_name_snapshot,s.quantity,p.allocation_weight_numerator,p.allocation_weight_denominator')->select()->toArray();
+            ->field('p.fact_id,p.store_id,p.source_document_type,s.source_type,s.item_id,s.item_name_snapshot')->select()->toArray();
         return $this->personnelCategories(array_column($rows,null,'fact_id'), false);
     }
 
@@ -684,6 +797,10 @@ final class BasicActivityReportServices
     /** Business wording shared by screen/export metadata; no physical schema leaks into field help. */
     private function source(string $key, string $kind): string
     {
+        if ($key === 'store_name' && $kind === 'employee_item') return '显示查询时员工未删除任职所在的当前门店；历史跨店销售仍保留在事实层，但不迁移到当前门店结果。';
+        if ($key === 'employee_name' && $kind === 'employee_item') return '显示查询时未删除门店任职保存的员工姓名；已离职员工不进入本表。';
+        if ($key === 'sales_performance' && $kind === 'performance') return '原充值或原销售订单最终有效的逐人现金业绩分配，按销售业务日显示；退款及后续欠款补交不混入此表。';
+        if ($key === 'store_name' && in_array($kind, ['employee','employee_service','performance'], true)) return '优先显示业务发生时保存的门店名称；原记录缺少名称时，按本行已授权门店身份补充当前门店名称，不改变原业务记录和统计结果。';
         if ($key === 'store_name' && $kind === 'employee_home') return '按查询时员工唯一有效任职的当前门店归属显示；多店归属不猜测，已授权服务门店仍限制实际服务范围。';
         if ($key === 'employee_name' && $kind === 'followup') return '已关联原订单明确记录的跟单任职对应姓名；该兼容身份没有独立历史姓名快照，按当前任职名称展示，不冒充导购或销售经理。';
         if ($key === 'quantity' && in_array($kind,['product','followup'],true)) return '成功销售事实记录的原销售明细数量，不按支付方式或参与人数重复计算；非金额数字。';
@@ -702,7 +819,7 @@ final class BasicActivityReportServices
             'new_customer_total'=>'本表沿用原员工统计口径：纳入原客源范围、排除合作项目及旧卡录入/纯欠款的有效销售客。会员在同店同日去重后按销售参与人均分；游客与朋友按每条人员销售记录计次。与工资表首次全款疗程卡新客不同。历史原客源、卡内项目或服务对象缺少可核实事实时显示“-”，不把缺失当作0。',
             'new_customer_converted'=>'上述客源范围内会员订单初次成功记账收款达到298元的成交客，按同店同日与销售参与人分配；退款或作废订单排除，不用后续补交把原成交日重新落档。',
             'new_customer_conversion_rate'=>'本行成交总新客除以服务总新客乘100，沿用原公式取整数百分数；没有新客时为0，来源待核对时显示“-”，不相加或取平均作为合计。',
-            'sales_quantity'=>'直接销售项目数量乘原销售分配权重；只计有效销售分配，不把补交或退款当成再次销售；非金额数字。',
+            'sales_quantity'=>'原销售订单内的成交数量按该订单完整销售参与人数均分，按本店当前员工与项目汇总后保留两位小数；员工筛选不改变原单人数。零销售员工显示0.00；不读取金额分配比例。',
             'category_path'=>'由已核实的品项身份关联平台商品当前分类；无法核实则留空，不按名称猜测。',
             'cash_amount'=>'查询业务日期内成功记账收款分给该销售明细的金额，不按人数重复显示。',
             'balance_amount'=>'结账时为该订单行冻结的余额支付分摊；历史缺少可靠分摊时留空，不重新按比例计算。为防止缺失值造成伪合计，本列不声明合计。',

@@ -34,16 +34,9 @@ class UnifiedReport extends AuthController
     /** 新基础报表独立入口；既有报表目录和查询分发不变。 */
     public function basicCatalog()
     {
-        if (!$this->basicMenuAllStores()) {
-            if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
-            // 新增门店对账单始终独立授权，旧基础报表总入口不能自动获得新财务读取能力。
-            return app('json')->success(array_values(array_filter(\app\services\report\BasicReportHostServices::catalog(), function (array $entry): bool {
-                return $entry['code'] !== \app\services\report\StoreReconciliationReportServices::CODE || $this->canReadBasicReport($entry['code']);
-            })));
-        }
-        // 目录只返回当前账号能从菜单进入的报表，不能以目录接口探测其他叶子报表。
+        // 只返回当前账号持有叶子菜单的报表；父目录只负责导航，不能枚举数据。
         $entries = array_values(array_filter(\app\services\report\BasicReportHostServices::catalog(), function (array $entry): bool {
-            return $this->hasMenuPermission('admin-report-' . (string)$entry['code']);
+            return $this->canReadBasicReport((string)$entry['code']);
         }));
         if (!$entries) return app('json')->fail('当前账号未配置基础报表菜单');
         return app('json')->success($entries);
@@ -109,7 +102,7 @@ class UnifiedReport extends AuthController
 
     public function basicSave(Request $request)
     {
-        if (!$this->hasMenuPermission('admin-report-basic') || !$this->hasMenuPermission('admin-report-basic-write')) return app('json')->fail('当前账号没有刷单登记编辑权限');
+        if (!$this->canReadBasicReport('basic_brush_registration') || !$this->hasMenuPermission('admin-report-basic-write')) return app('json')->fail('当前账号没有刷单登记编辑权限');
         try {
             // 门店范围来自账号权威权限，不使用待保存对象的门店ID扩大范围。
             $context = $this->basicContext([]);
@@ -142,16 +135,13 @@ class UnifiedReport extends AuthController
             (int)$this->adminId, 'platform', $canWrite);
     }
 
-    /** 菜单可见是本开关下的唯一基础报表读授权；未知报表仍由目录白名单拒绝。 */
+    /** 所有平台实例都只接受当前报表叶子菜单；全店配置只改变门店范围。 */
     private function canReadBasicReport(string $code): bool
     {
-        if ($code === \app\services\report\StoreReconciliationReportServices::CODE) return $this->hasMenuPermission('admin-report-' . $code);
-        return $this->basicMenuAllStores()
-            ? $this->hasMenuPermission('admin-report-' . $code)
-            : $this->hasMenuPermission('admin-report-basic');
+        return $this->hasMenuPermission('admin-report-' . $code);
     }
 
-    /** 配置按实例启用；010 之外默认保持原有组织数据权限。 */
+    /** 配置仅决定菜单授权后的可见门店范围，不产生报表读取权限。 */
     private function basicMenuAllStores(): bool
     {
         return (bool)config('basic_report.platform_menu_all_stores');
