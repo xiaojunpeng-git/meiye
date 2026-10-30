@@ -44,7 +44,13 @@ if (!SuixingPayGateway::validReply($minimalError, $public, '01234567', 'abc'))
 $wrongOrgError = ['code' => '0002', 'orgId' => 'other'];
 $wrongOrgError['sign'] = SuixingPayGateway::sign($wrongOrgError, $private);
 if (SuixingPayGateway::validReply($wrongOrgError, $public, '01234567', 'abc'))
-    throw new RuntimeException('wrong echoed organization accepted');
+    throw new RuntimeException('malformed response organization accepted');
+$acquiringReply = ['code' => '0000', 'orgId' => '76895137', 'reqId' => 'abc'];
+$acquiringReply['sign'] = SuixingPayGateway::sign($acquiringReply, $private);
+if (!SuixingPayGateway::validReply($acquiringReply, $public, '01234567', 'abc'))
+    throw new RuntimeException('signed acquiring-organization reply rejected');
+if (SuixingPayGateway::validReply($acquiringReply, $public, '01234567', 'other'))
+    throw new RuntimeException('acquiring reply with wrong request ID accepted');
 $successReply = ['code' => '0000', 'reqId' => 'abc'];
 $successReply['sign'] = SuixingPayGateway::sign($successReply, $private);
 if (SuixingPayGateway::validReply($successReply, $public, '01234567', 'abc'))

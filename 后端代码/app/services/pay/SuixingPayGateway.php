@@ -69,17 +69,19 @@ final class SuixingPayGateway
         return openssl_verify(self::canonical($fields), $signature, $pem, OPENSSL_ALGO_SHA1) === 1;
     }
 
-    /** Production error envelopes can contain only code/msg/sign. They may
-     * report an error, but can never authorize settlement; success must echo
-     * both identities, and any echoed identity must match the request. */
+    /** Production error envelopes can contain only code/msg/sign. Trade
+     * responses may carry the acquiring institution's orgId instead of the
+     * submitting institution's ID; the verified request ID binds a successful
+     * reply to this request, while callers still verify order and amount. */
     public static function validReply(array $reply, string $publicKey, string $orgId, string $reqId): bool
     {
+        if (!preg_match('/^\d{8}$/D', $orgId)) return false;
         if (!self::verify($reply, $publicKey)) return false;
         if (isset($reply['reqId']) && (string)$reply['reqId'] !== $reqId) return false;
-        if (isset($reply['orgId']) && (string)$reply['orgId'] !== $orgId) return false;
+        if (isset($reply['orgId']) && !preg_match('/^\d{8}$/D', (string)$reply['orgId'])) return false;
         return (string)($reply['code'] ?? '') !== '0000'
             || ((string)($reply['reqId'] ?? '') === $reqId
-                && (string)($reply['orgId'] ?? '') === $orgId);
+                && isset($reply['orgId']));
     }
 
     /** Send a signed request and verify the complete provider envelope. */

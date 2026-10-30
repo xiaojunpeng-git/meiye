@@ -85,12 +85,37 @@ $tests['combined-confirmed-callback-once'] = static function () use ($service,$u
     $order = $service->create($uid,$input,'h5');
     expectTrue($order['status'] === 'pending' && $order['externalCents'] === 46600,'freeze residual');
     expectTrue(MemberCommerceServices::heldBalanceCents($uid) >= 10000,'hold balance until confirmed');
-    rejected(static function () use ($service,$order) { $service->paid($order['id'],1,'LOCAL-MOCK','wechat'); },'wrong amount must fail');
-    $service->paid($order['id'],46600,'LOCAL-MOCK','wechat');
-    $service->paid($order['id'],46600,'LOCAL-MOCK','wechat');
+    rejected(static function () use ($service,$order) { $service->paid($order['id'],1,'LOCAL-MOCK','wechat','fuyou','LOCAL-MERCHANT'); },'wrong amount must fail');
+    $service->paid($order['id'],46600,'LOCAL-MOCK','wechat','fuyou','LOCAL-MERCHANT');
+    $service->paid($order['id'],46600,'LOCAL-MOCK','wechat','fuyou','LOCAL-MERCHANT');
     expectTrue($service->detail($uid,$order['id'])['status'] === 'paid','callback settles');
     $after = MemberCommerceServices::cents((string)Db::name('user')->where('uid',$uid)->value('now_money'));
     expectTrue($before-$after === 10000,'callback balance debit exactly once');
+};
+$tests['provider-confirmed-failure-releases-hold'] = static function () use ($service,$uid): void {
+    $before = MemberCommerceServices::heldBalanceCents($uid);
+    // This transition fixture avoids local payment-switch defaults; the
+    // provider query is tested separately with signed production responses.
+    $publicId = 'MC-' . bin2hex(random_bytes(12));
+    $snapshot = ['onlineProvider'=>'suixingpay','onlineMerchantNo'=>'LOCAL-SXF',
+        'paymentMethod'=>'wechat','storeName'=>'测试门店','items'=>[]];
+    Db::name('member_commerce_order')->insert([
+        'public_id'=>$publicId,'member_id'=>$uid,'store_id'=>118,'kind'=>'purchase','channel'=>'routine',
+        'idempotency_key'=>'local-sxf-fail-'.bin2hex(random_bytes(10)),
+        'input_fingerprint'=>hash('sha256',$publicId),'snapshot_json'=>json_encode($snapshot),
+        'amount_cents'=>56600,'balance_cents'=>10000,'external_cents'=>46600,
+        'status'=>'payment_unknown','result_json'=>'{}','created_at'=>time(),'updated_at'=>time()]);
+    expectTrue(MemberCommerceServices::heldBalanceCents($uid) === $before + 10000,'unknown payment keeps balance hold');
+    rejected(static function () use ($service,$publicId) {
+        $service->failedByProvider($publicId,'suixingpay','WRONG-MERCHANT');
+    },'wrong merchant cannot close payment');
+    expectTrue($service->failedByProvider($publicId,'suixingpay','LOCAL-SXF'),'verified failure must close order');
+    expectTrue($service->detail($uid,$publicId)['status'] === 'failed','failed order must be visible');
+    expectTrue(MemberCommerceServices::heldBalanceCents($uid) === $before,'terminal failure releases balance hold');
+    expectTrue($service->failedByProvider($publicId,'suixingpay','LOCAL-SXF'),'failure replay is idempotent');
+    rejected(static function () use ($service,$publicId) {
+        $service->paid($publicId,46600,'LATE-SUCCESS','wechat','suixingpay','LOCAL-SXF');
+    },'failed order cannot settle silently');
 };
 $tests['cancel-unsubmitted-releases-hold'] = static function () use ($service,$uid): void {
     $before = MemberCommerceServices::heldBalanceCents($uid);
@@ -100,7 +125,7 @@ $tests['cancel-unsubmitted-releases-hold'] = static function () use ($service,$u
     $order = $service->create($uid,$input,'h5');
     expectTrue($service->cancel($uid,$order['id'])['status'] === 'cancelled','cancel pending intent');
     expectTrue(MemberCommerceServices::heldBalanceCents($uid) === $before,'release pending hold');
-    rejected(static function () use ($service,$order) { $service->paid($order['id'],46600,'LOCAL-CANCEL-MOCK','wechat'); },'cancelled intent cannot settle');
+    rejected(static function () use ($service,$order) { $service->paid($order['id'],46600,'LOCAL-CANCEL-MOCK','wechat','fuyou','LOCAL-MERCHANT'); },'cancelled intent cannot settle');
 };
 $tests['recharge-external-only-and-callback'] = static function () use ($service,$uid): void {
     rejected(static function () use ($service,$uid) {
@@ -113,8 +138,8 @@ $tests['recharge-external-only-and-callback'] = static function () use ($service
     rejected(static function () use ($service,$uid,$input) { $service->create($uid,$input,'h5'); },'balance recharge forbidden');
     $input['payment_mode'] = 'fuyou';
     $order = $service->create($uid,$input,'h5');
-    $service->paid($order['id'],10000,'LOCAL-RECHARGE-MOCK','wechat');
-    $service->paid($order['id'],10000,'LOCAL-RECHARGE-MOCK','wechat');
+    $service->paid($order['id'],10000,'LOCAL-RECHARGE-MOCK','wechat','fuyou','LOCAL-MERCHANT');
+    $service->paid($order['id'],10000,'LOCAL-RECHARGE-MOCK','wechat','fuyou','LOCAL-MERCHANT');
     $paid = $service->detail($uid,$order['id']);
     expectTrue(strpos($paid['orderNo'],'SJ-CZ') === 0,'recharge numbering');
     expectTrue(MemberCommerceServices::cents((string)Db::name('user')->where('uid',$uid)->value('now_money'))-$before === 10000,'recharge credits once');

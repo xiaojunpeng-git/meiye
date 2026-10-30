@@ -86,13 +86,20 @@ final class SuixingPayMemberService
             'mno' => (string)($snapshot['onlineMerchantNo'] ?? ''),
             'ordNo' => self::providerOrderNo((string)$order['public_id'])]);
         $data = (array)($reply['respData'] ?? []);
-        if (($reply['code'] ?? '') !== '0000' || ($data['bizCode'] ?? '') !== '0000'
-            || ($data['tranSts'] ?? '') !== 'SUCCESS') return;
+        if (($reply['code'] ?? '') !== '0000' || ($data['bizCode'] ?? '') !== '0000') return;
+        if (!in_array((string)($data['tranSts'] ?? ''), ['SUCCESS', 'FAIL', 'CLOSED', 'CANCELED'], true)) return;
         if ((string)($data['ordNo'] ?? '') !== self::providerOrderNo((string)$order['public_id'])
             || (string)($data['payType'] ?? '') !== 'WECHAT'
             || !in_array((string)($data['payWay'] ?? ''), ['', '03'], true)
             || SuixingPayGateway::cents((string)($data['oriTranAmt'] ?? '')) !== (int)$order['external_cents']) {
             throw new ValidateException('随行付查询结果与订单不一致。');
+        }
+        // A signed terminal failure releases only this order's reservations;
+        // an unknown or paying state must remain held until confirmed.
+        if ($data['tranSts'] !== 'SUCCESS') {
+            (new MemberCommerceServices())->failedByProvider((string)$order['public_id'],
+                'suixingpay', (string)$snapshot['onlineMerchantNo']);
+            return;
         }
         (new MemberCommerceServices())->paid((string)$order['public_id'], (int)$order['external_cents'],
             (string)($data['transactionId'] ?? ''), 'wechat', 'suixingpay', (string)$snapshot['onlineMerchantNo']);

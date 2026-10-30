@@ -197,6 +197,32 @@ final class MemberCommerceServices
         });
     }
 
+    /** Close only a provider-confirmed failed attempt. The caller must first
+     * verify the signed query and match its order number, channel and amount. */
+    public function failedByProvider(string $id, string $provider, string $merchantNo): bool
+    {
+        return Db::transaction(function () use ($id, $provider, $merchantNo): bool {
+            $row = Db::name('member_commerce_order')->where('public_id', $id)->find();
+            if (!$row) throw new ValidateException('支付订单不存在。');
+            $this->member((int)$row['member_id'], true);
+            $row = Db::name('member_commerce_order')->where('id', $row['id'])->lock(true)->find();
+            $snapshot = json_decode((string)$row['snapshot_json'], true);
+            if (($snapshot['onlineProvider'] ?? '') !== $provider || $merchantNo === ''
+                || !hash_equals((string)($snapshot['onlineMerchantNo'] ?? ''), $merchantNo)) {
+                throw new ValidateException('支付商户与订单不一致。');
+            }
+            if ($row['status'] === 'failed') return true;
+            if ($row['status'] === 'paid') return false;
+            if (!in_array($row['status'], ['payment_requested', 'payment_unknown'], true)) {
+                throw new ValidateException('订单当前不能关闭支付。');
+            }
+            Db::name('member_commerce_order')->where('id', $row['id'])
+                ->update(['status' => 'failed', 'updated_at' => time()]);
+            (new MemberCommerceBenefitsServices())->releaseInTx((int)$row['id']);
+            return true;
+        });
+    }
+
     public function listing(int $uid, array $input = []): array
     {
         $page = max(1, min(100000, (int)($input['page'] ?? 1)));
