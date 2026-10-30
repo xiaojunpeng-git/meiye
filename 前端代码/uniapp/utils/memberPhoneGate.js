@@ -1,10 +1,11 @@
 import { LOGIN_STATUS, USER_INFO } from '@/config/cache';
 import Cache from '@/utils/cache';
 
-// 未授权手机号时只开放完成身份授权所需页面，分享页、首页和业务深链均不得绕过。
+// 公开调查仅允许查看与填写；提交和奖励仍由认证接口保护，其他业务深链继续执行手机号门禁。
 const PHONE_GATE_ALLOWLIST = [
 	'pages/users/wechat_login/index',
-	'pages/users/privacy/index'
+	'pages/users/privacy/index',
+	'pages/users/survey/index'
 ];
 const LOGIN_ROUTE = '/pages/users/wechat_login/index';
 let interceptorsInstalled = false;
@@ -50,8 +51,9 @@ function redirectToMemberLogin() {
 /**
  * 校验当前页面；返回 false 表示当前业务页已被拦截并开始跳转登录页。
  */
-export function enforceMemberPhoneGate(store) {
-	if (hasMemberPhoneAuthorization(store) || isAllowedRoute(currentRoute())) return true;
+export function enforceMemberPhoneGate(store, pendingRoute = '') {
+    // 冷启动时页面栈尚未建立，使用框架传入的落地页；已有页面永远优先，不能借旧扫码路径放宽门禁。
+    if (hasMemberPhoneAuthorization(store) || isAllowedRoute(currentRoute() || pendingRoute)) return true;
 	redirectToMemberLogin();
 	return false;
 }

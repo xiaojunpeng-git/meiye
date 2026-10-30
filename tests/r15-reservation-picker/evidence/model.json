@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "rightsNameDurationRemaining": true,
+  "catalogRemainingUnknown": true,
+  "unchangedMethods": [
+    "buildAddonPayload",
+    "reservationOrderCreate",
+    "reservationButlerUpdate",
+    "confirmAddonPicker",
+    "removeSelectedAddon",
+    "loadStaffList",
+    "loadAvailableTime"
+  ],
+  "productionWrites": 0
+}

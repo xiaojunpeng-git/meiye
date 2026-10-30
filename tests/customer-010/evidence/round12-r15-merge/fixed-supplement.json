@@ -1,0 +1,31 @@
+{
+  "base_head": "66b6036127b4b8e57845b60a59ecf38ad45571ba",
+  "merged_approved_release": "96953d21",
+  "staged_tree": "0fae8fa711a1eff4611a67954032b31770fc1f57",
+  "source_hashes": {
+    "前端代码/admin/src/pages/user/survey/index.vue": "d14970be1e2b17069bf5eb4a8c8534d1285ce14bf2205791c9687bf31dc9c35c",
+    "前端代码/admin/src/components/goodsAttr/index.vue": "e8a6c5ac5a9c428f52b7efb1a5a64f0fe4b2a26e8adca7110f3cf33c16a7038c",
+    "前端代码/admin/src/components/memberSurveyReward/index.vue": "7e715d2afb52c83e97fff7b837b87b4c897133e7e33e2d31ceffb9c6219b8098",
+    "后端代码/app/services/user/MemberSurveyServices.php": "59234c59e33ee8a9feae226ce880df823f33f6b27d7e44684cd0ca7e58511bdb",
+    "后端代码/app/services/user/MemberSurveyMiniProgramCodeServices.php": "b1a56b601e9a279fae8965b81dbbe203229529ad547c8b65c83bc73609a83bf4",
+    "后端代码/config/member_survey.php": "ba5b9e22b20214438439865998f66720afa086fddeba2a3f8b3ddf22003b3ec2",
+    "前端代码/uniapp/pages/users/survey/index.vue": "c7c41e6b5a1ce36f64cb4810e41bfc05b10e533f255814501b509d8648affac6"
+  },
+  "checks": {
+    "business.json": true,
+    "browser.json": true,
+    "admin-build.json": true,
+    "member-build-h5-rh.json": true,
+    "member-build-h5-008.json": true,
+    "member-build-h5-010.json": true,
+    "member-build-mp-weixin-008.json": true,
+    "member-build-mp-weixin-010.json": true
+  },
+  "release_config": {
+    "rh": "h5 default with existing member H5 URL",
+    "008": "MEMBER_SURVEY_QR_MODE=mini; mini trial environment",
+    "010": "MEMBER_SURVEY_QR_MODE=mini; mini trial environment"
+  },
+  "scope": "Preserve R15 shared source and previously accepted R12 gift+eligibility, restore phone/store/miniprogram QR for 008/010, keep H5 QR on rh. No business data changes.",
+  "excluded_dirty_file": "tests/customer-010/evidence/round6-payroll-release/push.json"
+}

@@ -1,0 +1,391 @@
+{
+  "task": "010-R12-SURVEY-MINI",
+  "base_head": "46a19f4f11a036dcd4be02fbc4a1c75bf4f2ce7a",
+  "fingerprint": "94b2160db32285c58ae120c3e3a631d04a617ce73eff0cc0ab059cb775b1262a",
+  "files": [
+    {
+      "group": "frontend",
+      "path": "前端代码/admin/src/pages/user/survey/index.vue",
+      "sha256": "2da06335d8794ac9fd2a444dca10290ca9221e8db3f1f945955d6c03ee80a75a"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/App.vue",
+      "sha256": "2276d3c68646900ed8cf96ee444b7f2a4e2f7b3f2a6b490a67120c3bfa7c1a3b"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/api/memberSurvey.js",
+      "sha256": "ccd305d6a00b77adf689de6e546a425df85b88b582aef8dc40e0f1290130e2e3"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/libs/login.js",
+      "sha256": "abb4008b2d7f7b7e32b63e1e62fc51923fbb3a20ffb621ccb91e5ac8c1af69df"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/pages/users/survey/index.vue",
+      "sha256": "9c5205cdb1c53e2b71fbba8e64b44fc3306535c4874d72c85dd553e738904f76"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/utils/memberPhoneGate.js",
+      "sha256": "a12e45e590b637d7d72dc057309df3d40a8b227c3d3e8e576dbb2f8510cf768d"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/uniapp/utils/memberSurveyScene.js",
+      "sha256": "317927eb453a64c850dddfce0107184852c2609cce33c2f3802531c9ebc5d138"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/controller/api/v1/user/MemberSurvey.php",
+      "sha256": "ab8a222e908668cd217b7dbed9d5a57015d2a81ec6572dc7cde6d08a3f975bf3"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/user/MemberSurveyServices.php",
+      "sha256": "9584117f5d996dafde6d5b18f4b701d41d572328995e6e0235323bdfdb80c56a"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/user/MemberSurveyMiniProgramCodeServices.php",
+      "sha256": "b1a56b601e9a279fae8965b81dbbe203229529ad547c8b65c83bc73609a83bf4"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/user/UserBelongStoreServices.php",
+      "sha256": "af7dedc4cb22389c90810a5cfa542be6743f1c40eb24b620551080bf74b2c00b"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/config/member_survey.php",
+      "sha256": "bfe717abb318364e07a3c7421d43a4af33a55465a63719ae448b356c1feb0538"
+    },
+    {
+      "group": "preserved_baseline",
+      "path": "前端代码/admin/src/pages/setting/staff/add.vue",
+      "sha256": "03ac863c7bec6a5847d7bc2f2a4b711893cf0509dcaefb5e4ed3c6cb7b9f636b"
+    },
+    {
+      "group": "preserved_baseline",
+      "path": "前端代码/admin/src/pages/setting/staff/index.vue",
+      "sha256": "70db3d787daa18479a2982bd2e8e82df98084e7110b7d09303f0cba94a82a320"
+    },
+    {
+      "group": "preserved_baseline",
+      "path": "前端代码/uniapp/pages/discover/discoverIndex/index.vue",
+      "sha256": "f92eebbf2a97a5c461e874e969dc3a65bfff1c26820d9e03d4ba0c4781cc9f12"
+    },
+    {
+      "group": "preserved_baseline",
+      "path": "前端代码/uniapp/pages/users/user_card/index.vue",
+      "sha256": "39416a5436d437ae9618bb33b3b38e1287161a66f238baba1d8ecda57486dbdc"
+    },
+    {
+      "group": "preserved_baseline",
+      "path": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+      "sha256": "49cef8438e99cd4d0e3c1d08cf3204cfdf76e092bb11b82f1f15a25fabdfc504"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/browser.cjs",
+      "sha256": "3069d82eca3772e5b7bc76abedbdb819582081b00b72002adc36a6cb8883a8ec"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/h5-runtime.cjs",
+      "sha256": "9472af7dd73c93601783d63d84404daa1e48beea3480d43ca22cac7af5210037"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/scene.cjs",
+      "sha256": "c8c21ed45847298ce0eeaaebb2dc795e16cd8db64923c032216734760e3309b3"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/phone-gate.cjs",
+      "sha256": "1ea90ea3620afc5585775c3e177cfbca2f86db023c9dfc9977a91a9d185d85ac"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/mini-login.cjs",
+      "sha256": "b782df8752bfc9295d6f9c2c73956c34e356c6129a7237dfa0b2b2d00a5d2682"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/js/platform-baseline.cjs",
+      "sha256": "5e3d2df87d3ee1ab63ac8cb601f2f4f88d22f96310c4d9f7ec349bf11d499d4c"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-survey/php/local-business.php",
+      "sha256": "438e6c1c83e5d13657fbc9d16a9e0a08d2ed79e92621b8f42f485498becb8b80"
+    },
+    {
+      "group": "tests",
+      "path": "tests/member-entitlement-display/model.cjs",
+      "sha256": "a5eac092395f840c6c463a707719436ede854db42151feb292c1bfe7336cf1c9"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/member-survey/build-admin-local.cjs",
+      "sha256": "a99475e9bc6e2295217fea4516a9eca91ac83b7eeadafabe896f95a5b7533f67"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/member-survey/build-local.cjs",
+      "sha256": "252bd9d6b9f1cb63ddc8e209129aec32cd64eedc5077455d069e4d5abff401ba"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/member-survey/test-local.cjs",
+      "sha256": "cf3f33e270058743ce9919e7785510e89f9d039624c435dee0a72f55c3e8dd80"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/member-survey/prepare-mini-experience.cjs",
+      "sha256": "7e43ae172b84ecc5c95f404e451d23ef9322a6b84873bca73b0837b83addfe27"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/member-survey/fix-mini-candidate.cjs",
+      "sha256": "211b023c1822c331d68f81cc63c6377891d2697d9442d946ad49c4b1d4d6e27a"
+    }
+  ],
+  "removed": [
+    "tests/member-survey/js/decode-qr.m"
+  ],
+  "checks": {
+    "business": {
+      "passed": true,
+      "count": 71,
+      "evidence_sha256": "ec1bbb1b3b9cfdacdf2050c94681fbd455807385c8aaa23167a5b2dfb392df00"
+    },
+    "browser": {
+      "passed": true,
+      "count": 16,
+      "evidence_sha256": "0160e3cda8049e1e07f98c34a2d173c1b35075ddacb641381cf5788e6bb4eb04"
+    },
+    "scene": {
+      "passed": true,
+      "count": 207,
+      "evidence_sha256": "77552513280cdce884efa4e5dc279c932372db58eb0232fb744b2c7e48e47097"
+    },
+    "phone-gate": {
+      "passed": true,
+      "count": 5,
+      "evidence_sha256": "9a8140ce58a04894b42996a57fee3ff864f5136c94049c9180722dd7d716d43c"
+    },
+    "mini-login": {
+      "passed": true,
+      "count": 4,
+      "evidence_sha256": "aba513587bce370394827088ae5200fb94219662037eb4322272941e9c1e0e3c"
+    },
+    "platform-baseline": {
+      "passed": true,
+      "count": 5,
+      "evidence_sha256": "0f7a69a8cf8a3e91f5be17cf9d2fa7deeee4002a34e183f484738d036ee709c6"
+    },
+    "member-baseline": {
+      "passed": true,
+      "count": 6,
+      "evidence_sha256": "5b0b61719d3a7b76b662acefd7a7e4453b7cfff448a3c220c0af82fc1d710518"
+    },
+    "h5-runtime": {
+      "passed": true,
+      "count": 4,
+      "evidence_sha256": "e443c700408b3b906953f28ea39974492a6f6cb3d5e99a8dac2056572ea52bf2"
+    },
+    "wechat-code-api": {
+      "passed": true,
+      "count": 1,
+      "evidence_sha256": "7a5c905a008fcd1cd54724b16ccf60029b6b6f4a6611936fd67592b4d583e05d"
+    },
+    "native-validation": {
+      "passed": true,
+      "count": 6,
+      "evidence_sha256": "eb19452d956b665b676df5fc1319d2c24df587b9db3a5cb09058585fd59d0443"
+    }
+  },
+  "builds": {
+    "admin-build": {
+      "passed": true,
+      "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/admin",
+      "base_head": "46a19f4f11a036dcd4be02fbc4a1c75bf4f2ce7a",
+      "node": "v16.20.2",
+      "source_inputs": {
+        "src/pages/user/survey/index.vue": "2da06335d8794ac9fd2a444dca10290ca9221e8db3f1f945955d6c03ee80a75a",
+        "src/components/memberSurveyReward/index.vue": "d01ce645c4aaaee91d295e46f0622a2df13b73822644e7e66b3ac907c7752184",
+        "src/utils/memberSurveyExcel.js": "fb01242e316ad6ecb15ae03a6a0b424291d38dbfdb29152e4aef231b136c2fee",
+        "src/utils/requiredGuidance.js": "d6d9128aab08dbe1bc32f7778655924f1dc11bca66be0ef387d3f2e2878035a6",
+        "src/api/memberSurvey.js": "f70dbcc0e60fcc990c34f435ec2b084badc76f5dd529d1c7966669ad5095bf38",
+        "src/router/modules/user.js": "d71d9812268f07938a797f61a9630e69c4225454a7ffedb8349f4ec4801552d6",
+        "src/pages/setting/staff/add.vue": "03ac863c7bec6a5847d7bc2f2a4b711893cf0509dcaefb5e4ed3c6cb7b9f636b",
+        "src/pages/setting/staff/index.vue": "70db3d787daa18479a2982bd2e8e82df98084e7110b7d09303f0cba94a82a320"
+      },
+      "output": "/tmp/r12-survey-admin-mini-flow",
+      "html_sha256": "26f115f2481898637f8f81b7479eeec64b28ebf732edc5c0dbc6611d18a85660",
+      "release": false,
+      "files": 1234,
+      "assets_sha256": "201f509a9b17825bacce960fde8ca767484ffa6dff1bdf7cf2248aa13f264a56"
+    },
+    "member-build-h5-010": {
+      "passed": true,
+      "platform": "h5",
+      "target": "010",
+      "apiOrigin": "https://010.cc3798.com",
+      "node": "v22.22.2",
+      "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/uniapp",
+      "source_inputs": {
+        "App.vue": "2276d3c68646900ed8cf96ee444b7f2a4e2f7b3f2a6b490a67120c3bfa7c1a3b",
+        "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+        "api/memberSurvey.js": "ccd305d6a00b77adf689de6e546a425df85b88b582aef8dc40e0f1290130e2e3",
+        "pages/users/survey/index.vue": "9c5205cdb1c53e2b71fbba8e64b44fc3306535c4874d72c85dd553e738904f76",
+        "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+        "utils/memberPhoneGate.js": "a12e45e590b637d7d72dc057309df3d40a8b227c3d3e8e576dbb2f8510cf768d",
+        "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+        "libs/login.js": "abb4008b2d7f7b7e32b63e1e62fc51923fbb3a20ffb621ccb91e5ac8c1af69df",
+        "utils/memberSurveyScene.js": "317927eb453a64c850dddfce0107184852c2609cce33c2f3802531c9ebc5d138",
+        "pages/discover/discoverIndex/index.vue": "f92eebbf2a97a5c461e874e969dc3a65bfff1c26820d9e03d4ba0c4781cc9f12",
+        "pages/users/user_card/index.vue": "39416a5436d437ae9618bb33b3b38e1287161a66f238baba1d8ecda57486dbdc",
+        "pages/users/user_card_list/index.vue": "49cef8438e99cd4d0e3c1d08cf3204cfdf76e092bb11b82f1f15a25fabdfc504"
+      },
+      "output": "/tmp/r12-survey-member-h5-010-mini-flow2",
+      "entry_sha256": "8e6324f270b00c08cfd1ff5d6a6b8ebf65fabcbd32ca2f1ae36fcb5693eae1ee",
+      "release": false,
+      "files": 511,
+      "assets_sha256": "1b6c59297c8dc2f6887b79ae021adca79f84dd56000e776d367d4ebd90267792"
+    },
+    "member-build-mp-weixin-010": {
+      "passed": true,
+      "platform": "mp-weixin",
+      "target": "010",
+      "apiOrigin": "https://010.cc3798.com",
+      "node": "v22.22.2",
+      "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/uniapp",
+      "source_inputs": {
+        "App.vue": "2276d3c68646900ed8cf96ee444b7f2a4e2f7b3f2a6b490a67120c3bfa7c1a3b",
+        "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+        "api/memberSurvey.js": "ccd305d6a00b77adf689de6e546a425df85b88b582aef8dc40e0f1290130e2e3",
+        "pages/users/survey/index.vue": "9c5205cdb1c53e2b71fbba8e64b44fc3306535c4874d72c85dd553e738904f76",
+        "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+        "utils/memberPhoneGate.js": "a12e45e590b637d7d72dc057309df3d40a8b227c3d3e8e576dbb2f8510cf768d",
+        "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+        "libs/login.js": "abb4008b2d7f7b7e32b63e1e62fc51923fbb3a20ffb621ccb91e5ac8c1af69df",
+        "utils/memberSurveyScene.js": "317927eb453a64c850dddfce0107184852c2609cce33c2f3802531c9ebc5d138",
+        "pages/discover/discoverIndex/index.vue": "f92eebbf2a97a5c461e874e969dc3a65bfff1c26820d9e03d4ba0c4781cc9f12",
+        "pages/users/user_card/index.vue": "39416a5436d437ae9618bb33b3b38e1287161a66f238baba1d8ecda57486dbdc",
+        "pages/users/user_card_list/index.vue": "49cef8438e99cd4d0e3c1d08cf3204cfdf76e092bb11b82f1f15a25fabdfc504"
+      },
+      "output": "/tmp/r12-survey-member-mp-weixin-010-mini-flow2",
+      "entry_sha256": "db7bc6f288914b6f8d23de98e89ae025e3c3ec5adad79cd7a3b5f580adf85795",
+      "release": false,
+      "files": 1913,
+      "assets_sha256": "68daa983f735a2fd9ecf4fc40c2647686af3c27d8081ab0ea380b7c95ec6aae4"
+    }
+  },
+  "preserved_baseline": {
+    "source_commit": "82894c184b9d9120d43e8e91a97f49d6f474953c",
+    "member_source_commit": "a08a1f77bcc2e404e6a15c0c17876cfb852b2d0e",
+    "accepted_R22_live_asset_matches": 778,
+    "rebuilt_unchanged_asset_matches": 774,
+    "changed_projection_assets": [
+      "view_admin/css/chunk-02dc75a8.e879aeed.css",
+      "view_admin/js/app.f5746a16.js",
+      "view_admin/js/chunk-02dc75a8.877dd1d9.js"
+    ],
+    "backend_matches_head": {
+      "app/services/user/MemberSurveyServices.php": true,
+      "app/services/user/UserBelongStoreServices.php": true,
+      "app/controller/api/v1/user/MemberSurvey.php": true,
+      "config/member_survey.php": true
+    },
+    "admin_source_inputs_matched": 1491,
+    "different_build_context_fingerprints_disclosed": true
+  },
+  "scope": [
+    "任务专属小程序码",
+    "提交前手机号授权",
+    "未归属会员主动选店，已有归属不改",
+    "首次归属与答卷同事务",
+    "奖励继续使用010现有服务"
+  ],
+  "delivery_target": {
+    "member_appid": "wxce4f61fc9c4eaaa6",
+    "trial_version": "3.4.1",
+    "api_origin": "https://010.cc3798.com",
+    "instance": "010",
+    "production_007_connection_changes": false
+  },
+  "runtime_configuration": {
+    "instance": "010",
+    "section": "MEMBER_SURVEY",
+    "MINI_ENV_VERSION": "trial",
+    "credentials_changes": false
+  },
+  "native_validation": {
+    "status": "native_connection_verified",
+    "app_id": "wxce4f61fc9c4eaaa6",
+    "api_origin": "https://010.cc3798.com",
+    "domain_validation_enabled": true,
+    "checks_passed": [
+      "开发者工具实际加载对应AppID的010包",
+      "扫码编译模式直接进入pages/users/survey/index",
+      "问卷冷启动保留任务页面，没有被手机号门禁提前重定向",
+      "开启合法域名校验时真实请求010接口成功",
+      "合成无效token收到后端业务拒绝，不是微信网络拦截"
+    ],
+    "blocker": null,
+    "observed_existing_domains": null,
+    "required_action": null,
+    "production_007_changed": false,
+    "uploaded": false,
+    "screenshot": "native-final-package-verified.png",
+    "verified_at": "2026-10-29T17:19:04.917441+08:00",
+    "request_url": "https://010.cc3798.com/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff",
+    "http_status": 200,
+    "business_status": 400,
+    "response_message": "问卷链接无效",
+    "synthetic_token_only": true,
+    "full_live_submission": "pending post-acceptance deployment; current online tasks are user drafts",
+    "passed": true,
+    "project": "/tmp/r12-survey-member-mp-weixin-010-mini-flow2",
+    "app_json_sha256": "db7bc6f288914b6f8d23de98e89ae025e3c3ec5adad79cd7a3b5f580adf85795",
+    "vendor_sha256": "ef5ce77e23043a1f638d101538a9266ee807ef6e10fcaf1fedcc55ef1a6b2daa",
+    "checks": [
+      "开发者工具实际加载对应AppID的010包",
+      "扫码编译模式直接进入pages/users/survey/index",
+      "问卷冷启动保留任务页面，没有被手机号门禁提前重定向",
+      "开启合法域名校验时真实请求010接口成功",
+      "合成无效token收到后端业务拒绝，不是微信网络拦截",
+      "纳入已上线M014会员权益基线的最终体验包再次通过原生扫码联网验证"
+    ]
+  },
+  "limitations": [
+    "010合法域名及原生联网已验证；新代码部署后的真实提交联调尚未执行",
+    "未提交、未部署、未上传；需固定版本产品经理补验",
+    "未创建或发布线上测试任务，010已有草稿保留",
+    "此前本地ruihao开发库事件仍未恢复，本轮测试只用隔离合成库"
+  ],
+  "cleanup": [
+    "删除已失效的普通H5二维码解码测试",
+    "删除管理页普通二维码生成分支及依赖导入",
+    "删除已无调用的member_h5_base_url配置，其他模块仍使用的qrcodejs2依赖保留"
+  ],
+  "comments": [
+    "前端代码/admin/src/pages/user/survey/index.vue",
+    "前端代码/uniapp/App.vue",
+    "前端代码/uniapp/api/memberSurvey.js",
+    "前端代码/uniapp/libs/login.js",
+    "前端代码/uniapp/pages/users/survey/index.vue",
+    "前端代码/uniapp/utils/memberPhoneGate.js",
+    "前端代码/uniapp/utils/memberSurveyScene.js",
+    "后端代码/app/controller/api/v1/user/MemberSurvey.php",
+    "后端代码/app/services/user/MemberSurveyServices.php",
+    "后端代码/app/services/user/MemberSurveyMiniProgramCodeServices.php",
+    "后端代码/app/services/user/UserBelongStoreServices.php",
+    "后端代码/config/member_survey.php"
+  ]
+}

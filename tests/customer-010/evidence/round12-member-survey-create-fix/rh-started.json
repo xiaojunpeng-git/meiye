@@ -1,0 +1,6 @@
+{
+  "backup": "/www/backups/rh/round12-create-fix-ad40ce8efbd6-20261029133025",
+  "commit": "ad40ce8efbd6d0ad08b1f9954986650cf2a819fa",
+  "old_sha256": "ae34a79489f9698f9172be3974e04e22b4c928f418d79d6ed74fa00f995c50ca",
+  "new_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36"
+}

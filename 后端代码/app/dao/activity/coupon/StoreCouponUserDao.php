@@ -218,11 +218,13 @@ class StoreCouponUserDao extends BaseDao
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getUserAllCoupon(int $uid)
+    public function getUserAllCoupon(int $uid, bool $includeUnavailable = false)
     {
-        return $this->getModel()->where(['uid' => $uid, 'status' => 0, 'is_fail' => 0])
-            ->where('start_time', '<=', time())->where('end_time', '>=', time())
-            ->order('coupon_price DESC')->with('issue')->select()->hidden(['status', 'is_fail'])->toArray();
+        // Selection needs all owned coupons to explain rejection; other callers retain their old scope.
+        $query = $this->getModel()->where('uid', $uid);
+        if (!$includeUnavailable) $query->where(['status' => 0, 'is_fail' => 0])
+            ->where('start_time', '<=', time())->where('end_time', '>=', time());
+        return $query->order('coupon_price DESC')->with('issue')->select()->toArray();
     }
 
     /**

@@ -1,0 +1,75 @@
+{
+  "round": 11,
+  "date": "2026-10-29",
+  "result": "PASS",
+  "business_source_commit": "fdefbefb8591cfca481746a17ffb2bc6bd464534",
+  "original_feature_commit": "bf3b8ea1efcffd6a46f090b8e93477831973baf5",
+  "fixed_supplement": "042cec4d35e1c193b23ab734ddcbc1d29f30c01c1c4d353416e8a41ce3e1185e",
+  "sequence": [
+    "rh verified",
+    "origin push verified",
+    "008 verified",
+    "010 verified"
+  ],
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backup": "/www/backups/rh/round11-fdefbefb8591-20261029005522",
+      "files": 17,
+      "matrix_columns": 104,
+      "daily_columns": 32,
+      "export_rows": 13,
+      "old_reports_equal": true,
+      "business_and_grants_unchanged": true
+    },
+    "008": {
+      "result": "PASS",
+      "backup": "/www/backups/008/round11-fdefbefb8591-20261029005616",
+      "files": 17,
+      "matrix_columns": 132,
+      "daily_columns": 32,
+      "export_rows": 10,
+      "old_reports_equal": true,
+      "business_and_grants_unchanged": true
+    },
+    "010": {
+      "result": "PASS",
+      "backup": "/www/backups/010/round11-fdefbefb8591-20261029005637",
+      "files": 17,
+      "matrix_columns": 12,
+      "daily_columns": 32,
+      "export_rows": 12,
+      "old_reports_equal": true,
+      "business_and_grants_unchanged": true
+    }
+  },
+  "browser": {
+    "010": {
+      "authenticated_user": "A0751",
+      "new_report_without_leaf_grant": "not listed in menu / direct route refuses data",
+      "store_grant_tree": "基础报表→门店对账单 exists and unchecked",
+      "platform_grant_tree": "报表→门店统计→门店对账单 exists and unchecked; legacy same-name entry remains separate",
+      "changes_saved": false,
+      "cancelled_editor": true,
+      "existing_employee_report_actual_query_click": "PASS"
+    },
+    "rh": {
+      "existing_browser_session_direct_new_route": "403, independent permission preserved"
+    },
+    "limitation": "No real account was granted new report access for this release; authorized positive business behavior verified through real deployed Host/Reader and export, not claimed as an authorized-account full UI test."
+  },
+  "entry": "平台：报表→门店统计→门店对账单；门店：基础报表→门店对账单",
+  "permissions": "新增叶子默认不授予旧岗位；当前账号需在岗位中获授新叶子后才能看到入口",
+  "data": "未导入或重算业务数据；980元原退款状态差异仍留在导入方案",
+  "not_deployed": [
+    "007",
+    "012",
+    "商家端小程序",
+    "会员端"
+  ],
+  "operations_scripts": {
+    "scripts/payroll/round11-publish.py": "9502b9a0a3caa8d4338b0d38252e7aa26508273e9de0ab4c536918ffaa28cb7c",
+    "scripts/payroll/round11-release-install.php": "96d4faa233c7457f54da5d85756c1f84a3f2dc3272fd441bb6e6b6cd7d8f9068"
+  },
+  "formal_package": "本轮按已验收固定源码构建及精确静态增量发布；原现网包与固定基线逐字节重建匹配；不把本地验证包冒充另一次8080整包构建"
+}

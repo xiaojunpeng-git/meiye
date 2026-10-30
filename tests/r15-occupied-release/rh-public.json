@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "checkedAssets": [
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.6dcbdbfd.js",
+    "/static/js/index.5b423603.js",
+    "/static/js/pages-activity-reservation-index.756ec005.js",
+    "/static/js/pages-discover-discoverIndex-index.241e21ce.js",
+    "/static/js/pages-user-index.a5fbacf7.js",
+    "/static/js/pages-users-survey-index.673b9d9f.js",
+    "/static/js/pages-users-user_card-index.6c74f2b8.js",
+    "/static/js/pages-users-user_card_list-index.7c94998e.js"
+  ],
+  "personalCenterAPI": true,
+  "businessWrites": 0
+}

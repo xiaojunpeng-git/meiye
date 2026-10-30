@@ -1,0 +1,6 @@
+{
+  "result": "FAIL",
+  "templates": 419,
+  "outputSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr": "components/chooseTime/index.wxml:1:546: Bad attr `style` with message: unexpected token `}`.\n"
+}

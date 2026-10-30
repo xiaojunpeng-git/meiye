@@ -1,0 +1,37 @@
+{
+  "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+  "candidateTree": "1f76afda5525ab55f61ec3ef3b8627a1281f9a96",
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "branch": "release/r15-occupied-publish-20261030",
+  "acceptedFiles": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "cd5f8bf3cfb0e4484ab8e7969eeff2edd1115591d29fe555edb78e09de17cb3d",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "5f9ae5486f9e6fa5866c7955b160915f4715ed502b2ced80829d9a7cbc753128"
+  },
+  "backendFiles": [
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "supplementalAccepted": true,
+  "acceptedPatches": [
+    "50cce4fe"
+  ],
+  "apps": {
+    "008": {
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.82"
+    },
+    "010": {
+      "appid": "wxce4f61fc9c4eaaa6",
+      "version": "3.0.82"
+    }
+  },
+  "memberOutputs": {
+    "008": "/private/tmp/r15-occupied-addon-final-008-h5/output",
+    "rh": "/private/tmp/r15-occupied-publish-rh-h5/output",
+    "010": "/private/tmp/r15-occupied-publish-010-h5/output"
+  },
+  "miniOutputs": {
+    "008": "/private/tmp/r15-occupied-addon-final-008-mp-weixin/output",
+    "010": "/private/tmp/r15-occupied-publish-010-mp-weixin/output"
+  },
+  "scope": "one backend file and member H5; platform/cashier/configuration/data protected"
+}

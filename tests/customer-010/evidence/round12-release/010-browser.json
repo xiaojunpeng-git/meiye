@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "account": "A0751",
+  "checks": [
+    "Existing survey menu and task list render",
+    "Questionnaire editor opens",
+    "Missing questionnaire name focuses the field and shows inline guidance",
+    "Refresh restores empty task list",
+    "Public member H5 deep link renders invalid-link state without forced login"
+  ],
+  "no_test_business_rows_created": true
+}

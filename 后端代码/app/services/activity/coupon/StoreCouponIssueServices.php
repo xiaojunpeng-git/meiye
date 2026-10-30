@@ -154,10 +154,22 @@ class StoreCouponIssueServices extends BaseServices
      */
     public function saveCoupon($data, $id, $coupon_issue_type)
     {
-        // Every issuer (platform/store/merchant) shares allowance invariants.
-        // Controller validation alone would let an older editor change an
-        // issued face or accidentally reinterpret it as a discount percentage.
         $existing = $id ? $this->dao->get($id) : null;
+        // Published eligibility cannot be reinterpreted by an older editor. New
+        // policies require a new template, so historical coupons keep their terms.
+        foreach (['usage_target', 'new_user_only'] as $field) {
+            if (!array_key_exists($field, $data)) $data[$field] = (int)($existing[$field] ?? 0);
+            if ($existing && (int)$data[$field] !== (int)$existing[$field]) {
+                throw new AdminException('已发行优惠券的使用对象和新用户规则不可修改，请新建优惠券');
+            }
+        }
+        if ($existing && ((int)$existing['applicable_type'] === 3 || (int)($data['applicable_type'] ?? 1) === 3)
+            && (int)$existing['applicable_type'] !== (int)$data['applicable_type']) {
+            throw new AdminException('已发行优惠券不可切换发放门店规则，请新建优惠券');
+        }
+        try { StoreCouponEligibilityRule::validate($data); }
+        catch (\InvalidArgumentException $e) { throw new AdminException($e->getMessage()); }
+        // Every issuer shares allowance invariants, including legacy editors.
         if ((int)($data['coupon_type'] ?? 1) === StoreCouponAllowanceServices::TYPE
             || ($existing && (int)$existing['coupon_type'] === StoreCouponAllowanceServices::TYPE)) {
             if ($existing && ((int)($data['coupon_type'] ?? 1) !== (int)$existing['coupon_type']
@@ -263,6 +275,8 @@ class StoreCouponIssueServices extends BaseServices
                 $data['cid'] = $item['id'];
                 $data['uid'] = $uid;
                 $data['oid'] = $orderInfo['id'];
+                // Business-origin store is immutable for order/recharge gifts.
+                $data += (new StoreCouponEligibilityServices())->issuance((int)$uid, (int)($orderInfo['store_id'] ?? 0));
                 $data['coupon_title'] = $item['store_name'];
                 $data['coupon_price'] = $coupon['coupon_price'];
                 $data['use_min_price'] = $coupon['use_min_price'];
@@ -305,7 +319,7 @@ class StoreCouponIssueServices extends BaseServices
      * @param string $type
      * @return array
      */
-    public function saveGiveCoupon(int $uid, array $couponList, string $type = 'get')
+    public function saveGiveCoupon(int $uid, array $couponList, string $type = 'get', int $businessStoreId = 0)
     {
         if (!$uid || !$couponList) {
             return [];
@@ -330,6 +344,7 @@ class StoreCouponIssueServices extends BaseServices
                 $data['end_time'] = $item['end_use_time'];
             }
             $data['type'] = $type;
+            $data += (new StoreCouponEligibilityServices())->issuance($uid, $businessStoreId ?: (int)($item['relation_id'] ?? 0), $type === 'get');
             $issue['uid'] = $uid;
             $issue['issue_coupon_id'] = $item['id'];
             $issue['add_time'] = $time;
@@ -458,13 +473,13 @@ class StoreCouponIssueServices extends BaseServices
      * 下单之后赠送
      * @param $uid
      */
-    public function orderPayGiveCoupon($uid, $coupon_issue_ids)
+    public function orderPayGiveCoupon($uid, $coupon_issue_ids, int $businessStoreId = 0)
     {
         if (!$coupon_issue_ids) return [];
         $couponList = $this->dao->getGiveCoupon([['id', 'IN', $coupon_issue_ids]]);
         $couponData = [];
         if ($couponList) {
-            $couponData = $this->saveGiveCoupon($uid, $couponList, 'order');
+            $couponData = $this->saveGiveCoupon($uid, $couponList, 'order', $businessStoreId);
         }
         return $couponData;
     }
@@ -915,6 +930,7 @@ class StoreCouponIssueServices extends BaseServices
                 $data[$i]['end_time'] = $coupon['end_use_time'];
             }
             $data[$i]['type'] = 'send';
+            $data[$i] += (new StoreCouponEligibilityServices())->issuance((int)$v, (int)($coupon['relation_id'] ?? 0));
             $issueData[$i]['uid'] = $v;
             $issueData[$i]['issue_coupon_id'] = $coupon['id'];
             $issueData[$i]['add_time'] = time();

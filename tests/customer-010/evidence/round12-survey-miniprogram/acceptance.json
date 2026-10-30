@@ -1,0 +1,10 @@
+{
+  "accepted": true,
+  "fingerprint": "94b2160db32285c58ae120c3e3a631d04a617ce73eff0cc0ab059cb775b1262a",
+  "user_confirmation": "确认补验通过，继续部署010并上传体验版",
+  "targets": [
+    "010 backend/platform/member H5",
+    "shared member AppID experience only, API010"
+  ],
+  "production007_unchanged": true
+}

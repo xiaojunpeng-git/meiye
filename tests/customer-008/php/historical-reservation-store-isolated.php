@@ -41,6 +41,24 @@ set_exception_handler(static function (Throwable $error): void {
 });
 Db::connect('mysql', true)->query('SELECT 1');
 
+// Cloned entitlement lines must also belong to an issued rule when the
+// disposable carrier already has one; otherwise the fixture is corrupt.
+function cloneReservationRuleComponent(int $newId, array $row): void
+{
+    $holderId = (int)Db::name('user_card_holder')->where('oid', (int)$row['oid'])->value('id');
+    $stateId = (int)Db::name('cashier_v3_card_rule_state')->where('card_holder_id', $holderId)->value('id');
+    if (!$stateId) return;
+    $component = Db::name('cashier_v3_card_rule_component')->where('rule_state_id', $stateId)->find();
+    if (!$component) throw new RuntimeException('Missing base rule component');
+    unset($component['id']);
+    $component['component_state_id'] = 'CRC-LOCAL-' . bin2hex(random_bytes(10));
+    $component['legacy_detail_id'] = $newId;
+    $component['relation_id'] = 9000000 + $newId;
+    $component['remaining_times'] = (int)$row['write_surplus_times'];
+    $component['total_times'] = max((int)$component['total_times'], (int)$row['write_surplus_times']);
+    Db::name('cashier_v3_card_rule_component')->insert($component);
+}
+
 $service = new ImportedEntitlementReservationStoreServices();
 $orderInfo = $app->make(StoreReservationOrderServices::class)->getOrderInfo(421, 5338, 13967);
 if (empty($orderInfo['historical_store_picker'])
@@ -134,7 +152,9 @@ try {
         $row = array_merge($baseDetail, ['write_surplus_times' => 2, 'write_start' => 0, 'write_end' => 0], $changes);
         unset($row['id']);
         $row['unique'] = bin2hex(random_bytes(16));
-        return (int)Db::name('store_order_cart_info')->insertGetId($row);
+        $id = (int)Db::name('store_order_cart_info')->insertGetId($row);
+        cloneReservationRuleComponent($id, $row);
+        return $id;
     };
     $addonId = $newDetail(['write_surplus_times' => 1]);
     $mainId = $newDetail();

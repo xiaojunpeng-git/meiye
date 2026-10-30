@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "kind": "admin",
+  "source_commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "files": 37,
+  "archive_sha256": "46ccac096a2ed2a82002d7add1af6c27e6067f1bce9ae6c750085c0fff67140e",
+  "manifest_sha256": "311e773ca3080b54c190757616f7f3e15eb6beda170fd0747ed56fe8188c913d"
+}

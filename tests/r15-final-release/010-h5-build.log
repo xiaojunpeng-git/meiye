@@ -1,0 +1,27 @@
+Compiling...
+
+已忽略静态资源目录：static/app-plus。详见：https://uniapp.dcloud.net.cn/tutorial/platform.html#static
+
+ INFO  Build optimizing...
+ DONE  Build complete. 
+Performing hot reload...
+WARNING: asset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
+This can impact web performance.
+Assets: 
+  static/js/index.8bf8c2ea.js (643 KiB)
+  static/js/pages-admin-agent-index~pages-admin-yeji-staff~pages-admin-yeji-store.a031b29b.js (358 KiB)
+  static/js/pages-annex-special-index~pages-index-index.0652511f.js (457 KiB)
+  static/js/pages-annex-vip_active-index.c3a2d15d.js (360 KiB)
+  static/js/pages-goods-lottery-grids-index.19a4456b.js (424 KiB)
+  static/js/pages-goods-lottery-wheel-index.6d975f90.js (914 KiB)
+  static/js/pages-users-binding_phone-index~pages-users-distributor-apply~pages-users-franchisees-index~pages-us~2d5eb401.cef00a2c.js (541 KiB)
+  static/design-system/beauty-carousel-care.png (290 KiB)
+  static/design-system/beauty-carousel-spa.png (313 KiB)
+  static/design-system/beauty-member-hub.png (579 KiB)
+  static/design-preview/beauty-hero.png (1.65 MiB)
+entrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
+Entrypoints:
+  index (643 KiB)
+      static/js/index.8bf8c2ea.js
+
+ DONE  Build complete.

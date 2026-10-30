@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "checks": 80,
+  "results": [
+    {
+      "mode": "platform",
+      "width": 1475,
+      "passed": true
+    },
+    {
+      "mode": "platform",
+      "width": 610,
+      "passed": true
+    },
+    {
+      "mode": "store",
+      "width": 1475,
+      "passed": true
+    },
+    {
+      "mode": "store",
+      "width": 610,
+      "passed": true
+    }
+  ],
+  "evidence": "Actual Vue components and PHP unified query with source-oracle-proven anonymized receipt data; authenticated online deployment is pending acceptance."
+}

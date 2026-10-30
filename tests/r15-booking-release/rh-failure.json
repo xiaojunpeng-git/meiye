@@ -1,0 +1,8 @@
+{
+  "error": "Command '['ssh', '-T', '-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', 'rh-server', '/www/server/php/74/bin/php -- rh']' returned non-zero exit status 255.",
+  "stderr": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\n",
+  "started": [
+    "admin",
+    "member"
+  ]
+}

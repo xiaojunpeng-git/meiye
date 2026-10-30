@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "checkedAssets": [
+    "/static/index.e8e070f7.css",
+    "/static/js/chunk-vendors.4f78314f.js",
+    "/static/js/index.c9aa2994.js",
+    "/static/js/pages-users-survey-index.8352101e.js",
+    "/static/js/pages-users-user_card-index.7397300a.js",
+    "/static/js/pages-discover-discoverIndex-index.7d2cbe0e.js",
+    "/static/js/pages-users-user_card_list-index.f515b356.js",
+    "/basic-report-menu.css",
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.33283ef6.js",
+    "/view_admin/js/app.a515c148.js"
+  ],
+  "allOrdersFromPublicAPI": true,
+  "businessWrites": 0
+}

@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/admin",
+  "base_head": "0bcbc98d546ea58146b75ba82c203ac1997cc317",
+  "node": "v16.20.2",
+  "source_inputs": {
+    "src/pages/user/survey/index.vue": "25ff45be815389a9ba1b692cff3f350a2dac079404f4a3297460dbeeb12778b5",
+    "src/components/memberSurveyReward/index.vue": "7e715d2afb52c83e97fff7b837b87b4c897133e7e33e2d31ceffb9c6219b8098",
+    "src/components/rechargeGiftConfig/index.vue": "0bbc366f7e289b3011cd75195ad02fafb6694f81208bd1b4a18564db02fa3346",
+    "src/components/goodsAttr/index.vue": "e7fbaca411a71bbd9cb3eee93897e46e0b2e0b23f9ad09c2ba34d87f4cbc48b5",
+    "src/utils/memberSurveyExcel.js": "fb01242e316ad6ecb15ae03a6a0b424291d38dbfdb29152e4aef231b136c2fee",
+    "src/utils/requiredGuidance.js": "d6d9128aab08dbe1bc32f7778655924f1dc11bca66be0ef387d3f2e2878035a6",
+    "src/api/memberSurvey.js": "f3ba4ebeadca28954b2a88e2010db5ac74b0c05bc96e9b543452dc29b3b3bdae",
+    "src/router/modules/user.js": "d71d9812268f07938a797f61a9630e69c4225454a7ffedb8349f4ec4801552d6",
+    "src/pages/setting/staff/add.vue": "03ac863c7bec6a5847d7bc2f2a4b711893cf0509dcaefb5e4ed3c6cb7b9f636b",
+    "src/pages/setting/staff/index.vue": "70db3d787daa18479a2982bd2e8e82df98084e7110b7d09303f0cba94a82a320"
+  },
+  "output": "/tmp/r12-survey-admin-eligibility-final",
+  "html_sha256": "86573081de3c084e9a7a865abcd271a224a2343ffcead8a5f979f5a1ced7142a",
+  "release": false
+}

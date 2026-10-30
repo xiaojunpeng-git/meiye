@@ -155,20 +155,6 @@
                 </FormItem>
               </Col>
             </Row>
-            <Row :gutter="24" v-if="Number(formInline.cashier_craftsman_enabled) === 1">
-              <Col :span="24">
-                <FormItem label="手艺人服务业绩类型：">
-                  <RadioGroup v-model="formInline.craftsman_performance_type" type="button">
-                    <Radio label="commission">消耗业绩</Radio>
-                    <Radio label="labor">手工费</Radio>
-                    <Radio label="commission_labor">消耗业绩+手工费</Radio>
-                  </RadioGroup>
-                  <div class="form-tip">
-                    消耗业绩、手工费或两者同时参与服务结算。
-                  </div>
-                </FormItem>
-              </Col>
-            </Row>
             <Row :gutter="24">
               <Col :span="12">
                 <FormItem label="在职状态：">
@@ -596,7 +582,7 @@ function getDefaultStaffForm() {
     can_choose: 1,
     cashier_salesperson_enabled: 1,
     cashier_craftsman_enabled: 1,
-    // 新建默认同时计消耗业绩和手工费，编辑时以已保存类型为准。
+    // 兼容后端员工保存契约：新编辑一律按双项业绩保存，历史事实不回写。
     craftsman_performance_type: 'commission_labor',
     craftsman_setting_version: 1,
     is_reservable: 1,
@@ -1107,9 +1093,7 @@ export default {
             ? data.cashier_craftsman_enabled
             : base.cashier_craftsman_enabled,
         ),
-        craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String((data && data.craftsman_performance_type) || ''))
-          ? String(data.craftsman_performance_type)
-          : 'commission', // 旧详情缺少该字段时沿用原编辑兼容值，不把新建默认写回历史员工。
+        craftsman_performance_type: 'commission_labor',
         // 旧响应缺少版本时不猜测；服务端拒绝无版本写入，避免覆盖并发设置。
         craftsman_setting_version: Number(data && data.craftsman_setting_version) || null,
         is_fencheng: Number((data && data.is_fencheng) != null ? data.is_fencheng : base.is_fencheng),
@@ -1402,9 +1386,8 @@ export default {
         : [];
       payload.cashier_salesperson_enabled = Number(this.formInline.cashier_salesperson_enabled) === 1 ? 1 : 0;
       payload.cashier_craftsman_enabled = Number(this.formInline.cashier_craftsman_enabled) === 1 ? 1 : 0;
-      payload.craftsman_performance_type = ['commission', 'labor', 'commission_labor'].includes(String(this.formInline.craftsman_performance_type || ''))
-        ? String(this.formInline.craftsman_performance_type)
-          : 'commission';
+      // 编辑旧员工时也统一使用双项业绩，不再继承已取消的类型开关。
+      payload.craftsman_performance_type = 'commission_labor';
       if (payload.store_id === 0) {
         payload.craftsman_setting_version = this.formInline.craftsman_setting_version;
       } else {

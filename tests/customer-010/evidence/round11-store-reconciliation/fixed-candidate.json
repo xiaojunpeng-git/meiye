@@ -1,0 +1,256 @@
+{
+  "round": 11,
+  "name": "门店对账单固定候选",
+  "created_at": "2026-10-29T00:26:28.986680+08:00",
+  "base_head": "2762e0234510b0f897277d628a8f5a903d1f3855",
+  "main_head_checked": "038ccffa5c6ad6112858ac23a132450a6e498fe2",
+  "baseline_only_commits": [
+    "f1782dfcf8239b00e2cf0f6f2d1c6b61d1f90bd5",
+    "2762e0234510b0f897277d628a8f5a903d1f3855"
+  ],
+  "patch_fingerprint_sha256": "ee145ff001190bb120c5e569c8067cec48b97058a644cf5fca5b99f6cc714e3e",
+  "fingerprint_algorithm": "SHA256(sorted relative path + NUL + file SHA256 joined by LF, ending LF)",
+  "files": [
+    {
+      "group": "frontend",
+      "path": "前端代码/cashier-v3/src/views/BasicReportsView.vue",
+      "sha256": "b780fddd26254a4720f11419971a16182c9acaa51f4854430b27619be08a08d6"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/cashier-v3/src/services/basicReportApi.js",
+      "sha256": "c9d28685f551fa1f113a92455371f73472c36f9a61cf92a3db2a110088077c5a"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/cashier-v3/src/components/reports/StoreReconciliationReport.vue",
+      "sha256": "515387094a048c27c5bdb8c62f1dcde915f72e3e2922b058319e94dbd9faf97f"
+    },
+    {
+      "group": "frontend",
+      "path": "前端代码/cashier-v3/src/dev/r11StoreReconciliationFixture.js",
+      "sha256": "575a8b1c7b3ce4deedf31dbca3cb978fff6615606db0c81ae227a96b318dd773"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/order/ValidCashOrderServices.php",
+      "sha256": "4cd16036fb1319616c459c5e22e51b28b5f8f14a0d465dfe5993bcbdaca6ad53"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+      "sha256": "510caf415c42f62614ca2bef41ceb516245fd7c6ff45a9987670cb3384f83cb2"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/organization/StorePermissionCatalogServices.php",
+      "sha256": "5fb1a7708bf395f0ce42209bdf4cad22b349400909e05317a6745771fbdba2c6"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/BasicReportCatalogServices.php",
+      "sha256": "20550c5e2a7e88c894a552ed4c1fde920d87b929047fa8bade819ed4031ccdda"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/BasicReportHostServices.php",
+      "sha256": "79d972e87122e8d48cb22160afa8637d1da8b91e902d25901411ba3a830e6b58"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/query/BasicBusinessQueryRegistrar.php",
+      "sha256": "0cb37536b2784d39a057d209be1096f3443f29026d15f3e47119b747175d3224"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/config/unified_query.php",
+      "sha256": "0666fbc756181a50b8d089532882ea5e0f75d7c02637446a2949329cbf0578e4"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/StoreReconciliationReceiptReader.php",
+      "sha256": "9ba20cb48edf4e3eaee93bfe12fd4c56952e50682a0ef9917d14627db040d8e9"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/StoreReconciliationMatrix.php",
+      "sha256": "9977ccda7e4415b0581f7a6a07c8aa087504821d7457422fd60b97088cebb65b"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/StoreReconciliationReportServices.php",
+      "sha256": "f1245514cb12a8591459db5c973bd96493bec0c8e2051bf45850496374fa580d"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationQueryProvider.php",
+      "sha256": "f9194f960f21c4a47085b77b884254318db507512d89f6a4a1d4224b9d978cbd"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationQueryRegistrar.php",
+      "sha256": "0611607fbfd99fc5de5ea177f171a95c13d293fddabe84bbd6062e20ae58a3a0"
+    },
+    {
+      "group": "backend",
+      "path": "后端代码/app/services/report/query/BasicStoreReconciliationWorkerContextResolver.php",
+      "sha256": "e711d2f810f442d8a83e989bd72f14698b7afca3347a54f8511ef5588b8fac93"
+    },
+    {
+      "group": "migrations",
+      "path": "后端代码/database/upgrades/2026-10-28-门店对账单/01-平台菜单.sql",
+      "sha256": "9cb9dfee72f93ab1a44d76165855575d3a042af2e31245289187815e32fde2f2"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/payroll/round11-reconciliation-install.php",
+      "sha256": "06a4bc9b569d63096a5c863ba309cc14de209823941fe3acb45dbe6ea20d4e3f"
+    },
+    {
+      "group": "scripts",
+      "path": "scripts/payroll/round11-reconciliation-source.py",
+      "sha256": "e0de8f0e6487b6dbc6ddcdfaf45f66dbb369f0676237963ba0064d1beed7a64b"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-matrix.php",
+      "sha256": "8a3602d5bec556ea692188c584efdf6db4c045d2a13957c5272b732718fe1313"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-query.php",
+      "sha256": "44799c75481b71c7829896f4320cc4fd3f8c83261d7ad4a88d3570f3bf5cdf25"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-runtime.php",
+      "sha256": "21766fab42b1c222793a4ce5b35a8f119850c397d7eb036b5476defd4494c131"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-permissions.php",
+      "sha256": "07806883aac2830d616e2a7d3ac73a34b1764bfbe36dce16acbe195c00f3527a"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-local.php",
+      "sha256": "323501cf0fe34417f416f5091ec36bc32b5ef1372b5a16267e66f655b012a2f7"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-reconciliation-contract.php",
+      "sha256": "71bca215c18218047bd1e19bfece58b02377e8719e82aaf7900a52a2407acce3"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/js/store-reconciliation-browser.mjs",
+      "sha256": "4f59928af6a8e9190440c6c913a01638bc6fc82e6ee1215a03dfe99f4ee44f9a"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/catalog-contract.php",
+      "sha256": "c5a1ca00cf2d7d9883bae20edec6f1ce5133a803a7e281aeb906eb14809cd3af"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/navigation-local.php",
+      "sha256": "77c7cc47c51cbd4915ad90fe66f7bb0d9534ab1da860a7901cec11361b6ca13b"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/php/store-group-grant-contract.php",
+      "sha256": "0fa28ea2a04bda666aefacc7c0733826fd842529bf7f0f8df25f000be98fc7c8"
+    },
+    {
+      "group": "automated_tests",
+      "path": "tests/report-basic/js/business-browser.mjs",
+      "sha256": "cedac09685720a5d9e49a1b64d38b9c1cb9692071eabf1c47ee1abec4916d307"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/exceljs.min-a0d233a6.js",
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/index-2da1bc6c.js",
+      "sha256": "20fdb11e843ea658aa091d875e3d87bf8e1d715810d416e118d0cb93e3fc8a4a"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/index-ae8d7fac.css",
+      "sha256": "ae8d7facb6d8442c7b30abc8b6c19f9d2dc56584821f576824acbe123b118195"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/assets/login-beauty-quiet-826510a5.png",
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "/private/tmp/beauty-r11-store-reconciliation-build/index.html",
+      "sha256": "a78ea56557daf1afc029171ea720e59f0bd0dc2d455c082990778faa545f1026"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/selftest-summary.json",
+      "sha256": "f7dc9beaa74e7a025a2710c24074490ca9d16efa7a746890184f1a44c8c640d8"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/browser-results.json",
+      "sha256": "6c19537d667703a78d452855606b98de06533438d02f364dd2c6eda702fa4fa7"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/r51-business-browser.json",
+      "sha256": "e3e5ab7d8bc3eadbad1e9b2da51a1521631bcf2bed52ff03ccb9448e6866b6c9"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/php-lint.json",
+      "sha256": "a79ce1479756ddc9ef828fe1d456a1dc23f1d57c2022e7d83d82e8a92a0d630b"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/010-september-lifecycle-readonly.json",
+      "sha256": "e44ab227d7fc970068392beb311da38781dedfc2aae6d401efe30d4cbf6425dd"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/explain-010.json",
+      "sha256": "33fea08814fbdc7735ab7634cfdf3826e68d64a0f9fb8c30810e94a119e407a3"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/reconciliation-platform-1475.png",
+      "sha256": "0e729a89b3aaf196fc67dde428e6d3edc5876ec337ca586ea70ebf544f39cec0"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/reconciliation-platform-610.png",
+      "sha256": "b9e1f71e8e9bc119805928cfe39bd4f09f5a43e393b1a7b19438a16e365201bb"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/reconciliation-store-1475.png",
+      "sha256": "3c8f4fd40f25bad4fdc1a17f302a8af3199798fba31ec1d8f948bf919e223ac3"
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/reconciliation-store-610.png",
+      "sha256": "f591b50d02357f8f65407994942cb470993f1a929d59366d7ab97b566c6b0b13"
+    }
+  ],
+  "local_private_inputs": [
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/source-007-2026-09.json",
+      "sha256": "0178487dae51707aeb6b3c63728abe2dc3f7de77b07c4e6530d1e60f630cb373",
+      "commit": false
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/source-010-2026-09.json",
+      "sha256": "4b743f7784953cec768361d35bb91f65358fe83ec4c8a30144f2e2f35406a5bb",
+      "commit": false
+    },
+    {
+      "path": "tests/customer-010/evidence/round11-store-reconciliation/local-oracle-results.json",
+      "sha256": "0dca9b74ae6ad99e2d4c855af6794524865a5cb43b026997c7f5e76e06381829",
+      "commit": false
+    }
+  ],
+  "excluded_unrelated_change": "tests/customer-010/evidence/round6-payroll-release/push.json",
+  "pm_acceptance": "待确认",
+  "feature_commit": "未提交",
+  "deployment": "未部署",
+  "formal_8080_package": "未执行，须验收后核对固定开发源及目标现网"
+}

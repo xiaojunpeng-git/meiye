@@ -1,0 +1,207 @@
+{
+  "round": 15,
+  "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+  "acceptedCommits": [
+    "dd4e1e083bd55ff4619ef8e73a602a93468a7bac",
+    "3ff92890059beed8f42735cd78e34fb35f49221d"
+  ],
+  "candidateTree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+  "push": {
+    "result": "PASS",
+    "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+    "branch": "release/r15-member-center-20261029"
+  },
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+      "tree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+      "backups": {
+        "admin": "/www/backups/rh/combination-group-6c7712ac",
+        "member": "/www/backups/rh/store-address-6c7712ac"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+      "tree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+      "backups": {
+        "admin": "/www/backups/008/combination-group-6c7712ac",
+        "member": "/www/backups/008/store-address-6c7712ac"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "010": {
+      "result": "PASS",
+      "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+      "tree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+      "backups": {
+        "admin": "/www/backups/010/combination-group-6c7712ac",
+        "member": "/www/backups/010/store-address-6c7712ac"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    }
+  },
+  "pendingTasks": [],
+  "uploadsVerified": true,
+  "productionBusinessWrites": 0,
+  "savedOnlineDecoration": false,
+  "sharedHeadUnchanged": true,
+  "sharedIndexUnchanged": true,
+  "miniPrograms": {
+    "008": {
+      "version": "3.0.78",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "taskId": "confirmation_upload_1ba03ab6-d219-4444-ad4a-3bf58d802c09",
+      "status": "UPLOAD_SUCCESS",
+      "wechatConfirmed": true,
+      "size": {
+        "total": 10564773,
+        "packages": [
+          {
+            "name": "TOTAL",
+            "size": 10564773
+          },
+          {
+            "name": "main",
+            "size": 2032742
+          },
+          {
+            "name": "/pages/activity/",
+            "size": 742456
+          },
+          {
+            "name": "/pages/admin/",
+            "size": 1783915
+          },
+          {
+            "name": "/pages/annex/",
+            "size": 957671
+          },
+          {
+            "name": "/pages/behalf/",
+            "size": 187724
+          },
+          {
+            "name": "/pages/columnGoods/",
+            "size": 17631
+          },
+          {
+            "name": "/pages/discover/",
+            "size": 204163
+          },
+          {
+            "name": "/pages/extension/",
+            "size": 69650
+          },
+          {
+            "name": "/pages/goods/",
+            "size": 1951495
+          },
+          {
+            "name": "/pages/merchant/",
+            "size": 205062
+          },
+          {
+            "name": "/pages/short_video/",
+            "size": 306282
+          },
+          {
+            "name": "/pages/store/",
+            "size": 430070
+          },
+          {
+            "name": "/pages/users/",
+            "size": 1658754
+          },
+          {
+            "name": "/pages/work/",
+            "size": 17158
+          }
+        ]
+      },
+      "experienceSettingVerified": false
+    },
+    "010": {
+      "version": "3.0.78",
+      "appid": "wxce4f61fc9c4eaaa6",
+      "taskId": "confirmation_upload_6866b837-998f-4eee-a191-47a1350ce430",
+      "status": "UPLOAD_SUCCESS",
+      "wechatConfirmed": true,
+      "size": {
+        "total": 10564763,
+        "packages": [
+          {
+            "name": "TOTAL",
+            "size": 10564763
+          },
+          {
+            "name": "main",
+            "size": 2032737
+          },
+          {
+            "name": "/pages/activity/",
+            "size": 742501
+          },
+          {
+            "name": "/pages/admin/",
+            "size": 1783934
+          },
+          {
+            "name": "/pages/annex/",
+            "size": 957685
+          },
+          {
+            "name": "/pages/behalf/",
+            "size": 187730
+          },
+          {
+            "name": "/pages/columnGoods/",
+            "size": 17617
+          },
+          {
+            "name": "/pages/discover/",
+            "size": 204149
+          },
+          {
+            "name": "/pages/extension/",
+            "size": 69660
+          },
+          {
+            "name": "/pages/goods/",
+            "size": 1951462
+          },
+          {
+            "name": "/pages/merchant/",
+            "size": 205076
+          },
+          {
+            "name": "/pages/short_video/",
+            "size": 306274
+          },
+          {
+            "name": "/pages/store/",
+            "size": 430063
+          },
+          {
+            "name": "/pages/users/",
+            "size": 1658729
+          },
+          {
+            "name": "/pages/work/",
+            "size": 17146
+          }
+        ]
+      },
+      "experienceSettingVerified": false
+    }
+  },
+  "status": "THREE_SITES_PUBLISHED_AND_TWO_MINI_UPLOADS_VERIFIED"
+}

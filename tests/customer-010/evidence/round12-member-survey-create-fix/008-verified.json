@@ -1,0 +1,29 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "before_service_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+  "candidate_sha256": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+  "task_total": 0,
+  "task_rows_verified": 0,
+  "task_ids": [],
+  "survey_data_sha256": {
+    "member_survey_task": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_questionnaire": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_target": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_answer": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_popup": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_reward_config": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "member_survey_reward": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "survey_data_unchanged": true,
+  "runtime_source_file_unchanged": true,
+  "platform_entry_sha256": "5e9213d8d6dd31907321c9e46e9d3f11b2a355cf4b590907db47e0dace47f2d7",
+  "member_entry_sha256": "b9b206291f4950a7459d99c69357d873b5fa7c7cf6c83953d6649614966fe447",
+  "business_writes": 0,
+  "source_commit": "ad40ce8efbd6d0ad08b1f9954986650cf2a819fa",
+  "backup": "/www/backups/008/round12-create-fix-ad40ce8efbd6-20261029133124",
+  "only_one_backend_file_deployed": true,
+  "existing_survey_data_unchanged": true,
+  "frontend_entries_unchanged": true,
+  "unauthenticated_api_denied": true
+}

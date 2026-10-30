@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": "6388",
+  "prefix": "008:",
+  "tag_prefix": "008:MOHE:",
+  "select": 0
+}

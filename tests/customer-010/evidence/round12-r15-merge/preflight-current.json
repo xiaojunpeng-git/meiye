@@ -1,0 +1,32 @@
+{
+  "rh": {
+    "app/services/user/MemberSurveyServices.php": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+    "app/services/user/MemberSurveyGiftServices.php": "f96b30ecc997ee91718461bf70ffda39e45bcf4ba3638cb4f7aa369d8bb24d8b",
+    "app/services/user/MemberSurveyMiniProgramCodeServices.php": null,
+    "config/member_survey.php": "23091410d41d7f145f847dfa49de642387e1fe0f0cd57f184e6d683654bd61f3",
+    "public/system.html": "b5c9b813cc81d42b613da289c85a9d068596109c74bb08038c962c761acf0095",
+    "public/index.html": "e14135ddd330995ce2d1dcb8bd49449350f00ef4dc1bb85cdf959c05808c5112",
+    "public/view_cashier_v3/index.html": "5290ebd9ec2c30cd5e22e0ce5ae402105694f5b74ef19f3ce8a55a9fb27ca21c",
+    "public/view_mobile_v3/index.html": "93cb6f93efa9f5d775f91f52481048fec38a28bc182cc6d44312e8a665fd17aa"
+  },
+  "008": {
+    "app/services/user/MemberSurveyServices.php": "3bcf65d9f642c406231153680d14cbbc9f529e110502579970a5668540082a36",
+    "app/services/user/MemberSurveyGiftServices.php": "f96b30ecc997ee91718461bf70ffda39e45bcf4ba3638cb4f7aa369d8bb24d8b",
+    "app/services/user/MemberSurveyMiniProgramCodeServices.php": null,
+    "config/member_survey.php": "23091410d41d7f145f847dfa49de642387e1fe0f0cd57f184e6d683654bd61f3",
+    "public/system.html": "b5c9b813cc81d42b613da289c85a9d068596109c74bb08038c962c761acf0095",
+    "public/index.html": "f1bcb7537fb04cecc4fcb89f66f4a02a21eb5dcdb13ef6a916459768d31a6132",
+    "public/view_cashier_v3/index.html": "5290ebd9ec2c30cd5e22e0ce5ae402105694f5b74ef19f3ce8a55a9fb27ca21c",
+    "public/view_mobile_v3/index.html": "93cb6f93efa9f5d775f91f52481048fec38a28bc182cc6d44312e8a665fd17aa"
+  },
+  "010": {
+    "app/services/user/MemberSurveyServices.php": "9584117f5d996dafde6d5b18f4b701d41d572328995e6e0235323bdfdb80c56a",
+    "app/services/user/MemberSurveyGiftServices.php": "f96b30ecc997ee91718461bf70ffda39e45bcf4ba3638cb4f7aa369d8bb24d8b",
+    "app/services/user/MemberSurveyMiniProgramCodeServices.php": "b1a56b601e9a279fae8965b81dbbe203229529ad547c8b65c83bc73609a83bf4",
+    "config/member_survey.php": "bfe717abb318364e07a3c7421d43a4af33a55465a63719ae448b356c1feb0538",
+    "public/system.html": "b5c9b813cc81d42b613da289c85a9d068596109c74bb08038c962c761acf0095",
+    "public/index.html": "c1144928318241dc1858da55ab9d691e6a37d2b7a1ae8a5d34eabb4377e6ead4",
+    "public/view_cashier_v3/index.html": "5290ebd9ec2c30cd5e22e0ce5ae402105694f5b74ef19f3ce8a55a9fb27ca21c",
+    "public/view_mobile_v3/index.html": "93cb6f93efa9f5d775f91f52481048fec38a28bc182cc6d44312e8a665fd17aa"
+  }
+}

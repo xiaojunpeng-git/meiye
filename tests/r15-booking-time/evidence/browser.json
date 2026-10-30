@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "layouts": [
+    {
+      "width": 320,
+      "slots": 52,
+      "fullHeight": true,
+      "lastRowAboveFooter": true,
+      "themeDates": true,
+      "disabledSelectionRetained": true,
+      "legacyDefaultRetained": true
+    },
+    {
+      "width": 375,
+      "slots": 52,
+      "fullHeight": true,
+      "lastRowAboveFooter": true,
+      "themeDates": true,
+      "disabledSelectionRetained": true,
+      "legacyDefaultRetained": true
+    },
+    {
+      "width": 430,
+      "slots": 52,
+      "fullHeight": true,
+      "lastRowAboveFooter": true,
+      "themeDates": true,
+      "disabledSelectionRetained": true,
+      "legacyDefaultRetained": true
+    }
+  ],
+  "componentMethodsUnchanged": true,
+  "productionRequests": 0,
+  "appointmentsCreated": 0
+}

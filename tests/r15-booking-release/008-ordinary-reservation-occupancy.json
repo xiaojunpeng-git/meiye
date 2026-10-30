@@ -1,0 +1,36 @@
+{
+  "result": "PASS",
+  "occupiedOrdinaryProjects": [
+    {
+      "entitlement_source_detail_id": 16664,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    },
+    {
+      "entitlement_source_detail_id": 16651,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    },
+    {
+      "entitlement_source_detail_id": 16626,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    },
+    {
+      "entitlement_source_detail_id": 16624,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    },
+    {
+      "entitlement_source_detail_id": 16664,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    },
+    {
+      "entitlement_source_detail_id": 16626,
+      "quantity": 1,
+      "status": "PENDING_CONFIRMATION"
+    }
+  ],
+  "writes": 0
+}

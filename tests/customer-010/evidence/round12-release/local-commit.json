@@ -1,0 +1,7 @@
+{
+  "feature_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+  "fixed_fingerprint": "b47316466b858c6e8583f22c5fac01f28f49574d55d7f7e2cfe79367fe400729",
+  "local_commit_scope": "40 fixed source/test/script files plus fixed candidate evidence; unrelated dirty files excluded",
+  "pushed_remote": "origin/010/basic-report-menu",
+  "local_ruihao_recovery": "still pending, no restore performed"
+}

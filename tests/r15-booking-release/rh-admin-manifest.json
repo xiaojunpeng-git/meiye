@@ -1,0 +1,24 @@
+{
+  "site": "rh",
+  "commit": "7e884434db71dc657d8f3e018e96b7fe2d2b2a22",
+  "previewAuthorized": false,
+  "backendAllowlist": [
+    "app/controller/api/v1/order/StoreReservationOrder.php",
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php",
+    "app/services/cashier/v3/reservation/MemberV3ReservationServices.php"
+  ],
+  "targets": {
+    "formal/app/controller/api/v1/order/StoreReservationOrder.php": {
+      "before": "04e381b9a98de35d6aa7cb86cd30044ef67c37fc5aad928bebba3881d9fb4879",
+      "after": "36293a108f1502845764412f6ac854044b196046c1968bc3dd3b68c559e6b6d7"
+    },
+    "formal/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": {
+      "before": "fa0db13d1d1e4d6c6534a30b44259faf1f575723f3049b3441e1e94e12d4f781",
+      "after": "ff09570bbbf1a02bd05981f8ae3af61fa44c6d1a800d228d79450b0b54b89d4f"
+    },
+    "formal/app/services/cashier/v3/reservation/MemberV3ReservationServices.php": {
+      "before": "533bafe11350ff20cee57e902b0e3e60af7e266ae34013734cb1e4cf519043dc",
+      "after": "a1a1bb36a58542b7e85ce32453f2b3c4d8ba51d28624229fb2e29c2981cc83c2"
+    }
+  }
+}

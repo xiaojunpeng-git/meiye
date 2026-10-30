@@ -1,27 +1,30 @@
 <script>
+import MemberMenuMedia from '@/components/memberMenuMedia';
 export default {
+  // 与会员端共用本地字体和订单图标口径，避免后台旧字体缺少全部订单字形。
+  components: { MemberMenuMedia },
   props: {
     orderData: {
       type: Object,
-      default: () => ({}),
-    },
+      default: () => ({})
+    }
   },
   computed: {
     visibleOrderMenu() {
       return (this.orderData.list || []).filter((item) => item.is_show !== 0);
-    },
+    }
   },
   methods: {
     intoPage(url) {
-      this.$emit("intoPage", url);
+      this.$emit('intoPage', url);
     },
     goMenuPage(url, name) {
-      this.$emit("goMenuPage", url, name);
+      this.$emit('goMenuPage', url, name);
     },
     tapQrCode() {
-      this.$emit("tapQrCode");
-    },
-  },
+      this.$emit('tapQrCode');
+    }
+  }
 };
 </script>
 <template>
@@ -35,9 +38,9 @@ export default {
         </div>
       </div>
       <div class="acea-row section-content">
-        <div v-for="item in visibleOrderMenu" class="item">
+        <div v-for="item in visibleOrderMenu" :key="item.key" class="item">
           <div class="icon">
-            <span class="mobiconfont" :class="item.icon"></span>
+            <MemberMenuMedia :item="item" kind="order" :size="24" />
           </div>
           <div class="">{{ item.title }}</div>
         </div>
@@ -114,9 +117,6 @@ export default {
       margin-bottom: 9px;
     }
 
-    .mobiconfont {
-      font-size: 24px;
-    }
   }
 }
 </style>

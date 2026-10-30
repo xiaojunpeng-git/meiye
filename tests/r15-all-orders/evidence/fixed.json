@@ -1,0 +1,31 @@
+{
+  "baselineHEAD": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "patchSHA256": "5b043cf6b62906df9ddfe716522ec3739453cd288cd20c43915f37a028ae4799",
+  "files": {
+    "后端代码/app/services/diy/DiyServices.php": "a0d97d6bf0fb23ce71d86235caec295e3c3b7e260cfc3c3fae781369b06b3b31",
+    "前端代码/admin/src/store/modules/admin/modules/userTemplateConfig.js": "82b13f1faf0ae3393c7634d186e0bdb2db0ebd1018e6d6581138ab0e2e5d0f69",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/OrderConfig.vue": "6ab511a8fa4b88fa3829a673899ef7d0a39be7e42b43da026158cd0a7ed27675",
+    "tests/r15-all-orders/mysql.php": "255d64fe00949cefeb63020075c6504f7271e343e834dd4cb0a97a2986d2002d",
+    "tests/r15-all-orders/editor.cjs": "4353d3b7fea4866750fe1d8d7b2502d3dac3486d592a42f2667c5d10f05fcba8"
+  },
+  "scope": {
+    "frontend": [
+      "平台端订单配置组件",
+      "平台端装修初始状态"
+    ],
+    "backend": [
+      "DiyServices个人中心默认入口及历史/缓存兼容"
+    ],
+    "memberFrontend": "沿用已有数据驱动渲染及订单跳转，无会员端源码修改",
+    "migration": "无",
+    "tests": [
+      "真实MySQL与会员menu接口12项检查",
+      "Vue2配置组件、三种后台预览与两种会员样式的显隐和点击跳转检查"
+    ]
+  },
+  "status": "LOCAL_PASS_PENDING_PRODUCT_ACCEPTANCE",
+  "productionWrites": 0,
+  "deployed": false,
+  "committed": false,
+  "savedOnlineDecoration": false
+}

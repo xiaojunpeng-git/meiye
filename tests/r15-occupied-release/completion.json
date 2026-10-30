@@ -1,0 +1,73 @@
+{
+  "featureCommit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+      "tree": "1f76afda5525ab55f61ec3ef3b8627a1281f9a96",
+      "backups": {
+        "admin": "/www/backups/rh/combination-group-0e0f7d9e",
+        "member": "/www/backups/rh/store-address-0e0f7d9e"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+      "tree": "1f76afda5525ab55f61ec3ef3b8627a1281f9a96",
+      "backups": {
+        "admin": "/www/backups/008/combination-group-0e0f7d9e",
+        "member": "/www/backups/008/store-address-0e0f7d9e"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "010": {
+      "result": "PASS",
+      "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+      "tree": "1f76afda5525ab55f61ec3ef3b8627a1281f9a96",
+      "backups": {
+        "admin": "/www/backups/010/combination-group-0e0f7d9e",
+        "member": "/www/backups/010/store-address-0e0f7d9e"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    }
+  },
+  "uploads": {
+    "008": {
+      "site": "008",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.82",
+      "taskId": "confirmation_upload_c180a26c-83b0-4c7f-aa54-c4080a035914",
+      "status": "success",
+      "detail": "execution_success",
+      "result": {
+        "success": true,
+        "totalPackageSize": 10576146
+      },
+      "evidence": "Original task polled after user confirmed; WeChat developer tools returned success.",
+      "formalRelease": false
+    },
+    "010": {
+      "site": "010",
+      "appid": "wxce4f61fc9c4eaaa6",
+      "version": "3.0.82",
+      "taskId": "confirmation_upload_6224db8a-bee2-4f7e-a44b-85bfaef62ba0",
+      "status": "success",
+      "detail": "execution_success",
+      "result": {
+        "success": true,
+        "totalPackageSize": 10576284
+      },
+      "evidence": "Original task polled after user confirmed; WeChat developer tools returned success.",
+      "formalRelease": false
+    }
+  },
+  "push": "PASS",
+  "businessDataChanged": false
+}

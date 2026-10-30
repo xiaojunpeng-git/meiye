@@ -1,0 +1,11 @@
+{
+  "commit": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+  "backup": "/www/backups/010/round12-mini-8949a12e9e04-20261029172857",
+  "files": 143,
+  "package_sha256": "d929efe8682032f71f39e4e7a2ba4dcf606bc807eccada27910db3c3a06c8fb7",
+  "installer_sha256": "c8d487b9f1ae4ea2e737ed167de6694f48ecbdabc9b08ea04e55f8e0159cd5c5",
+  "targets": [
+    "010 only"
+  ],
+  "migration": false
+}

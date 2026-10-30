@@ -1,0 +1,9 @@
+{
+  "acceptedBase": "08e54654ab8082aac3cd556d2803e6fd55e8a293",
+  "sharedHEAD": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "cd5f8bf3cfb0e4484ab8e7969eeff2edd1115591d29fe555edb78e09de17cb3d"
+  },
+  "indexSHA256": "39c996f91a98d6da47e4837549beca0239ddde08b5a9ad993b3ecf76e0ee0cef",
+  "remote": "008只读核对当前主权益，不创建预约"
+}

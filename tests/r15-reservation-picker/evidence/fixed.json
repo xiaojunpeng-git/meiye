@@ -1,0 +1,40 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "sourceBaseline": "96fe153a4f8e851bd4fcf2ed5ddcbbe49e70f0e2",
+  "candidateTree": "78054f9f0f756851065c35e7ad5269e354659455",
+  "patchSHA256": "86c8cce48e10707854b416c1f8277d2dda6a89a97345e8e5f6d65c70ccc21009",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "a36ca28f48a3a98ff02c03a0af24e5f2b8f010be6a708226e2b4f5d372766099",
+    "tests/r15-reservation-picker/browser.cjs": "cb1ca762cb791dc4fc6db3dbf7fa24a95a941421b480da30bf3796f7488de0b9",
+    "tests/r15-reservation-picker/model.cjs": "d5afed9b5d7c8af09e7f814d5354969a524d04708900f9c76204516a81d8553f",
+    "scripts/r15-reservation-picker-build.cjs": "c5bfda08f28c182447763ed9febc4e13615651a64c0a3f4f20ee37569cbe7f2d"
+  },
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PRODUCT_ACCEPTANCE",
+  "remoteInstances": "not applicable; local only",
+  "databaseChanges": false,
+  "commentsUpdated": [
+    "前端代码/uniapp/pages/activity/reservation/index.vue"
+  ],
+  "verification": {
+    "componentBrowserWidths": [
+      320,
+      375,
+      430
+    ],
+    "scrollRows": 40,
+    "fullNamesWrap": true,
+    "fixedHeaderFooter": true,
+    "rightsMetadataAndCatalogUnknownQuota": "PASS",
+    "unchangedBookingMethods": 7,
+    "priorRemovalRegression": "22 checks PASS",
+    "historicalAddonRegression": "PASS",
+    "H5Build": "PASS",
+    "miniBuild": "PASS",
+    "nativeTemplates": 419,
+    "realDeviceTested": false
+  },
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "uploaded": false
+}

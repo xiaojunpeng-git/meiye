@@ -86,6 +86,11 @@ const props = defineProps({
     type: Function,
     default: null
   },
+  // The caller supplies the existing store switch; this only controls presentation, not historical debt facts.
+  debtPaymentEnabled: {
+    type: Boolean,
+    default: true
+  },
   initialTab: {
     type: String,
     default: 'profile'
@@ -122,7 +127,7 @@ const ACTION_LABELS = Object.freeze({
   'open-gift-records': '查看赠送记录'
 })
 
-const activeTab = ref(DEFAULT_TABS.some((tab) => tab.key === props.initialTab) ? props.initialTab : 'profile')
+const activeTab = ref(DEFAULT_TABS.some((tab) => tab.key === props.initialTab) && (props.initialTab !== 'debt' || props.debtPaymentEnabled) ? props.initialTab : 'profile')
 const activeActionKey = ref('')
 const actionError = ref('')
 const tabKeyword = ref('')
@@ -199,7 +204,8 @@ const debtRecords = computed(() => readList(detail.value, ['debtRecords', 'debts
 
 const availableActions = computed(() => normalizeActionList(readList(detail.value, ['actions', 'availableActions', 'actionList']), 'member'))
 
-const tabs = DEFAULT_TABS
+// Hide the existing debt tab without deleting debts or altering balances.
+const tabs = computed(() => DEFAULT_TABS.filter(tab => tab.key !== 'debt' || props.debtPaymentEnabled))
 const isSearchableTab = computed(() => ['assets', 'coupons', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
 const tabKeywordPlaceholder = computed(() => {
   if (activeTab.value === 'writeoff') return '输入手艺人或项目后查询'
@@ -222,11 +228,17 @@ watch(
   () => props.initialTab,
   (tabKey) => {
     if (DEFAULT_TABS.some((tab) => tab.key === tabKey)) {
+      if (tabKey === 'debt' && !props.debtPaymentEnabled) tabKey = 'profile'
       activeTab.value = tabKey
       tabStatus.value = ['assets', 'gift', 'coupons'].includes(tabKey) ? 'active' : (tabKey === 'care' ? 'unfinished' : '')
     }
   }
 )
+
+// A switch change must also leave an already open debt panel, so hidden content cannot remain active.
+watch(() => props.debtPaymentEnabled, enabled => {
+  if (!enabled && activeTab.value === 'debt') switchTab({ key: 'profile' })
+})
 
 const headerFacts = computed(() => [
   { label: '完整手机号', value: firstValueFrom([member.value, detail.value], ['phone', 'mobile', 'memberPhone']) },
@@ -418,7 +430,7 @@ function tabIsLoading(tabKey) {
 }
 
 function switchTab(tab) {
-  if (!tab || tab.key === activeTab.value) return
+  if (!tab || tab.key === activeTab.value || !tabs.value.some(item => item.key === tab.key)) return
   activeTab.value = tab.key
   actionError.value = ''
   tabKeyword.value = ''

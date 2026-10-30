@@ -16,7 +16,7 @@ final class CashierV3CardSaleActualAmountServices
     /**
      * @return array<int,int> legacy cart detail id => actual sale cents
      */
-    public function forOrders(array $orderIds, array $carts): array
+    public function forOrders(array $orderIds, array $carts, ?string $tenantId = null): array
     {
         if ($orderIds === [] || $carts === []) {
             return [];
@@ -44,11 +44,15 @@ final class CashierV3CardSaleActualAmountServices
             return [];
         }
         try {
-            $allocations = $this->rows(Db::name('cashier_v3_card_sale_item_allocation_fact')
+            $allocationQuery = Db::name('cashier_v3_card_sale_item_allocation_fact')
                 ->field('card_receipt_id,component_product_id,sale_amount_cents,status')
                 ->whereIn('card_receipt_id', $receiptIds)
-                ->where('status', 'effective')
-                ->select());
+                ->where('status', 'effective');
+            // The immutable fact is keyed by tenant before receipt. The
+            // caller-verified tenant keeps this bounded read on that index;
+            // legacy callers without a tenant retain their previous behavior.
+            if ($tenantId !== null) $allocationQuery->where('tenant_id', $tenantId);
+            $allocations = $this->rows($allocationQuery->select());
         } catch (\Throwable $exception) {
             if ($this->missingOptionalAmountFactTable($exception)) {
                 return [];
@@ -129,7 +133,16 @@ final class CashierV3CardSaleActualAmountServices
             $orders
         ))));
         if ($orderIds === [] || $carts === []) return [];
-        $raw = $this->forOrders($orderIds, $carts);
+        $tenants = array_values(array_unique(array_filter(array_map(
+            static fn(array $order): string => trim((string)($order['tenant_id'] ?? '')),
+            $orders
+        ), static fn(string $value): bool => $value !== '')));
+        // Only a complete single-tenant order set can narrow the allocation
+        // query. Mixed or partially attributed sets keep the old read path.
+        $tenantId = count($tenants) === 1 && count($orders) === count(array_filter($orders,
+            static fn(array $order): bool => trim((string)($order['tenant_id'] ?? '')) !== ''))
+            ? $tenants[0] : null;
+        $raw = $this->forOrders($orderIds, $carts, $tenantId);
         $ordersById = [];
         foreach ($orders as $order) $ordersById[(int)($order['id'] ?? 0)] = $order;
         $cartsByOrder = [];

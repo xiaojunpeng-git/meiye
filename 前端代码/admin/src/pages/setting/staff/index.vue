@@ -66,9 +66,6 @@
               <template slot-scope="{ row }" slot="cashier_craftsman_enabled">
                 {{ row.cashier_craftsman_enabled == 1 ? '是' : '否' }}
               </template>
-              <template slot-scope="{ row }" slot="craftsman_performance_type">
-                {{ { commission: '消耗业绩', labor: '手工费', commission_labor: '消耗业绩+手工费' }[row.craftsman_performance_type] || '消耗业绩' }}
-              </template>
               <template slot-scope="{ row }" slot="employment_type_code">
                 <!-- 主档空类型与编辑弹窗一致显示未分类，不能把默认文案当成保存结果。 -->
                 {{ { internal: '内部员工', partner: '合作方', outsourced: '外包' }[row.employment_type_code] || '未分类' }}
@@ -252,7 +249,6 @@ const COLUMNS_META = [
   { key: 'is_manager', title: '店长', minWidth: 80, slot: 'is_manager' },
   { key: 'cashier_salesperson_enabled', title: '可作为销售人', minWidth: 110, slot: 'cashier_salesperson_enabled' },
   { key: 'cashier_craftsman_enabled', title: '可作为手艺人', minWidth: 110, slot: 'cashier_craftsman_enabled' },
-  { key: 'craftsman_performance_type', title: '手艺人服务业绩类型', minWidth: 150, slot: 'craftsman_performance_type' },
   { key: 'employment_type_code', title: '人员类型', minWidth: 100, slot: 'employment_type_code' },
   { key: 'status', title: '在职状态', minWidth: 80, slot: 'status' },
   { key: 'mobile_enabled', title: '手机端', minWidth: 80, slot: 'mobile_enabled' },
@@ -286,7 +282,6 @@ const DEFAULT_COLUMN_CONFIG = [
   { key: 'position_label', show: true },
   { key: 'cashier_salesperson_enabled', show: true },
   { key: 'cashier_craftsman_enabled', show: true },
-  { key: 'craftsman_performance_type', show: true },
   { key: 'employment_type_code', show: true },
   { key: 'status', show: true },
   { key: 'mobile_enabled', show: true },
@@ -302,7 +297,7 @@ const LEGACY_DEFAULT_COLUMN_KEYS = [
 function isLegacyDefaultColumnConfig(columns) {
   const keys = (columns || []).map((column) => column.key);
   return LEGACY_DEFAULT_COLUMN_KEYS.every((key) => keys.includes(key))
-    && !['craftsman_performance_type', 'employment_type_code', 'mobile_enabled'].some((key) => keys.includes(key));
+    && !['employment_type_code', 'mobile_enabled'].some((key) => keys.includes(key));
 }
 
 export default {
@@ -466,7 +461,8 @@ export default {
             }
             // 旧用户保存的列配置没有“所属组织”，补到 ID 后面，
             // 避免新字段因历史配置而永远不可见。
-            const nextColumns = columns.map((column) => ({ ...column }));
+            // 旧用户列偏好中可能包含已撤掉的服务业绩类型列，加载时剔除，避免列设置里残留。
+            const nextColumns = columns.filter((column) => COLUMNS_META.some((meta) => meta.key === column.key)).map((column) => ({ ...column }));
             if (!nextColumns.some((column) => column.key === 'organization_name')) {
               const idIndex = nextColumns.findIndex((column) => column.key === 'id');
               nextColumns.splice(idIndex >= 0 ? idIndex + 1 : 0, 0, {

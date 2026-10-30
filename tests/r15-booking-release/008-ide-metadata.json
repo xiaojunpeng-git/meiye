@@ -1,0 +1,97 @@
+{
+  "changedByProjectImport": [
+    "project.config.json",
+    "project.private.config.json"
+  ],
+  "appid": "wx85d4bfd0b4b6aafb",
+  "businessFilesUnchanged": true,
+  "configuration": {
+    "description": "项目配置文件。",
+    "packOptions": {
+      "ignore": [
+        {
+          "value": "static/design-preview",
+          "type": "folder"
+        },
+        {
+          "value": "static/design-system",
+          "type": "folder"
+        },
+        {
+          "value": "static/mall",
+          "type": "folder"
+        },
+        {
+          "value": "static/html",
+          "type": "folder"
+        },
+        {
+          "value": "static/fonts",
+          "type": "folder"
+        },
+        {
+          "value": "static/css",
+          "type": "folder"
+        },
+        {
+          "value": "static/iconfont/iconfont.woff2",
+          "type": "file"
+        },
+        {
+          "value": "static/iconfont/iconfont.css",
+          "type": "file"
+        }
+      ],
+      "include": []
+    },
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true,
+      "newFeature": true,
+      "bigPackageSizeSupport": true,
+      "compileWorklet": false,
+      "uglifyFileName": false,
+      "uploadWithSourceMap": true,
+      "enhance": false,
+      "packNpmManually": false,
+      "packNpmRelationList": [],
+      "minifyWXSS": true,
+      "minifyWXML": true,
+      "localPlugins": false,
+      "disableUseStrict": false,
+      "useCompilerPlugins": false,
+      "condition": false,
+      "babelSetting": {
+        "ignore": [],
+        "disablePlugins": [],
+        "outputPath": ""
+      }
+    },
+    "compileType": "miniprogram",
+    "libVersion": "",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "projectname": "会员服务",
+    "condition": {
+      "search": {
+        "current": -1,
+        "list": []
+      },
+      "conversation": {
+        "current": -1,
+        "list": []
+      },
+      "game": {
+        "current": -1,
+        "list": []
+      },
+      "miniprogram": {
+        "current": -1,
+        "list": []
+      }
+    },
+    "simulatorPluginLibVersion": {},
+    "editorSetting": {}
+  }
+}

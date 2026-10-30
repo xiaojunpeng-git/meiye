@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+  "backup": "/www/backups/rh/combination-group-7c666951",
+  "scope": "platform icon assets only",
+  "memberBackendConfigurationUnchanged": true,
+  "businessWrites": 0
+}

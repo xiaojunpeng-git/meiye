@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "public_entries": [
+    "system.html",
+    "index.html",
+    "/admin/user/survey",
+    "/pages/users/survey/index",
+    "/api/survey/entry/ffffffffffffffffffffffffffffffffffffffffffffffff"
+  ],
+  "runtime": {
+    "qr_mode": "mini",
+    "env": "trial",
+    "appid": "wxce4f61fc9c4eaaa6",
+    "tasks": 2,
+    "database": "mohe_010_app"
+  },
+  "business_writes": 0
+}

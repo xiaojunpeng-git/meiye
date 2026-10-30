@@ -1,0 +1,67 @@
+{
+  "size": {
+    "total": 10557645,
+    "packages": [
+      {
+        "name": "TOTAL",
+        "size": 10557645
+      },
+      {
+        "name": "main",
+        "size": 2028615
+      },
+      {
+        "name": "/pages/activity/",
+        "size": 742111
+      },
+      {
+        "name": "/pages/admin/",
+        "size": 1792044
+      },
+      {
+        "name": "/pages/annex/",
+        "size": 957099
+      },
+      {
+        "name": "/pages/behalf/",
+        "size": 187579
+      },
+      {
+        "name": "/pages/columnGoods/",
+        "size": 17518
+      },
+      {
+        "name": "/pages/discover/",
+        "size": 203466
+      },
+      {
+        "name": "/pages/extension/",
+        "size": 69290
+      },
+      {
+        "name": "/pages/goods/",
+        "size": 1949836
+      },
+      {
+        "name": "/pages/merchant/",
+        "size": 204629
+      },
+      {
+        "name": "/pages/short_video/",
+        "size": 306146
+      },
+      {
+        "name": "/pages/store/",
+        "size": 429496
+      },
+      {
+        "name": "/pages/users/",
+        "size": 1652949
+      },
+      {
+        "name": "/pages/work/",
+        "size": 16867
+      }
+    ]
+  }
+}

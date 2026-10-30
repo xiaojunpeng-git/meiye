@@ -1,0 +1,2210 @@
+{
+  "legacy_sources": [
+    {
+      "id": 1,
+      "name": "大众",
+      "status": 1
+    },
+    {
+      "id": 2,
+      "name": "抖音",
+      "status": 1
+    },
+    {
+      "id": 3,
+      "name": "自然进店",
+      "status": 1
+    },
+    {
+      "id": 4,
+      "name": "小红书",
+      "status": 1
+    },
+    {
+      "id": 5,
+      "name": "转介绍",
+      "status": 1
+    },
+    {
+      "id": 6,
+      "name": "老客续卡",
+      "status": 1
+    },
+    {
+      "id": 7,
+      "name": "旧卡录入",
+      "status": 0
+    },
+    {
+      "id": 8,
+      "name": "秒杀",
+      "status": 0
+    },
+    {
+      "id": 9,
+      "name": "砍价",
+      "status": 0
+    },
+    {
+      "id": 10,
+      "name": "拼团",
+      "status": 0
+    },
+    {
+      "id": 11,
+      "name": "售后客",
+      "status": 1
+    },
+    {
+      "id": 12,
+      "name": "其他",
+      "status": 0
+    }
+  ],
+  "business_sources": [
+    {
+      "id": 1,
+      "parent_id": 0,
+      "name": "A老客首护",
+      "status": 0,
+      "is_fixed": 1,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 2,
+      "parent_id": 0,
+      "name": "B导购引流",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 1,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 3,
+      "parent_id": 0,
+      "name": "C老带新客",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 2,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 4,
+      "parent_id": 0,
+      "name": "D线上引流",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 3,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 5,
+      "parent_id": 0,
+      "name": "E地推拓客",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 4,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 6,
+      "parent_id": 0,
+      "name": "F美带新客",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 5,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 7,
+      "parent_id": 0,
+      "name": "G异业收客",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 6,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 8,
+      "parent_id": 0,
+      "name": "H沉睡唤醒",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 7,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 9,
+      "parent_id": 0,
+      "name": "K退款顾客",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 8,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 10,
+      "parent_id": 0,
+      "name": "顾客老带新",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 9,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 11,
+      "parent_id": 0,
+      "name": "顾客退款",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 12,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 12,
+      "parent_id": 5,
+      "name": "合作方",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 13,
+      "parent_id": 5,
+      "name": "自家导购",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 14,
+      "parent_id": 4,
+      "name": "抖音",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 15,
+      "parent_id": 4,
+      "name": "美团",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 16,
+      "parent_id": 8,
+      "name": "觉知",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 17,
+      "parent_id": 8,
+      "name": "睡眠激活",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 0,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 2,
+      "created_at": 1792905368,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 18,
+      "parent_id": 0,
+      "name": "大众",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 1,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 19,
+      "parent_id": 0,
+      "name": "抖音",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 2,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 20,
+      "parent_id": 0,
+      "name": "自然进店",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 3,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 21,
+      "parent_id": 0,
+      "name": "小红书",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 4,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 22,
+      "parent_id": 0,
+      "name": "转介绍",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 5,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 23,
+      "parent_id": 0,
+      "name": "老客续卡",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 6,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 24,
+      "parent_id": 0,
+      "name": "旧卡录入",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 7,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 25,
+      "parent_id": 0,
+      "name": "秒杀",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 8,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 26,
+      "parent_id": 0,
+      "name": "砍价",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 9,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 27,
+      "parent_id": 0,
+      "name": "拼团",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 10,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 28,
+      "parent_id": 0,
+      "name": "售后客",
+      "status": 1,
+      "is_fixed": 0,
+      "sort": 11,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    },
+    {
+      "id": 29,
+      "parent_id": 0,
+      "name": "其他",
+      "status": 0,
+      "is_fixed": 0,
+      "sort": 12,
+      "require_secondary": 0,
+      "attribution_type": "other",
+      "version": 1,
+      "created_at": 1792916685,
+      "updated_at": 1792916685
+    }
+  ],
+  "sale_schema": [
+    {
+      "Field": "id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": null,
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "fact_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "UNI",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_event_no",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_type",
+      "Type": "varchar(48)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_direction",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "natural_key",
+      "Type": "varchar(160)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "command_idempotency_key",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "immutable_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "reversal_of",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "status",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "organization_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "organization_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "organization_path_snapshot",
+      "Type": "varchar(512)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "store_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "store_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "member_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "member_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "operator_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "operator_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_date",
+      "Type": "date",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_timezone",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "occurred_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "settled_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "recorded_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_no_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "source_document_type",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_label_snapshot",
+      "Type": "varchar(140)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "source_attribution_type_snapshot",
+      "Type": "varchar(24)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "other",
+      "Extra": ""
+    },
+    {
+      "Field": "source_line_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "source_type",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "item_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "item_code_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "item_name_snapshot",
+      "Type": "varchar(255)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "category_id_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "category_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "quantity",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "original_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "discount_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "sale_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "debt_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_user_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_discount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "friend_counts_as_customer",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "1",
+      "Extra": ""
+    },
+    {
+      "Field": "is_presale",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "inventory_outbound_required",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "1",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_payment_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    }
+  ],
+  "order_schema": [
+    {
+      "Field": "id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": null,
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "order_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "UNI",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_no",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "natural_key",
+      "Type": "varchar(160)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "contract_version",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "command_idempotency_key",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "immutable_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "organization_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "organization_path_snapshot",
+      "Type": "varchar(191)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "organization_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "store_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "store_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "member_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "member_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "operator_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "operator_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_prepare_idempotency_key",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_authority_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_aggregate_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_source_set_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "composition",
+      "Type": "varchar(24)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_date",
+      "Type": "date",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_timezone",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "occurred_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "settled_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "recorded_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "source_document_type",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "source_document_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "source_document_no_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_label_snapshot",
+      "Type": "varchar(140)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "reward_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "line_count",
+      "Type": "int(10) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "total_quantity",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "original_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "discount_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "sale_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "order_status",
+      "Type": "varchar(24)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_direction",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "reversal_of_order_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "reversal_reason_snapshot",
+      "Type": "varchar(255)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "add_time",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "update_time",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_note",
+      "Type": "varchar(500)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "supplement_enabled",
+      "Type": "tinyint(3) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "supplement_reason",
+      "Type": "varchar(255)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "supplement_operator_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "supplement_operator_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "supplement_operated_at",
+      "Type": "int(11) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    }
+  ],
+  "line_schema": [
+    {
+      "Field": "id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": null,
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "order_line_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "UNI",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "natural_key",
+      "Type": "varchar(160)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "command_idempotency_key",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "immutable_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "store_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "member_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_line_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_line_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "line_no",
+      "Type": "int(10) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "item_type",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "item_type_name_snapshot",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "item_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "catalog_sku_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "item_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "item_code_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "item_name_snapshot",
+      "Type": "varchar(255)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "category_id_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "category_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "service_object",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "is_experience",
+      "Type": "tinyint(3) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "craftsmen_snapshot_json",
+      "Type": "mediumtext",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "salespeople_snapshot_json",
+      "Type": "mediumtext",
+      "Null": "YES",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "quantity",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "original_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "discount_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "sale_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "line_status",
+      "Type": "varchar(24)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "line_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "line_direction",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "reversal_of_line_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "add_time",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "update_time",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "configured_cost_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "friend_counts_as_customer",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "1",
+      "Extra": ""
+    },
+    {
+      "Field": "is_presale",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "inventory_outbound_required",
+      "Type": "tinyint(1) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "1",
+      "Extra": ""
+    },
+    {
+      "Field": "debt_amount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "price_change_reason",
+      "Type": "varchar(255)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "price_changed_by",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "price_changed_by_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "price_changed_at",
+      "Type": "int(11) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_user_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_discount_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "manual_labor_fee_cents",
+      "Type": "bigint(20) unsigned",
+      "Null": "YES",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "card_purchase_snapshot_json",
+      "Type": "mediumtext",
+      "Null": "YES",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "detail_remark_snapshot",
+      "Type": "mediumtext",
+      "Null": "YES",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "coupon_payment_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    }
+  ],
+  "performance_schema": [
+    {
+      "Field": "id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": null,
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "fact_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "UNI",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_event_no",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_type",
+      "Type": "varchar(48)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_direction",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "natural_key",
+      "Type": "varchar(160)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "command_idempotency_key",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "immutable_fingerprint",
+      "Type": "char(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "fact_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "reversal_of",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "status",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "tenant_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "organization_id",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "organization_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "organization_path_snapshot",
+      "Type": "varchar(512)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "store_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "store_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "member_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "member_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "operator_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "operator_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_date",
+      "Type": "date",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_timezone",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "occurred_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "settled_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "recorded_at",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "checkout_request_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "order_no_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "source_document_type",
+      "Type": "varchar(32)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_primary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_secondary_name_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "business_source_label_snapshot",
+      "Type": "varchar(140)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "source_attribution_type_snapshot",
+      "Type": "varchar(24)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "other",
+      "Extra": ""
+    },
+    {
+      "Field": "source_line_id",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "performance_type",
+      "Type": "varchar(48)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "employee_id",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "employee_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "employee_type_snapshot",
+      "Type": "varchar(16)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "employee_type_authority_version",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "role_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "allocation_weight_numerator",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "allocation_weight_denominator",
+      "Type": "bigint(20) unsigned",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "allocation_base_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "labor_fee_amount_cents",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "project_count_half_units",
+      "Type": "bigint(20)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "0",
+      "Extra": ""
+    },
+    {
+      "Field": "project_count_decimal",
+      "Type": "decimal(20,6)",
+      "Null": "YES",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "rule_code_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    },
+    {
+      "Field": "rule_name_snapshot",
+      "Type": "varchar(128)",
+      "Null": "NO",
+      "Key": "",
+      "Default": "",
+      "Extra": ""
+    },
+    {
+      "Field": "rule_version_snapshot",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "",
+      "Default": null,
+      "Extra": ""
+    }
+  ],
+  "mode": 1,
+  "position_model": "independent",
+  "files": {
+    "app/services/report/BasicActivityReportServices.php": "6a25e4476941341f2675438f3cc45fe8746645e1a40ef977f1cb909bdd06ad6e",
+    "app/services/report/query/BasicBusinessQueryProvider.php": "bff28028cb931899fd74f6d5aa55335fd51a92daba0246e907a45b86164d48af",
+    "public/view_cashier_v3/index.html": "64ad1697b29631997b1d1c95e7b69e824bbdb84aa8100e1342be6d1c7d3a6a7e"
+  }
+}

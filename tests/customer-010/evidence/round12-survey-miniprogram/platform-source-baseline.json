@@ -1,0 +1,12 @@
+{
+  "accepted_R22_proof": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/cashier-v3/evidence/R22-final-20261029/candidate-admin-build.json",
+  "proof_sha256": "ded5e1c96c8abb8b14587227e8b65e1a4a8419dc5c259c63edca25dd832dc777",
+  "accepted_tree": "fe88136c608d71fcd60516c6c1aa1207db5d62a7",
+  "matched_admin_inputs": 1491,
+  "intentional_changes": [
+    "前端代码/admin/src/pages/user/survey/index.vue"
+  ],
+  "missing": [],
+  "passed": true,
+  "pipeline": "node16-no-cache-no-thread-no-eslint-loader-no-parallel"
+}

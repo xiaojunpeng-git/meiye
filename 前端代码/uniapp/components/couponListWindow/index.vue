@@ -16,9 +16,10 @@
 				</view>
 				<view class="px-20 scroll-content">
 					<scroll-view scroll-y="true" style="max-height: 800rpx">
-						<view class="coupon-list" v-if="coupon.list.length">
+						<!-- Unavailable owned coupons stay visible; the selection handler rejects them. -->
+                        <view class="coupon-list" v-if="coupon.list.length">
 							<view v-for="(item, index) in coupon.list" :key="index" @tap="goCouponDetails(item)">
-								<view class="mt-24 h-170 bg--w111-fff text-center rd-16rpx flex">
+								<view class="mt-24 h-170 bg--w111-fff text-center rd-16rpx flex" :style="item.canUse === false ? 'opacity:0.55;height:auto;min-height:170rpx' : ''">
 									<view class="left-bg" :class="[item.category == 2 ? 'bg-coupon-vip text--w111-FACC7D' : 'bg-gradient text--w111-fff']">
 										<view class="left-container w-full h-full relative flex-col flex-between-center py-32">
 											<baseMoney :money="item.coupon_price" symbolSize="28" integerSize="52" decimalSize="28" :color="item.category == 2 ? '#FACC7D' : '#FFFFFF'" isCoupon v-if="item.coupon_type == 1"></baseMoney>
@@ -46,7 +47,8 @@
 											</view>
 										</view>
 										<view class="flex-y-center fs-20 text--w111-999 lh-28rpx mt-20">
-											<text>{{ item.type | typeFilter }}</text>
+											<text v-if="item.unavailableReasons && item.unavailableReasons.length">{{ item.unavailableReasons.join('；') }}</text>
+                                            <text v-else>{{ item.type | typeFilter }}</text>
 											<view>
 												<text class="pl-8 fs-20">| 查看用券规则</text>
 												<text class="iconfont icon-ic_rightarrow fs-20 ml-4"></text>
@@ -119,6 +121,8 @@ export default {
 		getCouponUser: function (index, id) {
 			let that = this;
 			let list = that.coupon.list;
+            // Server eligibility is authoritative; disabled rows must not emit selection.
+            if (list[index].canUse === false) return;
 			if (list[index].unused) {
 				that.$emit('ChangCoupons', 0);
 				return;

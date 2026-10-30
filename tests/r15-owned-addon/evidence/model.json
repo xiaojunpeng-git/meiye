@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "separatePurchases": true,
+  "combinationGroups": true,
+  "standaloneRows": true,
+  "foldPreservesSelection": true,
+  "searchExpands": true,
+  "sharedPoolDraftGuard": true,
+  "choiceKindDraftGuard": true,
+  "ownedContext": true,
+  "errorRetry": true,
+  "staleResponseIgnored": true,
+  "productionRequests": 0
+}

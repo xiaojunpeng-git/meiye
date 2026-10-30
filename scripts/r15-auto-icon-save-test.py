@@ -1,0 +1,8 @@
+"""Run real save/read/rollback coverage only inside the local Docker database.
+The process-only test configuration never changes canonical PHP or any customer."""
+import pathlib,base64,subprocess,json,hashlib
+root=pathlib.Path(__file__).resolve().parents[1];evidence=root/'tests/r15-auto-icon-save/evidence'
+source=(root/'tests/member-center-save/mysql.php').read_text();needle='$app->initialize();';assert source.count(needle)==1
+source=source.replace(needle,"$app->env->set('database.database','ruihao_restore_verify_20261006');$app->env->set('DATABASE_DATABASE','ruihao_restore_verify_20261006');$localEnv=new ReflectionProperty($app,'envName');$localEnv->setAccessible(true);$localEnv->setValue($app,'r15-local');$app->initialize();if(config('database.connections.mysql.database')!=='ruihao_restore_verify_20261006')throw new RuntimeException('Local test database mismatch');")
+fixture=base64.b64encode((root/'tests/member-center-save/fixtures/accepted-service-menu.json').read_bytes()).decode();needle="file_get_contents(__DIR__ . '/fixtures/accepted-service-menu.json')";assert source.count(needle)==1;source=source.replace(needle,"base64_decode('"+fixture+"')")
+p=subprocess.run(['docker','exec','-i','mohe-app','php'],input=source.encode(),capture_output=True,cwd=root,timeout=90);(evidence/'mysql.log').write_bytes(p.stdout+p.stderr);assert p.returncode==0,(p.stdout+p.stderr).decode();(evidence/'mysql.json').write_text(json.dumps({'result':'PASS','localDockerOnly':True,'testProcessSHA256':hashlib.sha256(source.encode()).hexdigest(),'autoIconSaveRefresh':True,'optionalLegacyMirrors':True,'rollback':True,'productionWrites':0},indent=2));print(p.stdout.decode())

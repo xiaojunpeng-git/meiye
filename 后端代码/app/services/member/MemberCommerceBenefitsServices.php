@@ -37,7 +37,7 @@ final class MemberCommerceBenefitsServices
         $couponId = max(0, (int)($input['coupon_id'] ?? 0));
         $selected = null;
         foreach ($couponOptions as $option) {
-            if ((int)$option['id'] === $couponId) {
+            if ((int)$option['id'] === $couponId && !empty($option['canUse'])) {
                 $selected = $option;
                 break;
             }
@@ -261,32 +261,42 @@ final class MemberCommerceBenefitsServices
     {
         $now = time();
         $query = Db::name('store_coupon_user')->alias('cu')->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
-            ->where('cu.uid', $uid)->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
-            ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
-            ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
-            ->where('ci.category', 1)
+            ->where('cu.uid', $uid)
             ->field('cu.id,cu.cid,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,'
                 . 'ci.coupon_type,ci.top_discount_price,ci.type as applicable_scope,ci.product_id,ci.category_id,'
                 . 'ci.brand_id,ci.applicable_type,ci.applicable_store_id,ci.coupon_issue_type,ci.relation_id,'
-                . 'ci.use_mode,ci.order_tiers_json');
+                . 'ci.use_mode,ci.order_tiers_json,cu.status,cu.is_fail,cu.use_time,cu.start_time,'
+                . 'cu.original_recipient_uid,cu.issuance_store_id,ci.usage_target,ci.new_user_only');
         if ($lock) $query->lock(true);
         $rows = $query->order('cu.end_time asc,cu.id asc')->select()->toArray();
         $reserved = array_fill_keys(array_map('intval', Db::name(self::TABLE)
             ->where('coupon_user_id', '>', 0)->where('status', 'reserved')->column('coupon_user_id')), true);
         $result = [];
+        // Keep unavailable coupons visible, but never allow their IDs into settlement.
+        $eligibility = new \app\services\activity\coupon\StoreCouponEligibilityServices();
+        if ($lock) $eligibility->lockMember($uid);
+        $needsHistory = (bool)array_filter($rows, static fn(array $row): bool => (int)($row['new_user_only'] ?? 0) === 1);
+        $hasConsumed = $needsHistory && $eligibility->hasConsumed($uid, '', $lock);
         foreach ($rows as $row) {
-            if (isset($reserved[(int)$row['id']]) || !$this->allowsStore($row, $storeId)) continue;
+            $reasons = \app\services\activity\coupon\StoreCouponEligibilityRule::reasons($row, $uid, $storeId, $hasConsumed);
+            if (isset($reserved[(int)$row['id']])) $reasons[] = '已被其他待支付订单占用';
+            if (!$this->allowsStore($row, $storeId)) $reasons[] = '不适用于当前门店';
+            if ((int)$row['is_fail']) $reasons[] = '已作废';
+            if ((int)$row['status'] === 1 || (int)$row['use_time'] > 0) $reasons[] = '已使用';
+            if ((int)$row['status'] === 2 || ((int)$row['end_time'] > 0 && (int)$row['end_time'] < $now)) $reasons[] = '已过期';
+            if ((int)$row['start_time'] > $now) $reasons[] = '尚未到使用时间';
+            if ((int)$row['coupon_type'] === 3) $reasons[] = '多次抵用券请在门店收银使用';
             $eligible = $this->eligibleLines($row, $lines);
-            if (!$eligible) continue;
+            if (!$eligible) $reasons[] = '不适用于当前商品';
             $eligibleTotal = array_sum(array_map(static fn(array $line): int => (int)$line['amountCents'], $eligible));
             if ((int)$row['use_mode'] === StoreCouponOrderRule::ORDER) {
                 $tiers = StoreCouponOrderRule::fromStored((string)$row['order_tiers_json']);
-                if (StoreCouponOrderRule::maxCount($tiers, $eligibleTotal) < 1) continue;
+                if (StoreCouponOrderRule::maxCount($tiers, $eligibleTotal) < 1) $reasons[] = '未达到整单用券门槛';
                 $discount = self::wholeYuan(self::moneyCents($row['coupon_price']));
                 $minimum = (int)$tiers[0]['min_amount_cents'];
             } else {
                 $minimum = self::moneyCents($row['use_min_price']);
-                if ($eligibleTotal < $minimum) continue;
+                if ($eligibleTotal < $minimum) $reasons[] = '未达到使用门槛';
                 $discount = self::moneyCents($row['coupon_price']);
                 if ((int)$row['coupon_type'] === 2) {
                     $rate = self::percentHundredths($row['coupon_price']);
@@ -296,7 +306,7 @@ final class MemberCommerceBenefitsServices
                 }
                 $discount = self::wholeYuan($discount);
             }
-            if ($discount <= 0) continue;
+            if ($discount <= 0) $reasons[] = '当前商品无可抵扣金额';
             usort($eligible, static fn(array $a, array $b): int => (int)$b['amountCents'] <=> (int)$a['amountCents']);
             $target = null;
             foreach ($eligible as $line) {
@@ -307,14 +317,17 @@ final class MemberCommerceBenefitsServices
                     break;
                 }
             }
-            if ($target === null) continue;
+            if ($target === null) $reasons[] = '没有满足抵扣金额的商品明细';
+            $target = $target ?? ['index' => -1];
             $fingerprint = hash('sha256', json_encode([$row['id'], $row['cid'], $row['coupon_title'],
                 $discount, $storeId, $target['index']], JSON_UNESCAPED_UNICODE));
             $result[] = ['id' => (int)$row['id'], 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
                 'discountCents' => $discount, 'expiresAt' => (int)$row['end_time'],
                 'useMode' => (int)$row['use_mode'], 'minimumCents' => $minimum,
-                'lineIndex' => (int)$target['index'], 'fingerprint' => $fingerprint];
+                'lineIndex' => (int)$target['index'], 'fingerprint' => $fingerprint,
+                'canUse' => !$reasons, 'unavailableReasons' => array_values(array_unique($reasons))];
         }
+        usort($result, static fn(array $a, array $b): int => (int)$b['canUse'] <=> (int)$a['canUse']);
         return $result;
     }
 
@@ -349,7 +362,11 @@ final class MemberCommerceBenefitsServices
         $ledgerAvailable = (int)app()->make(UserBillServices::class)
             ->countIntegralBalance($memberIntegral, $uid);
         $available = max(0, min($memberIntegral, $ledgerAvailable) - $this->heldIntegral($uid));
-        $ratioCents = self::moneyCents(sys_config('integral_ratio', 0));
+        // Existing customer instances may keep the optional ratio row blank.
+        // A blank value means points are not configured; it must not block an
+        // otherwise valid member purchase quote.
+        $ratio = trim((string)sys_config('integral_ratio', 0));
+        $ratioCents = $ratio === '' ? 0 : self::moneyCents($ratio);
         if (!$enabled || $ratioCents <= 0 || $payableCents <= 0) {
             return ['enabled' => false, 'available' => $available, 'maxUsable' => 0,
                 'maxDiscountCents' => 0, 'used' => 0, 'discountCents' => 0];

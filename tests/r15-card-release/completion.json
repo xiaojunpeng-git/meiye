@@ -1,0 +1,60 @@
+{
+  "featureCommit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+  "acceptedPatch": "535f20f8",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+      "tree": "a9b865759a2279ca9c2ab04a18ea3bd6f395eb44",
+      "backups": {
+        "admin": "/www/backups/rh/combination-group-cb29510a",
+        "member": "/www/backups/rh/store-address-cb29510a"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+      "tree": "a9b865759a2279ca9c2ab04a18ea3bd6f395eb44",
+      "backups": {
+        "admin": "/www/backups/008/combination-group-cb29510a",
+        "member": "/www/backups/008/store-address-cb29510a"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    },
+    "010": {
+      "result": "PASS",
+      "commit": "cb29510a1db61bfd17d5ae9fd65737b0cfe1d5ad",
+      "tree": "a9b865759a2279ca9c2ab04a18ea3bd6f395eb44",
+      "backups": {
+        "admin": "/www/backups/010/combination-group-cb29510a",
+        "member": "/www/backups/010/store-address-cb29510a"
+      },
+      "businessWrites": 0,
+      "configurationChanged": false,
+      "migration": false
+    }
+  },
+  "uploads": {
+    "008": {
+      "version": "3.0.83",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "taskId": "confirmation_upload_dc957808-3750-4c22-8378-e06780a1da29",
+      "status": "success",
+      "receiptSHA256": "e8416724c6e3133362ec0320bae1998e564fbddb7b76d46a8978bbf4316d03e2"
+    },
+    "010": {
+      "version": "3.0.83",
+      "appid": "wxce4f61fc9c4eaaa6",
+      "taskId": "confirmation_upload_0d0142f0-9add-4dd8-a442-c62505256557",
+      "status": "success",
+      "receiptSHA256": "fdcc976d3d16f6f73874ac7283291383c576cbffe0ea70aeb341962d8a9bfa34"
+    }
+  },
+  "businessWrites": 0,
+  "migration": false
+}

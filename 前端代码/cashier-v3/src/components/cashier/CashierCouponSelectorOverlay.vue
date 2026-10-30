@@ -204,10 +204,11 @@ function chooseCoupon(coupon) {
               <template v-else-if="Number(coupon.useMinAmountCents || 0) > 0">满 {{ moneyFromCents(coupon.useMinAmountCents) }} 可用 · </template>
               {{ expiryText(coupon.expiresAt) }}
             </small>
+            <small v-if="coupon.productScopeText" class="cashier-coupon-item__scope" :title="coupon.productScopeText">{{ coupon.productScopeText }}</small>
           </span>
         </button>
         <template v-if="belowMinimumCoupons.length">
-          <h3 class="cashier-coupon-list__heading">未达使用门槛</h3>
+          <h3 class="cashier-coupon-list__heading">暂不可用</h3>
           <div
             v-for="coupon in belowMinimumCoupons"
             :key="couponId(coupon)"
@@ -216,7 +217,10 @@ function chooseCoupon(coupon) {
             <span class="cashier-coupon-item__amount">暂不可用</span>
             <span class="cashier-coupon-item__content">
               <strong>{{ coupon.name || '优惠券' }}</strong>
-              <small>满 {{ roundedMoneyFromCents(coupon.useMinAmountCents) }} 可用 · 还差 {{ roundedMoneyFromCents(coupon.shortfallCents) }} · {{ expiryText(coupon.expiresAt) }}</small>
+              <!-- 后端返回全部不满足条件，前端只展示，不自行授权用券。 -->
+              <small v-if="coupon.unavailableReasons?.length">{{ coupon.unavailableReasons.join('；') }}</small>
+              <small v-else>满 {{ roundedMoneyFromCents(coupon.useMinAmountCents) }} 可用 · 还差 {{ roundedMoneyFromCents(coupon.shortfallCents) }} · {{ expiryText(coupon.expiresAt) }}</small>
+              <small v-if="coupon.productScopeText" class="cashier-coupon-item__scope" :title="coupon.productScopeText">{{ coupon.productScopeText }}</small>
             </span>
           </div>
         </template>
@@ -343,6 +347,15 @@ function chooseCoupon(coupon) {
 .cashier-coupon-item__content { min-width: 0; display: grid; gap: 5px; }
 .cashier-coupon-item__content strong { overflow-wrap: anywhere; color: #25333a; }
 .cashier-coupon-item__content small { color: #738087; }
+/* 适用范围最多两行，完整内容保留在原生提示中，不挤掉选券操作区域。 */
+.cashier-coupon-item__scope {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 .cashier-coupon-empty { display: grid; place-content: center; gap: 8px; min-height: 180px; text-align: center; color: #738087; }
 .cashier-coupon-empty strong { color: #394950; }
 

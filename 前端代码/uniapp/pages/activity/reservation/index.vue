@@ -12,7 +12,10 @@
 			   <text class="booking-header-count">{{ selectedItems.length }} 个项目</text>
 		   </view>
 		   <view class="selected-items acea-row">
-			   <view class="item-tag" v-for="(item, idx) in selectedItems" :key="idx">{{ item.label }}</view>
+			   <view class="item-tag" :class="{ 'item-tag--removable': item.removable }" v-for="item in selectedItems" :key="item.key">
+                   <text>{{ item.label }}</text>
+                   <button v-if="item.removable" class="item-remove" :aria-label="'移除' + item.label" @click.stop="removeSelectedAddon(item.key)"><text aria-hidden="true">×</text></button>
+               </view>
 		   </view>
 		   <view class="service-duration acea-row row-between-wrapper" v-if="totalServiceDuration > 0">
 			   <text>预计服务时长</text>
@@ -103,6 +106,8 @@
 		   <chooseTime
 			   class="booking-time-picker"
 			   :embedded="true"
+			   :expandTimeSlots="true"
+			   :filledDateTabs="true"
 			   :isQuantum="true"
 			   :beginTime="timeBegin"
 			   :endTime="timeEnd"
@@ -279,9 +284,10 @@
 	   		</view>
 	   	</view>
 	   </view>
-	   <view :class="orderId ? 'heights-order' : 'heights'"></view>
+	   <view :class="[orderId ? 'heights-order' : 'heights', { 'heights-order--error': orderId && bookingSubmitError }]"></view>
 	   <view class="booking-footer" v-if="orderId">
-		   <view class="booking-submit-btn" @click="butlerEdit ? reservationButlerUpdate() : reservationOrderCreate()">{{ butlerEdit ? '保存修改' : '立即预约' }}</view>
+		   <view v-if="bookingSubmitError" class="booking-submit-error" role="status" aria-live="polite">{{ bookingSubmitError }}</view>
+		   <view class="booking-submit-btn" :class="{ 'is-submitting': bookingSubmitting }" :aria-disabled="bookingSubmitting ? 'true' : 'false'" @click="butlerEdit ? reservationButlerUpdate() : reservationOrderCreate()">{{ bookingSubmitting ? '提交中…' : (butlerEdit ? '保存修改' : '立即预约') }}</view>
 	   </view>
 	   <view class="footer acea-row row-middle" v-else>
 		   <view class="w-190">
@@ -370,21 +376,14 @@
 		</view>
 
 		<!-- 加项选择 -->
-		<view class="staff-mask" v-if="addonPickerVisible" @click="addonPickerVisible = false">
+		<view class="staff-mask addon-picker-mask" v-if="addonPickerVisible" @click="addonPickerVisible = false">
 			<view class="staff-panel addon-picker-panel" @click.stop="">
-				<view class="staff-panel-title">添加项目</view>
-				<view class="addon-picker-tabs acea-row">
-					<view
-						class="addon-picker-tab"
-						:class="{ active: addonPickerTab === 1 }"
-						@click="switchAddonTab(1)"
-					>已购项目</view>
-					<view
-						v-if="!historicalStorePicker"
-						class="addon-picker-tab"
-						:class="{ active: addonPickerTab === 2 }"
-						@click="switchAddonTab(2)"
-					>全部项目</view>
+				<!-- 全屏弹层只关闭本次选择，不返回预约页；为小程序状态栏和原生胶囊保留空间。 -->
+				<view class="addon-picker-heading" :style="{ paddingTop: addonPickerTop + 'px' }">
+					<view class="addon-picker-titlebar">
+						<button class="addon-picker-close" aria-label="关闭添加项目" @click="addonPickerVisible = false">取消</button>
+						<view class="staff-panel-title">添加项目</view>
+					</view>
 				</view>
 				<view class="addon-search-wrap">
 					<text class="iconfont icon-ic_search addon-search-icon"></text>
@@ -395,26 +394,39 @@
 						confirm-type="search"
 					/>
 				</view>
-				<scroll-view scroll-y class="staff-list">
+				<scroll-view scroll-y class="staff-list addon-picker-list">
 					<view v-if="addonPickerLoading" class="staff-empty">加载中...</view>
-					<view v-else-if="!filteredAddonPickerOptions.length" class="staff-empty">暂无可选项目</view>
-					<view
-						v-else
-						class="staff-item"
-						v-for="item in filteredAddonPickerOptions"
-						:key="item._key"
-						@click="toggleAddonItem(item)"
-					>
-						<view class="acea-row row-between-wrapper">
-							<view class="flex-1 min-w-0">
-								<view class="line1">{{ item.label }}</view>
-								<view class="addon-item-meta" v-if="item.durationText">{{ item.durationText }}</view>
+					<view v-else-if="addonPickerError" class="staff-empty" role="status">
+						<view>{{ addonPickerError }}</view>
+						<button class="addon-retry" @click="loadAddonPickerOptions">重新加载</button>
+					</view>
+					<view v-else-if="!addonPickerGroups.length" class="staff-empty">暂无可预约的已购项目</view>
+					<view v-else class="addon-option-groups">
+						<view v-for="group in addonPickerGroups" :key="group.key" class="addon-option-group" :class="{ 'addon-card-group': group.card }">
+							<view v-if="group.card" class="addon-card-heading" role="button" tabindex="0" :aria-label="group.card.name + (group.collapsed ? '，展开项目' : '，收起项目')" @keydown.enter="toggleAddonGroup(group.key)" @click="toggleAddonGroup(group.key)">
+								<view class="addon-card-identity">
+									<view class="addon-card-name">{{ group.card.name }} <text class="addon-card-fold">{{ group.collapsed ? '+' : '−' }}</text></view>
+									<view class="addon-card-caption">{{ group.card.rule_label }}<text v-if="group.card.number"> · {{ group.card.number }}</text></view>
+								</view>
+								<text class="addon-card-remain">{{ group.card.remaining_text }}</text>
 							</view>
-							<text class="iconfont ml-12" :class="isAddonSelected(item._key) ? 'icon-a-ic_CompleteSelect text-color' : 'icon-ic_unselect'"></text>
+							<view v-if="!group.collapsed" class="addon-group-items">
+								<view v-for="section in group.sections" :key="section.key">
+									<view v-if="section.name" class="addon-section-heading">{{ section.name }}<text class="addon-section-rule">{{ section.rule }}</text></view>
+									<view v-for="item in section.items" :key="item._key" class="staff-item addon-picker-item" :class="{ 'addon-card-child': group.card, 'addon-item-disabled': item.disabled }" :aria-disabled="item.disabled ? 'true' : 'false'" @click="toggleAddonItem(item)">
+										<view class="addon-item-row">
+											<view class="addon-item-name">{{ item.projectDisplayName || item.displayName || item.product_name || item.label }}</view>
+											<view class="addon-item-meta"><text>{{ item.durationText }}</text><text>{{ item.remainingText }}</text></view>
+											<text v-if="item.disabled" class="addon-disabled-reason" role="status">{{ item.disabledReason }}</text>
+											<text v-else class="iconfont addon-item-check" :class="isAddonSelected(item._key) ? 'icon-a-ic_CompleteSelect text-color' : 'icon-ic_unselect'"></text>
+										</view>
+									</view>
+								</view>
+							</view>
 						</view>
 					</view>
 				</scroll-view>
-				<view class="addon-confirm-btn" @click="confirmAddonPicker">确定</view>
+				<view class="addon-picker-footer"><view class="addon-confirm-btn" @click="confirmAddonPicker">确定</view></view>
 			</view>
 		</view>
 	</view>
@@ -431,7 +443,7 @@ import colors from "@/mixins/color";
 import confirm from "@/mixins/confirm";
 import { Debounce } from '@/utils/validate.js'
 import {getReservationInfo,getReservationDate,getReservationTimes,postReservationCompute,postReservationSwitch,getReservationStaffList,getStaffAvailableTime,getBusyStaffAtTime,getStaffReservationConflicts} from '@/api/activity.js';
-import {postCartAdd, getProductslist, storeReservationDetail, storeReservationUpdate} from '@/api/store.js';
+import {postCartAdd, storeReservationDetail, storeReservationUpdate} from '@/api/store.js';
 import { merchantReservationDetail, merchantReservationUpdate } from '@/api/merchant.js';
 import { setCouponReceive } from '@/api/api.js';
 import {getReservationOrderInfo,postReservationOrderCreate,getUserPurchasedRemainItems,getReservationCustomServices} from '@/api/order.js';
@@ -439,7 +451,6 @@ import { isMobileReservationOpen } from '@/utils/mobileReservation.js';
 import { openYuyueSubscribe, openGuanjiaSubscribe } from '@/utils/SubscribeMessage.js';
 import { resolveProjectDuration, resolveAddonDuration } from '@/utils/serviceDuration.js';
 
-const CUSTOM_CARD_PRODUCT_ID = 8154;
 export default {
 	name: 'reservation',
 	components: {
@@ -465,6 +476,8 @@ export default {
 			customServiceLoading: false,
 			customServiceError: '',
 			customServiceEpoch: 0,
+            staffAvailabilityEpoch: 0,
+            timeAvailabilityEpoch: 0,
 			unique:'',
 			attrList:[],
 			storeName:'',
@@ -492,11 +505,14 @@ export default {
 			disableTimeSlot:[],
 			addonItems:[],
 			addonPickerVisible:false,
+			addonPickerTop:0,
 			addonPickerSelected:[],
-			addonPickerTab: 1,
 			addonPickerSearch: '',
 			addonPickerLoading: false,
 			addonPickerOptions: [],
+			addonPickerError: '',
+			addonPickerRequestId: 0,
+			collapsedAddonGroups: [],
 			serviceData:[
 				{id:3,name:'上门服务',status:1},
 				{id:2,name:'到店服务',status:1}
@@ -540,6 +556,9 @@ export default {
 			preselectedStoreApplied: false,
 			configData: this.$Cache.get('BASIC_CONFIG'),
 			serviceMark: '',
+			// One in-flight command; feedback is local UI state, never a booking result.
+			bookingSubmitting: false,
+			bookingSubmitError: '',
 		}
 	},
 	computed: {
@@ -592,13 +611,17 @@ export default {
 			if (this.mainItemLabel) {
 				const dur = resolveProjectDuration(this.projectServiceDuration);
 				items.push({
-					label: `${this.mainItemLabel} (${dur}分钟)`,
+					key: `main_${this.orderId || 0}_${this.cartInfoId || 0}`,
+                    removable: false,
+                    label: `${this.mainItemLabel} (${dur}分钟)`,
 				});
 			}
 			this.addonItems.forEach(item => {
 				const dur = resolveAddonDuration(item.addon_service_duration);
 				items.push({
-					label: `${item.product_name} (${dur}分钟)`,
+					key: item._key,
+                    removable: !!item._key,
+                    label: `${item.product_name} (${dur}分钟)`,
 				});
 			});
 			return items;
@@ -624,6 +647,28 @@ export default {
 				list = list.filter(item => (item.label || '').toLowerCase().includes(kw));
 			}
 			return list;
+		},
+		// Group only by purchased order and issued combination group; equal names
+		// must never merge separate purchases or independently counted rights.
+		addonPickerGroups() {
+			const groups = [];
+			this.filteredAddonPickerOptions.forEach(item => {
+				const key = item.card ? `card_${item.oid}` : item._key;
+				let group = groups.find(row => row.key === key);
+				if (!group) {
+					group = { key, card: item.card || null, sections: [], collapsed: !this.addonPickerSearch && this.collapsedAddonGroups.includes(key) };
+					groups.push(group);
+				}
+				const info = item.cardPresentation || {};
+				const sectionKey = String(info.group_no || 0);
+				let section = group.sections.find(row => row.key === sectionKey);
+				if (!section) {
+					section = { key: sectionKey, name: info.group_name || '', rule: info.rule_label || '', items: [] };
+					group.sections.push(section);
+				}
+				section.items.push(item);
+			});
+			return groups;
 		},
 		filteredHistoricalStores() {
 			const keyword = this.historicalStoreSearch.trim().toLowerCase();
@@ -737,7 +782,18 @@ export default {
 			}
 			return extra;
 		},
-		reservationOrderCreate(){
+        bookingFailureMessage(error) {
+            // The request client rejects structured {status,msg} objects. Toast
+            // titles must be text; never expose SQL/stack details to members.
+            const value = typeof error === 'string' ? error : (error && (error.msg || error.message));
+            if (typeof value !== 'string' || !value.trim() || /SQLSTATE|Stack trace|\bSELECT\b.+\bFROM\b/i.test(value)) {
+                return '预约未成功，请稍后重试或联系门店。';
+            }
+            return value.trim();
+        },
+		async reservationOrderCreate(){
+            if (this.bookingSubmitting) return;
+            this.bookingSubmitError = '';
 			if (this.historicalStorePicker && !Number(this.storeId)) {
 				return this.$util.Tips({ title: '请先选择预约门店' });
 			}
@@ -747,6 +803,9 @@ export default {
 			if(!this.verify()){
 				return
 			}
+			// Catch payload/transport failures too, so no click can fail silently.
+			this.bookingSubmitting = true;
+			try {
 			let data = {
 				cart_num:this.cartNum,
 				reservation_time:this.targetDay,
@@ -767,7 +826,7 @@ export default {
 			// #ifdef MP
 			openYuyueSubscribe();
 			// #endif
-			postReservationOrderCreate(this.orderId,data).then(res=>{
+			const res = await postReservationOrderCreate(this.orderId,data);
 				let url = `/pages/goods/reservation_status/index?orderId=${this.orderId}`;
 				const reservationId = Number(res.data && (res.data.reservationId || res.data.id) || 0);
 				if (reservationId > 0) {
@@ -777,9 +836,14 @@ export default {
 					url += `&book_uid=${this.bookUid}`;
 				}
 				uni.navigateTo({ url });
-			}).catch(err=>{
-				return this.$util.Tips({ title: err });
-			})
+            } catch (error) {
+                // Keep the rejection visible beside the submit button, including
+                // when a toast is hidden or disappears before the member reads it.
+                this.bookingSubmitError = this.bookingFailureMessage(error);
+                this.$util.Tips({ title: this.bookingSubmitError });
+            } finally {
+                this.bookingSubmitting = false;
+            }
 		},
 		merchantContextParams() {
 			return {
@@ -949,15 +1013,6 @@ export default {
 				return this.$util.Tips({ title: err });
 			})
 		},
-		isCustomCardProduct(item) {
-			if (!item) return false;
-			const id = Number(item.id || item.product_id || 0);
-			const pid = Number(item.pid || 0);
-			return id === CUSTOM_CARD_PRODUCT_ID || pid === CUSTOM_CARD_PRODUCT_ID;
-		},
-		filterAllReservationProducts(list) {
-			return (list || []).filter(item => Number(item.product_type) === 6 && !this.isCustomCardProduct(item));
-		},
 		buildServiceLabel(name, cardName, sku, remain) {
 			let label = cardName ? `${name}（${cardName}）` : name;
 			if (sku) label += ` / ${sku}`;
@@ -970,7 +1025,9 @@ export default {
 				if (Number(item.product_type) !== 6) return;
 				if (Number(item.id) === Number(this.cartInfoId)) return;
 				const canBook = Number(item.write_surplus_times) > 0 && Number(item.is_writeoff) !== 1;
-				if (!canBook) return;
+				// Disabled rows are server-authorized visible rights, never selectable quota.
+				const disabled = item.card_presentation?.disabled === true;
+				if (!canBook && !disabled) return;
 				const pinfo = item.cart_info?.productInfo || {};
 				const attrInfo = pinfo.attrInfo || {};
 				const sku = attrInfo.suk || attrInfo.suk || '';
@@ -983,10 +1040,22 @@ export default {
 					if (sku) label += ` / ${sku}`;
 					if (item.write_surplus_times != null) label += `（余${item.write_surplus_times}次）`;
 				}
+				// 展示名称和余次分别来自同一权益明细，不从拼接文案反解析；label仍供原搜索使用。
+				const displayName = item.display_name
+					? `${item.display_name}${sku ? ' / ' + sku : ''}`
+					: this.buildServiceLabel(storeName, cardName, sku, null);
 				const addonDur = resolveAddonDuration(pinfo.addon_service_duration || item.addon_service_duration || this.addonServiceDuration);
 				options.push({
+					disabled,
+					disabledReason: item.card_presentation?.disabled_reason || '暂不可预约',
 					_key: `addon_${order.id}_${item.id}`,
 					label,
+					displayName,
+					remainingText: item.card_presentation?.remaining_text || `剩余${item.write_surplus_times}次`,
+					projectDisplayName: `${storeName}${sku ? ' / ' + sku : ''}`,
+					card: (Number(order.type) === 11 || Number(order.product_type) === 5)
+						? (order.card?.name ? order.card : { name: cardName || '卡项', rule_label: '卡项', number: '', remaining_text: '' }) : null,
+					cardPresentation: item.card_presentation || null,
 					product_id: item.product_id,
 					unique: item.sku_unique || attrInfo.unique || '',
 					oid: order.id,
@@ -1006,53 +1075,27 @@ export default {
 				let cardName = '';
 				if (isCardOrder && rows && rows.length) {
 					const mainRow = rows.find(row => Number(row.cart_type) === 0);
-					cardName = mainRow?.cart_info?.productInfo?.store_name || order.store_name || '';
+					cardName = order.card?.name || mainRow?.cart_info?.productInfo?.store_name || order.store_name || '';
 				}
 				options.push(...this.parseCartAddonRows(order, rows, cardName));
 			});
 			return options;
 		},
 		loadAddonPickerOptions() {
+			const requestId = ++this.addonPickerRequestId;
 			this.addonPickerLoading = true;
-			if (this.addonPickerTab === 2) {
-				getProductslist({
-					store_name: (this.addonPickerSearch || '').trim(),
-					page: 1,
-					limit: 100,
-				}).then(res => {
-					const list = this.filterAllReservationProducts(res.data?.list || res.data || []);
-					this.addonPickerOptions = list.map(item => {
-						const addonDur = resolveAddonDuration(item.addon_service_duration);
-						return {
-							_key: `addon_all_${item.id}`,
-							label: item.store_name,
-							product_id: item.id,
-							unique: '',
-							cart_info_id: 0,
-							product_name: item.store_name,
-							addon_service_duration: addonDur,
-							durationText: `${addonDur}分钟`,
-							sourceType: 2,
-						};
-					});
-				}).catch(() => {
-					this.addonPickerOptions = [];
-				}).finally(() => {
-					this.addonPickerLoading = false;
-				});
-				return;
-			}
-			// 传主权益上下文而不是放宽普通已购接口的隐藏订单过滤。
-			const historicalContext = this.historicalStorePicker ? {
-				historical_order_id: this.orderId,
-				main_detail_id: this.cartInfoId,
-			} : {};
-			getUserPurchasedRemainItems(this.buildBookUidParams({ store_id: this.storeId || 0, ...historicalContext })).then(res => {
+			this.addonPickerError = '';
+			// 所有主项目统一查询当前门店可用的已购权益；历史导入项目也由后端逐条校验。
+			const ownedContext = { main_order_id: this.orderId, main_detail_id: this.cartInfoId, main_quantity: Number(this.cartNum) || 1 };
+			getUserPurchasedRemainItems(this.buildBookUidParams({ store_id: this.storeId || 0, ...ownedContext })).then(res => {
+				if (requestId !== this.addonPickerRequestId) return;
 				this.addonPickerOptions = this.parsePurchasedAddonOptions(res.data?.list || []);
 			}).catch(() => {
+				if (requestId !== this.addonPickerRequestId) return;
 				this.addonPickerOptions = [];
+				this.addonPickerError = '已购项目加载失败，请重新加载';
 			}).finally(() => {
-				this.addonPickerLoading = false;
+				if (requestId === this.addonPickerRequestId) this.addonPickerLoading = false;
 			});
 		},
 		openAddonPicker() {
@@ -1060,36 +1103,69 @@ export default {
 			if (this.historicalStorePicker && !Number(this.storeId)) {
 				return this.$util.Tips({ title: '请先选择预约门店' });
 			}
-			this.addonPickerTab = 1;
 			this.addonPickerSearch = '';
+			this.collapsedAddonGroups = [];
 			this.addonPickerSelected = this.addonItems.map(item => item._key);
+			// 状态栏高度仅用于原生容器布局，不参与预约业务或权益提交。
+			this.addonPickerTop = 0;
+			// #ifdef MP || APP-PLUS
+			if (typeof uni !== 'undefined' && typeof uni.getSystemInfoSync === 'function') {
+				this.addonPickerTop = Number(uni.getSystemInfoSync().statusBarHeight) || 0;
+			}
+			// #endif
 			this.addonPickerVisible = true;
 			this.loadAddonPickerOptions();
 		},
-		switchAddonTab(tab) {
-			this.addonPickerTab = tab;
-			this.addonPickerSelected = this.addonItems.map(item => item._key);
-			this.loadAddonPickerOptions();
+		toggleAddonGroup(key) {
+			// Folding changes presentation only, never the selected rights.
+			const index = this.collapsedAddonGroups.indexOf(key);
+			if (index >= 0) this.collapsedAddonGroups.splice(index, 1);
+			else this.collapsedAddonGroups.push(key);
 		},
 		isAddonSelected(key) {
 			return this.addonPickerSelected.includes(key);
 		},
 		toggleAddonItem(item) {
+			// Occupancy labels explain availability; taps must not change the draft.
+			if (item.disabled) return;
 			const idx = this.addonPickerSelected.indexOf(item._key);
 			if (idx >= 0) {
 				this.addonPickerSelected.splice(idx, 1);
 			} else {
+				// Display hints only prevent an impossible draft selection; the
+				// server still rechecks ownership, shared pools and kinds in its transaction.
+				const info = item.cardPresentation || {};
+				const selected = this.addonPickerOptions.filter(row => this.addonPickerSelected.includes(row._key));
+				if (info.pool_key && selected.filter(row => row.cardPresentation?.pool_key === info.pool_key).length >= info.available_quantity) {
+					return this.$util.Tips({ title: '该卡剩余可预约次数不足' });
+				}
+				if (info.choice_key && info.choice_cost > 0) {
+					const kinds = selected.filter(row => row.cardPresentation?.choice_key === info.choice_key).reduce((sum, row) => sum + Number(row.cardPresentation.choice_cost || 0), 0);
+					if (kinds + info.choice_cost > info.choice_available) return this.$util.Tips({ title: '已达到该卡可选项目种数' });
+				}
 				this.addonPickerSelected.push(item._key);
 			}
 		},
+        removeSelectedAddon(key) {
+            // 只移除当前附加权益的稳定键；同名/同链接项目独立，主权益及已持有权益不变。
+            const index = this.addonItems.findIndex(item => item._key === key);
+            if (!key || index < 0) return false;
+            this.addonItems.splice(index, 1);
+            this.addonPickerSelected = this.addonPickerSelected.filter(selected => selected !== key);
+            // 时长由剩余项目重算，旧时间选择不能继续提交；沿用原老师与时段刷新流程。
+            this.selectedTimeRange = null;
+            return this.loadStaffList();
+        },
 		confirmAddonPicker() {
 			const merged = [...this.addonItems];
 			this.addonPickerOptions.forEach(item => {
-				if (this.addonPickerSelected.includes(item._key) && !merged.find(row => row._key === item._key)) {
+				if (!item.disabled && this.addonPickerSelected.includes(item._key) && !merged.find(row => row._key === item._key)) {
 					merged.push(item);
 				}
 			});
-			this.addonItems = merged.filter(item => this.addonPickerSelected.includes(item._key));
+			// A refreshed occupied right must not survive through an older selected draft.
+			const blocked = this.addonPickerOptions.filter(item => item.disabled).map(item => item._key);
+			this.addonItems = merged.filter(item => this.addonPickerSelected.includes(item._key) && !blocked.includes(item._key));
 			this.addonPickerVisible = false;
 			this.selectedTimeRange = null;
 			this.loadStaffList();
@@ -1387,6 +1463,9 @@ export default {
 			this.staffList = list;
 		},
 		loadStaffList() {
+            // 连续删除/加项时仅接收最新上下文的老师及时段响应，避免旧时长结果覆盖新选择。
+            const epoch = ++this.staffAvailabilityEpoch;
+            ++this.timeAvailabilityEpoch;
 			if (!this.storeId) return Promise.resolve();
 			const params = {
 				store_id: this.storeId,
@@ -1399,11 +1478,13 @@ export default {
 				params.service_time = query.reservation_start;
 			}
 			return getReservationStaffList(params).then(res => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = this.filterReservationStaffList(res.data?.list || res.data || []);
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
 				this.loadAvailableTime();
 			}).catch(() => {
+                if (epoch !== this.staffAvailabilityEpoch) return;
 				this.staffList = [];
 				this.sanitizeStaffChooseAfterReload();
 				this.applyPreselectedStaff();
@@ -1411,6 +1492,7 @@ export default {
 			});
 		},
 		loadAvailableTime() {
+            const epoch = ++this.timeAvailabilityEpoch;
 			if (!this.storeId || !this.targetDay) return;
 			const staffIds = this.selectedStaffIds;
 			getStaffAvailableTime({
@@ -1421,12 +1503,14 @@ export default {
 				service_duration: this.totalServiceDuration,
 				exclude_reservation_id: this.getExcludeReservationId(),
 			}).then(res => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				const data = res.data || {};
 				this.timeBegin = data.begin_time || '09:00:00';
 				this.timeEnd = data.end_time || '22:00:00';
 				this.disableTimeSlot = data.disable_time_slot || [];
 				this.validateSelectedTimeRange();
 			}).catch(() => {
+                if (epoch !== this.timeAvailabilityEpoch) return;
 				this.disableTimeSlot = [];
 				this.validateSelectedTimeRange();
 			});
@@ -1823,11 +1907,17 @@ export default {
 		opacity: 0.9;
 	}
 	.selected-items{
+        padding-top: 10rpx;
+        align-items: flex-start;
 		flex-wrap: wrap;
 		margin-top: 16rpx;
 		gap: 12rpx;
 	}
 	.item-tag{
+        position: relative;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-wrap: break-word;
 		background: rgba(255,255,255,0.25);
 		padding: 12rpx 24rpx;
 		border-radius: 30rpx;
@@ -1835,6 +1925,28 @@ export default {
 		margin-right: 12rpx;
 		margin-bottom: 12rpx;
 	}
+    .item-tag--removable { padding-right: 40rpx; }
+    .item-remove {
+        position: absolute;
+        top: -10rpx;
+        right: -8rpx;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40rpx;
+        height: 40rpx;
+        min-height: 0;
+        padding: 0;
+        margin: 0;
+        border: 2rpx solid rgba(255,255,255,.65);
+        border-radius: 50%;
+        background: #fff;
+        color: var(--view-theme, #7B2941);
+        font-size: 30rpx;
+        line-height: 1;
+        &::after { border: 0; }
+        &:focus-visible { outline: 2rpx solid #fff; outline-offset: 3rpx; }
+    }
 	.service-duration{
 		margin-top: 20rpx;
 		padding-top: 20rpx;
@@ -1900,6 +2012,9 @@ export default {
 		box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.06);
 		z-index: 20;
 	}
+	.heights-order--error{ height: calc(22vh + 180rpx + env(safe-area-inset-bottom)); }
+	.booking-submit-error{ box-sizing: border-box; color: #9a263d; background: #fff0f2; padding: 16rpx 20rpx; margin-bottom: 16rpx; border-radius: 12rpx; font-size: 26rpx; line-height: 1.5; overflow-wrap: anywhere; max-height: 22vh; overflow-y: auto; }
+	.booking-submit-btn.is-submitting{ opacity: .65; }
 	.booking-submit-btn{
 		height: 88rpx;
 		line-height: 88rpx;
@@ -2050,27 +2165,51 @@ export default {
 		border-radius: 40rpx;
 		font-size: 28rpx;
 	}
+	/* 只改变加项弹层：确定高度的纵向布局保证长列表独立滚动，其他人员弹层保持原样。 */
+	// Occupied rights remain readable and searchable, with a textual reason instead of a selection control.
+	.addon-item-disabled{ background: #f5f5f5; color: #777; }
+	.addon-disabled-reason{ margin-left: 16rpx; color: #777; font-size: 22rpx; line-height: 1.5; max-width: 120rpx; flex-shrink: 0; white-space: normal; }
+	.addon-picker-mask{ overflow: hidden; }
 	.addon-picker-panel{
-		max-height: 78vh;
+		height: 100%;
+		max-height: 100%;
+		min-height: 0;
+		box-sizing: border-box;
+		border-radius: 0;
+		padding: 0 24rpx;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		.addon-picker-heading, .addon-search-wrap, .addon-picker-footer{ flex-shrink: 0; }
+		.addon-picker-list{ flex: 1; height: 0; min-height: 0; max-height: none; }
+		.addon-picker-item{ box-sizing: border-box; }
+		.addon-picker-item .flex-1{ flex: 1; min-width: 0; }
+		.addon-picker-item .iconfont{ flex-shrink: 0; }
 	}
-	.addon-picker-tabs{
-		margin-bottom: 20rpx;
-		gap: 16rpx;
-	}
-	.addon-picker-tab{
-		flex: 1;
-		text-align: center;
-		padding: 16rpx 0;
-		font-size: 26rpx;
-		color: #666;
-		background: #f5f5f5;
-		border-radius: 12rpx;
-		&.active{
-			color: #07CD9A;
-			background: #e3fdf7;
-			font-weight: 600;
-		}
-	}
+	.addon-picker-titlebar{ position: relative; height: 44px; display: flex; align-items: center; justify-content: center; }
+	.addon-picker-titlebar .staff-panel-title{ margin: 0; }
+	.addon-picker-close{ position: absolute; left: 0; top: 0; height: 44px; margin: 0; padding: 0 12rpx; border: 0; background: transparent; font-size: 28rpx; color: #333; display: flex; align-items: center; }
+	.addon-picker-close::after{ border: 0; }
+	.addon-item-name{ white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; overflow-wrap: anywhere; line-height: 1.5; }
+	.addon-item-row{ display: flex; align-items: center; }
+	.addon-item-row .addon-item-name{ flex: 1; min-width: 0; }
+	.addon-item-meta{ flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; margin-left: 20rpx; line-height: 1.6; color: #777; font-size: 24rpx; }
+	.addon-item-check{ margin-left: 20rpx; width: 32rpx; }
+	.addon-option-group{ margin-bottom: 20rpx; }
+	.addon-card-group{ border: 1rpx solid #e8edf3; border-radius: 12rpx; overflow: hidden; }
+	.addon-card-heading{ display: flex; align-items: center; justify-content: space-between; padding: 22rpx 16rpx; background: #f5f8fc; }
+	.addon-card-identity{ flex: 1; min-width: 0; }
+	.addon-card-name{ font-size: 28rpx; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+	.addon-card-fold{ display: inline-block; font-size: 24rpx; border: 1rpx solid #adc8e5; border-radius: 20rpx; padding: 0 14rpx; color: #3474a8; }
+	.addon-card-caption{ margin-top: 4rpx; font-size: 22rpx; line-height: 1.5; color: #7c8798; }
+	.addon-card-remain{ flex-shrink: 0; max-width: 200rpx; margin-left: 16rpx; font-size: 24rpx; font-weight: 600; color: #46536a; }
+	.addon-picker-panel .addon-card-child{ position: relative; padding-left: 48rpx; }
+	.addon-card-child::before{ content: ''; position: absolute; left: 20rpx; top: 28rpx; width: 18rpx; height: 26rpx; border-left: 1rpx solid #adc0d9; border-bottom: 1rpx solid #adc0d9; border-bottom-left-radius: 4rpx; }
+	.addon-section-heading{ padding: 16rpx; font-size: 24rpx; font-weight: 600; background: #fafbfd; }
+	.addon-section-rule{ margin-left: 16rpx; color: #7c8798; font-weight: 400; }
+	.addon-retry{ display: inline-block; margin-top: 20rpx; padding: 0 24rpx; font-size: 26rpx; color: var(--view-theme, #7b2941); background: #fff; }
+	.addon-picker-footer{ padding: 20rpx 0; padding-bottom: calc(20rpx + env(safe-area-inset-bottom)); background: #fff; }
+	.addon-picker-footer .addon-confirm-btn{ margin-top: 0; display: flex; align-items: center; justify-content: center; line-height: 1.4; }
 	.addon-search-wrap{
 		display: flex;
 		align-items: center;
@@ -2107,11 +2246,6 @@ export default {
 		color: #333;
 		line-height: 1.5;
 	}
-	.addon-item-meta{
-		font-size: 22rpx;
-		color: #999;
-		margin-top: 6rpx;
-	}
 </style>
 
 <style lang="scss">
@@ -2120,9 +2254,6 @@ export default {
 		border-color: #07CD9A !important;
 		background: #f0fdf9 !important;
 		color: #07CD9A !important;
-	}
-	.borderb {
-		border-bottom-color: #07CD9A !important;
 	}
 	.all {
 		color: #07CD9A;

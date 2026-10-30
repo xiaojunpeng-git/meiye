@@ -196,8 +196,14 @@ class StoreReservationOrder
 		$bookUid = (int)$request->get('book_uid', 0);
 		$uid = $this->services->resolveBookingUid($loginUid, $bookUid);
 		$storeId = (int)$request->get('store_id', 0);
-		// Historical add-ons require the owned main-right context and selected
-		// store; ordinary callers retain their existing purchased-items contract.
+		// 会员端以主权益上下文查询普通及历史项目；老调用保持原契约，不放宽其他列表。
+		$mainOrderId = (int)$request->get('main_order_id', 0);
+		if ($mainOrderId > 0) {
+			return app('json')->successful(app()->make(
+				\app\services\cashier\v3\reservation\ImportedEntitlementReservationStoreServices::class
+			)->ownedAddonOptions($uid, $mainOrderId, (int)$request->get('main_detail_id', 0), $storeId, max(1, (int)$request->get('main_quantity', 1))));
+		}
+		// 兼容已发布旧会员端的历史主项目入口，继续要求其历史范围校验。
 		$historicalOrderId = (int)$request->get('historical_order_id', 0);
 		if ($historicalOrderId > 0) {
 			return app('json')->successful(app()->make(

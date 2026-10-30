@@ -1,0 +1,60 @@
+{
+  "acceptedCommits": [
+    "dd4e1e083bd55ff4619ef8e73a602a93468a7bac",
+    "3ff92890059beed8f42735cd78e34fb35f49221d"
+  ],
+  "acceptedFiles": {
+    "后端代码/app/services/diy/DiyServices.php": "a0d97d6bf0fb23ce71d86235caec295e3c3b7e260cfc3c3fae781369b06b3b31",
+    "前端代码/admin/src/store/modules/admin/modules/userTemplateConfig.js": "82b13f1faf0ae3393c7634d186e0bdb2db0ebd1018e6d6581138ab0e2e5d0f69",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/OrderConfig.vue": "6ab511a8fa4b88fa3829a673899ef7d0a39be7e42b43da026158cd0a7ed27675",
+    "tests/r15-all-orders/mysql.php": "255d64fe00949cefeb63020075c6504f7271e343e834dd4cb0a97a2986d2002d",
+    "tests/r15-all-orders/editor.cjs": "4353d3b7fea4866750fe1d8d7b2502d3dac3486d592a42f2667c5d10f05fcba8",
+    "前端代码/uniapp/utils/memberMenuIcon.js": "e205826da1e9a59f427912e73e5810b82ad08866d3fac231257dcb2f0a821a2e",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/MenuConfig.vue": "80c640a4a7278ee79894917b4e7fc7852fc0682f9ece7512f8eeb0d79df613cf",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template1.vue": "37155958d0f030a93f23d4fe9ee7c53bb000dc14ede3523322754daa74d9974e",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template2.vue": "72c182f59097c25e6d659e3807c0144d0bd9c83c004a91e2c093084c7c33602f",
+    "前端代码/admin/src/pages/setting/devise/template/Menus/template3.vue": "0b70afbb1283a8237e304889a039ae0df80de4682024676b099e70bcd00eb2f9",
+    "前端代码/uniapp/pages/user/components/menus/template1.vue": "f13e4b635e4dc6d0ea5d0f4cc7341ffbb0727be77b3970a71398c034846214f2",
+    "前端代码/uniapp/pages/user/components/menus/template2.vue": "c1a1876f651233a208397bdbdd7136fec3c252fded8e05aaba756e6bd39250ac",
+    "前端代码/uniapp/pages/user/components/menus/template3.vue": "1177d944a985c1e5148ed59ed0f1113c13aed7575a3efaa55bbe1c9f9270ad6e",
+    "前端代码/shared/memberMenuMedia.js": "df69fad9153ee296be2f3a9162a64ea656a6c30f94d5bad05bbc9173e05cc2bb",
+    "前端代码/admin/src/components/memberMenuMedia/index.vue": "8d0c0c461a9311139e289adf6d68df20cd3b98ef7db7f323688723a024918c30",
+    "前端代码/admin/src/assets/member-menu-glyphs.json": "b85e899bf87010f04183088be0d94c1c22397d81caacd7879ebc19487f3025e6",
+    "前端代码/uniapp/components/memberMenuMedia/index.vue": "d9dff97c7736d6138166623d269b72e42f505ec3e134678fd292b597842347eb",
+    "前端代码/shared/memberMenuIcons.woff2": "a5d3a77efe622a8ec4b6b8a3eaf8eb5945a74c0b8dea253695f2dfbe9f0aad9a",
+    "tests/r15-menu-preview/model.cjs": "56fa3ef548edae1eaaf951319cbdaf69b6f49e23c0abaa7fc5ea41e4ff8c949f",
+    "tests/r15-menu-preview/browser.cjs": "e7204e1465352a5cc8c19ad993432e8a846385778dbfd85fd09e0f54a13b0e9a",
+    "scripts/r15-menu-preview-build.cjs": "b1181246d6db17509b50234b7d03907f7117b402729da19fc44d8f2916405927"
+  },
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "indexSHA256": "8bc2a90fda712858697951d9ee952330af8391cae543c14a1ae5666362d8904b",
+  "platformPublishedCommit": "0515a2939a7cf0fd654ae37610fde2f330b38432",
+  "retainedSources": {
+    "前端代码/uniapp/App.vue": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/api/memberSurvey.js": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/libs/login.js": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/pages/users/survey/index.vue": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/utils/memberPhoneGate.js": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/utils/memberSurveyScene.js": "8949a12e9e0438c1572addb6ac25ff907e4b58e5",
+    "前端代码/uniapp/pages/users/user_card/index.vue": "b481de399ef793c55c17cf6e333d199578d35647",
+    "前端代码/uniapp/pages/users/user_card_list/index.vue": "b481de399ef793c55c17cf6e333d199578d35647",
+    "后端代码/app/services/user/UserCardHolderServices.php": "b481de399ef793c55c17cf6e333d199578d35647",
+    "前端代码/uniapp/pages/discover/discoverIndex/index.vue": "bfea3f14fe68692e9d51bf82b6c7253bb29cdc02"
+  },
+  "baselineTree": "2c0ea3b5354c206f9c539b328fba2feb7c2bd936",
+  "candidateTree": "e55eb3cb427cf372e7c4820d946ab23949ec710b",
+  "commit": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+  "apps": {
+    "008": {
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.78"
+    },
+    "010": {
+      "appid": "wxce4f61fc9c4eaaa6",
+      "version": "3.0.78"
+    }
+  },
+  "status": "PREPARING_UNIFIED_CANDIDATE_FOR_SUPPLEMENTAL_ACCEPTANCE",
+  "branch": "release/r15-member-center-20261029",
+  "supplementalAccepted": true
+}

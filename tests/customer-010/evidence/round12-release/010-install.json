@@ -1,0 +1,11 @@
+{
+  "result": "INSTALLED",
+  "metadata": {
+    "passed": true,
+    "database": "mohe_010_app",
+    "business_rows_imported": 0,
+    "existing_roles_changed": 0,
+    "ddl_channel": "existing isolated maintenance connection"
+  },
+  "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a"
+}

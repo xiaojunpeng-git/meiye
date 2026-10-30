@@ -82,7 +82,7 @@
       <Button type="primary" :loading="saving" @click="handleSave">保存</Button>
     </div>
     <Modal v-model="goodsModal" title="商品列表" footer-hide scrollable width="900">
-      <goods-attr :goodsType="1" :flatSelect="true" ref="goodSattr" v-if="goodsModal" @getProductId="getAtterId" />
+      <goods-attr :goodsType="1" :flatSelect="true" :giftPickerTypes="[0, 5, 6]" ref="goodSattr" v-if="goodsModal" @getProductId="getAtterId" />
     </Modal>
     <coupon-list ref="couponTemplates" @nameId="onCouponSelected" />
   </Modal>
@@ -180,8 +180,9 @@ export default {
       this.$refs.couponTemplates.isTemplate = true;
       this.$refs.couponTemplates.tableList();
     },
-    onCouponSelected(ids) {
-      const list = this.$refs.couponTemplates.couponList || [];
+    onCouponSelected(ids, names = []) {
+      // 优惠券选择跨页时以选择器保留的ID/名称为准，不以最后一页列表漏配奖品。
+      const list = names.length ? names : (this.$refs.couponTemplates.couponList || []);
       ids.forEach(id => {
         const row = list.find(item => item.id === id);
         if (!row) return;

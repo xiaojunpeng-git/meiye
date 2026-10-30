@@ -1,0 +1,34 @@
+{
+  "scope": "第12轮问卷二维码会员资格校验",
+  "base_head": "0bcbc98d546ea58146b75ba82c203ac1997cc317",
+  "files": {
+    "后端代码/app/services/user/MemberSurveyServices.php": "cde1b4e25abf051de99cab87ab7becdb15630d8b7f8609156ce2fe90c6fae415",
+    "前端代码/admin/src/pages/user/survey/index.vue": "25ff45be815389a9ba1b692cff3f350a2dac079404f4a3297460dbeeb12778b5",
+    "前端代码/uniapp/pages/users/survey/index.vue": "c7c41e6b5a1ce36f64cb4810e41bfc05b10e533f255814501b509d8648affac6",
+    "tests/member-survey/php/local-business.php": "2ca050aeb66333468022af3766d59273f1aead40fd67976baadfcac3789e0b6f",
+    "tests/member-survey/js/browser.cjs": "0aa53e3cfeb3806f46c9487aa64290a3a23975ed21195d97d9a36851ab62f5c6"
+  },
+  "patch_sha256": "384a4504c4583162b39b47e06fc9058ec898fccfdc8fd75190370296091299b7",
+  "checks": {
+    "business.json": 83,
+    "browser.json": 23,
+    "admin-build.json": true,
+    "member-build-h5.json": true,
+    "member-build-mp-weixin.json": true
+  },
+  "rules": [
+    "未设置会员条件的任务保持公开扫码",
+    "设置条件时以发布时固定的目标名单校验，手动指定与筛选命中均可答卷",
+    "匿名扫码先登录且不下发题目；名单外登录会员不能读取题目、提交或领取新奖励",
+    "服务端在提交前及事务内重复校验；历史已完成答卷与奖励不删除",
+    "手机号授权、无所属门店选店及奖励发放保持原规则"
+  ],
+  "release": "本地固定候选，未提交、未推送、未部署，未改写业务数据",
+  "evidence": [
+    "business.json",
+    "browser.json",
+    "admin-build.json",
+    "member-build-h5.json",
+    "member-build-mp-weixin.json"
+  ]
+}

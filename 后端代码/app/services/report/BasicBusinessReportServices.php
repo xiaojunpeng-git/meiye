@@ -7,7 +7,11 @@ final class BasicBusinessReportServices
     /** 显式责任划分避免未知报表回落到另一种粒度的数据。 */
     public static function owner(string $code): string
     {
-        $owners = [BasicFinancialReportServices::class, BasicActivityReportServices::class,
+        // 已逐表对齐的 Reader 由统一适配层接入；缺源状态继续随结果显式返回。
+        $owners = [Sidebar007ReportServices::class, RoundFour007ReportServices::class,
+            BalanceOrder007ReadServices::class, OtherReports007ReadServices::class,
+            Sidebar007UnconsumedV3ReadServices::class,
+            BasicFinancialReportServices::class, BasicActivityReportServices::class,
             BasicEntitlementReportServices::class, BasicSalaryReportServices::class];
         foreach ($owners as $owner) {
             if (in_array($code, $owner::codes(), true)) return $owner;

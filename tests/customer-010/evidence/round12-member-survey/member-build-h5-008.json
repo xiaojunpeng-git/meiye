@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "platform": "h5",
+  "target": "008",
+  "apiOrigin": "https://008.cc3798.com",
+  "node": "v22.22.2",
+  "source": "/Users/xiaojunpeng/.codex/worktrees/beauty-010-basic-menu/前端代码/uniapp",
+  "source_inputs": {
+    "App.vue": "6dab754754427693a947d210e6e25973efc9d2f7856b9ba1e2dca02c6cc0aef6",
+    "pages.json": "213342e0c8bc185d79c092af8efdd7716662473353ae2141dac0c006464fbb56",
+    "api/memberSurvey.js": "c3a0f86286ee3bb76923bdc163a143ae98082f1b457e89ab0fc8106e56cf16ca",
+    "pages/users/survey/index.vue": "91153f58b359291da084497af3c8de25923415cfaa31fca427942a1cf24a1167",
+    "components/requiredFieldGuide/index.vue": "5f8bbb2212dfc7f35553f4578310f3b6ca859c7bf26fa3b399ad17b093c4391b",
+    "utils/memberPhoneGate.js": "f3080bf7f35086444a9420e20a3bcdb4d2f3f83e91717f215df1a290832fc1da",
+    "utils/memberSurveyReminder.js": "b889466968b41a856d47d92b352c4cd6596cdb241a9de6d19eaa3191da4391d4",
+    "libs/login.js": "c6f290a5bb8b032c03e27673fb960f966ebb69e2324b4b699f8cbcfb7ab7c9a1"
+  },
+  "output": "/tmp/r12-survey-member-h5-008",
+  "entry_sha256": "79017f1f5ae3b27eeeb1ad05dcc15cf893e4db4a29e23ad5d8dc3c7a1d2af045",
+  "release": false
+}

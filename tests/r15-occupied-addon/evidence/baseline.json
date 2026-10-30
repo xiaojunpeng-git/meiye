@@ -1,0 +1,10 @@
+{
+  "head": "6e959c83249d1d9358a24b071649f619f63a78b3",
+  "acceptedBase": "0e46f2377a1afb015e45d1e3723412c454aa4ed0",
+  "remote": "不适用：本次仅本地开发",
+  "files": {
+    "前端代码/uniapp/pages/activity/reservation/index.vue": "1076bb426a672224be6b76d21471195d738eeb6e39bb097cbd73879a3273b206",
+    "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": "ff09570bbbf1a02bd05981f8ae3af61fa44c6d1a800d228d79450b0b54b89d4f"
+  },
+  "indexHash": "39c996f91a98d6da47e4837549beca0239ddde08b5a9ad993b3ecf76e0ee0cef"
+}

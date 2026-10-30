@@ -72,6 +72,8 @@ class DiyServices extends BaseServices
 		'order' => [// 订单
 			'style' => 1,// 风格
 			'list' => [
+				// 不附加状态筛选，复用会员自己的全部订单列表与原权限边界。
+				['key' => 'all', 'title' => '全部订单', 'url' => '/pages/goods/order_list/index', 'icon' => 'icon-ic_order1', 'is_show' => 1],
 				['key' => 'unpaid', 'title' => '待付款', 'url' => '/pages/goods/order_list/index?status=0', 'icon' => 'icon-ic_daifukuan', 'is_show' => 1],
 				['key' => 'debt', 'title' => '欠款', 'url' => '/pages/users/debt/index', 'icon' => 'icon-ic_money', 'is_show' => 1],
 				['key' => 'unshipped', 'title' => '待发货', 'url' => '/pages/goods/order_list/index?status=1', 'icon' => 'icon-ic_daifahuo', 'is_show' => 0],
@@ -638,7 +640,15 @@ class DiyServices extends BaseServices
 			foreach (['routine_my_banner', 'routine_my_menus'] as $name) {
 				// Missing optional groups are not synthesized or written with gid=0.
 				if ($groups->value(['config_name' => $name], 'id')) {
-					$groupData->saveAllData($data[$name] ?? [], $name);
+					$items = $data[$name] ?? [];
+                    if ($name === 'routine_my_menus') {
+                        // 旧会员客户端读取的镜像也应用同一开关；未使用新字段时保留原状态。
+                        foreach ($items as &$item) {
+                            if (array_key_exists('is_show', $item)) $item['status'] = self::isMemberServiceVisible($item) ? 1 : 0;
+                        }
+                        unset($item);
+                    }
+                    $groupData->saveAllData($items, $name);
 				}
 			}
 		});
@@ -677,7 +687,7 @@ class DiyServices extends BaseServices
 				return [];
 				break;
 		}
-		return $this->dao->cacheTag()->remember($key, function () use ($name, $default) {
+		$cached = $this->dao->cacheTag()->remember($key, function () use ($name, $default) {
 			$info = $this->dao->get(['template_name' => $name, 'type' => 3]);
 			if ($info) {
 				$result = json_decode($info['value'], true);
@@ -687,7 +697,19 @@ class DiyServices extends BaseServices
 			}
 			return $result;
 		});
+		// 个人中心后台与会员 API 共用缓存键；旧缓存命中也须补新入口，不能只在缓存未命中时处理。
+        if ($name !== 'member') return $cached;
+        $member = $this->mergeMemberConfig($cached ?: []);
+        // 仅会员读取投影过滤隐藏入口；共享缓存及后台getMemberData保留完整配置，允许重新开启。
+        $member['menu']['list'] = array_values(array_filter($member['menu']['list'] ?? [], [self::class, 'isMemberServiceVisible']));
+        return $member;
 	}
+
+    /** 缺字段及null保持历史默认显示；数值0、字符串0、布尔false均代表显式隐藏。 */
+    private static function isMemberServiceVisible(array $item): bool
+    {
+        return !in_array($item['is_show'] ?? null, [0, '0', false], true);
+    }
 
 	/**
 	 * 为历史个人中心配置补齐新增字段，避免旧配置覆盖新的订单入口配置。
@@ -701,6 +723,11 @@ class DiyServices extends BaseServices
 		$result = $member ? array_merge($default, array_intersect_key($member, $default)) : $default;
 		$configuredOrder = is_array($result['order'] ?? null) ? $result['order'] : [];
 		$result['order'] = array_merge($default['order'], $configuredOrder);
+		// 老装修已有 list 时浅合并不会补新入口；只补缺失的全部订单，保留原排序、图标及显隐。
+		// 已配置（含主动隐藏）的 all 必须原样保留，刷新或保存后不能重新打开或重复添加。
+		if (is_array($result['order']['list']) && !in_array('all', array_column($result['order']['list'], 'key'), true)) {
+			array_unshift($result['order']['list'], $default['order']['list'][0]);
+		}
 		return $result;
 	}
 

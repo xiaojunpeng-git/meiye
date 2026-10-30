@@ -1,0 +1,59 @@
+{
+  "commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "verified_files": 175,
+      "admin_changed": 161,
+      "member_changed": 12,
+      "backup_admin": "/www/backups/rh/combination-group-e4e48432",
+      "backup_member": "/www/backups/rh/store-address-e4e48432",
+      "config_backup": null
+    },
+    "008": {
+      "result": "PASS",
+      "verified_files": 177,
+      "admin_changed": 162,
+      "member_changed": 12,
+      "backup_admin": "/www/backups/008/combination-group-e4e48432",
+      "backup_member": "/www/backups/008/store-address-e4e48432",
+      "config_backup": "/www/backups/008/survey-config-e4e48432"
+    },
+    "010": {
+      "result": "PASS",
+      "verified_files": 50,
+      "admin_changed": 37,
+      "member_changed": 10,
+      "backup_admin": "/www/backups/010/combination-group-e4e48432",
+      "backup_member": "/www/backups/010/store-address-e4e48432",
+      "config_backup": "/www/backups/010/survey-config-e4e48432"
+    }
+  },
+  "push": {
+    "remote": "origin",
+    "branch": "010/basic-report-menu",
+    "verified": true
+  },
+  "uploads": {
+    "008": {
+      "site": "008",
+      "version": "3.0.84",
+      "task_id": "confirmation_upload_b7525751-3edb-4093-8e1d-701156695630",
+      "status": "success",
+      "detail": "execution_success",
+      "package_bytes": 10583128,
+      "formal_release": false
+    },
+    "010": {
+      "site": "010",
+      "version": "3.0.84",
+      "task_id": "confirmation_upload_c96aaaad-6601-4fc4-ab21-e1a2e12e43b8",
+      "status": "success",
+      "detail": "execution_success",
+      "package_bytes": 10583135,
+      "formal_release": false
+    }
+  },
+  "user_data_changed": false,
+  "source_007_touched": false
+}

@@ -27,6 +27,7 @@ use mohe\traits\OptionTrait;
 use mohe\traits\ServicesTrait;
 use mohe\utils\Arr;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * Class StoreOrderCartInfoServices
@@ -416,10 +417,12 @@ class StoreOrderCartInfoServices extends BaseServices
 
     public function getOrderCardRelatedCartInfo(int $oid = 0, int $uid = 0)
     {
+        // Member reads are owner-bound; internal staff reads retain their
+        // existing caller permission checks and resolve the order's owner here.
+        $ownerUid = (int)StoreOrder::where('id', $oid)->value('uid');
+        if ($uid > 0 && $ownerUid !== $uid) throw new ValidateException('无权查看该卡项。');
         $cart_info = $this->dao->getCartColunm(['oid' => $oid, 'cart_type' => 2], '*');
         $cart = $this->dao->getOne(['oid' => $oid, 'cart_type' => 0]);
-        /** @var StoreReservationOrderServices $reservationOrderServices */
-        $reservationOrderServices = app()->make(StoreReservationOrderServices::class);
         /** @var StoreProductReplyServices $replyServices */
         $replyServices = app()->make(StoreProductReplyServices::class);
         $pay_price = 0;
@@ -432,6 +435,8 @@ class StoreOrderCartInfoServices extends BaseServices
         if ($isDingzhi) {
             $cart_info = $this->dedupeCustomCardBundleLines($cart_info);
         }
+        // 只补充接口展示图片，不更新订单快照、次数或金额；H5与小程序共用此字段。
+        $cart_info = $this->withCardRelatedDisplayImages($cart_info);
         $count = count($cart_info);
         $orderPayPrice = (string)StoreOrder::where('id', $oid)->value('pay_price');
         $shellPay = (string)($cart['pay_price'] ?? 0);
@@ -463,13 +468,71 @@ class StoreOrderCartInfoServices extends BaseServices
             $v['waiting_service'] = 0;
             //新增是否评价字段
             $v['is_reply'] = $replyServices->count(['unique' => $v['unique']]);
-            if ($v['product_type'] == 6) {
-                if (!$uid) $uid = $v['uid'];
-                $v['waiting_service'] = $reservationOrderServices->count(['uid' => $uid, 'oid' => $oid, 'cart_info_id' => $v['id'], 'status' => 0, 'is_del' => 0]);
-            }
+
         }
         unset($v);
+        // The member detail and card list share V3 occupancy with the booking
+        // picker. This projection never consumes or repairs purchased rights.
+        if ($ownerUid > 0) {
+            $cart_info = (new \app\services\cashier\v3\reservation\ImportedEntitlementReservationStoreServices())
+                ->withCardBenefitsReservationUsage($ownerUid, $cart_info);
+        }
         return $cart_info;
+    }
+
+    /**
+     * 权益图片优先读取购买快照；缺失时按本行真实项目ID和SKU批量补读当前图片。
+     * 当前目录只提供展示素材，不能替换历史名称、规格、价格或权益身份。
+     */
+    private function withCardRelatedDisplayImages(array $rows): array
+    {
+        $missing = [];
+        $productIds = [];
+        $uniques = [];
+        foreach ($rows as $key => $row) {
+            $info = is_string($row['cart_info'] ?? null) ? json_decode($row['cart_info'], true) : ($row['cart_info'] ?? []);
+            if (!is_array($info)) continue;
+            $product = is_array($info['productInfo'] ?? null) ? $info['productInfo'] : [];
+            $attr = is_array($product['attrInfo'] ?? null) ? $product['attrInfo'] : [];
+            if (is_string($attr['image'] ?? null) && trim($attr['image']) !== '') continue;
+            // 快照商品图与快照顶层图同属原始资料，优先于当前目录素材。
+            foreach ([$product['image'] ?? '', $info['image'] ?? ''] as $image) {
+                if (is_string($image) && trim($image) !== '') {
+                    $info['productInfo'] = $product;
+                    $info['productInfo']['attrInfo'] = $attr;
+                    $info['productInfo']['attrInfo']['image'] = trim($image);
+                    $rows[$key]['cart_info'] = $info;
+                    continue 2;
+                }
+            }
+            $productId = (int)($row['product_id'] ?? 0);
+            if ($productId <= 0) continue;
+            $unique = trim((string)($row['sku_unique'] ?? ''));
+            $missing[$key] = [$info, $product, $attr, $productId, $unique];
+            $productIds[$productId] = $productId;
+            if ($unique !== '') $uniques[$unique] = $unique;
+        }
+        if (!$missing) return $rows;
+        $images = Db::name('store_product')->whereIn('id', array_values($productIds))->column('image', 'id');
+        $skuImages = [];
+        if ($uniques) {
+            $skus = Db::name('store_product_attr_value')->where('type', 0)
+                ->whereIn('product_id', array_values($productIds))->whereIn('unique', array_values($uniques))
+                ->field('product_id,unique,image')->select()->toArray();
+            foreach ($skus as $sku) $skuImages[(int)$sku['product_id'] . ':' . $sku['unique']] = $sku['image'];
+        }
+        foreach ($missing as $key => [$info, $product, $attr, $productId, $unique]) {
+            // 双键匹配防止跨商品错取SKU图片；SKU缺图时再使用该项目的主图。
+            foreach ([$skuImages[$productId . ':' . $unique] ?? '', $images[$productId] ?? ''] as $image) {
+                if (!is_string($image) || trim($image) === '') continue;
+                $info['productInfo'] = $product;
+                $info['productInfo']['attrInfo'] = $attr;
+                $info['productInfo']['attrInfo']['image'] = trim($image);
+                $rows[$key]['cart_info'] = $info;
+                break;
+            }
+        }
+        return $rows;
     }
 
     /**

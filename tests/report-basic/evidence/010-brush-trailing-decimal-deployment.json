@@ -1,0 +1,38 @@
+{
+  "commit": "9a8aad27c777c3240ffecd93492cb94eb17b983c",
+  "install": {
+    "status": "installed",
+    "backup": "/www/backups/010/brush-decimal-9a8aad27-20261028173347",
+    "before_sha256": "3bd523c587a43b700abf4f5b0d0ddd78fa0560c3c1b6b65bd29baf2d538fd24c",
+    "after_sha256": "1068ba40ced18847f1dcf688fa495df09c71cee07ac34c56816db45165c66dc4",
+    "service": "active",
+    "php_lint": "pass"
+  },
+  "business_database_writes": 0,
+  "verification": {
+    "result": "PASS",
+    "browser": "A0751 real 010 platform tab: query, 20-row first and second pages, total 2284, amount 326 visible; returned to first page",
+    "readonly_provider": {
+      "authorized_rows": 2284,
+      "page_rows": 20,
+      "export_rows": 2284,
+      "registration_922_cents": 32600,
+      "raw_value": "326.",
+      "source_sha256": "1068ba40ced18847f1dcf688fa495df09c71cee07ac34c56816db45165c66dc4"
+    },
+    "original_source_rows_checked": 2286,
+    "count_explanation": "2286 is all legacy rows in configured report; 2284 is the active authorized store population returned by platform host.",
+    "service": "active",
+    "limitations": "No business database writes; no store write or permissions changes; production browser export download not tested.",
+    "store_scope": {
+      "other_store_count": 0,
+      "own_store_count": 1,
+      "own_store_amount_cents": 32600,
+      "test": "read-only authenticated host context simulation, not store browser login"
+    },
+    "catalog": {
+      "report_count": 21,
+      "employee_summary_present": true
+    }
+  }
+}

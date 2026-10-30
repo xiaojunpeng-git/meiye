@@ -1,0 +1,8 @@
+{
+  "site": "rh",
+  "kind": "admin",
+  "source_commit": "e4e4843256ec95b0e6c224fa62b7c22ca2456a4f",
+  "files": 161,
+  "archive_sha256": "106c8173afd3ed3c71a2e235ca2a21c8e42b55e5a5e9ece79e58c6c83658065b",
+  "manifest_sha256": "628c26e0c13172ed511d85599c0e838abbdb34ab761e97ae09eb7c0ef431abfd"
+}

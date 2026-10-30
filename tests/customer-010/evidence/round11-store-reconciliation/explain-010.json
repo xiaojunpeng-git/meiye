@@ -1,0 +1,49 @@
+{
+  "read_only": true,
+  "instance": "010",
+  "sql_sha256": "680a6ea851415ea59063692e8b22dc50623cdfcd0017dfdaef718be44f443050",
+  "plan": [
+    {
+      "id": 1,
+      "select_type": "PRIMARY",
+      "table": "eb_store_order",
+      "partitions": null,
+      "type": "index_merge",
+      "possible_keys": "PRIMARY,pid,add_time,paid,pay_type,store_id,refund_status,is_system_del,cash_choose,order_type",
+      "key": "paid,refund_status",
+      "key_len": "1,1",
+      "ref": null,
+      "rows": 30788,
+      "filtered": 1.5667359828948975,
+      "Extra": "Using intersect(paid,refund_status); Using where"
+    },
+    {
+      "id": 3,
+      "select_type": "SUBQUERY",
+      "table": "eb_combination_order",
+      "partitions": null,
+      "type": "ALL",
+      "possible_keys": null,
+      "key": null,
+      "key_len": null,
+      "ref": null,
+      "rows": 2564,
+      "filtered": 9.999999046325684,
+      "Extra": "Using where"
+    },
+    {
+      "id": 2,
+      "select_type": "SUBQUERY",
+      "table": "co",
+      "partitions": null,
+      "type": "ALL",
+      "possible_keys": null,
+      "key": null,
+      "key_len": null,
+      "ref": null,
+      "rows": 2564,
+      "filtered": 9.999999046325684,
+      "Extra": "Using where"
+    }
+  ]
+}

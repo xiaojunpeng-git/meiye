@@ -1,0 +1,3 @@
+{"ok":true,"visible_store_ids":[11],"cross_brand_denied":true,"wrong_member_denied":true,"closed_store_denied":true,"disabled_organization_denied":true,"booking_write_rolled_back":true,"replay_idempotent":true,"double_booking_denied":true,"historical_multi_project_rolled_back":true,"addon_scope_denied":true,"addon_quota_atomic":true,"server_duration_authoritative":true}
+MIXED_OWNED_PICKER_AND_BOOKING_ROLLBACK_PASS
+FIVE_CARD_TYPES_PRESENTATION_AND_POOL_ROLLBACK_PASS

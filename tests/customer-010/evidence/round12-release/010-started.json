@@ -1,0 +1,6 @@
+{
+  "backup": "/www/backups/010/round12-d76a8ce44b96-20261029120726",
+  "source_commit": "d76a8ce44b9603b15091554dc320c7b23beead1a",
+  "payload_sha256": "d44052a25cf62aa507a2f15aa069ebf3688e88eecb0f81c6f95644164bad7af2",
+  "installer_sha256": "336de24a3d6aa93d76b271b1bb3301065aca6c08823128a2b5c2b454aa781e5d"
+}

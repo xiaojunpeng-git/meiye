@@ -1,20 +1,19 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { UnifiedReportQueryToolbar, UnifiedQueryDateRange, cloneUnifiedQuerySnapshot, formatReportMoney } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
-import ArrowLeft from '@lucide/vue/dist/esm/icons/arrow-left.mjs'
 import BookOpen from '@lucide/vue/dist/esm/icons/book-open.mjs'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
 import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
-const router = useRouter()
 const state = useCashierV3State()
 const platform = computed(() => route.meta.platformReport === true)
 const catalog = ref([])
@@ -39,6 +38,8 @@ const salaryDraft = ref(null)
 const salarySaving = ref(false)
 const freezeDialog = ref(null)
 const salaryReport = computed(() => active.value?.code === 'basic_salary_realtime')
+const reconciliationReport = computed(() => active.value?.code === 'basic_store_reconciliation')
+const reconciliationModal = ref(false)
 const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
 const today = ['year', 'month', 'day'].map(type => todayParts.find(part => part.type === type).value).join('-')
 const dates = ref({ start_date: today.slice(0, 7) + '-01', end_date: today, as_of_date: today })
@@ -47,7 +48,6 @@ let requestId = 0
 let controller
 let returnFocus
 const active = computed(() => catalog.value.find(report => report.code === route.params.report))
-const groups = computed(() => [...new Set(catalog.value.map(report => report.group))])
 const visibleFields = computed(() => {
   return fields.value.filter(field => field.defaultVisible)
 })
@@ -62,18 +62,17 @@ const storeOptions = computed(() => {
   return [...byId].map(([id, name]) => ({ id, name }))
 })
 
-function openReport(report) {
-  if (!report.available) return
-  void router.push({ name: route.name, params: { report: report.code } })
-}
 // 跨店历史结算默认核对本年，与原报表查询区间一致；切换其他表仍回到月初。
 function resetReportDates(code) {
+  salaryMonth.value = today.slice(0, 7)
   dates.value = { start_date: code === 'basic_cross_store_settlement' ? today.slice(0, 4) + '-01-01' : today.slice(0, 7) + '-01', end_date: today, as_of_date: today }
 }
 
 /** 在途旧响应不能覆盖新的组织筛选、页码或已退出的报表。 */
 async function run(next = query.value) {
   if (!active.value?.available) return
+  // 动态门店/逐日列由专用展示组件消费同一后端契约，避免宿主重复发起通用表查询。
+  if (reconciliationReport.value) return
   const id = ++requestId
   controller?.abort()
   controller = new AbortController()
@@ -107,7 +106,7 @@ async function run(next = query.value) {
 function submitQuery(next) {
   if (active.value?.code === 'basic_brush_registration') { void run({ ...next, page: 1 }); return }
   const range = { ...dates.value }
-  if (active.value?.time_mode === 'realtime_month') {
+  if (['realtime_month', 'month'].includes(active.value?.time_mode)) {
     if (!/^\d{4}-\d{2}$/.test(salaryMonth.value)) { error.value = '请选择工资月份'; return }
     const [year, month] = salaryMonth.value.split('-').map(Number)
     range.start_date = salaryMonth.value + '-01'
@@ -201,7 +200,7 @@ async function exportRows() {
   try {
     const result = await loadBasicReport(platform.value, { ...frozen,
       export: { scope: 'query', fields: selectedFields.map(field => field.key) } }, selectedStores)
-    const blob = new Blob([registrationCsv(selectedFields, result.exportRows, result.summaries, result.field_sources)], { type: 'text/csv;charset=utf-8' })
+    const blob = new Blob([registrationCsv(selectedFields, result.exportRows, result.summaries, result.field_sources, result.table_layout?.summary_position !== 'none', result.row_sources || [], result.summary_cards || [])], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url; anchor.download = (active.value?.name || '基础报表') + '.csv'; anchor.click()
@@ -212,21 +211,36 @@ async function exportRows() {
 function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
   // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
-  if (active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(row[field.key]).toFixed(2)
-  if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
-  if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
+  if (active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(row[field.key]).toFixed(2)
+  if (active.value?.code === 'basic_cross_store_settlement' && ['settlement_total', 'total_amount'].includes(field.key)) return String(Math.trunc(Number(row[field.key])))
+  // 矩阵单位由后端逐行声明，同一门店列可以分别显示金额、客数与比例。
+  const unit = field.value_unit === 'row' ? row.value_unit : field.value_unit
+  if (unit === 'percent_integer') return String(row[field.key]) + '%'
+  if (unit === 'money_yuan' || field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
+  if (field.type === 'decimal') return formatReportCount(row[field.key], field)
   if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
   return row[field.key] ?? '-'
+}
+// 仅按后端列元数据限制页面精度；结果和导出继续使用未格式化的原始数量。
+function formatReportCount(value, field) {
+  const precision = field?.display_precision
+  const minimum = field?.display_min_precision
+  const number = Number(value)
+  if (Number.isInteger(precision) && precision >= 0 && precision <= 6 && Number.isFinite(number)) {
+    const minimumFractionDigits = Number.isInteger(minimum) && minimum >= 0 && minimum <= precision ? minimum : 0
+    return new Intl.NumberFormat('zh-CN', { useGrouping: false, minimumFractionDigits, maximumFractionDigits: precision }).format(number)
+  }
+  const text = String(value)
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/0+$/, '').replace(/\.$/, '') : text
 }
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
-  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
-  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
-  // 员工统计客数与指定客可含小数；只去除合计末尾无意义的零，保留后端精度和导出原值。
-  if (amount != null && active.value?.code === 'basic_employee_summary' && ['service_visits', 'point_visits'].includes(field.key)) return String(amount).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')
-  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : ['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) ? String(Number(amount)) : amount
+  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(amount).toFixed(2)
+  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && ['settlement_total', 'total_amount'].includes(field.key)) return String(Math.trunc(Number(amount)))
+  // 合计与明细使用同一数量显示口径；金额仍使用统一金额格式化函数。
+  if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : field.type === 'decimal' ? formatReportCount(amount, field) : amount
   return index === 0 ? '合计' : '-'
 }
 // 固定列和列宽只服从后端元数据；字段隐藏后重新计算左侧偏移，不按列位置猜业务身份。
@@ -285,9 +299,9 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 </script>
 
 <template>
-  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog ? '' : null">
+  <main class="basic-reports" :inert="editor || fieldGuide || commissionProof || freezeDialog || reconciliationModal ? '' : null">
     <header class="basic-reports__header">
-      <div><button v-if="route.params.report" type="button" class="basic-reports__icon" aria-label="返回基础报表" title="返回基础报表" @click="router.push({ name: route.name })"><ArrowLeft :size="18" /></button><h1>{{ active?.name || '基础报表' }}</h1></div>
+      <div><h1>{{ active?.name || '报表' }}</h1></div>
       <button v-if="active?.available && data.can_edit" type="button" class="button button--primary" @click="edit()">新增登记</button>
     </header>
     <p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p>
@@ -295,19 +309,15 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     <p v-if="data.coverage_start && data.range?.start_date < data.coverage_start" class="basic-reports__error" role="status">本表仅包含 {{ data.coverage_start }} 起纳入统一数据底层的业务，更早历史尚未纳入本表。</p>
     <p v-if="salaryReport && data.realtime_start_date" class="basic-reports__snapshot" role="status">{{ data.source_kind === 'saved_salary_snapshot' ? data.coverage : data.realtime_start_date + ' 起按业务发生日期实时统计；此前月份读取历史保存工资。' }}</p>
     <p v-if="active?.code === 'basic_cross_store_settlement' && data.source_kind === 'sealed_legacy_settlement_snapshot'" class="basic-reports__snapshot" role="status">{{ data.coverage }}</p>
-    <template v-if="!route.params.report">
-      <section v-for="group in groups" :key="group" class="basic-reports__group">
-        <h2>{{ group }}</h2><div class="basic-reports__directory">
-          <button v-for="report in catalog.filter(item => item.group === group)" :key="report.code" type="button" :disabled="!report.available" @click="openReport(report)"><span>{{ report.name }}</span><small v-if="!report.available">开发中</small></button>
-        </div>
-      </section>
-    </template>
+    <!-- 两端都从各自可配置菜单直达单表；旧目录地址只引导回菜单，不再维护第二套卡片入口。 -->
+    <p v-if="!route.params.report && !error" class="basic-reports__empty" role="status">请从报表菜单选择需要查看的报表。</p>
+    <StoreReconciliationReport v-else-if="active?.available && reconciliationReport" :platform="platform" @modal-change="reconciliationModal = $event" />
     <template v-else-if="active?.available">
       <UnifiedReportQueryToolbar :fields="fields" :page-code="active.code"
         :is-query-loading="loading || salarySaving" :executed-query="executedQuery" @query="submitQuery">
         <template #leading-controls>
           <OrganizationStoreScopePicker v-if="platform" v-model="stores" :tree="scope.tree" :allowed-store-ids="scope.allowed_store_ids" :label="scopeLabel" @change="selectScope" />
-          <label v-if="active.time_mode === 'realtime_month'" class="basic-reports__date">时间选择：<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" aria-label="工资月份"></label>
+          <label v-if="['realtime_month', 'month'].includes(active.time_mode)" class="basic-reports__date">时间选择：<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" :aria-label="salaryReport ? '工资月份' : '报表月份'"></label>
           <span v-else-if="!['current', 'registration_date'].includes(active.time_mode)" class="basic-reports__period"><UnifiedQueryDateRange :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" /></span>
         </template>
         <template #primary-actions>
@@ -319,10 +329,11 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         </template>
       </UnifiedReportQueryToolbar>
       <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="!data.salary_readonly && data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
+      <div v-if="data.summary_cards?.length" class="basic-reports__metric-summary" aria-label="当前查询汇总"><span v-for="card in data.summary_cards" :key="card.key">{{ card.label }}：<strong>{{ card.value == null ? '-' : card.money ? formatReportMoney(card.value) : card.value }}</strong></span></div>
       <section class="basic-reports__results" :aria-busy="loading">
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
-            <tr class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
+            <tr v-if="data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
             <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
           <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
@@ -347,7 +358,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
       </div>
       <!-- 依据由后端随授权行返回；弹窗不读取另一份数据或重新计算提成。 -->
       <div v-if="commissionProof" class="basic-report-dialog" role="dialog" aria-modal="true" aria-label="劳动提成计算依据" @keydown="trapFocus" @keydown.esc="commissionProof = null"><section><header><h2>{{ commissionProof.employee_name }} · 劳动提成计算依据</h2><button type="button" class="basic-reports__icon" aria-label="关闭" @click="commissionProof = null"><X :size="18" /></button></header><p>按员工、门店和自然月计算，当前为预计结果。</p><dl><template v-for="proof in commissionProof.commission_details" :key="proof.fact_id"><dt>{{ proof.business_date }} · {{ proof.project_name || '待核对项目' }}</dt><dd v-if="proof.amount_cents != null">月净销售业绩 {{ proof.display_threshold }}；劳动业绩 {{ proof.display_basis }} × {{ proof.rate_percent }}%；预计提成 {{ proof.display_commission }}</dd><dd v-else>{{ proof.message }}</dd></template></dl></section></div>
-      <div v-if="fieldGuide" class="basic-report-dialog" role="dialog" aria-modal="true" aria-label="列名取值来源" @keydown="trapFocus" @keydown.esc="fieldGuide = false"><section><header><h2>列名取值来源</h2><button type="button" class="basic-reports__icon" aria-label="关闭" @click="fieldGuide = false"><X :size="18" /></button></header><dl><template v-for="field in visibleFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ data.field_sources?.[field.key] || '该条业务记录的稳定身份。' }}</dd></template></dl></section></div>
+      <div v-if="fieldGuide" class="basic-report-dialog" role="dialog" aria-modal="true" aria-label="列名取值来源" @keydown="trapFocus" @keydown.esc="fieldGuide = false"><section><header><h2>列名取值来源</h2><button type="button" class="basic-reports__icon" aria-label="关闭" @click="fieldGuide = false"><X :size="18" /></button></header><dl><template v-for="field in visibleFields" :key="field.key"><dt>{{ field.label }}</dt><dd>{{ data.field_sources?.[field.key] || '该条业务记录的稳定身份。' }}</dd></template><template v-for="source in data.row_sources || []" :key="source.row_id"><dt>{{ source.label }}</dt><dd>{{ source.description }}</dd></template></dl></section></div>
     </Teleport>
   </main>
 </template>
@@ -367,8 +378,9 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 .basic-reports :deep(.table-pagination__summary){display:block;white-space:normal}
 .basic-reports__date{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.basic-reports__date input{min-width:0;max-width:148px;min-height:32px;border:1px solid #dce4ec;border-radius:4px;padding:3px 6px;color:inherit;background:#fff;font:inherit}.basic-reports td.is-money{color:#1f5f8b}
 .basic-reports{height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;padding:12px 16px;gap:12px;color:#35475e;font-size:13px;overflow:auto;letter-spacing:0}
-.basic-reports__header,.basic-reports__header>div{display:flex;align-items:center;gap:10px}.basic-reports__header{justify-content:space-between;flex:none}.basic-reports h1{font-size:18px;margin:0}.basic-reports h2{font-size:14px;margin:0 0 12px}.basic-reports__group{padding:12px 0;border-top:1px solid #e6ebf1}.basic-reports__directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.basic-reports__directory button{display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:74px;padding:14px;border:1px solid #dce5ed;border-radius:6px;background:#fff;text-align:left;font:inherit;color:#245e95;cursor:pointer;overflow-wrap:anywhere}.basic-reports__directory button:disabled{color:#7c8898;cursor:default;background:#fafbfd}.basic-reports__directory small{font-size:11px;color:#8c97a6}
+.basic-reports__header,.basic-reports__header>div{display:flex;align-items:center;gap:10px}.basic-reports__header{justify-content:space-between;flex:none}.basic-reports h1{font-size:18px;margin:0}
 .basic-reports__icon{display:inline-grid;place-items:center;width:32px;height:32px;flex:none;border:1px solid #dce4ec;border-radius:4px;background:#fff;color:#49617d;cursor:pointer}.basic-reports__icon:disabled{opacity:.5;cursor:default}.basic-reports__results{display:flex;flex-direction:column;flex:1;min-height:180px;overflow:hidden;border:1px solid #e0e7ee}.basic-reports__scroll{flex:1;min-height:0;overflow:auto;position:relative}.basic-reports table{min-width:800px;width:100%;border-collapse:separate;border-spacing:0}.basic-reports th,.basic-reports td{padding:12px;text-align:left;white-space:nowrap;border-bottom:1px solid #e7edf3;height:42px;box-sizing:border-box}.basic-reports th{position:sticky;top:0;background:#f2f6fb;color:#53667f;z-index:2}.basic-reports .basic-reports__total th{top:42px;background:#eaf3fc;color:#1f5f8b}.basic-reports td.is-fixed{z-index:1;background:#fff}.basic-reports th.is-fixed{z-index:3}.basic-reports__empty{text-align:center;padding:40px 12px;color:#8491a2}.basic-reports__error{color:#ba2929;margin:0;line-height:1.6}.basic-reports__edit{border:0;background:none;color:#1675d4;cursor:pointer}
+.basic-reports__metric-summary{display:flex;flex-wrap:wrap;gap:8px 24px;flex:none;color:#54647a}.basic-reports__metric-summary strong{font-weight:500;color:#1f5f8b}
 .basic-reports__snapshot{margin:0;color:#687b92;font-size:12px;line-height:1.4}
 .basic-report-dialog{position:fixed;inset:0;z-index:2000;background:#17253e66;display:grid;place-items:center;padding:16px;color:#35475e;font-size:13px}.basic-report-dialog>form,.basic-report-dialog>section{width:min(580px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:6px;padding:20px;box-sizing:border-box}.basic-report-dialog header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.basic-report-dialog h2{font-size:16px;margin:0}.basic-report-dialog__fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.basic-report-dialog label{display:flex;flex-direction:column;gap:7px;min-width:0}.basic-report-dialog input,.basic-report-dialog select{width:100%;min-width:0;box-sizing:border-box;min-height:34px;border:1px solid #dce4ec;border-radius:4px;padding:5px 8px;background:#fff;color:inherit;font:inherit}.basic-report-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.basic-report-dialog dt{font-weight:600;margin-top:15px}.basic-report-dialog dd{margin:6px 0;line-height:1.7;color:#687b92}
 @media(max-width:600px){.basic-reports{padding:10px}.basic-report-dialog__fields{grid-template-columns:minmax(0,1fr)}}

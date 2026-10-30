@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "output": "{\"result\": \"PASS\", \"checks\": 783, \"fixture_rows\": 30, \"temporary_local_database\": true, \"remote_writes\": 0}",
+  "error": ""
+}

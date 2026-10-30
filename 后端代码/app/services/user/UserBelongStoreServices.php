@@ -46,6 +46,7 @@ class UserBelongStoreServices extends BaseServices
         'admin_expire' => '管理员操作解绑',
         'shop' => '更换', //更换店员同步更换归属门店
         'admin_transfer' => '平台会员调店',
+        'survey_choice' => '会员问卷首次选择门店',
     ];
 
     /**
@@ -240,6 +241,23 @@ class UserBelongStoreServices extends BaseServices
             $userServices->cacheTag()->clear();
         }
         return $result;
+    }
+
+    /** 首次问卷选店与答卷共用事务：只补空归属，不覆盖已有门店，不修改店员、订单或权益。 */
+    public function assignUnboundStoreForSurveyInTx(int $uid, int $storeId): array
+    {
+        \app\services\cashier\v3\CashierV3TransactionGuard::assertInTransaction('survey.memberStoreAssignment');
+        $user=Db::name('user')->where('uid',$uid)->lock(true)->find();
+        if(!$user||trim((string)($user['phone']??''))==='')throw new ValidateException('请先完成手机号授权');
+        $existing=(int)($user['belong_store_id']??0);
+        if($existing>0)return ['store_id'=>$existing,'changed'=>false];
+        if($storeId<=0)throw new ValidateException('请选择您的所属门店');
+        $store=Db::name('system_store')->where(['id'=>$storeId,'is_del'=>0,'is_show'=>1])->lock(true)->find();
+        if(!$store)throw new ValidateException('所选门店已不可用，请重新选择');
+        $now=time();$historyId=(int)Db::name('user_belong_store')->insertGetId(['group'=>1,'type'=>'survey_choice','uid'=>$uid,'store_id'=>$storeId,'staff_id'=>0,'admin_id'=>0,'add_time'=>$now]);
+        if($historyId<=0||Db::name('user')->where('uid',$uid)->update(['belong_store_id'=>$storeId])!==1)throw new \RuntimeException('会员首次归属保存失败');
+        (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberStoreAssignmentInTx(['tenant_id'=>'0'],['member_id'=>$uid,'assigned'=>true,'store_id'=>$storeId,'effective_at'=>$now,'source_type'=>'USER_BELONG_STORE','source_event_id'=>(string)$historyId,'idempotency_key'=>'phase3-member-store:'.$historyId]);
+        return ['store_id'=>$storeId,'changed'=>true];
     }
 
     /**

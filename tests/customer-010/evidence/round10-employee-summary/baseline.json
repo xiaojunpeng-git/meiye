@@ -1,0 +1,17 @@
+{
+  "worktree_HEAD": "42709bddc562058c6c7b24ed4563c43046299340",
+  "main_HEAD": "c56295f75347209bff85df7f84f95320ff487ece",
+  "main_unrelated_working_changes": 4483,
+  "target": "010",
+  "source_check": [
+    {
+      "file": "app/services/report/BasicActivityReportServices.php",
+      "matches_source_baseline": true
+    },
+    {
+      "file": "app/services/report/query/BasicBusinessQueryProvider.php",
+      "matches_source_baseline": true
+    }
+  ],
+  "remote_business_write": false
+}

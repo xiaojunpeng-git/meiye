@@ -1,0 +1,34 @@
+{
+  "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+  "acceptedPatch": "50cce4fed6f80fd039bb7e7f9a080808e5b3424d073bf165fb5cab7bf1a5e6e0",
+  "newFunction": "占用权益保留显示、原因说明和禁选",
+  "preserved": [
+    "五类卡分组/独立权益",
+    "主项目排除及附加项目删除",
+    "全屏可滚动选择器",
+    "时段完整展开/日期主题底色",
+    "会员中心图标/服务显隐/全部订单",
+    "登录手机号授权/改号撤销登录",
+    "平台会员功能及已有工资统计"
+  ],
+  "backendFiles": 1,
+  "databaseMigration": false,
+  "productionBusinessWrites": 0,
+  "deployOrder": [
+    "rh",
+    "push",
+    "008",
+    "010"
+  ],
+  "miniVersion": "3.0.82",
+  "miniTargets": [
+    "008会员端",
+    "010会员端"
+  ],
+  "excluded": [
+    "007正式版",
+    "商家端",
+    "审核及正式发布"
+  ],
+  "sharedIndexUnchanged": true
+}

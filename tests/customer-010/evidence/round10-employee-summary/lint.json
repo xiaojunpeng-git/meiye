@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "files": [
+    "后端代码/app/services/report/BasicActivityReportServices.php",
+    "后端代码/app/services/report/EmployeeSummaryNewCustomerReadServices.php",
+    "tests/customer-010/round10-employee-summary-local.php",
+    "scripts/payroll/round10-readonly-candidate.php"
+  ]
+}

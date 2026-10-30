@@ -40,6 +40,7 @@ return [
     // 所有页面由配置显式登记；Runtime 不持有任何领域默认值。
     'registrars' => [
         \app\services\report\query\BasicRegistrationQueryRegistrar::class,
+        \app\services\report\query\BasicStoreReconciliationQueryRegistrar::class,
         \app\services\report\query\BasicBusinessQueryRegistrar::class,
         MemberUnifiedQueryPageRegistrar::class,
         \app\services\query\provider\PlatformMemberUnifiedQueryRegistrar::class,
@@ -53,6 +54,11 @@ return [
     'permission_resolvers' => [],
     'providers' => [
         \app\services\report\query\BasicRegistrationQueryProvider::class,
+        \app\services\report\query\BasicStoreReconciliationQueryProvider::class,
+        \app\services\report\query\BasicSalesDataQueryProvider::class,
+        \app\services\report\query\BasicSalesPkQueryProvider::class,
+        \app\services\report\query\BasicSalesAnalysisQueryProvider::class,
+        \app\services\report\query\BasicStoreEfficiencyQueryProvider::class,
         \app\services\report\query\BasicStoreSummaryQueryProvider::class,
         \app\services\report\query\BasicCrossStoreSettlementQueryProvider::class,
         \app\services\report\query\BasicStoreItemSalesQueryProvider::class,
@@ -102,6 +108,11 @@ return [
     // 后台导出执行时按权威 task.page_code 重建当前账号权限与数据范围。
     'worker_context_resolvers' => [
         \app\services\report\query\BasicRegistrationWorkerContextResolver::class,
+        \app\services\report\query\BasicStoreReconciliationWorkerContextResolver::class,
+        \app\services\report\query\BasicSalesDataWorkerContextResolver::class,
+        \app\services\report\query\BasicSalesPkWorkerContextResolver::class,
+        \app\services\report\query\BasicSalesAnalysisWorkerContextResolver::class,
+        \app\services\report\query\BasicStoreEfficiencyWorkerContextResolver::class,
         \app\services\report\query\BasicStoreSummaryWorkerContextResolver::class,
         \app\services\report\query\BasicCrossStoreSettlementWorkerContextResolver::class,
         \app\services\report\query\BasicStoreItemSalesWorkerContextResolver::class,

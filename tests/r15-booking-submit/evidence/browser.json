@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "widths": [
+    320,
+    375,
+    430
+  ],
+  "visibleError": true,
+  "inFlightGuard": true,
+  "retryAndSuccessNavigation": true,
+  "productionRequests": 0
+}

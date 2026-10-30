@@ -1,0 +1,14 @@
+{
+  "site": "010",
+  "appid": "wxce4f61fc9c4eaaa6",
+  "version": "3.0.82",
+  "taskId": "confirmation_upload_6224db8a-bee2-4f7e-a44b-85bfaef62ba0",
+  "status": "success",
+  "detail": "execution_success",
+  "result": {
+    "success": true,
+    "totalPackageSize": 10576284
+  },
+  "evidence": "Original task polled after user confirmed; WeChat developer tools returned success.",
+  "formalRelease": false
+}

@@ -1,0 +1,14 @@
+{
+  "site": "010",
+  "commit": "0e0f7d9e07b2a4a0c6e3369ad0039c184c9dfe5f",
+  "previewAuthorized": false,
+  "backendAllowlist": [
+    "app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php"
+  ],
+  "targets": {
+    "formal/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php": {
+      "before": "ff09570bbbf1a02bd05981f8ae3af61fa44c6d1a800d228d79450b0b54b89d4f",
+      "after": "5f9ae5486f9e6fa5866c7955b160915f4715ed502b2ced80829d9a7cbc753128"
+    }
+  }
+}

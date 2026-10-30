@@ -1,0 +1,189 @@
+{
+  "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+  "candidateTree": "8719d37bfab08ba9c80a1dc763afeb6561b78ea7",
+  "acceptedPatch": "99b0c5f2f738120d20a640fb92b0786c4fe44c49ba9cebcee140b76dd60c9364",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+      "backup": "/www/backups/rh/combination-group-7c666951",
+      "scope": "platform icon assets only",
+      "memberBackendConfigurationUnchanged": true,
+      "businessWrites": 0
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+      "backup": "/www/backups/008/combination-group-7c666951",
+      "scope": "platform icon assets only",
+      "memberBackendConfigurationUnchanged": true,
+      "businessWrites": 0
+    },
+    "010": {
+      "result": "PASS",
+      "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+      "backup": "/www/backups/010/combination-group-7c666951-retry1",
+      "scope": "platform icon assets only",
+      "memberBackendConfigurationUnchanged": true,
+      "businessWrites": 0
+    }
+  },
+  "push": {
+    "result": "PASS",
+    "commit": "7c666951fc3832da37cf474c06b7facdb6780a8e",
+    "branch": "release/r15-order-icons-20261029"
+  },
+  "miniPrograms": {
+    "008": {
+      "version": "3.0.79",
+      "taskId": "confirmation_upload_e4efea90-bafc-47bf-b5bb-5124e12e7d6e",
+      "status": "UPLOAD_SUCCESS",
+      "wechatConfirmed": true,
+      "size": {
+        "total": 10564773,
+        "packages": [
+          {
+            "name": "TOTAL",
+            "size": 10564773
+          },
+          {
+            "name": "main",
+            "size": 2032742
+          },
+          {
+            "name": "/pages/activity/",
+            "size": 742456
+          },
+          {
+            "name": "/pages/admin/",
+            "size": 1783915
+          },
+          {
+            "name": "/pages/annex/",
+            "size": 957671
+          },
+          {
+            "name": "/pages/behalf/",
+            "size": 187724
+          },
+          {
+            "name": "/pages/columnGoods/",
+            "size": 17631
+          },
+          {
+            "name": "/pages/discover/",
+            "size": 204163
+          },
+          {
+            "name": "/pages/extension/",
+            "size": 69650
+          },
+          {
+            "name": "/pages/goods/",
+            "size": 1951495
+          },
+          {
+            "name": "/pages/merchant/",
+            "size": 205062
+          },
+          {
+            "name": "/pages/short_video/",
+            "size": 306282
+          },
+          {
+            "name": "/pages/store/",
+            "size": 430070
+          },
+          {
+            "name": "/pages/users/",
+            "size": 1658754
+          },
+          {
+            "name": "/pages/work/",
+            "size": 17158
+          }
+        ]
+      },
+      "experienceSettingVerified": false
+    },
+    "010": {
+      "version": "3.0.79",
+      "taskId": "confirmation_upload_affe5f4a-197e-48db-b0c3-0c4ff6db3878",
+      "status": "UPLOAD_SUCCESS",
+      "wechatConfirmed": true,
+      "size": {
+        "total": 10564763,
+        "packages": [
+          {
+            "name": "TOTAL",
+            "size": 10564763
+          },
+          {
+            "name": "main",
+            "size": 2032737
+          },
+          {
+            "name": "/pages/activity/",
+            "size": 742501
+          },
+          {
+            "name": "/pages/admin/",
+            "size": 1783934
+          },
+          {
+            "name": "/pages/annex/",
+            "size": 957685
+          },
+          {
+            "name": "/pages/behalf/",
+            "size": 187730
+          },
+          {
+            "name": "/pages/columnGoods/",
+            "size": 17617
+          },
+          {
+            "name": "/pages/discover/",
+            "size": 204149
+          },
+          {
+            "name": "/pages/extension/",
+            "size": 69660
+          },
+          {
+            "name": "/pages/goods/",
+            "size": 1951462
+          },
+          {
+            "name": "/pages/merchant/",
+            "size": 205076
+          },
+          {
+            "name": "/pages/short_video/",
+            "size": 306274
+          },
+          {
+            "name": "/pages/store/",
+            "size": 430063
+          },
+          {
+            "name": "/pages/users/",
+            "size": 1658729
+          },
+          {
+            "name": "/pages/work/",
+            "size": 17146
+          }
+        ]
+      },
+      "experienceSettingVerified": false
+    }
+  },
+  "status": "THREE_SITES_DEPLOYED_AND_TWO_MINI_UPLOADS_VERIFIED",
+  "uploadsVerified": true,
+  "onlineBrowserVerified": "008: real all-orders icon and seven configuration thumbnails visible after reload",
+  "onlineDecorationSaved": false,
+  "businessWrites": 0,
+  "backendAndMemberH5Unchanged": true,
+  "sharedHeadUnchanged": true
+}

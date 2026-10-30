@@ -25,6 +25,8 @@ const props = defineProps({ platformAdapter: { type: Object, default: null } })
 const loginAdapter = memberLoginAdapter(Boolean(props.platformAdapter))
 
 const state = props.platformAdapter?.state || useCashierV3State()
+// 门店列表复用现有欠款开关；平台适配器继续沿用独立字段配置，不改写历史欠款或保存偏好。
+const debtPaymentEnabled = computed(() => Boolean(props.platformAdapter) || state.cashier?.debtPaymentEnabled !== false)
 const canCreateMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.create === true : canUseCashierV3Operation('cashier.v3.member.create'))
 const canEditMember = computed(() => props.platformAdapter ? props.platformAdapter.permissions.edit === true : canUseCashierV3Operation('cashier.v3.member.edit'))
 const selectedMemberIds = ref([])
@@ -116,7 +118,8 @@ const queryFieldMap = computed(() => new Map(queryFields.value.map((field) => [f
 const visibleFields = computed(() => {
   // 仅调整列表展示，不删除标签元数据或改写账号已保存的筛选/导出配置。
   // 两列都获准显示时，会员编号紧邻建档时间；不擅自补回被配置隐藏的列。
-  const keys = configuredVisibleFieldKeys.value.filter((key) => key !== 'member_tag')
+  const keys = configuredVisibleFieldKeys.value.filter((key) => key !== 'member_tag'
+    && (key !== 'debt_amount' || debtPaymentEnabled.value))
   if (keys.includes('member_no') && keys.includes('created_at')) {
     keys.splice(keys.indexOf('member_no'), 1)
     keys.splice(keys.indexOf('created_at'), 0, 'member_no')

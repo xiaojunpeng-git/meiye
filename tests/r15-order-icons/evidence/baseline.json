@@ -1,0 +1,13 @@
+{
+  "head": "a6bcb56ccfa36f16b3ad6392a1d70921ed222582",
+  "publishedBaseline": "6c7712ac41d759b58fa1b1dd5805f3d4c817268a",
+  "indexSHA256": "8bc2a90fda712858697951d9ee952330af8391cae543c14a1ae5666362d8904b",
+  "files": {
+    "前端代码/admin/src/components/memberMenuMedia/index.vue": "8d0c0c461a9311139e289adf6d68df20cd3b98ef7db7f323688723a024918c30",
+    "前端代码/admin/src/pages/setting/devise/templateConfig/OrderConfig.vue": "6ab511a8fa4b88fa3829a673899ef7d0a39be7e42b43da026158cd0a7ed27675",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template1.vue": "b18d5c7f61a460ff1073ed586e49de2e3d3f0e2277746650f310840430b1ebc3",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template2.vue": "0e9cbf608a905df7fab1abe6d2448413863f58ef25ec96bb2d996c7d9e468427",
+    "前端代码/admin/src/pages/setting/devise/template/Order/template3.vue": "b18d5c7f61a460ff1073ed586e49de2e3d3f0e2277746650f310840430b1ebc3"
+  },
+  "remote": "不适用：本次仅本地开发，自测后交产品经理验收"
+}
