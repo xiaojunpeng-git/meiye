@@ -1,7 +1,14 @@
 function readPlatformAdminToken() {
   try {
-    const matched = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
-    return matched ? decodeURIComponent(matched[1]).trim() : ''
+    // 平台主账号与区域／代理账号分别使用两个同源 Cookie。嵌入的
+    // 订单中心必须沿用当前平台会话，但不得退回门店收银会话。
+    for (const name of ['admin-token', 'admin-agent_token']) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const matched = document.cookie.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]*)`))
+      const token = matched ? decodeURIComponent(matched[1]).trim() : ''
+      if (token) return token
+    }
+    return ''
   } catch (_) {
     return ''
   }

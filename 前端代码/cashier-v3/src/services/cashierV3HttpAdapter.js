@@ -80,9 +80,10 @@ export function createCashierV3HttpAdapter(options = {}) {
 
   async function post(payload) {
     const token = platformOrderCenter
-      // 平台嵌入页与现有平台看板共用 admin-token；绝不能读取门店
-      // cashier_token，否则管理员页面会被错误地当成门店收银会话。
-      ? readSameOriginCookie('admin-token', browserWindow)
+      // 平台嵌入页必须沿用主账号或区域／代理账号的当前平台会话；
+      // 绝不能读取 cashier_token，否则平台查询会被错误地当成门店收银会话。
+      ? (readSameOriginCookie('admin-token', browserWindow)
+        || readSameOriginCookie('admin-agent_token', browserWindow))
       : options.storage
       ? String(options.storage.getItem?.('cashier-v3:session-token') || '').trim()
       : readStoreV3SessionToken(browserWindow)
