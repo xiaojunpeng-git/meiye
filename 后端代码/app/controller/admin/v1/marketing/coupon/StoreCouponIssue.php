@@ -440,7 +440,8 @@ class StoreCouponIssue extends AuthController
      */
     public function issue_log($id)
     {
-        $list = $this->services->issuedRecordList((int)$id);
+        $filters = $this->request->getMore([['member_name', ''], ['phone', '']]);
+        $list = $this->services->issuedRecordList((int)$id, $filters);
         return $this->success($list);
     }
 }

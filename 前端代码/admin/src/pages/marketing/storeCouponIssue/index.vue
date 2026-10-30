@@ -262,8 +262,14 @@
       closable
       title="领取记录"
       :mask-closable="false"
-      width="1100"
+      width="1260"
     >
+      <div class="acea-row row-middle mb15">
+        <Input v-model="receiveDraft.member_name" placeholder="会员姓名" clearable style="width: 180px; margin-right: 10px" @on-enter="receiveSearch" />
+        <Input v-model="receiveDraft.phone" placeholder="手机号" clearable style="width: 180px; margin-right: 10px" @on-enter="receiveSearch" />
+        <Button type="primary" @click="receiveSearch">查询</Button>
+        <Button style="margin-left: 8px" @click="receiveReset">重置</Button>
+      </div>
       <Table
         :columns="columns2"
         :data="receiveList"
@@ -485,6 +491,16 @@ export default {
           minWidth: 140,
         },
         {
+          title: '转让人',
+          key: 'sender_name',
+          minWidth: 140,
+        },
+        {
+          title: '转让人手机',
+          key: 'sender_phone',
+          minWidth: 140,
+        },
+        {
           title: '领取/发放时间',
           key: 'issued_at',
           minWidth: 170,
@@ -504,7 +520,10 @@ export default {
       receiveFrom: {
         page: 1,
         limit: 15,
+        member_name: '',
+        phone: '',
       },
+      receiveDraft: { member_name: '', phone: '' },
       rows: {},
       staffData: [],
       couponHeader: [],
@@ -559,7 +578,21 @@ export default {
       this.rows = row;
       // 切换优惠券时回第一页，避免沿用上一个券的页码造成有记录却显示空白。
       this.receiveFrom.page = 1;
+      this.receiveFrom.member_name = '';
+      this.receiveFrom.phone = '';
+      this.receiveDraft = { member_name: '', phone: '' };
       this.getReceivelist(row);
+    },
+    // 查询与分页共用已提交筛选值，输入框草稿不会悄悄改变翻页条件。
+    receiveSearch() {
+      this.receiveFrom.member_name = this.receiveDraft.member_name.trim();
+      this.receiveFrom.phone = this.receiveDraft.phone.trim();
+      this.receiveFrom.page = 1;
+      this.getReceivelist(this.rows);
+    },
+    receiveReset() {
+      this.receiveDraft = { member_name: '', phone: '' };
+      this.receiveSearch();
     },
     getReceivelist(row) {
       this.loading2 = true;

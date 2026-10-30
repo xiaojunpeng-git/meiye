@@ -238,12 +238,12 @@ class StoreCouponIssueServices extends BaseServices
     }
 
     /** 平台领取记录使用券实例，以便展示发放门店和使用状态；保留旧日志接口供门店调用。 */
-    public function issuedRecordList(int $id): array
+    public function issuedRecordList(int $id, array $filters = []): array
     {
         if (!$this->dao->get($id)) throw new ValidateException('优惠券不存在');
         /** @var StoreCouponUserServices $couponUserServices */
         $couponUserServices = app()->make(StoreCouponUserServices::class);
-        return $couponUserServices->issuedRecordList($id);
+        return $couponUserServices->issuedRecordList($id, $filters);
     }
 
     /**
