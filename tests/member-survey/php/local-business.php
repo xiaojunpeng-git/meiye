@@ -39,7 +39,18 @@ try{
  $savedList=$survey->listTasks(1,20);$savedRow=array_column($savedList['list'],null,'id')[$id]??null;
  check12($savedList['count']===1&&$savedRow!==null&&$savedRow['title']==='公开扫码任务'&&(int)$savedRow['answer_count']===0&&(int)$savedRow['total_answer_count']===0,'创建成功后非空列表可回读草稿及零答卷');
  $savedAgain=(new Survey())->listTasks(1,20);check12((int)$savedAgain['list'][0]['id']===$id,'刷新服务后仍能读取已保存任务');
+ // 历史问卷模板行只作留存，新任务奖励完全由任务配置决定。
+ Db::name('member_survey_reward_config')->insert(['gift_type'=>2,'relation_id'=>$qid,'config'=>json_encode(['store_id'=>11,'reward_each_round'=>true,'product'=>[],'coupon'=>[['id'=>31,'store_name'=>'旧模板券','num'=>1,'write_days'=>30]]],JSON_UNESCAPED_UNICODE),'created_at'=>time(),'updated_at'=>time()]);
+ check12($gift->config($id)['coupon']===[],'旧问卷赠送模板不再自动继承到任务');
+ $gift->saveConfig($id,['store_policy'=>'member','reward_each_round'=>false,'product'=>[],'coupon'=>[]]);
+ // 复制配置不复制答卷、目标名单或二维码；筛选总数由服务端按状态计算。
+ $copyId=$survey->copyTask($id,7);$copy=$survey->readTask($copyId);
+ check12($copyId!==$id&&$copy['status']==='draft'&&$copy['questionnaire_id']===$qid&&empty($copy['entry_token'])&&Db::name('member_survey_target')->where('task_id',$copyId)->count()===0,'复制任务只生成独立草稿');
+ check12($gift->config($copyId)['reward_each_round']===false&&$gift->config($copyId)['store_policy']==='member','复制任务保留独立奖励配置');
+ check12($survey->listTasks(1,20,'normal')['count']===2&&$survey->listTasks(1,20,'stopped')['count']===0,'正常筛选包含草稿且总数正确');
+ $survey->deleteTask($copyId);check12(Db::name('member_survey_task')->where('id',$copyId)->count()===0,'无答卷草稿可删除');
  $survey->publish($id);$task=$survey->readTask($id);
+ reject12(fn()=>$survey->deleteTask($id),'进行中的任务须先停止');
  check12(Db::name('member_survey_target')->count()===0,'零提醒名单可发布');
  // 未开通小程序的站点维持受控 H5 二维码，任务资格仍由统一答卷服务校验。
  think\facade\Config::set(['qr_mode'=>'h5','member_h5_base_url'=>'https://member.example.test'],'member_survey');
@@ -61,6 +72,12 @@ try{
  reject12(fn()=>$survey->entry('invalid'),'错误二维码拒绝');reject12(fn()=>$survey->submit(101,$id,[],1),'后端必填保护');
  $answer=['1'=>'1','2'=>['1','2'],'3'=>'合成建议'];$result=$survey->submit(101,$id,$answer,1);
  check12($result['status']==='none'&&Db::name('member_survey_answer')->count()===1,'名单外会员可提交');
+ $answeredCopy=$survey->copyTask($id,7);$survey->publish($answeredCopy);$survey->stop($answeredCopy);
+ check12($survey->listTasks(1,20,'stopped')['count']===1,'停止筛选仅包含停止任务');
+ $survey->deleteTask($answeredCopy);check12(Db::name('member_survey_task')->where('id',$answeredCopy)->count()===0,'无答卷停止任务可删除');
+ $survey->stop($id);reject12(fn()=>$survey->deleteTask($id),'有答卷的停止任务须保留历史');
+ Db::name('member_survey_task')->where('id',$id)->update(['status'=>'published','stopped_at'=>0]);
+ if (getenv('R97_ACTIONS_ONLY')) { echo json_encode(['passed'=>true,'checks'=>$checks,'isolated_database_destroyed_on_exit'=>true],JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT)."\n"; return; }
  $survey->submit(101,$id,$answer,1);check12(Db::name('member_survey_answer')->count()===1,'同轮重复提交不重复答卷');
  check12($survey->memberDetail(101,$id)['completed']===true,'已提交返回完成状态');
  $answeredRow=array_column($survey->listTasks(1,20)['list'],null,'id')[$id];
@@ -106,16 +123,21 @@ try{
  seed12('store_product',['id'=>42,'type'=>1,'relation_id'=>11,'product_type'=>0,'store_name'=>'合成实物','is_del'=>0,'is_verify'=>1,'is_show'=>0,'is_inventory'=>0]);
  seed12('store_product_attr_value',['id'=>52,'product_id'=>42,'type'=>0,'unique'=>'survey-product-sku','suk'=>'默认','stock'=>0]);
  seed12('store_product',['id'=>43,'type'=>0,'relation_id'=>11,'product_type'=>0,'store_name'=>'不可赠的非实物','is_del'=>0,'is_verify'=>1,'is_show'=>0]);
- // 共享选品控件仍从所选发放门店的门店商品/规格取值，仓库筛选不会把其他门店混进来。
- $saleCatalog=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1]);
- check12($saleCatalog['count']===1&&(int)$saleCatalog['list'][0]['id']===41&&(int)$saleCatalog['list'][0]['attrValue'][0]['id']===51,'问卷商品选择器销售中目录按门店和规格返回');
- $warehouseCatalog=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>2,'product_type'=>'0']);
- check12($warehouseCatalog['count']===1&&(int)$warehouseCatalog['list'][0]['id']===42&&(int)$warehouseCatalog['list'][0]['attrValue'][0]['id']===52,'问卷商品选择器仓库中实物可检索');
+ // 新问卷在总部选品，会员提交时再把同源SKU解析到其归属门店。
+ seed12('store_product',['id'=>141,'type'=>0,'relation_id'=>0,'product_type'=>6,'store_name'=>'总部护理项目','is_del'=>0,'is_verify'=>1,'is_show'=>1]);
+ seed12('store_product_attr_value',['id'=>151,'product_id'=>141,'type'=>0,'unique'=>'survey-master-project-sku','suk'=>'默认','write_times'=>1]);
+ seed12('store_product',['id'=>142,'type'=>0,'relation_id'=>0,'product_type'=>0,'store_name'=>'总部实物','is_del'=>0,'is_verify'=>1,'is_show'=>0]);
+ seed12('store_product_attr_value',['id'=>152,'product_id'=>142,'type'=>0,'unique'=>'survey-master-product-sku','suk'=>'默认','stock'=>0]);
+ Db::name('store_product')->where('id',41)->update(['pid'=>141]);Db::name('store_product')->where('id',42)->update(['pid'=>142]);
+ $saleCatalog=$gift->catalog(0,['page'=>1,'limit'=>20,'type'=>1]);
+ check12($saleCatalog['count']===1&&(int)$saleCatalog['list'][0]['id']===141&&(int)$saleCatalog['list'][0]['attrValue'][0]['id']===151,'问卷选品只展示总部项目');
+ $warehouseCatalog=$gift->catalog(0,['page'=>1,'limit'=>20,'type'=>2,'product_type'=>'0']);
+ check12($warehouseCatalog['count']===1&&(int)$warehouseCatalog['list'][0]['id']===142&&(int)$warehouseCatalog['list'][0]['attrValue'][0]['id']===152,'问卷选品展示总部实物产品');
  reject12(fn()=>$gift->catalog(11,['product_type'=>'5']),'问卷商品选择器拒绝整卡赠送');
- for($n=0;$n<21;$n++){seed12('store_product',['id'=>1000+$n,'type'=>1,'relation_id'=>11,'product_type'=>6,'store_name'=>'合成分页项目'.$n,'is_del'=>0,'is_verify'=>1,'is_show'=>1]);seed12('store_product_attr_value',['id'=>1100+$n,'product_id'=>1000+$n,'type'=>0,'unique'=>'survey-page-sku-'.$n,'suk'=>'默认','write_times'=>1]);}
- $catalogFirst=$gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1]);$catalogLast=$gift->catalog(11,['page'=>2,'limit'=>20,'type'=>1]);
+ for($n=0;$n<21;$n++){seed12('store_product',['id'=>1000+$n,'type'=>0,'relation_id'=>0,'product_type'=>6,'store_name'=>'合成分页项目'.$n,'is_del'=>0,'is_verify'=>1,'is_show'=>1]);seed12('store_product_attr_value',['id'=>1100+$n,'product_id'=>1000+$n,'type'=>0,'unique'=>'survey-page-sku-'.$n,'suk'=>'默认','write_times'=>1]);}
+ $catalogFirst=$gift->catalog(0,['page'=>1,'limit'=>20,'type'=>1]);$catalogLast=$gift->catalog(0,['page'=>2,'limit'=>20,'type'=>1]);
  check12($catalogFirst['count']===22&&count($catalogFirst['list'])===20&&$catalogLast['count']===22&&count($catalogLast['list'])===2,'问卷选品目录超过20项时后端分页和总数一致');
- check12($gift->catalog(11,['page'=>1,'limit'=>20,'type'=>1,'store_name'=>'合成护理项目'])['count']===1,'问卷选品搜索后总数回到完整筛选集');
+ check12($gift->catalog(0,['page'=>1,'limit'=>20,'type'=>1,'store_name'=>'总部护理项目'])['count']===1,'问卷选品搜索后总数回到完整筛选集');
  seed12('inventory_location',['id'=>61,'tenant_id'=>'0','store_id'=>11,'organization_id'=>'21','location_type'=>'STORE','is_default'=>1,'location_status'=>'ACTIVE','location_name'=>'合成门店仓','organization_path'=>'/21/']);
  $id3=$survey->save(['title'=>'项目实物奖励','questionnaire_id'=>$qid],7);
  $config=['store_id'=>11,'reward_each_round'=>true,'product'=>[['id'=>51,'num'=>2,'write_days'=>30],['id'=>52,'num'=>1,'write_days'=>30]],'coupon'=>[]];
@@ -130,6 +152,24 @@ try{
  reject12(fn()=>$gift->saveConfig($id3,$config),'发布后不能修改奖励');
  $id4=$survey->save(['title'=>'失效奖品验证','questionnaire_id'=>$qid],7);$config['product'][0]['num']=1.5;reject12(fn()=>$gift->saveConfig($id4,$config),'奖励数量不接受小数');
  $config['product'][0]['num']=1;Db::name('store_product')->where('id',42)->update(['is_verify'=>0]);reject12(fn()=>$gift->saveConfig($id4,$config),'失效实物不能绕过010赠送资格');
+ // 新奖励配置不指定总部发放门店，答卷提交冻结会员归属，并映射总部SKU到该店SKU。
+ Db::name('store_product')->where('id',42)->update(['is_verify'=>1]);
+ $memberTask=$survey->save(['title'=>'按会员归属门店发奖','questionnaire_id'=>$qid],7);
+ $gift->saveConfig($memberTask,['store_policy'=>'member','reward_each_round'=>true,'product'=>[['id'=>151,'num'=>1,'write_days'=>30],['id'=>152,'num'=>1,'write_days'=>30]],'coupon'=>[]]);
+ $survey->publish($memberTask);$memberResult=$survey->submit(101,$memberTask,['1'=>'归属门店发奖'],1);
+ check12($memberResult['status']==='issued','会员门店奖励成功发放');
+ $memberRequest=Db::name('member_survey_reward')->where('task_id',$memberTask)->where('uid',101)->find();
+ $memberSnapshot=json_decode($memberRequest['config_snapshot'],true,512,JSON_THROW_ON_ERROR);
+ check12(($memberSnapshot['store_policy']??'')==='member'&&(int)$memberSnapshot['store_id']===11,'答卷提交冻结会员归属门店');
+ check12(Db::name('cashier_v3_direct_gift_item')->where('gift_id',$memberRequest['gift_id'])->where('catalog_product_id',41)->count()===1,'总部项目映射成归属门店项目且保留赠送事实');
+ check12(Db::name('cashier_v3_direct_gift_item')->where('gift_id',$memberRequest['gift_id'])->where('catalog_product_id',42)->count()===1,'总部实物产品映射成归属门店产品');
+ seed12('user',['uid'=>106,'nickname'=>'首次选店获奖会员','phone'=>'13800000106','belong_store_id'=>0,'status'=>1,'delete_time'=>null]);
+ $firstStoreTask=$survey->save(['title'=>'首次选店后发奖','questionnaire_id'=>$qid],7);
+ $gift->saveConfig($firstStoreTask,['store_policy'=>'member','reward_each_round'=>true,'product'=>[['id'=>151,'num'=>1,'write_days'=>30]],'coupon'=>[]]);
+ $survey->publish($firstStoreTask);$firstStoreResult=$survey->submit(106,$firstStoreTask,['1'=>'首次选择门店'],1,11);
+ check12($firstStoreResult['status']==='issued'&&(int)Db::name('user')->where('uid',106)->value('belong_store_id')===11,'首次选服务门店后同次问卷发奖');
+ $firstRequest=Db::name('member_survey_reward')->where('task_id',$firstStoreTask)->where('uid',106)->find();
+ check12((int)json_decode($firstRequest['config_snapshot'],true,512,JSON_THROW_ON_ERROR)['store_id']===11,'首次选店和奖励门店在同次提交中冻结');
  check12(count($survey->listQuestionnaires(1,1)['list'])===1,'问卷管理后端分页');
 
  // 两个独立PHP进程真实并发，同一个答卷唯一键和任务锁必须共同阻止重复发奖。

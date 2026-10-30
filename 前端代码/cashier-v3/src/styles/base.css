@@ -4945,7 +4945,8 @@ html.group-dashboard-document #app {
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 84px 102px 118px 126px 102px 64px;
+  /* 姓名最多占 180px，宽屏新增空间分给需要输入的业务列。 */
+  grid-template-columns: 180px minmax(80px, .8fr) minmax(76px, .8fr) minmax(105px, 1fr) minmax(120px, 1.1fr) minmax(126px, 1.1fr) minmax(100px, .9fr) 64px;
 }
 
 .personnel-full-table--history {
@@ -4954,7 +4955,7 @@ html.group-dashboard-document #app {
 
 .personnel-full-table--history .personnel-full-table__head,
 .personnel-full-table--history .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .75fr .8fr 1fr .85fr .75fr .55fr;
+  grid-template-columns: 180px minmax(80px, .8fr) minmax(76px, .8fr) minmax(105px, 1fr) minmax(120px, 1.1fr) minmax(126px, 1.1fr) minmax(100px, .9fr) 64px;
 }
 
 /* 计算法隐藏一列时同步收紧网格，保证项目数和操作仍与表头对齐。 */
@@ -4963,11 +4964,11 @@ html.group-dashboard-document #app {
 }
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: minmax(112px, 1.1fr) 92px 84px 102px 118px 102px 64px;
+  grid-template-columns: 180px minmax(80px, .8fr) minmax(76px, .8fr) minmax(105px, 1fr) minmax(120px, 1.1fr) minmax(100px, .9fr) 64px;
 }
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__head,
 .personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__row {
-  grid-template-columns: 1.15fr .8fr .75fr .8fr 1fr .75fr .55fr;
+  grid-template-columns: 180px minmax(80px, .8fr) minmax(76px, .8fr) minmax(105px, 1fr) minmax(120px, 1.1fr) minmax(100px, .9fr) 64px;
 }
 
 .personnel-full-table__head > *,

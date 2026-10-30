@@ -56,6 +56,50 @@ class StoreCouponUserServices extends BaseServices
     }
 
     /**
+     * 平台领取记录按已发出的券实例分页；领取计数日志没有门店及使用状态，不能代替券事实。
+     * 历史券若缺少发放门店快照，仅返回“未知”，不根据会员所属门店推断。
+     */
+    public function issuedRecordList(int $issueId, array $filters = []): array
+    {
+        [$page, $limit] = $this->getPageValue();
+        $query = Db::name('store_coupon_user')->alias('cu')
+            ->leftJoin('user member', 'member.uid=cu.uid')
+            ->leftJoin('store_coupon_transfer transfer', 'transfer.coupon_user_id=cu.id')
+            ->leftJoin('user sender', 'sender.uid=transfer.from_uid')
+            ->where('cu.cid', $issueId);
+        $memberName = trim((string)($filters['member_name'] ?? ''));
+        $phone = trim((string)($filters['phone'] ?? ''));
+        // 在券实例分页前筛选当前持有人；转让人来自不可变的转赠审计记录。
+        if ($memberName !== '') $query->where('member.nickname', 'like', '%' . addcslashes($memberName, '%_\\') . '%');
+        if ($phone !== '') $query->where('member.phone', 'like', '%' . addcslashes($phone, '%_\\') . '%');
+        $count = (int)(clone $query)->count('cu.id');
+        $list = $query->field('cu.id,cu.uid,cu.add_time,cu.start_time,cu.end_time,cu.use_time,cu.status,cu.is_fail,cu.issuance_store_id,member.nickname AS member_name,member.phone AS phone,transfer.from_uid,sender.nickname AS sender_name,sender.phone AS sender_phone')
+            ->order('cu.id desc')->page($page, $limit)->select()->toArray();
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($list, 'issuance_store_id')))));
+        $stores = $storeIds ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id') : [];
+        $now = time();
+        foreach ($list as &$item) {
+            $storeId = (int)$item['issuance_store_id'];
+            $item['member_name'] = $item['member_name'] ?: '会员已删除';
+            $item['phone'] = $item['phone'] ?: '—';
+            $item['sender_name'] = (int)$item['from_uid'] > 0 ? ($item['sender_name'] ?: '会员已删除') : '—';
+            $item['sender_phone'] = (int)$item['from_uid'] > 0 ? ($item['sender_phone'] ?: '—') : '—';
+            $item['issuance_store_name'] = $storeId > 0 ? ($stores[$storeId] ?? '门店已删除') : '未知';
+            $item['issued_at'] = (int)$item['add_time'] > 0 ? date('Y-m-d H:i:s', (int)$item['add_time']) : '';
+            $item['is_used'] = (int)$item['use_time'] > 0 || (int)$item['status'] === 1;
+            // 状态以券实例当前事实为准；部分抵用仍可继续使用，不能标成已用完。
+            if ((int)$item['is_fail'] !== 0) $item['status_label'] = '已作废';
+            elseif ((int)$item['status'] === 1) $item['status_label'] = '已使用';
+            elseif ((int)$item['status'] === 2 || ((int)$item['end_time'] > 0 && (int)$item['end_time'] < $now)) $item['status_label'] = '已过期';
+            elseif ((int)$item['start_time'] > $now) $item['status_label'] = '未开始';
+            elseif ($item['is_used']) $item['status_label'] = '部分使用';
+            else $item['status_label'] = '可使用';
+        }
+        unset($item);
+        return compact('list', 'count');
+    }
+
+    /**
      * 获取列表
      * @param array $where
      * @return array

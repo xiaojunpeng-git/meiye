@@ -16,6 +16,10 @@ try{
  let source=component('前端代码/admin/src/pages/user/survey/index.vue','SurveyAdmin');source=source.replace('const { guideRequired, clearRequiredGuidance } = window.api;', 'const { guideRequired, clearRequiredGuidance } = window.apiGuide;');
  await page.addScriptTag({content:source});await page.evaluate(()=>{window.vm=new Vue(window.SurveyAdmin).$mount('#mount');});await page.waitForTimeout(150);
  check(await page.locator('body').innerText().then(s=>s.includes('扫码任务')),'任务列表实际渲染');
+ check(await page.evaluate(()=>vm.taskStatus==='normal'&&calls.some(c=>c.name==='surveyList'&&c.args[0].status==='normal')),'任务默认筛选正常');
+ check(await page.locator('.survey-task-actions__row').count()===2&&await page.getByRole('button',{name:'复制',exact:true}).count()===1&&await page.getByRole('button',{name:'删除',exact:true}).isDisabled(),'操作两行展示且进行中不可删除');
+ await page.evaluate(()=>{vm.taskStatus='stopped';vm.changeTaskStatus();});await page.waitForTimeout(100);
+ check(await page.evaluate(()=>vm.page===1&&calls.some(c=>c.name==='surveyList'&&c.args[0].status==='stopped')),'切换停止筛选重置首页并交给后端');
  await page.evaluate(()=>vm.newQuestionnaire());await page.waitForTimeout(150);await page.getByRole('button',{name:'保存问卷',exact:true}).click();
  check(await page.locator('[role=status]').innerText().then(s=>s.includes('填写问卷名称')),'平台首个必填就地定位');
  await page.locator('[data-required-key=title] input').last().fill('浏览器合成问卷');await page.getByRole('button',{name:'保存问卷',exact:true}).click();await page.waitForTimeout(150);
@@ -30,9 +34,9 @@ try{
  await page.evaluate(()=>{window.goodsAttr={template:'<div>合成商品选择器</div>'};window.couponList={template:'<div>合成优惠券选择器</div>',data:()=>({couponList:[]}),methods:{tableList(){}}};window.api=new Proxy(window.api,{get:(target,name)=>name==='surveyGiftCatalog'?async(store,filters)=>({data:{list:[],count:0,store,filters}}):target[name]});});
  let reward=component('前端代码/admin/src/components/memberSurveyReward/index.vue','SurveyReward').replace('const { guideRequired, clearRequiredGuidance } = window.api;', 'const { guideRequired, clearRequiredGuidance } = window.apiGuide;');await page.addScriptTag({content:reward});
  await page.evaluate(async()=>{vm.$destroy();document.body.innerHTML='<div id="reward"></div>';window.rewardVm=new Vue({...SurveyReward,propsData:{visible:true,surveyId:1,readonly:false}}).$mount('#reward');await rewardVm.load();});await page.waitForTimeout(150);
- check(await page.evaluate(()=>rewardVm.form.coupon.length===1),'奖励加载不因门店on-change清空已有配置');
+ check(await page.evaluate(()=>rewardVm.form.coupon.length===1),'奖励加载保留已有配置');
  check(await page.locator('.survey-reward-table th').allTextContents().then(columns=>columns.join('|')==='类型|名称|数量|生效时间|有效天数|结束时间|操作'),'问卷赠送使用储值赠送七列设置');
- check(await page.evaluate(async()=>{const result=await rewardVm.fetchProducts({page:2,limit:20});return result.data.store===11&&result.data.filters.page===2;}),'问卷共用选品控件按发放门店请求分页目录');
+ check(await page.evaluate(async()=>{const result=await rewardVm.fetchProducts({page:2,limit:20});return result.data.store===0&&result.data.filters.page===2;}),'问卷选品不预设发放门店并保持分页');
  check(await page.evaluate(()=>{rewardVm.addProducts([{id:41,store_name:'合成项目',product_type:6,attrValue:[{id:51}]}]);rewardVm.addProducts([{id:44,store_name:'整卡',product_type:5,attrValue:[{id:54}]}]);return rewardVm.form.product.length===1&&rewardVm.form.product[0].id===51;}),'问卷从商品选择转换为门店SKU且不开放整卡');
  check(await page.evaluate(()=>{rewardVm.addCoupons([34],[{id:34,title:'跨页合成券'}]);return rewardVm.form.coupon.some(row=>row.id===34&&row.store_name==='跨页合成券');}),'跨页选择优惠券保留所选名称');
  await page.evaluate(()=>{window.api=new Proxy(window.api,{get:(target,name)=>name==='mapState'?()=>({}):name==='changeListApi'?async params=>{window.pickerQuery=params;return{data:{list:[],count:0}};}:target[name]});});
@@ -49,7 +53,7 @@ try{
  await page.getByRole('button',{name:'提交问卷'}).click();check(await page.evaluate(()=>lastReturn.includes('entry=')),'登录返回保留任务深链');
  await page.evaluate(async()=>{vm.$destroy();document.body.innerHTML='<div id="mount"></div>';auth.getters.isLogin=true;task.requirements={phone_required:false,store_required:true,stores:[{id:11,name:'合成归属门店'}]};Vue.component('picker',{props:['range'],template:'<select aria-label="所属门店" @change="$emit(\'change\',{detail:{value:$event.target.value}})"><option value="">选择所属门店</option><option v-for="(store,i) in range" :value="i">{{store.name}}</option></select>'});window.vm=new Vue(SurveyMember).$mount('#mount');vm.$options.onLoad.call(vm,{entry:'a'.repeat(48)});});await page.waitForTimeout(100);
  check(await page.evaluate(()=>vm.answers['1']==='1'&&vm.answers['2'][0]==='1'&&vm.answers['3']==='登录后保留的合成答案'),'登录后恢复同轮草稿');
- await page.getByRole('button',{name:'提交问卷'}).click();check(await page.locator('[role=status]').innerText().then(s=>s.includes('选择您的所属门店')),'无归属提交定位必选门店且不提交');await page.screenshot({path:path.join(evidence,'member-store-required.png'),fullPage:true});await page.getByLabel('所属门店').selectOption('0');
+ await page.getByRole('button',{name:'提交问卷'}).click();check(await page.locator('[role=status]').innerText().then(s=>s.includes('选择您需要服务的门店')),'无归属提交定位必选门店且不提交');await page.screenshot({path:path.join(evidence,'member-store-required.png'),fullPage:true});await page.getByLabel('所属门店').selectOption('0');
  await page.getByRole('button',{name:'提交问卷'}).click();await page.waitForTimeout(100);check(await page.evaluate(()=>submitted.store===11),'仅提交会员主动选择的所属门店');check(await page.locator('body').innerText().then(s=>s.includes('奖励待发')),'发奖失败显示答卷已提交而非诱导重答');
  check(await page.evaluate(()=>submitted.round===1&&Object.keys(saved).length===0),'提交携带轮次且确认后清除草稿');
  await page.getByRole('button',{name:'重试发放奖励'}).click();await page.waitForTimeout(100);check(await page.locator('body').innerText().then(s=>s.includes('奖励已发放')),'待发奖励可独立重试');

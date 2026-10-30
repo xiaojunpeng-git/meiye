@@ -2961,8 +2961,6 @@ Route::group('adminapi', function () {
         Route::get('survey/questionnaires/:id/export-data', 'v1.user.MemberSurvey/questionnaireExportData')->option(['real_name' => '导出会员调查问卷数据']);
         Route::get('survey/questionnaires/:id/analysis/text', 'v1.user.MemberSurvey/questionnaireTextAnswers')->option(['real_name' => '会员调查问卷文字回答']);
         Route::get('survey/questionnaires/:id/analysis', 'v1.user.MemberSurvey/questionnaireAnalysis')->option(['real_name' => '会员调查问卷题目分析']);
-        Route::get('survey/questionnaires/:id/gifts', 'v1.user.MemberSurvey/questionnaireGifts')->option(['real_name' => '查看问卷赠送配置']);
-        Route::put('survey/questionnaires/:id/gifts', 'v1.user.MemberSurvey/updateQuestionnaireGifts')->option(['real_name' => '设置问卷完成赠送']);
         Route::get('survey/questionnaires/:id', 'v1.user.MemberSurvey/questionnaireRead')->option(['real_name' => '会员调查问卷详情']);
         Route::put('survey/questionnaires/:id', 'v1.user.MemberSurvey/questionnaireUpdate')->option(['real_name' => '编辑会员调查问卷']);
         Route::get('survey', 'v1.user.MemberSurvey/index')->option(['real_name' => '会员调查列表']);
@@ -2973,6 +2971,8 @@ Route::group('adminapi', function () {
         Route::put('survey/:id/gifts', 'v1.user.MemberSurvey/updateGifts')->option(['real_name' => '设置调查完成赠送']);
         Route::get('survey/:id', 'v1.user.MemberSurvey/read')->option(['real_name' => '会员调查详情']);
         Route::put('survey/:id', 'v1.user.MemberSurvey/update')->option(['real_name' => '修改会员调查']);
+        Route::delete('survey/:id', 'v1.user.MemberSurvey/delete')->option(['real_name' => '删除会员调查任务']);
+        Route::post('survey/:id/copy', 'v1.user.MemberSurvey/copy')->option(['real_name' => '复制会员调查任务']);
         Route::get('survey/:id/targets', 'v1.user.MemberSurvey/targets')->option(['real_name' => '调查目标会员设置']);
         Route::put('survey/:id/targets', 'v1.user.MemberSurvey/updateTargets')->option(['real_name' => '设置调查目标会员']);
         Route::post('survey/:id/publish', 'v1.user.MemberSurvey/publish')->option(['real_name' => '发布会员调查']);

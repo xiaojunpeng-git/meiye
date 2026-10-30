@@ -15,8 +15,8 @@
           </view>
         </template></required-field-guide>
         <required-field-guide v-if="requirements.store_required && !requirements.phone_required" ref="storeGuide" anchor="survey-member-store">
-          <view class="question-title">请选择您的所属门店</view>
-          <picker :range="requirements.stores || []" range-key="name" @change="chooseStore"><button>{{ selectedStoreName || '选择所属门店' }}</button></picker>
+          <view class="question-title">请选择您需要服务的门店</view>
+          <picker :range="requirements.stores || []" range-key="name" @change="chooseStore"><button>{{ selectedStoreName || '请选择您需要服务的门店' }}</button></picker>
           <view class="description">首次选择将保存为您的所属门店。</view>
         </required-field-guide>
         <view v-else-if="requirements.store_id" class="description">所属门店：{{ requirements.store_name }}</view>
@@ -63,7 +63,7 @@ export default {
       if (index !== -1) { this.$refs.guides[index].guide('请在这里填写第' + (index + 1) + '题'); return; }
       this.persist();
       if (!this.$store.getters.isLogin || this.requirements.phone_required) { toLogin(undefined, undefined, '/pages/users/survey/index?' + (this.entryToken ? 'entry=' + encodeURIComponent(this.entryToken) : 'id=' + this.taskId)); return; }
-      if (this.requirements.store_required && !this.selectedStoreId) { this.$refs.storeGuide.guide('请在这里选择您的所属门店');return; }
+      if (this.requirements.store_required && !this.selectedStoreId) { this.$refs.storeGuide.guide('请在这里选择您需要服务的门店');return; }
       this.submitting = true; this.error = ''; try { const response = await surveySubmit(this.taskId, this.answers, this.task.send_round, this.selectedStoreId); this.reward = response.data.gift || {}; this.completed = true; uni.removeStorageSync(this.draftKey); } catch (e) { this.error = e.msg || '提交失败，已填内容保留，请稍后重试'; } finally { this.submitting = false; }
     },
     async retryReward() { if (this.submitting) return; this.submitting = true; this.error = ''; try { this.reward = (await surveyRetry(this.taskId)).data; } catch (e) { this.error = e.msg || '奖励暂未发放，请稍后重试'; } finally { this.submitting = false; } }

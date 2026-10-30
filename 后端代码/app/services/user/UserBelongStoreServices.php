@@ -251,7 +251,7 @@ class UserBelongStoreServices extends BaseServices
         if(!$user||trim((string)($user['phone']??''))==='')throw new ValidateException('请先完成手机号授权');
         $existing=(int)($user['belong_store_id']??0);
         if($existing>0)return ['store_id'=>$existing,'changed'=>false];
-        if($storeId<=0)throw new ValidateException('请选择您的所属门店');
+        if($storeId<=0)throw new ValidateException('请选择您需要服务的门店');
         $store=Db::name('system_store')->where(['id'=>$storeId,'is_del'=>0,'is_show'=>1])->lock(true)->find();
         if(!$store)throw new ValidateException('所选门店已不可用，请重新选择');
         $now=time();$historyId=(int)Db::name('user_belong_store')->insertGetId(['group'=>1,'type'=>'survey_choice','uid'=>$uid,'store_id'=>$storeId,'staff_id'=>0,'admin_id'=>0,'add_time'=>$now]);

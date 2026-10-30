@@ -117,13 +117,9 @@ class MemberSurveyServices
     {
         $count=Db::name('member_survey_questionnaire')->count();
         $rows = Db::name('member_survey_questionnaire')->order('updated_at', 'desc')->order('id', 'desc')->page(max(1,$page),max(1,min(100,$limit)))->select()->toArray();
-        $giftMap = $rows ? app()->make(MemberSurveyRewardConfigurationServices::class)
-            ->getConfigMap(MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY_QUESTIONNAIRE, array_column($rows, 'id')) : [];
         foreach ($rows as &$row) {
             $row['question_count'] = count($this->decode((string)$row['questions']));
             $row['task_count'] = Db::name('member_survey_task')->where('questionnaire_id', $row['id'])->count();
-            $gifts = $giftMap[(int)$row['id']] ?? ['product' => [], 'coupon' => []];
-            $row['gift_count'] = count($gifts['product']) + count($gifts['coupon']);
             unset($row['questions']);
         }
         return ['list'=>$rows,'count'=>$count];
@@ -424,20 +420,67 @@ class MemberSurveyServices
         return (int)Db::name('member_survey_task')->insertGetId($data);
     }
 
-    /** 返回总部任务分页及提醒/回答数量，不在读取时补写业务记录。 */
-    public function listTasks(int $page = 1, int $limit = 20): array
+    /** 复制为独立草稿：只复制可编辑配置，重新发布时再计算目标名单并生成新二维码。 */
+    public function copyTask(int $id, int $creatorId): int
+    {
+        return Db::transaction(function () use ($id, $creatorId): int {
+            $source = Db::name('member_survey_task')->where('id', $id)->lock(true)->find();
+            if (!$source) throw new ValidateException('调查任务不存在');
+            if (!Db::name('member_survey_questionnaire')->where('id', $source['questionnaire_id'])->count()) {
+                throw new ValidateException('原问卷已不存在，无法复制任务');
+            }
+            $title = mb_substr((string)$source['title'], 0, 146) . '（复制）';
+            $newId = (int)Db::name('member_survey_task')->insertGetId([
+                'questionnaire_id' => $source['questionnaire_id'], 'title' => $title,
+                'description' => $source['description'], 'questions' => $source['questions'],
+                'filters' => $source['filters'], 'status' => 'draft',
+                'deadline' => (int)$source['deadline'] > $this->now() ? $source['deadline'] : 0,
+                'creator_id' => $creatorId, 'created_at' => $this->now(),
+            ]);
+            // 奖励独立复制为任务配置；旧单店奖励须转换到会员归属规则，无法唯一映射时拒绝复制。
+            $config = Db::name('member_survey_reward_config')->where('gift_type', MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY)
+                ->where('relation_id', $id)->value('config');
+            if ($config) {
+                $reward = $this->decode((string)$config);
+                $reward['store_policy'] = 'member'; $reward['store_id'] = 0;
+                app()->make(MemberSurveyGiftServices::class)->saveConfig($newId, $reward);
+            }
+            return $newId;
+        });
+    }
+
+    /** 只删除从未作答/发奖且已停止的任务；删除名单和弹窗记录不触碰会员或赠送事实。 */
+    public function deleteTask(int $id): void
+    {
+        Db::transaction(function () use ($id): void {
+            $task = Db::name('member_survey_task')->where('id', $id)->lock(true)->find();
+            if (!$task) throw new ValidateException('调查任务不存在');
+            if (!in_array($task['status'], ['draft', 'stopped'], true)) throw new ValidateException('请先停止任务再删除');
+            if (Db::name('member_survey_answer')->where('task_id', $id)->count()
+                || Db::name('member_survey_reward')->where('task_id', $id)->count()
+                || Db::name('member_survey_target')->where('task_id', $id)->where('completed_round', '>', 0)->count()) {
+                throw new ValidateException('任务已有答卷或奖励记录，须保留历史，不能删除');
+            }
+            Db::name('member_survey_popup')->where('task_id', $id)->delete();
+            Db::name('member_survey_target')->where('task_id', $id)->delete();
+            Db::name('member_survey_reward_config')->where('gift_type', MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY)
+                ->where('relation_id', $id)->delete();
+            Db::name('member_survey_task')->where('id', $id)->delete();
+        });
+    }
+
+    /** 状态筛选、总数与当前页在同一后端范围；正常包含草稿和进行中。 */
+    public function listTasks(int $page = 1, int $limit = 20, string $status = 'normal'): array
     {
         $page = max(1, $page); $limit = max(1, min(100, $limit));
+        if (!in_array($status, ['normal', 'stopped'], true)) throw new ValidateException('任务状态筛选无效');
         $query = Db::name('member_survey_task');
+        $query = $status === 'normal' ? $query->whereIn('status', ['draft', 'published']) : $query->where('status', 'stopped');
         $count = $query->count();
-        $rows = Db::name('member_survey_task')->order('id', 'desc')->page($page, $limit)->select()->toArray();
+        $rows = ($status === 'normal' ? Db::name('member_survey_task')->whereIn('status', ['draft', 'published']) : Db::name('member_survey_task')->where('status', 'stopped'))
+            ->order('id', 'desc')->page($page, $limit)->select()->toArray();
         $giftConfigs = $rows ? app()->make(MemberSurveyRewardConfigurationServices::class)
             ->getConfigMap(MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY, array_column($rows, 'id')) : [];
-        $ownGiftIds = $rows ? Db::name('member_survey_reward_config')->where('gift_type', MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY)
-            ->whereIn('relation_id', array_column($rows, 'id'))->column('relation_id') : [];
-        $ownGiftLookup = array_fill_keys(array_map('intval', $ownGiftIds), true);
-        $questionnaireGiftConfigs = $rows ? app()->make(MemberSurveyRewardConfigurationServices::class)
-            ->getConfigMap(MemberSurveyRewardConfigurationServices::GIFT_TYPE_SURVEY_QUESTIONNAIRE, array_column($rows, 'questionnaire_id')) : [];
         foreach ($rows as &$row) {
             $filters = $this->decode((string)$row['filters']);
             $row['targets_configured'] = $this->requiresTarget(['filters'=>$filters]);
@@ -449,11 +492,7 @@ class MemberSurveyServices
                 ->where('send_round', $row['send_round'])->count();
             // 累计答卷包含扫码与提醒名单的全部轮次；source只在参与关系表中，不能用来筛除答卷。
             $row['total_answer_count'] = Db::name('member_survey_answer')->where('task_id', $row['id'])->count();
-            $row['gift_inherited'] = $row['status'] === 'draft' && (int)$row['questionnaire_id'] > 0
-                && !isset($ownGiftLookup[(int)$row['id']]);
-            $gift = $row['gift_inherited']
-                ? ($questionnaireGiftConfigs[(int)$row['questionnaire_id']] ?? ['product' => [], 'coupon' => []])
-                : ($giftConfigs[$row['id']] ?? ['product' => [], 'coupon' => []]);
+            $gift = $giftConfigs[$row['id']] ?? ['product' => [], 'coupon' => []];
             $row['gift_count'] = count($gift['product']) + count($gift['coupon']);
         }
         return ['list' => $rows, 'count' => $count];
@@ -567,7 +606,7 @@ class MemberSurveyServices
         Db::transaction(function () use ($id, $preview, $questions, $task) {
             $locked=Db::name('member_survey_task')->where('id',$id)->lock(true)->find();
             if(!$locked||$locked['status']!=='draft'||$locked['questions']!==json_encode($task['questions'],JSON_UNESCAPED_UNICODE)||$locked['filters']!==json_encode($task['filters'],JSON_UNESCAPED_UNICODE)|| (int)$locked['questionnaire_id']!==(int)$task['questionnaire_id'] || $locked['title']!==$task['title'] || (int)$locked['deadline']!==(int)$task['deadline'])throw new ValidateException('草稿已变化，请刷新后发布');
-            // 问卷配置与奖励均锁到事务结束，新编辑只能供下一任务使用。
+            // 问卷题目与任务奖励均锁到事务结束，新编辑只能供下一任务使用。
             $questionnaire=Db::name('member_survey_questionnaire')->where('id',$task['questionnaire_id'])->lock(true)->find();
             if(!$questionnaire)throw new ValidateException('问卷不存在');
             $questions=$this->decode($questionnaire['questions']);
@@ -576,7 +615,7 @@ class MemberSurveyServices
                     'questions' => json_encode($questions, JSON_UNESCAPED_UNICODE), 'entry_token' => bin2hex(random_bytes(24))]);
             if (!$changed) throw new ValidateException('任务已发布');
             $gift = app()->make(MemberSurveyGiftServices::class);
-            $gift->snapshotQuestionnaireConfig($id, (int)$task['questionnaire_id']);
+            $gift->freezeTaskConfig($id);
             $gift->validateTargets($id, array_map('intval', array_column($preview['list'], 'uid')));
             foreach (array_chunk($preview['list'], 500) as $chunk) {
                 $rows = [];
