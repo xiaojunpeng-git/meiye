@@ -238,7 +238,8 @@ class SystemMenus extends AuthController
         [$type] = $this->request->getMore([
             ['type', 1]
         ], true);
-        [$menus, $unique] = $this->services->getMenusList($this->adminInfo['roles'], (int)$this->adminInfo['level']);
+        // 刷新导航必须沿用实际账号类型，避免区域代理误领平台会员入口。
+        [$menus, $unique] = $this->services->getMenusList($this->adminInfo['roles'], (int)$this->adminInfo['level'], 1, (int)($this->adminInfo['admin_type'] ?? 0));
         [$menus, $unique] = \app\services\ai\management\AiManagementMenuPolicy::formatted($menus, $unique, is_array($this->adminInfo) ? $this->adminInfo : $this->adminInfo->toArray());
         return app('json')->success(['menus' => $menus, 'unique' => $unique]);
     }

@@ -8,7 +8,7 @@ use app\services\query\UnifiedQueryRuntime;
 use app\services\query\provider\MemberUnifiedQueryContextFactory;
 use app\services\query\provider\PlatformMemberUnifiedQueryProvider;
 
-/** 平台会员模块只使用服务端平台身份，会员范围和每项写权限均由服务层重新验证。 */
+/** 平台会员模块只接受有效总后台身份；白名单命令、并发与客户实例边界仍由服务层验证。 */
 class MemberCenter extends AuthController
 {
     public function bootstrap(PlatformMemberCenterServices $service) { return $this->safe(function () use ($service) { return $service->bootstrap((int)$this->adminId); }); }

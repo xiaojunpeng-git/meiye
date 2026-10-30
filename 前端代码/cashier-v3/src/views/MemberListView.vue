@@ -32,6 +32,7 @@ const canEditMember = computed(() => props.platformAdapter ? props.platformAdapt
 const selectedMemberIds = ref([])
 const isMemberCreatorOpen = ref(false)
 const editingMember = ref(null)
+const memberEditOpenError = ref('')
 const deletingMember = ref(null)
 const restoringMember = ref(null)
 const memberRestoreError = ref('')
@@ -360,6 +361,7 @@ function clearMemberQueryResult(message = '') {
   lastSuccessfulQuery.value = null
   selectedMemberIds.value = []
   queryError.value = message
+  memberEditOpenError.value = ''
 }
 
 async function queryMembers(query = {}, resetPage = true) {
@@ -510,21 +512,29 @@ function editableMemberDraft(member) {
   }
 }
 
+// 打开编辑窗是服务端授权读取；失败要在按钮附近可见，不能让用户误以为点击无效。
 async function openMemberEditor(record) {
+  memberEditOpenError.value = ''
   const memberId = memberRecordId(record)
-  const response = await requestAction('open-member-editor', { memberId })
-  if (!unifiedQueryActionSucceeded(response)) return response
-  const data = resultData(response)
-  if (data.creatorSchema && typeof data.creatorSchema === 'object') {
-    creatorSchema.value = data.creatorSchema
+  try {
+    const response = await requestAction('open-member-editor', { memberId })
+    if (!unifiedQueryActionSucceeded(response)) {
+      memberEditOpenError.value = unifiedQueryActionMessage(response, '会员资料读取失败，请重试。')
+      return response
+    }
+    const data = resultData(response)
+    if (data.creatorSchema && typeof data.creatorSchema === 'object') creatorSchema.value = data.creatorSchema
+    const member = data.member
+    if (member && member.memberId) {
+      memberSaveFeedback.value = null
+      memberEditConflictMessage.value = ''
+      editingMember.value = { ...member }
+    } else memberEditOpenError.value = '会员资料读取失败，请重试。'
+    return response
+  } catch (error) {
+    memberEditOpenError.value = error?.message || '会员资料读取失败，请重试。'
+    return { result: { status: 'failed', message: memberEditOpenError.value } }
   }
-  const member = data.member
-  if (member && member.memberId) {
-    memberSaveFeedback.value = null
-    memberEditConflictMessage.value = ''
-    editingMember.value = { ...member }
-  }
-  return response
 }
 
 async function saveMemberEdit() {
@@ -700,6 +710,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
       </template>
     </MemberReportQueryToolbar>
 
+    <p v-if="memberEditOpenError" class="member-list-query-message member-list-query-message--error" role="alert">{{ memberEditOpenError }}</p>
     <p v-if="isQueryLoading" class="member-list-query-message" role="status">正在查询会员数据…</p>
     <p v-else-if="queryError" class="member-list-query-message member-list-query-message--error" role="alert">{{ queryError }}</p>
 

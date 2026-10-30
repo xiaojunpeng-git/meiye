@@ -2983,7 +2983,7 @@ Route::group('adminapi', function () {
         Route::get('survey/:id/qr', 'v1.user.MemberSurvey/qr')->option(['real_name'=>'调查任务二维码']);
         Route::post('survey/:id/retry-rewards', 'v1.user.MemberSurvey/retryRewards')->option(['real_name'=>'重试调查奖励']);
 
-        // 平台会员模块明确白名单，服务层沿用会员列表/新增/编辑/注销功能授权。
+        // 平台会员模块仅对有效总后台账号开放白名单命令；列表操作不按角色或员工门店范围裁剪。
         Route::get('member-center/bootstrap', 'v1.user.MemberCenter/bootstrap')->option(['real_name' => '平台会员初始化']);
         Route::post('member-center/action', 'v1.user.MemberCenter/action')->option(['real_name' => '平台会员操作']);
         Route::get('member-center/login/:id', 'v1.user.MemberCenter/login')->option(['real_name' => '平台会员登录信息']);

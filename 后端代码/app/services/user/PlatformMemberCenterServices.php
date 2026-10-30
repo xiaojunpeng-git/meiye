@@ -42,8 +42,9 @@ class PlatformMemberCenterServices
         $targetStore = in_array($action, ['create-member','query-query-entities'], true) ? (int)($payload['targetStoreId'] ?? 0) : 0;
         if ($action === 'create-member' && $targetStore <= 0) throw new ValidateException('请先选择新增会员的归属门店');
         if (($isWrite && $action !== 'create-member') || in_array($action, ['open-member-editor','open-member-restore'], true)) {
-            $targetStore = (int)Db::name('user')->where('uid', (int)($payload['memberId'] ?? 0))->value('belong_store_id');
-            if ($targetStore <= 0 && $isWrite) throw new ValidateException('该会员暂无归属门店，请先调店后操作');
+            // 历史会员的主归属门店可能已停用，但仍有关联的有效门店。编辑、注销和恢复
+            // 以服务端可用门店作为操作上下文，不把旧归属改写成新业务事实。
+            $targetStore = $this->activeMemberStoreId((int)($payload['memberId'] ?? 0));
         }
         $scope = (new PlatformMemberScopeServices())->build($adminId, $operation, $targetStore);
         $payload['pageCode'] = PlatformMemberUnifiedQueryProvider::PAGE_CODE;
@@ -110,14 +111,27 @@ class PlatformMemberCenterServices
                 $member = Db::name('user')->where('uid', (int)($payload['memberId'] ?? 0))->find();
                 if ($member && isset($data['member'])) {
                     $data['member']['memberRevision'] = $this->revision($member);
-                    $data['member']['storeId'] = (int)$member['belong_store_id'];
-                    $data['member']['storeName'] = (string)Db::name('system_store')->where('id', (int)$member['belong_store_id'])->value('name');
+                    $data['member']['storeId'] = $targetStore;
+                    $data['member']['storeName'] = $targetStore > 0
+                        ? (string)Db::name('system_store')->where('id', $targetStore)->value('name') : '';
                 }
             }
         }
         // 平台适配器单独维护查询偏好版本，不借用门店全局桥接状态。
         return ['result' => ['status' => 'success', 'message' => '操作完成'], 'data' => $data,
             'versions' => [['kind' => 'query_preference', 'id' => PlatformMemberUnifiedQueryProvider::PAGE_CODE, 'version' => $this->preferenceVersion($adminId, false)]]];
+    }
+
+    /** 从权威会员与有效门店关系选操作门店；旧主归属失效时不阻断会员资料编辑。 */
+    private function activeMemberStoreId(int $memberId): int
+    {
+        if ($memberId <= 0) return 0;
+        $primary = (int)Db::name('user')->where('uid', $memberId)->value('belong_store_id');
+        if ($primary > 0 && Db::name('system_store')->where('id', $primary)->where('is_del', 0)->value('id')) return $primary;
+        return (int)Db::name('store_user')->alias('su')
+            ->join('system_store s', 's.id=su.store_id')
+            ->where('su.uid', $memberId)->where('su.status', 1)->where('s.is_del', 0)
+            ->order('su.store_id', 'asc')->value('su.store_id');
     }
 
     /** 平台独立页面码隔离偏好与导出；金额/次数读取仍用同一会员 Provider。 */

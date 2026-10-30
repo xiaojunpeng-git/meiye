@@ -30,7 +30,7 @@ $before = (int)Db::name('member_management_receipt')->count();
 Db::startTrans();
 try {
     for ($n = 1; $n <= 42; $n++) {
-        $uid = (int)Db::name('user')->insertGetId(pmlSeed('user',['nickname'=>$prefix.'_'.$n,'real_name'=>$prefix.'_'.$n,'phone'=>$phoneBase.str_pad((string)$n,2,'0',STR_PAD_LEFT),'pwd'=>md5('OriginalLocal82'),'status'=>1,'is_del'=>0,'now_money'=>'150.00','integral'=>9,'belong_store_id'=>$n === 42 ? $otherStore : $store,'add_time'=>time(),'user_type'=>'routine']));
+        $uid = (int)Db::name('user')->insertGetId(pmlSeed('user',['nickname'=>$prefix.'_'.$n,'real_name'=>$prefix.'_'.$n,'phone'=>$phoneBase.str_pad((string)$n,2,'0',STR_PAD_LEFT),'pwd'=>md5('OriginalLocal82'),'status'=>1,'is_del'=>0,'now_money'=>'150.00','integral'=>9,'belong_store_id'=>$n === 42 ? $otherStore : ($n === 4 ? 99999999 : $store),'add_time'=>time(),'user_type'=>'routine']));
         $uids[] = $uid;
         Db::name('store_user')->insert(pmlSeed('store_user',['uid'=>$uid,'store_id'=>$n === 42 ? $otherStore : $store,'status'=>1]));
     }
@@ -84,6 +84,10 @@ try {
     pmlReject(function () use($center,$admin){$center->action($admin,'query-members',['selectedStoreIds'=>[2147483000]]);}, 'forged store scope rejected before reading');
     $cap = $center->action($admin,'query-unified-query-capabilities',['pageCode'=>'platform_member_list']);
     pmlCheck(in_array('wechat_binding',array_column($cap['data']['unifiedQueryCapability']['fields'],'key'),true), 'server capability registers binding field for list and export');
+    $legacy = $center->action($admin,'open-member-editor',['memberId'=>$uids[3],'pageCode'=>'platform_member_list']);
+    pmlCheck((int)$legacy['data']['member']['storeId'] === $store && (int)Db::name('user')->where('uid',$uids[3])->value('belong_store_id') === 99999999, 'deleted primary store falls back to active relation without rewriting history');
+    $legacyUpdate = $center->action($admin,'update-member',['memberId'=>$uids[3], 'memberRevision'=>$legacy['data']['member']['memberRevision'], 'requestId'=>bin2hex(random_bytes(16)), 'name'=>$prefix.'_L', 'phone'=>$phoneBase.'04']);
+    pmlCheck(($legacyUpdate['result']['status'] ?? '') === 'success' && Db::name('user')->where('uid',$uids[3])->value('real_name') === $prefix.'_L', 'legacy member remains editable through active store relation');
     $edit = $center->action($admin,'open-member-editor',['memberId'=>$uids[2],'pageCode'=>'platform_member_list']);
     pmlCheck(isset($edit['data']['member']['memberRevision']) && isset($edit['data']['creatorSchema']['profileFields']), 'platform editor reuses complete store profile schema and supplies concurrency proof');
     $changed = ['memberId'=>$uids[2], 'memberRevision'=>$edit['data']['member']['memberRevision'], 'requestId'=>bin2hex(random_bytes(16)), 'name'=>$prefix.'_U', 'phone'=>$phoneBase.'03'];
@@ -125,7 +129,18 @@ try {
     $otherPage=$context;$otherPage['page_code']='member_list';
     pmlReject(function()use($runtime,$otherPage,$task){$runtime['exports']->findForAccount($otherPage,$task['taskId']);}, 'same numeric store account cannot read platform page export');
     $nonroot=(int)Db::name('system_admin')->insertGetId(pmlSeed('system_admin',['account'=>$prefix,'real_name'=>'Local permission test','pwd'=>md5('LocalOnly32'),'roles'=>'','level'=>1,'admin_type'=>0,'status'=>1,'is_del'=>0]));
-    pmlReject(function()use($center,$nonroot){$center->bootstrap($nonroot);}, 'platform admin without member list role fails closed');
+    $allAccess = $center->bootstrap($nonroot);
+    pmlCheck(count($allAccess['stores']) === count($platform['stores']) && !in_array(false, $allAccess['permissions'], true), 'platform admin without member roles receives all member-list functions and stores');
+    $otherEdit = $center->action($nonroot,'open-member-editor',['memberId'=>$uids[41],'pageCode'=>'platform_member_list']);
+    pmlCheck((int)$otherEdit['data']['member']['memberId'] === $uids[41], 'platform admin can edit a member in another store');
+    [$memberMenus, $memberAuth] = app()->make(\app\services\system\SystemMenusServices::class)->getMenusList('', 1, 1, 0);
+    pmlCheck(in_array('admin-user-user-index', $memberAuth, true) && count($memberMenus) > 0, 'platform admin without roles can navigate to member list');
+    [$agentMenus, $agentAuth] = app()->make(\app\services\system\SystemMenusServices::class)->getMenusList('', 1, 1, 3);
+    pmlCheck(!in_array('admin-user-user-index', $agentAuth, true) && count($agentMenus) === 0, 'agent account does not inherit platform member navigation');
+    $crossWrite = $center->action($nonroot,'update-member',['memberId'=>$uids[41], 'memberRevision'=>$otherEdit['data']['member']['memberRevision'], 'requestId'=>bin2hex(random_bytes(16)), 'name'=>$prefix.'_X', 'phone'=>$phoneBase.'42']);
+    pmlCheck(($crossWrite['result']['status'] ?? '') === 'success' && Db::name('user')->where('uid',$uids[41])->value('real_name') === $prefix.'_X', 'platform admin without roles writes another-store member');
+    Db::name('system_admin')->where('id',$nonroot)->update(['status'=>0]);
+    pmlReject(function()use($center,$nonroot){$center->bootstrap($nonroot);}, 'disabled platform account still cannot access member list');
 
 
 } finally {
