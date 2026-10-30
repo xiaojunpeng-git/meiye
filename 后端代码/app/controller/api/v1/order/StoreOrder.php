@@ -137,9 +137,6 @@ class StoreOrder
      */
     public function confirm(Request $request, ShippingTemplatesServices $services)
     {
-        if (!$services->get(1, ['id'])) {
-            return app('json')->fail('默认模板未配置，无法下单');
-        }
         [$cartId, $new, $addressId, $shippingType, $storeId, $couponId, $luckRecordId, $is_store_delivery_type] = $request->postMore([
             'cartId',
             'new',
@@ -152,6 +149,10 @@ class StoreOrder
         ], true);
         if (!is_string($cartId) || !$cartId) {
             return app('json')->fail('请提交购买的商品');
+        }
+        // 购买门店订单不配送，不依赖运费模板；旧配送请求仍保留自身模板校验。
+        if (in_array((int)$shippingType, [1, 3], true) && !$services->get(1, ['id'])) {
+            return app('json')->fail('默认模板未配置，无法下单');
         }
         $user = $request->user()->toArray();
         return app('json')->successful($this->services->getOrderConfirmData($user, $cartId, !!$new, (int)$addressId, (int)$shippingType, (int)$storeId, (int)$couponId, (int)$is_store_delivery_type));
