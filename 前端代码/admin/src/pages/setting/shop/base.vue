@@ -33,7 +33,17 @@
                         <Option :value="1">默认上次选择</Option>
                     </Select>
                 </label>
-                <label v-for="entry in commerce.source_enabled === 0 ? commerceKinds : []" :key="entry.key">{{entry.label}}
+                <!-- 会员下单不弹出来源选择器；购买来源必须始终可见，且从现有目录中显式配置。 -->
+                <label>手机端购买来源
+                    <Select v-model="commerce.purchase_primary_id" style="width:180px" :disabled="!commerceLoaded || commerceSaving" placeholder="请选择一级来源" @on-change="commerce.purchase_secondary_id = 0">
+                        <Option v-for="source in commerce.sources || []" :key="source.id" :value="Number(source.id)">{{source.name}}</Option>
+                    </Select>
+                    <Select v-if="commerceChildren('purchase').length" v-model="commerce.purchase_secondary_id" style="width:160px" :disabled="!commerceLoaded || commerceSaving" placeholder="请选择二级来源">
+                        <Option :value="0">请选择二级来源</Option>
+                        <Option v-for="source in commerceChildren('purchase')" :key="source.id" :value="Number(source.id)">{{source.name}}</Option>
+                    </Select>
+                </label>
+                <label v-for="entry in commerce.source_enabled === 0 ? commerceFixedKinds : []" :key="entry.key">{{entry.label}}
                     <Select v-model="commerce[entry.key + '_primary_id']" style="width:180px" :disabled="!commerceLoaded || commerceSaving" @on-change="commerce[entry.key + '_secondary_id'] = 0">
                         <Option v-for="source in commerce.sources || []" :key="source.id" :value="Number(source.id)">{{source.name}}</Option>
                     </Select>
@@ -44,6 +54,7 @@
                 </label>
                 <Button type="primary" :disabled="!commerceLoaded || commerceSaving" :loading="commerceSaving" @click="saveCommerce">保存</Button>
             </div>
+            <div v-if="commerceLoaded && !commerce.purchase_primary_id" class="deal-people-threshold__error" role="status">请在这里设置手机端购买来源；未设置前，会员端不能购买。</div>
             <div v-if="commerceLoadFailed" class="deal-people-threshold__error">读取业务来源设置失败，请刷新页面后重试。</div>
         </section>
         </template>
@@ -83,7 +94,8 @@
                     purchase_primary_id: 0, purchase_secondary_id: 0, recharge_primary_id: 0,
                     recharge_secondary_id: 0, repayment_primary_id: 0, repayment_secondary_id: 0 },
                 commerceLoaded: false, commerceLoadFailed: false, commerceSaving: false,
-                commerceKinds: [{key:'purchase',label:'消费固定来源'}, {key:'recharge',label:'充值固定来源'}, {key:'repayment',label:'补交固定来源'}]
+                commerceKinds: [{key:'purchase',label:'手机端购买来源'}, {key:'recharge',label:'充值固定来源'}, {key:'repayment',label:'补交固定来源'}],
+                commerceFixedKinds: [{key:'recharge',label:'充值固定来源'}, {key:'repayment',label:'补交固定来源'}]
             };
         },
         created() {
