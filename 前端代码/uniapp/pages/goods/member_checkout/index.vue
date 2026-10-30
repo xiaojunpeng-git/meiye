@@ -115,7 +115,7 @@
               <radio value="balance" :checked="paymentMode === 'balance'" :color="themeColor" />
             </label>
             <label v-if="quote.onlineProvider" class="payment-row">
-              <view class="payment-label"><text class="iconfont icon-ic_card payment-icon"></text><text>在线支付（{{ onlineName(quote.onlineProvider) }}）</text></view>
+              <view class="payment-label"><text class="iconfont icon-ic_card payment-icon"></text><text>在线支付</text></view>
               <radio value="fuyou" :checked="paymentMode === 'fuyou'" :color="themeColor" />
             </label>
             <label v-if="kind === 'purchase' && quote.balanceEnabled && quote.onlineProvider" class="payment-row">
@@ -250,14 +250,14 @@ export default {
   onShow() { if (this.order && this.order.id) this.refreshOrder(); },
   methods: {
     yuan(cents) { return Math.round(Number(cents || 0) / 100); },
-    // Provider is display-only here; the server freezes the collector per order.
-    onlineName(provider) { return provider === 'suixingpay' ? '随行付' : '富友'; },
     goBack() { uni.navigateBack(); },
     // A command key is stable across transport retries and changes whenever
     // the customer edits an order-defining choice.
     newIntent() { this.commandKey = 'MEMBER-' + Date.now().toString(16) + '-' + Math.random().toString(16).slice(2, 18); },
     payload() {
       return {
+        // 使用已经授权并缓存的位置；不为默认选店额外发起定位授权。
+        latitude: uni.getStorageSync('user_latitude'), longitude: uni.getStorageSync('user_longitude'),
         kind: this.kind, store_id: this.storeId, items: this.items, cart_ids: this.cartIds,
         price: this.price, package_id: this.packageId, salespeople: this.salespeople,
         coupon_id: this.kind === 'purchase' ? this.couponId : 0,

@@ -116,6 +116,12 @@ class StoreCombination
      * 当前登录会员的拼团记录。
      * UID 只取认证上下文，禁止客户端指定其他会员读取记录。
      */
+    /** 历史详情只读并且限定为当前会员自己的参与记录。 */
+    public function memberRecordDetail(Request $request, MemberCombinationRecordServices $services, $id)
+    {
+        return app('json')->successful($services->detail((int)$request->uid(), (int)$id));
+    }
+
     public function memberRecords(Request $request, MemberCombinationRecordServices $services)
     {
         [$status, $page, $limit] = $request->getMore([

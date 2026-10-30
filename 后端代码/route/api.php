@@ -447,6 +447,10 @@ Route::group('api', function () {
         Route::post('coupon/receive/batch', 'v1.activity.StoreCoupons/receive_batch')->middleware(BlockerMiddleware::class)->name('couponReceiveBatch'); //批量领取优惠券
         Route::get('coupons/user/num', 'v1.activity.StoreCoupons/userCount')->name('userCount');//我的优惠券数量
         Route::get('coupons/user/:types', 'v1.activity.StoreCoupons/user')->name('couponsUser');//用户已领取优惠券
+        // 分享领取保持同一会员认证、频率限制和单券转赠事务。
+        Route::get('coupons/transfer/info/:id', 'v1.activity.StoreCoupons/shareInfo');
+        Route::post('coupons/transfer/share', 'v1.activity.StoreCoupons/shareCreate')->middleware(BlockerMiddleware::class);
+        Route::post('coupons/transfer/claim', 'v1.activity.StoreCoupons/shareClaim')->middleware(BlockerMiddleware::class);
         Route::post('coupons/transfer/target', 'v1.activity.StoreCoupons/transferTarget')->middleware(BlockerMiddleware::class)->name('couponTransferTarget');//精确查询转赠接收会员
         Route::post('coupons/transfer', 'v1.activity.StoreCoupons/transfer')->middleware(BlockerMiddleware::class)->name('couponTransfer');//会员优惠券转赠
         Route::get('coupons/order/:price', 'v1.activity.StoreCoupons/order')->name('couponsOrder');//优惠券 订单列表
@@ -549,6 +553,7 @@ Route::group('api', function () {
         Route::post('bargain/user/cancel', 'v1.activity.StoreBargain/user_cancel')->name('bargainUserCancel');//砍价取消
         Route::get('bargain/poster_info/:bargainId', 'v1.activity.StoreBargain/posterInfo')->name('posterInfo');//砍价海报详细信息
         //活动---拼团
+        Route::get('combination/member/records/:id', 'v1.activity.StoreCombination/memberRecordDetail')->name('combinationMemberRecordDetail');//当前会员历史拼团详情
         Route::get('combination/member/records', 'v1.activity.StoreCombination/memberRecords')->name('combinationMemberRecords');//当前会员拼团记录
         Route::get('combination/pink/:id', 'v1.activity.StoreCombination/pink')->name('combinationPink');//拼团开团
         Route::post('combination/remove', 'v1.activity.StoreCombination/remove')->name('combinationRemove');//拼团 取消开团

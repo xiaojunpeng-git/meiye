@@ -49,6 +49,8 @@ export default {
 					<view class="bind-phone" v-if="!userInfo.phone" @tap="bindPhone">绑定手机号</view>
 					<!-- #endif -->
 					<view class="phone" v-if="userInfo.phone">{{ perShowType ? 'ID：' + userInfo.uid : userInfo.phone }}</view>
+					<!-- 归属门店来自会员档案；只展示名称，不改变归属。 -->
+					<view v-if="userInfo.belong_store_name" class="fs-24 mt-8">{{ userInfo.belong_store_name }}</view>
 				</view>
 			</view>
 			<text class="iconfont icon-a-ic_QRcode fs-40" @click="tapQrCode"><text class="tips">会员码</text></text>

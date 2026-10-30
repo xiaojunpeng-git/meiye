@@ -39,11 +39,11 @@ final class MemberCommerceServices
         return Db::transaction(function () use ($uid, $input): array {
             $member = $this->member($uid);
             $stores = Db::name('system_store')->where('is_show', 1)->where('is_del', 0)
-                ->field('id,name')->order('id asc')->select()->toArray();
+                ->field('id,name,latitude,longitude')->order('id asc')->select()->toArray();
             $storeId = (int)($input['store_id'] ?? 0);
-            if ($storeId <= 0) $storeId = (int)$member['belong_store_id'];
+            // 显式选店继续生效；首次进入或旧门店已停用时，复用首页默认门店口径。
             $valid = array_column($stores, 'name', 'id');
-            if (!isset($valid[$storeId])) $storeId = 0;
+            if (!isset($valid[$storeId])) $storeId = (new MemberStorePreferenceServices())->choose($uid, $stores, $input);
             $result = ['stores' => $stores, 'storeId' => $storeId,
                 'balanceCents' => max(0, self::cents((string)$member['now_money']) - self::heldBalanceCents($uid)),
                 'balanceEnabled' => self::balanceEnabled(), 'onlineProvider' => self::onlineProvider(),

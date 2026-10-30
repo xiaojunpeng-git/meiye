@@ -3,10 +3,10 @@
 		<view class="records-head" :style="{'padding-top': sysHeight + 'px'}">
 			<view class="records-nav">
 				<text class="iconfont icon-ic_leftarrow records-back" @tap="backPage"></text>
-				<text class="records-title">我的拼团</text>
+				<text class="records-title">{{ detailId ? '拼团详情' : '我的拼团' }}</text>
 				<text class="records-placeholder"></text>
 			</view>
-			<scroll-view class="records-tabs" scroll-x :show-scrollbar="false">
+			<scroll-view v-if="!detailId" class="records-tabs" scroll-x :show-scrollbar="false">
 				<view class="records-tabs-inner">
 					<view v-for="item in tabs" :key="item.key" class="records-tab"
 						:class="{active: status === item.key}" @tap="changeStatus(item.key)">{{ item.name }}</view>
@@ -14,7 +14,20 @@
 			</scroll-view>
 		</view>
 
-		<view class="records-list" v-if="records.length">
+        <!-- 历史记录已下架也能查看，页面只展示权威参与事实。 -->
+        <view v-if="detail" class="records-list">
+            <view class="record-card"><image class="record-image" :src="detail.image" mode="aspectFill" />
+                <view class="record-main"><view class="record-name">{{ detail.title || '拼团活动' }}</view>
+                    <view class="record-progress">{{ detail.status_name }} · {{ detail.role }}</view>
+                    <view class="record-progress">已参团 {{ detail.joined_people }}/{{ detail.target_people }} 人</view></view>
+            </view>
+            <view class="record-card detail-facts"><view>团号：{{ detail.group_id }}</view>
+                <view>购买门店：{{ detail.store_name || '历史订单未记录' }}</view>
+                <view>订单号：{{ detail.order_no || '历史订单未记录' }}</view>
+                <view>参团时间：{{ detail.started_at || '--' }}</view><view>截止时间：{{ detail.expires_at || '--' }}</view></view>
+        </view>
+        <view v-if="detailError" class="records-loading" role="status">{{ detailError }}</view>
+		<view class="records-list" v-if="!detailId && records.length">
 			<view class="record-card" v-for="item in records" :key="item.record_id" @tap="openGroup(item)">
 				<image class="record-image" :src="item.image" mode="aspectFill"></image>
 				<view class="record-main">
@@ -35,7 +48,7 @@
 				<text class="iconfont icon-ic_rightarrow record-arrow"></text>
 			</view>
 		</view>
-		<view class="records-empty" v-else-if="!loading">
+		<view class="records-empty" v-else-if="!detailId && !loading">
 			<emptyPage title="暂无拼团记录～"></emptyPage>
 		</view>
 		<view class="records-loading" v-if="loading || records.length">
@@ -52,14 +65,14 @@
 	import colors from '@/mixins/color.js';
 	import emptyPage from '@/components/emptyPage';
 	import home from '@/components/home';
-	import { getMemberCombinationRecords } from '@/api/activity.js';
+	import { getMemberCombinationRecords, getMemberCombinationRecordDetail } from '@/api/activity.js';
 
 	export default {
 		components: { emptyPage, home },
 		mixins: [colors],
 		data() {
 			return {
-				sysHeight,
+				sysHeight, detailId: 0, detail: null, detailError: '',
 				status: 'all',
 				tabs: [
 					{ key: 'all', name: '全部' },
@@ -77,16 +90,17 @@
 			};
 		},
 		computed: mapGetters(['isLogin']),
-		onLoad() {
+		onLoad(options) {
+            this.detailId = Number(options.record_id) || 0;
 			if (!this.isLogin) {
 				toLogin();
 				return;
 			}
-			this.loadRecords();
+			if (this.detailId) this.loadDetail(); else this.loadRecords();
 		},
 		onShow() {
 			// 手机号授权完成返回本页时重新触发首屏查询，避免入口停留在空列表。
-			if (this.isLogin && !this.records.length && !this.loading && !this.loadEnd) {
+			if (!this.detailId && this.isLogin && !this.records.length && !this.loading && !this.loadEnd) {
 				this.loadRecords();
 			}
 		},
@@ -97,6 +111,13 @@
 			this.homeHide = true;
 		},
 		methods: {
+            /** 独立只读详情；失败显示在页内，保留返回操作。 */
+            async loadDetail() {
+                this.loading = true; this.detailError = '';
+                try { const res = await getMemberCombinationRecordDetail(this.detailId); this.detail = res.data; }
+                catch (error) { this.detailError = error.msg || '拼团详情加载失败'; }
+                finally { this.loading = false; }
+            },
 			/** 状态切换必须重置分页，防止把不同口径的记录混到同一列表。 */
 			changeStatus(status) {
 				if (this.status === status) return;
@@ -108,7 +129,7 @@
 			},
 			/** 后端返回当前会员范围内的权威分页，前端只负责追加展示。 */
 			loadRecords() {
-				if (this.loading || this.loadEnd || !this.isLogin) return;
+				if (this.detailId || this.loading || this.loadEnd || !this.isLogin) return;
 				this.loading = true;
 				getMemberCombinationRecords({ status: this.status, page: this.page, limit: this.limit })
 					.then(({ data }) => {
@@ -124,7 +145,7 @@
 			},
 			/** 团详情继续复用既有页面，避免记录入口产生第二套团状态口径。 */
 			openGroup(item) {
-				uni.navigateTo({ url: '/pages/activity/goods_combination_status/index?id=' + item.group_id });
+				uni.navigateTo({ url: '/pages/activity/user_combination_records/index?record_id=' + item.record_id });
 			},
 			backPage() {
 				uni.navigateBack({ delta: 1 });
@@ -134,6 +155,7 @@
 </script>
 
 <style lang="scss" scoped>
+    .detail-facts { display: block; line-height: 2.2; font-size: 26rpx; color: #666; overflow-wrap: anywhere; }
 	.records-page { min-height: 100vh; background: #f5f5f5; }
 	.records-head { position: sticky; top: 0; z-index: 20; background: #fff; }
 	.records-nav { height: 88rpx; padding: 0 30rpx; display: flex; align-items: center; justify-content: space-between; }

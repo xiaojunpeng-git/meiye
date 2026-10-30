@@ -20,7 +20,7 @@ final class MemberCombinationRecordServices
      *
      * @return array{list: array, count: int}
      */
-    public function getList(int $uid, string $status, int $page, int $limit): array
+    public function getList(int $uid, string $status, int $page, int $limit, int $recordId = 0): array
     {
         if ($uid <= 0) {
             return ['list' => [], 'count' => 0];
@@ -38,6 +38,8 @@ final class MemberCombinationRecordServices
             ->leftJoin('system_store s', 's.id=o.store_id')
             ->where('p.uid', $uid)
             ->where('p.uid', '>', 0);
+        // 详情沿用相同会员身份与状态口径，不调用可能改变团状态的参团接口。
+        if ($recordId > 0) $query->where('p.id', $recordId);
         $this->applyStatus($query, $status, $now);
 
         $count = (int)(clone $query)->count('p.id');
@@ -74,6 +76,15 @@ final class MemberCombinationRecordServices
         unset($row);
 
         return ['list' => $rows, 'count' => $count];
+    }
+
+    /** 下架活动仍允许原参与会员查看历史；不执行成团、退款或库存逻辑。 */
+    public function detail(int $uid, int $recordId): array
+    {
+        if ($recordId <= 0) throw new \think\exception\ValidateException('拼团记录不存在');
+        $page = $this->getList($uid, 'all', 1, 1, $recordId);
+        if (!$page['list']) throw new \think\exception\ValidateException('拼团记录不存在或不属于当前会员');
+        return $page['list'][0];
     }
 
     /** SQL 状态筛选与下方展示口径必须保持一致，避免分页总数和页面状态漂移。 */

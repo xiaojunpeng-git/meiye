@@ -9,7 +9,8 @@ final class MemberCommerce
 {
     private function input(Request $request): array
     {
-        return $request->postMore([['store_id',0], ['kind','purchase'], ['items',[]], ['cart_ids',''],
+        // 坐标仅供默认选店排序；交易权限、门店可用性和价格仍由服务端校验。
+        return $request->postMore([['latitude',''], ['longitude',''], ['store_id',0], ['kind','purchase'], ['items',[]], ['cart_ids',''],
             ['salespeople',[]], ['coupon_id',0], ['use_integral',0],
             ['payment_mode',''], ['balance_yuan','0'], ['price','0'],
             ['package_id',0], ['fingerprint',''], ['idempotency_key',''], ['external_method','wechat']]);

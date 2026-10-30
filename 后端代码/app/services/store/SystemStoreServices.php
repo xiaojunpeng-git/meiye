@@ -249,112 +249,16 @@ class SystemStoreServices extends BaseServices
      */
     public function getStoreIdByEntryRules(int $uid = 0, array $param = [], bool $isCache = false)
     {
-        $storeId = 0;
-        $default = '';
+        // 手动切换优先；默认不再受历史规则顺序或缓存旧门店影响。
         $param = $this->getDefaultEntryRulesParam($param);
-        $selectStoreId = (int)($param['select_store_id'] ?? 0);
-        unset($param['select_store_id']);
-        $userEntryRules = SystemConfigService::get('user_entry_rules', []);
-        $shopOperationType = sys_config('shop_operation_type', 1);
-        if ($uid) {
-            $cacheKey = md5('entry_store' . $uid);
-        } else {
-            $cacheKey = md5('entry_store_' . json_encode($param));
-        }
-        $user_entry_name = '';
-        $data = CacheService::get($cacheKey);
-        if (!$data || $isCache) {//移动端请求更新缓存
-            //用户移动端切换门店
-            if ($selectStoreId) {
-                $storeId = $selectStoreId;
-            } else {
-                if ($userEntryRules) {//设置进店规则
-                    $nowCity = [];
-                    if ($param['latitude'] && $param['longitude']) {
-                        //存在经纬度验证定位区域
-                        $nowCity = $this->handleLocation((string)$param['latitude'], (string)$param['longitude']);
-                    }
-                    foreach ($userEntryRules as $rule) {
-                        //禁用状态跳过
-                        if (!isset($rule['is_use']) || !$rule['is_use']) continue;
-                        switch ($rule['name']) {
-                            case 'user_belong_store'://用户归属门店
-                                if ($uid) {
-                                    /** @var UserServices $userServices */
-                                    $userServices = app()->make(UserServices::class);
-                                    $userInfo = $userServices->getUserCacheInfo($uid);
-                                    $storeId = $userInfo['belong_store_id'] ?? 0;
-                                    if ($storeId) {//门店未停业
-                                        $count = $this->dao->count(['is_del' => 0, 'id' => $storeId, 'is_show' => 1]);
-                                        if (!$count) $storeId = 0;
-                                    }
-                                }
-                                break;
-                            case 'user_param_store'://带参门店
-                                $storeId = $param['store_id'] ?? 0;
-                                break;
-                            case 'user_visit_store'://最近访问门店
-                                if ($uid) {
-                                    /** @var UserVisitStoreServices $userVisitStoreServices */
-                                    $userVisitStoreServices = app()->make(UserVisitStoreServices::class);
-                                    $storeId = $userVisitStoreServices->getUserNearVisitStore($uid);
-                                    if ($rule['is_alone'] && $storeId) {//仅隔离门店进入
-                                        $count = $this->dao->count(['is_del' => 0, 'id' => $storeId, 'is_alone' => 1]);
-                                        if (!$count) $storeId = 0;
-                                    }
-                                }
-                                break;
-                            case 'region_recommend_store'://地区定向推荐门店
-                                $storeId = $rule['store_id'] ?? 0;
-                                if ($rule['region_id'] && $storeId) {
-                                    if ($nowCity) {
-                                        $regionCity = array_map(function ($item) {
-                                            return end($item);
-                                        }, $rule['region_id']);
-                                        //不再推荐区域
-                                        if (!array_intersect($regionCity, $nowCity)) {
-                                            $storeId = 0;
-                                        }
-                                    } else {
-                                        $storeId = 0;
-                                    }
-                                }
-                                break;
-                            case 'user_locate_store'://用户定位推荐门店
-                                $where = [];
-                                if ($rule['is_region_alone'] && $param['latitude'] && $param['longitude']) {//开启区域隔离推荐
-                                    //存在经纬度验证定位区域
-                                    /** @var SystemRegionAgentServices $regionServices */
-                                    $regionServices = app()->make(SystemRegionAgentServices::class);
-                                    $region_id = $regionServices->getRegionByCity($nowCity);
-                                    if ($region_id) {
-                                        $where['region_id'] = $region_id;
-                                    }
-                                }
-                                $nearStore = $this->getNearbyStore($where, $param['latitude'] ?? '', $param['longitude'] ?? '', $param['ip'] ?? '', 1);
-                                $storeId = $nearStore['id'] ?? 0;
-                                break;
-                            case 'default_store'://无门店推荐结果，直接进入指定页面
-                                $storeId = $rule['default_type'] == 1 ? ($rule['store_id'] ?? 0) : 0;
-                                $default = $rule['default_type'] == 2 ? ($rule['url'] ?? '') : '';
-                                break;
-                        }
-                        $storeId = (int)$storeId;
-                        if ($storeId && $this->dao->count(['store_id' => $storeId, 'is_del' => 0, 'is_show' => 1])) {//匹配到进入门店ID 结束
-                            $user_entry_name = $rule['name'] ?? '';
-                            break;
-                        }
-                    }
-                }
-                if (!$storeId) {//进店规则未进入门店，默认取一个
-                    $nearStore = $this->getNearbyStore([], $param['latitude'] ?? '', $param['longitude'] ?? '', $param['ip'] ?? '', 1);
-                    $storeId = $nearStore['id'] ?? 0;
-                }
-            }
-            $data = ['store_id' => $storeId];
-            CacheService::redisHandler($this->cacheTag)->set($cacheKey, $data, 3 * 24 * 3600);
-        }
-        return array_merge($data, ['default' => $default, 'shop_operation_type' => $shopOperationType, 'user_entry_rules' => $userEntryRules, 'user_entry_name' => $user_entry_name]);
+        $stores = \think\facade\Db::name('system_store')->where('is_show', 1)->where('is_del', 0)
+            ->field('id,name,latitude,longitude')->order('id')->select()->toArray();
+        $selected = (int)($param['select_store_id'] ?? 0);
+        $ids = array_map('intval', array_column($stores, 'id'));
+        $storeId = in_array($selected, $ids, true) ? $selected
+            : (new \app\services\member\MemberStorePreferenceServices())->choose($uid, $stores, $param);
+        return ['store_id' => $storeId, 'default' => '', 'shop_operation_type' => sys_config('shop_operation_type', 1),
+            'user_entry_rules' => SystemConfigService::get('user_entry_rules', []), 'user_entry_name' => $uid > 0 && $storeId === (int)\think\facade\Db::name('user')->where('uid', $uid)->value('belong_store_id') ? 'user_belong_store' : 'user_locate_store'];
     }
 
     /**

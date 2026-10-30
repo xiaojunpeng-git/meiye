@@ -542,3 +542,8 @@ export function integralConfigApi() {
 		noAuth: true
 	});
 }
+
+/** 分享凭据仅用于本张券的领取；接收UID和手机号取认证上下文。 */
+export function getCouponTransferInfo(id) { return request.get('coupons/transfer/info/' + encodeURIComponent(id)); }
+export function createCouponShare(data) { return request.post('coupons/transfer/share', data); }
+export function claimCouponShare(token) { return request.post('coupons/transfer/claim', { token }); }

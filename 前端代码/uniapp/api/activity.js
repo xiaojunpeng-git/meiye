@@ -476,3 +476,8 @@ export function postReservationSwitch(data) {
 	  noAuth: true
   });
 }
+
+/** 历史详情只读，不经过当前活动的参团状态推进接口。 */
+export function getMemberCombinationRecordDetail(id) {
+    return request.get('combination/member/records/' + encodeURIComponent(id));
+}

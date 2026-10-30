@@ -342,7 +342,8 @@ class UserServices extends BaseServices
             'account' => $user['account'] ?? 'wx' . rand(1, 9999) . time(),
             'pwd' => $user['pwd'] ?? md5('123456'),
             'nickname' => $user['nickname'] ?? '',
-            'avatar' => !empty($user['headimgurl']) ? $user['headimgurl'] : sys_config('h5_avatar'),
+            // 来源和默认配置均可缺头像；新会员遵循 avatar 非空列的空字符串缺省。
+            'avatar' => (string)(!empty($user['headimgurl']) ? $user['headimgurl'] : (sys_config('h5_avatar') ?? '')),
             // CanonicalUserIdentityServices writes the member phone after the
             // identity row is reserved; this create payload must not bypass it.
             'phone' => '',
@@ -2118,6 +2119,8 @@ class UserServices extends BaseServices
         if(!empty($user['belong_store_id'])){
             $user['store_name']=SystemStore::where("id",$user['belong_store_id'])->value("name");
         }
+        // 会员卡片展示权威归属名称；沿用既有 store_name，统一提供明确字段。
+        $user['belong_store_name'] = (string)($user['store_name'] ?? '');
         //分销等级信息
         if ($user['agent_level']) {
             $levelInfo = $agentLevelServices->getLevelInfo((int)$user['agent_level'], 'id,name');

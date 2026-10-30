@@ -243,18 +243,26 @@ class UserBelongStoreServices extends BaseServices
         return $result;
     }
 
-    /** 首次问卷选店与答卷共用事务：只补空归属，不覆盖已有门店，不修改店员、订单或权益。 */
+    /** 首次问卷选店只补空归属，写同一归属历史与统一事实。 */
     public function assignUnboundStoreForSurveyInTx(int $uid, int $storeId): array
+    { return $this->assignFirstStoreInTx($uid, $storeId, 'survey_choice'); }
+
+    /** 分享转赠只在新注册会员领取事务中调用；注册时的默认归属可被本次赠送归属替换并留历史。 */
+    public function assignUnboundStoreForCouponShareInTx(int $uid, int $storeId): array
+    { return $this->assignFirstStoreInTx($uid, $storeId, 'coupon_share', true); }
+
+    /** 两个业务入口共用首次归属事务；来源由服务端常量传入，不接受客户端覆盖。 */
+    private function assignFirstStoreInTx(int $uid, int $storeId, string $source, bool $replaceRegistrationDefault = false): array
     {
-        \app\services\cashier\v3\CashierV3TransactionGuard::assertInTransaction('survey.memberStoreAssignment');
+        \app\services\cashier\v3\CashierV3TransactionGuard::assertInTransaction('member.firstStoreAssignment');
         $user=Db::name('user')->where('uid',$uid)->lock(true)->find();
         if(!$user||trim((string)($user['phone']??''))==='')throw new ValidateException('请先完成手机号授权');
         $existing=(int)($user['belong_store_id']??0);
-        if($existing>0)return ['store_id'=>$existing,'changed'=>false];
+        if($existing===$storeId || ($existing>0 && !$replaceRegistrationDefault))return ['store_id'=>$existing,'changed'=>false];
         if($storeId<=0)throw new ValidateException('请选择您需要服务的门店');
         $store=Db::name('system_store')->where(['id'=>$storeId,'is_del'=>0,'is_show'=>1])->lock(true)->find();
         if(!$store)throw new ValidateException('所选门店已不可用，请重新选择');
-        $now=time();$historyId=(int)Db::name('user_belong_store')->insertGetId(['group'=>1,'type'=>'survey_choice','uid'=>$uid,'store_id'=>$storeId,'staff_id'=>0,'admin_id'=>0,'add_time'=>$now]);
+        $now=time();$historyId=(int)Db::name('user_belong_store')->insertGetId(['group'=>$existing>0?2:1,'from_store_id'=>$existing,'type'=>$source,'uid'=>$uid,'store_id'=>$storeId,'staff_id'=>0,'admin_id'=>0,'add_time'=>$now]);
         if($historyId<=0||Db::name('user')->where('uid',$uid)->update(['belong_store_id'=>$storeId])!==1)throw new \RuntimeException('会员首次归属保存失败');
         (new StoreUnifiedReportPhaseThreeFoundationServices())->recordMemberStoreAssignmentInTx(['tenant_id'=>'0'],['member_id'=>$uid,'assigned'=>true,'store_id'=>$storeId,'effective_at'=>$now,'source_type'=>'USER_BELONG_STORE','source_event_id'=>(string)$historyId,'idempotency_key'=>'phase3-member-store:'.$historyId]);
         return ['store_id'=>$storeId,'changed'=>true];

@@ -104,6 +104,14 @@ class StoreCoupons
     /**
      * 转赠前按完整手机号精确查询接收会员
      */
+    /** 分享入口只接受登录UID；令牌内容与接收资格由服务端验证。 */
+    public function shareInfo(Request $request, \app\services\activity\coupon\CouponShareServices $service, $id)
+    { return app('json')->success($service->info((int)$request->uid(),(int)$id)); }
+    public function shareCreate(Request $request, \app\services\activity\coupon\CouponShareServices $service)
+    { return app('json')->success($service->create((int)$request->uid(),(int)$request->post('coupon_user_id',0))); }
+    public function shareClaim(Request $request, \app\services\activity\coupon\CouponShareServices $service)
+    { return app('json')->success($service->claim((int)$request->uid(),(string)$request->post('token',''))); }
+
     public function transferTarget(Request $request, StoreCouponUserServices $services)
     {
         [$couponUserId, $phone] = $request->postMore([

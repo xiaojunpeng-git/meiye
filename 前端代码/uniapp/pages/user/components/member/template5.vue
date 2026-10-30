@@ -61,6 +61,8 @@ export default {
 				<view class="name display-add" v-else @click="goEdit">请点击授权</view>
 				<view v-if="userInfo.uid">
 					<view class="phone" v-if="userInfo.phone">{{ perShowType ? 'ID：' + userInfo.uid : userInfo.phone }}</view>
+					<!-- 归属门店来自会员档案；只展示名称，不改变归属。 -->
+					<view v-if="userInfo.belong_store_name" class="fs-24 mt-8">{{ userInfo.belong_store_name }}</view>
 					<!-- #ifdef MP -->
 					<button class="bind-phone" v-if="!userInfo.phone" open-type="getPhoneNumber" @getphonenumber="getPhoneNumber">绑定手机号</button>
 					<!-- #endif -->
