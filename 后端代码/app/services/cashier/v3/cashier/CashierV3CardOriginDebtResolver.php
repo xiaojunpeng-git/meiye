@@ -25,6 +25,100 @@ final class CashierV3CardOriginDebtResolver
         return $this->cardDebtAmount($originOrder, $currentMemberId, $lock, false);
     }
 
+    /**
+     * Read-only report/member batch equivalent of pendingV3CardDebt(). The
+     * single-card method remains the locked checkout authority; this method
+     * resolves the same source chain for a bounded set without four queries
+     * per card. A null entry means the card is historic and needs the caller's
+     * existing legacy-debt fallback, never a fabricated zero balance.
+     *
+     * @param array<int,array<string,mixed>> $orders keyed or list original orders
+     * @return array<int,?string> original order id => pending yuan or null
+     */
+    public function pendingV3CardDebtsForOrders(array $orders, string $tenantId,
+        ?array &$statusByOrder = null): array
+    {
+        if ($tenantId === '') throw new \LogicException('cashier_v3_card_origin_batch_tenant_missing');
+        $byId = []; $memberIds = [];
+        foreach ($orders as $order) {
+            $id = (int)($order['id'] ?? 0); $member = (int)($order['uid'] ?? 0);
+            if ($id < 1 || $member < 1 || isset($byId[$id])
+                || (string)($order['tenant_id'] ?? '') !== $tenantId)
+                throw new \LogicException('cashier_v3_card_origin_batch_identity_invalid');
+            $byId[$id] = $order; $memberIds[$member] = true;
+        }
+        if (!$byId) { $statusByOrder = []; return []; }
+        $result = array_fill_keys(array_keys($byId), null);
+        $statusByOrder = array_fill_keys(array_keys($byId), null);
+        $baseCarts = Db::name('store_order_cart_info')->whereIn('oid', array_keys($byId))
+            ->whereIn('uid', array_keys($memberIds))->where('cart_type', 0)
+            ->where('product_type', 5)->where('source_type', 'cashier_v3')
+            ->field('oid,uid,cart_info')->order('oid asc,id asc')->select()->toArray();
+        $source = []; $salesOrderIds = [];
+        foreach ($baseCarts as $cart) {
+            $id = (int)$cart['oid'];
+            if (!isset($byId[$id]) || (int)$cart['uid'] !== (int)$byId[$id]['uid']) continue;
+            if (isset($source[$id])) throw new \LogicException('cashier_v3_card_origin_base_cart_duplicate');
+            $snapshot = json_decode((string)($cart['cart_info'] ?? ''), true);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            $salesOrder = trim((string)($snapshot['salesOrderId'] ?? ''));
+            $line = trim((string)($snapshot['salesOrderLineId'] ?? ''));
+            if ($salesOrder === '' || $line === '') throw new \LogicException('cashier_v3_card_origin_snapshot_incomplete');
+            $source[$id] = ['sales_order_id'=>$salesOrder, 'line_id'=>$line];
+            $salesOrderIds[$salesOrder] = true;
+        }
+        if (!$source) return $result;
+        $authorities = Db::name('cashier_v3_debt_authority')->alias('a')
+            ->join('store_debt d', 'd.id=a.debt_id')
+            ->where('a.tenant_id', $tenantId)
+            ->whereIn('a.member_id', array_keys($memberIds))
+            ->whereIn('a.sales_order_id', array_keys($salesOrderIds))
+            ->field('a.sales_order_id,a.member_id,a.debt_id,d.status')->order('a.id asc')->select()->toArray();
+        $authorityByIdentity = []; $debtIds = [];
+        foreach ($authorities as $authority) {
+            $identity = (string)$authority['sales_order_id'].':'.(int)$authority['member_id'];
+            if (isset($authorityByIdentity[$identity])) throw new \LogicException('cashier_v3_card_origin_debt_authority_duplicate');
+            $authorityByIdentity[$identity] = $authority;
+            $debtIds[(int)$authority['debt_id']] = true;
+        }
+        $lineIds = array_values(array_unique(array_column($source, 'line_id')));
+        $salesLines = Db::name('cashier_v3_sales_order_line')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('order_id', array_keys($salesOrderIds))->whereIn('order_line_id', $lineIds)
+            ->field('order_id,order_line_id,debt_amount_cents')->select()->toArray();
+        $lineByIdentity = [];
+        foreach ($salesLines as $line) {
+            $identity = (string)$line['order_id'].':'.(string)$line['order_line_id'];
+            $lineByIdentity[$identity][] = $line;
+        }
+        $items = $debtIds ? Db::name('cashier_v3_debt_item_personnel_authority')->alias('p')
+            ->join('store_debt_item i', 'i.id=p.debt_item_id AND i.debt_id=p.debt_id')
+            ->where('p.tenant_id', $tenantId)
+            ->whereIn('p.debt_id', array_keys($debtIds))->whereIn('p.order_line_id', $lineIds)
+            ->field('p.debt_id,p.order_line_id,i.debt_amount,i.repaid_debt')->order('p.id asc')->select()->toArray() : [];
+        $itemByIdentity = [];
+        foreach ($items as $item) {
+            $identity = (int)$item['debt_id'].':'.(string)$item['order_line_id'];
+            $itemByIdentity[$identity][] = $item;
+        }
+        foreach ($source as $orderId => $link) {
+            $member = (int)$byId[$orderId]['uid'];
+            $authority = $authorityByIdentity[$link['sales_order_id'].':'.$member] ?? null;
+            if ($authority === null) continue;
+            $statusByOrder[$orderId] = (int)$authority['status'];
+            if ((int)$authority['status'] !== 0) { $result[$orderId] = '0.00'; continue; }
+            $matchingLines = $lineByIdentity[$link['sales_order_id'].':'.$link['line_id']] ?? [];
+            if (count($matchingLines) !== 1) throw new \LogicException('cashier_v3_card_origin_sales_line_missing');
+            $line = $matchingLines[0];
+            if ((int)$line['debt_amount_cents'] === 0) { $result[$orderId] = '0.00'; continue; }
+            $matchingItems = $itemByIdentity[(int)$authority['debt_id'].':'.$link['line_id']] ?? [];
+            if (count($matchingItems) !== 1) throw new \LogicException('cashier_v3_card_origin_debt_item_missing');
+            $item = $matchingItems[0];
+            $result[$orderId] = $this->positiveDifference($item['debt_amount'] ?? '0', $item['repaid_debt'] ?? '0');
+        }
+        return $result;
+    }
+
     /** 取消整笔欠款后，每张卡只展示所属销售明细的未偿金额，不能重复展示整单取消额。 */
     public function cancelledV3CardDebt(array $originOrder, int $currentMemberId, string $tenantId, bool $lock = false): ?string
     {

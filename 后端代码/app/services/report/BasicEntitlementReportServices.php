@@ -17,6 +17,10 @@ use think\facade\Db;
 final class BasicEntitlementReportServices
 {
     private const AS_OF = 'basic_unconsumed_as_of_detail';
+    /** Internal-only source for 007 unconsumed component rows; not a menu code. */
+    public const UNCONSUMED_COMPONENT_SOURCE = 'internal_unconsumed_components_007';
+    /** Internal-only source for the same card population in store summary. */
+    public const UNCONSUMED_SUMMARY_SOURCE = 'internal_unconsumed_summary_007';
 
     /** Only genuinely readable reports may be registered by the Host. */
     public static function codes(): array
@@ -27,6 +31,8 @@ final class BasicEntitlementReportServices
     /** Static metadata is available before beginning a database read. */
     public static function definitions(string $code): array
     {
+        if ($code === self::UNCONSUMED_COMPONENT_SOURCE) $code = 'basic_customer_entitlements';
+        if ($code === self::UNCONSUMED_SUMMARY_SOURCE) $code = 'basic_unconsumed_summary';
         self::assertCode($code);
         $columns = [
             ['store_id', '所属门店ID', 'integer', false, false, false],
@@ -101,6 +107,10 @@ final class BasicEntitlementReportServices
      */
     public function read(string $code, array $stores, array $input): array
     {
+        $includeExhaustedForReport = in_array($code,
+            [self::UNCONSUMED_COMPONENT_SOURCE, self::UNCONSUMED_SUMMARY_SOURCE], true);
+        if ($code === self::UNCONSUMED_COMPONENT_SOURCE) $code = 'basic_customer_entitlements';
+        if ($code === self::UNCONSUMED_SUMMARY_SOURCE) $code = 'basic_unconsumed_summary';
         $fields = self::definitions($code);
         foreach (['start_date', 'end_date', 'as_of_date'] as $key) {
             if (isset($input[$key]) && $input[$key] !== '') self::date($input[$key]);
@@ -140,7 +150,7 @@ final class BasicEntitlementReportServices
             // Until SQL aggregation is available, oversized reads fail explicitly.
             if ($population > 10000) throw new \RuntimeException('ENTITLEMENT_SOURCE_LIMIT_EXCEEDED: 源会员超过10000，请缩小门店范围。');
             $ids = array_map('intval', array_column($members, 'uid'));
-            $details = $reader->readAiRightsSet($ids, $operator, $scope);
+            $details = $reader->readAiRightsSet($ids, $operator, $scope, null, $includeExhaustedForReport);
             // The shared member reader intentionally includes cross-store cards.
             // Verify numeric holder identity, never infer its scope from a name.
             if ($code === 'basic_customer_entitlements') {
@@ -253,7 +263,8 @@ final class BasicEntitlementReportServices
                 '当前报表不包含优惠券、独立赠品和预售库存；不生成没有权威依据的购买额或已使用额。',
                 '储值和卡项在明细中分行展示，空金额表示本行不适用；储值不随卡项重复计算。',
             ],
-            'metric_version' => $code === 'basic_customer_entitlements' ? 'basic-customer-project-entitlement-current-v1' : 'basic-entitlement-current-v1',
+            'metric_version' => $includeExhaustedForReport ? 'basic-unconsumed-project-all-status-read-v1'
+                : ($code === 'basic_customer_entitlements' ? 'basic-customer-project-entitlement-current-v1' : 'basic-entitlement-current-v1'),
             'coverage' => '当前有效会员储值与当前有效卡项；会员所属店与卡项来源店均限本次授权门店。非优惠券、赠品及预售库存报表。'];
     }
 

@@ -11,6 +11,12 @@ final class BasicReportCatalogServices
     public static function entries(): array
     {
         $groups = [
+            '经营分析' => [
+                ['sales_data', '销售数据', 'metric_store_period', 'period'],
+                ['sales_pk', 'PK数据', 'store_month', 'month'],
+                ['sales_analysis', '销售分析', 'metric_store_period', 'period'],
+                ['store_efficiency', '门店效能', 'metric_store_period', 'period'],
+            ],
             '门店统计' => [
                 ['store_reconciliation', '门店对账单', 'payment_method_store_or_day', 'period'],
                 ['store_summary', '门店统计表', 'store_period', 'period'],
