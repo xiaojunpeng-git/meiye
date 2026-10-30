@@ -1,20 +1,7 @@
 <template>
 	<view :style="colorStyle" :class="{'vip-coupon': couponData.category == 2}">
-        <!-- 分享领取先完成标准手机号授权；成功卡片展示真实券用途和有效期。 -->
-        <view v-if="shareToken" class="gift-page">
-            <view class="gift-card">
-                <view class="gift-seal">礼</view>
-                <view class="gift-heading">{{ received ? '好友的心意，已送达' : '好友送你一张优惠券' }}</view>
-                <view v-if="received" class="gift-title">获得一张{{ received.title }}</view>
-                <view v-if="received" class="gift-purpose">{{ received.description }}</view>
-                <view v-if="received" class="gift-rule">{{ received.rule || received.scope_notice }}</view>
-                <view v-if="received" class="gift-expiry">有效期至 {{ received.end_time }}</view>
-                <view v-if="giftError" class="gift-rule" role="status">{{ giftError }}</view>
-                <view v-if="claiming" class="gift-rule">正在接收好友的心意…</view>
-                <button v-if="received" class="gift-button" @tap="viewReceived">查看优惠券</button>
-                <button v-else-if="!claiming" class="gift-button" @tap="receiveGift">{{ isLogin ? '重新领取' : '授权手机号并领取' }}</button>
-            </view>
-        </view>
+        <!-- 旧分享链接仅负责交接凭据；首页承载授权、领取与成功弹层。 -->
+        <view v-if="shareToken" class="gift-redirect" role="status">正在进入商城首页…</view>
 		<view v-if="!shareToken" :style="[headerStyle]" class="relative">
 			<image :src="`${imgHost}/statics/images/coupon_details.png`" mode="aspectFill" class="abs-lt w-full h-full"></image>
 			<view class="abs-lb w-full h-120 shadow-bar"></view>
@@ -74,16 +61,17 @@
 			</view>
             <view v-if="transferInfo" class="p-32 rd-16rpx mt-20 bg--w111-fff">
                 <view class="fw-500">赠送给好友</view>
-                <view class="gift-actions"><button @tap="phoneTransfer">手机号转赠</button>
+                <!-- 转赠按钮复用“去使用”的高度、圆角和主题渐变，保留各端原有入口。 -->
+                <view class="gift-actions">
+                    <view role="button" tabindex="0" class="flex-1 flex-center h-88 rd-44rpx fw-500 fs-28 text--w111-fff btn" @tap="phoneTransfer">手机号转赠</view>
                     <!-- #ifdef MP-WEIXIN -->
-                    <button :disabled="preparingShare" @tap="prepareShare">分享转赠</button>
+                    <button open-type="share" :disabled="preparingShare || !outgoingToken" class="flex-1 flex-center h-88 rd-44rpx fw-500 fs-28 text--w111-fff btn gift-share-button">{{ preparingShare ? '准备中…' : '转赠微信好友' }}</button>
                     <!-- #endif -->
                 </view>
                 <view class="mt-20 fs-24 text--w111-999">每张券仅可转赠一次，有效期不延长。好友完成手机号授权后领取。</view>
-                <view v-if="outgoingToken" class="mt-20">
-                    <button open-type="share" class="gift-button">发送给微信好友</button>
-                    <view class="mt-12 fs-24 text--w111-999">第一个领取成功的好友获得此券。</view>
-                </view>
+                <!-- #ifdef MP-WEIXIN -->
+                <view v-if="sharePrepareError" class="mt-20 fs-24 text--w111-999" role="status" @tap="prepareShare">{{ sharePrepareError }}，点此重试</view>
+                <!-- #endif -->
             </view>
 			<view class="p-32 rd-16rpx mt-20 bg--w111-fff">
 				<view class="fw-500">使用说明</view>
@@ -131,7 +119,7 @@
 	import {
 		couponsDetailApi,
 		couponsApplicableApi,
-		setCouponReceive, getCouponTransferInfo, createCouponShare, claimCouponShare,
+		setCouponReceive, getCouponTransferInfo, createCouponShare,
 	} from '@/api/api.js';
 	import {
 		toLogin
@@ -139,7 +127,6 @@
 	import {
 		HTTP_REQUEST_URL
 	} from '@/config/app';
-    import { getUserInfo } from '@/api/user.js';
 
 	export default {
 		components: {
@@ -161,8 +148,8 @@
 				isStore: false,
 				storeList: [],
 				from: '',
-				usedId: 0, transferInfo: null, outgoingToken: '', preparingShare: false,
-                shareToken: '', received: null, giftError: '', claiming: false,
+				usedId: 0, transferInfo: null, outgoingToken: '', preparingShare: false, preparedCouponId: 0, sharePrepareError: '',
+                shareToken: '',
 			}
 		},
 		computed: {
@@ -196,19 +183,23 @@
 		},
 		onLoad(option) {
             this.shareToken = option.share_token || '';
-            if (this.shareToken) { this.receiveGift(); return; }
+            if (this.shareToken) {
+                // switchTab 不携带查询参数，短暂保存随机凭据；不保存手机号或会员资料。
+                uni.setStorageSync('pendingCouponGiftToken', this.shareToken);
+                uni.switchTab({ url: '/pages/index/index' });
+                return;
+            }
 			this.id = option.id;
 			this.usedId = option.used_id;
 			this.from = option.from || this.from;
 			this.getCouponsDetail();
 		},
         onShow() {
-            if (this.shareToken && this.isLogin && !this.received) this.receiveGift();
-            else if (this.usedId && this.id) this.loadTransferInfo();
+            if (!this.shareToken && this.usedId && this.id) this.loadTransferInfo();
         },
         // 只分享服务端签发的随机凭据，不把手机号、UID或金额放进分享地址。
-        onShareAppMessage() {
-            if (!this.outgoingToken) return { title: this.couponData.coupon_title || '优惠券', path: '/pages/activity/coupon_details/index?id=' + this.id };
+        onShareAppMessage(event) {
+            if (!event || event.from !== 'button' || !this.outgoingToken) return { title: this.couponData.coupon_title || '优惠券', path: '/pages/activity/coupon_details/index?id=' + this.id };
             return { title: '送你一张' + (this.transferInfo ? this.transferInfo.title : '优惠券'),
                 path: '/pages/activity/coupon_details/index?share_token=' + encodeURIComponent(this.outgoingToken) };
         },
@@ -224,10 +215,15 @@
 		methods: {
             /** 只展示这张已领券的真实转赠资格，不能以同类券替代已使用的实例。 */
             async loadTransferInfo() {
-                this.transferInfo = null; this.outgoingToken = '';
+                this.transferInfo = null;
                 if (!this.isLogin || !this.usedId || this.from !== 'user') return;
-                try { const res = await getCouponTransferInfo(this.usedId); this.transferInfo = res.data; }
-                catch (error) { /* 已使用或不可转赠的券保留详情，不显示赠送入口。 */ }
+                try {
+                    const res = await getCouponTransferInfo(this.usedId); this.transferInfo = res.data;
+                    // 原生分享必须由本次用户点击直接触发；先备好凭据，不增加第二个发送按钮。
+                    // #ifdef MP-WEIXIN
+                    await this.prepareShare();
+                    // #endif
+                } catch (error) { this.outgoingToken = ''; /* 不可转赠的券只保留详情。 */ }
             },
             phoneTransfer() {
                 if (!this.transferInfo) return;
@@ -238,27 +234,15 @@
             },
             async prepareShare() {
                 if (!this.transferInfo || this.preparingShare) return;
-                this.preparingShare = true;
-                try { const res = await createCouponShare({ coupon_user_id: this.usedId }); this.outgoingToken = res.data.token; }
-                catch (error) { uni.showToast({title: error.msg || '暂时无法分享',icon:'none'}); }
-                finally { this.preparingShare = false; }
-            },
-            /** 返回深链贯穿手机号授权；领取由服务端事务保证只发生一次。 */
-            async receiveGift() {
-                if (this.claiming || this.received) return;
-                if (!this.isLogin) { toLogin(false, undefined, '/pages/activity/coupon_details/index?share_token=' + this.shareToken); return; }
-                this.claiming = true; this.giftError = '';
+                const couponId = Number(this.usedId);
+                if (this.outgoingToken && this.preparedCouponId === couponId) return;
+                this.outgoingToken = ''; this.preparingShare = true; this.sharePrepareError = '';
                 try {
-                    const profile = await getUserInfo();
-                    if (!profile.data.phone) { toLogin(false, undefined, '/pages/activity/coupon_details/index?share_token=' + this.shareToken); return; }
-                    const res = await claimCouponShare(this.shareToken); this.received = res.data;
-                }
-                catch (error) { this.giftError = error.msg || '优惠券领取失败，请稍后重试'; }
-                finally { this.claiming = false; }
-            },
-            viewReceived() {
-                this.id = this.received.coupon_id; this.usedId = this.received.coupon_user_id;
-                this.from = 'user'; this.shareToken = ''; this.getCouponsDetail(); this.loadTransferInfo();
+                    const res = await createCouponShare({ coupon_user_id: couponId });
+                    if (Number(this.usedId) !== couponId) return;
+                    this.outgoingToken = res.data.token; this.preparedCouponId = couponId;
+                } catch (error) { this.sharePrepareError = error.msg || '暂时无法准备转赠'; }
+                finally { this.preparingShare = false; }
             },
 			getCouponsDetail() {
 				couponsDetailApi(this.id).then(res => {
@@ -556,10 +540,12 @@
 	}
 </style>
 <style scoped>
-.gift-page{min-height:100vh;padding:100rpx 36rpx;background:linear-gradient(160deg,#fff7ee,#f4e5ec);box-sizing:border-box}
-.gift-card{padding:64rpx 36rpx;background:#fff;border-radius:32rpx;text-align:center;box-shadow:0 18rpx 60rpx #7d33451a}
-.gift-seal{width:100rpx;height:100rpx;line-height:100rpx;margin:0 auto 32rpx;border-radius:50%;background:#f8e5c7;color:#8b6432;font-size:48rpx}
-.gift-heading{color:#8c6a57;font-size:26rpx}.gift-title{font-size:38rpx;font-weight:600;margin:28rpx 0;color:#782c43}
-.gift-purpose{font-size:30rpx;color:#782c43;line-height:1.7}.gift-rule{font-size:26rpx;color:#777;margin-top:24rpx;line-height:1.8;white-space:pre-wrap}.gift-expiry{font-size:23rpx;color:#999;margin-top:28rpx}
-.gift-button{margin-top:36rpx;background:#7e3048;color:#fff;border-radius:48rpx;font-size:28rpx}.gift-actions{display:flex;gap:20rpx;margin-top:24rpx}.gift-actions button{flex:1;font-size:26rpx;color:#7e3048;background:#fbf0f3;border-radius:36rpx}
+.gift-redirect{padding:64rpx 32rpx;text-align:center;color:#777}
+.gift-actions{display:flex;gap:20rpx;margin-top:24rpx}.gift-actions > view{min-width:0;white-space:nowrap;}
+</style>
+
+<style scoped>
+/* 原生 share 按钮消除框架默认边框和行高，外观与同排“去使用”口径保持一致。 */
+.gift-share-button{margin:0;padding:0;height:88rpx;line-height:normal;border:0;min-width:0;white-space:nowrap;font-size:28rpx;}
+.gift-share-button::after{border:0;}
 </style>

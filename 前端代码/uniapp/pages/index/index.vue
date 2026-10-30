@@ -109,6 +109,7 @@
 				<view class="pb-safe" :style="[pdHeights]" v-if="isFooter"></view>
 				<pageFooter  @newDataStatus="newDataStatus"></pageFooter>
 				<merchant-switch side="buyer" />
+                <coupon-gift-modal :token="couponGiftToken" @close="couponGiftToken = ''" />
 			</view>
 		</view>
 		<view v-else>
@@ -130,6 +131,7 @@
 <script>
 	const app = getApp();
 	const DIY_CACHE_REVISION = '2';
+	import couponGiftModal from '@/components/couponGiftModal/index.vue';
 	import colors from "@/mixins/color";
 	import couponWindow from '@/components/couponWindow/index';
 	import permision from "@/js_sdk/wa-permission/permission.js";
@@ -235,6 +237,7 @@
 		},
 		mixins: [colors],
 		components: {
+            couponGiftModal,
 			Loading,
 			pageFooter,
 			merchantSwitch,
@@ -288,6 +291,7 @@
 				numConfig: 0,
 				code: '',
 				isCouponShow: false,
+                couponGiftToken: '',
 				couponObj: {},
 				couponObjs: {
 					show: false
@@ -418,6 +422,9 @@
 			}
 		},
 		onShow() {
+            // 分享深链先切到首页；弹层只消费本机待处理凭据，领取仍由服务端验手机号及幂等。
+            const pendingGift = uni.getStorageSync('pendingCouponGiftToken');
+            if (pendingGift) this.couponGiftToken = pendingGift;
 			const enterOptions = uni.getEnterOptionsSync();
 			const query = enterOptions.query;
 			let spid = 0;
