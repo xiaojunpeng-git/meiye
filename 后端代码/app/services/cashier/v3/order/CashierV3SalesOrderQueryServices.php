@@ -1093,6 +1093,8 @@ final class CashierV3SalesOrderQueryServices
         if ($operation === 'detail') {
             $row = $query->field($fields)->find();
             $row = $row ? (is_array($row) ? $row : $row->toArray()) : null;
+            // 商城拼团的金额来自原购买/付款凭据，按已授权订单批读，不生成V3事实。
+            if ($row) $row = (new CashierV3GroupPurchaseFinancialProjection())->attach([$row])[0];
             $lineRows = $row ? $this->databaseLineRows([(int)$row['id']]) : [];
             return [
                 'row' => $row,
@@ -1127,6 +1129,7 @@ final class CashierV3SalesOrderQueryServices
         }
         $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'id')))));
         $lineRows = $this->databaseLineRows($ids);
+        $rows = (new CashierV3GroupPurchaseFinancialProjection())->attach($rows);
         return [
             'rows' => $rows,
             'total' => $total,
@@ -2602,7 +2605,7 @@ final class CashierV3SalesOrderQueryServices
             ];
         }, $collections);
         if (!$detail) {
-            return $mapped;
+            return $v3Ready ? $mapped : CashierV3GroupPurchaseFinancialProjection::project($mapped, $row);
         }
 
         // 订单备注与每笔记账收款的 remark_snapshot 是两个不同事实，
@@ -2649,7 +2652,7 @@ final class CashierV3SalesOrderQueryServices
             'operationLogs' => [],
         ];
         $mapped['relatedDataStatus'] = $v3Ready ? 'ready' : self::ECONOMICS_STATUS;
-        return $mapped;
+        return $v3Ready ? $mapped : CashierV3GroupPurchaseFinancialProjection::project($mapped, $row);
     }
 
     private function mapLine(array $line, array $v3 = []): array
