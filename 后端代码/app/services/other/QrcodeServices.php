@@ -320,8 +320,8 @@ class QrcodeServices extends BaseServices
 				}
 				$imageInfo = $upload->getUploadInfo();
 				$imageInfo['image_type'] = $uploadType;
-				if ($imageInfo['image_type'] == 1) $remoteImage = UtilService::remoteImage($siteUrl . $imageInfo['dir']);
-				else $remoteImage = UtilService::remoteImage($imageInfo['dir']);
+				// 本地存储既有 0/1 两种类型；按实际上传路径解析，验证新图时也使用完整地址。
+				$remoteImage = UtilService::remoteImage($this->routineImageUrl((string)$imageInfo['dir'], (string)$siteUrl));
 				if (!$remoteImage['status']) return false;
 				if ($isSaveAttach) {
 					$systemAttachmentService->save([
@@ -339,14 +339,23 @@ class QrcodeServices extends BaseServices
 				}
 				$url = $imageInfo['dir'];
 			} else $url = $imageInfo['att_dir'];
-			if ($imageInfo['image_type'] == 1) $url = $siteUrl . $url;
-			return $url;
+			// 缓存与新生成图片共用同一响应口径，旧体验版也能直接下载相对路径二维码。
+			return $this->routineImageUrl((string)$url, (string)$siteUrl);
 		} catch (\Throwable $e) {
 			// 本地/无微信配置时拉小程序码会失败；不得 die 拖垮门店 info 等接口
 			\think\facade\Log::warning('getRoutineQrcodePath fail: ' . $e->getMessage());
 			return false;
 		}
 	}
+
+    /** 本地 uploads 图片补本站根域名；不把 CDN 地址重复拼接，也不改变附件落库路径。 */
+    private function routineImageUrl(string $url, string $siteUrl): string
+    {
+        if (!preg_match('~^/+uploads/~', $url)) return $url;
+        $origin = rtrim($siteUrl, '/');
+        if (!preg_match('~^https?://[a-z0-9.-]+(?::\d+)?$~iD', $origin)) return '';
+        return $origin . '/' . ltrim($url, '/');
+    }
 
 	/**
 	 * 添加二维码  存在直接获取
