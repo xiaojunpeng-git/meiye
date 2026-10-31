@@ -208,7 +208,7 @@ class StoreOrder
      * @throws \think\db\exception\DataNotFoundException
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
-     * 拼团订单所属门店默认推荐员工的门店或者团长门店
+     * 拼团订单归属本人确认报价中的购买门店，推荐人和团长仅提供推荐/团关系。
      */
     public function create(Request $request, StoreOrderCreateServices $createServices, $key)
     {
@@ -250,6 +250,13 @@ class StoreOrder
         if (!$cartInfo) {
             return app('json')->fail('订单已过期或提交的商品不在送达区域,请刷新当前页面或重新选择商品下单!');
         }
+        // 在库存/名额预占之前核对报价门店，防止非法换店产生额外副作用。
+        try {
+            $groupPurchaseStoreId = \app\services\activity\combination\CombinationPurchaseStoreServices::fromQuote($cartInfo, (int)$storeId);
+        } catch (\think\exception\ValidateException $error) {
+            return app('json')->fail($error->getMessage());
+        }
+        if ($groupPurchaseStoreId !== null) $storeId = $groupPurchaseStoreId;
         // Historical payment/refund readers and distinct activity contracts
         // remain compatible; new ordinary sales cannot bypass the member
         // store/source/rights settlement through the legacy create endpoint.
@@ -341,7 +348,8 @@ class StoreOrder
                 }
             }
         }
-        if(!empty($spid)){
+        // 普通旧订单继续沿用既有推荐规则；拼团已在报价中确认本人购买门店。
+        if($groupPurchaseStoreId === null && !empty($spid)){
            $staffStoreId=SystemStoreStaff::where("uid",$spid)->value("store_id");
            if(!empty($staffStoreId)){
                $storeId=$staffStoreId;
@@ -351,12 +359,6 @@ class StoreOrder
                    $storeId=$staffStoreId;
                }
            }
-        }
-        if(!empty($pinkId)){
-            $pinkStore=\app\model\order\StoreOrder::where("pink_id",$pinkId)->value("store_id");
-            if(!empty($pinkStore)){
-                $storeId=$pinkStore;
-            }
         }
         try {
             $msg = '';

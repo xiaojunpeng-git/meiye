@@ -43,7 +43,9 @@ class CombinationFulfillmentServices
                     throw new ValidateException('成团卡权益发放失败，请重试');
                 app()->make(StoreOrderCreateServices::class)->changeOrder(5, $orderId);
             } elseif ($type === 6) {
-                // Only activate the purchased unconsumed project; do not create a reservation or deduct uses.
+                // 激活订单状态不足以供 V3 核销：同一事务内建立原单的项目权益载体，
+                // 确认发放成功后才推进回执；不创建预约、不扣次数、不重复收款。
+                (new CombinationProjectEntitlementServices())->issueInTx($orderId, time());
                 app()->make(StoreOrderCreateServices::class)->changeOrder(6, $orderId);
             }
             Db::name('combination_order_fulfillment')->where('order_id', $orderId)
