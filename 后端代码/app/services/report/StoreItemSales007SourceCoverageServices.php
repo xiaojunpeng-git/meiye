@@ -83,14 +83,19 @@ final class StoreItemSales007SourceCoverageServices
     private function legacySource(array $stores, array $range): array
     {
         $required = [
-            'store_order'=>['id','store_id','paid','is_system_del','is_del','refund_status',
+            'store_order'=>['id','order_id','uid','store_id','paid','is_system_del','is_del','refund_status',
                 'is_auto','pid','order_type','pay_type','cash_choose'],
             'store_order_cart_info'=>['id','oid','cart_type','product_id'],
             'store_product'=>['id','pid','product_type','store_name'],
             'system_store'=>['id','is_del'],
             'combination_order'=>['order_id','cash_choose','active_pay'],
+            'cashier_v3_card_purchase_receipt'=>['tenant_id','legacy_order_id','sales_order_id',
+                'store_id','member_id','status','card_holder_id'],
+            'cashier_v3_order_lifecycle_operation'=>['tenant_id','store_id','source_order_id',
+                'source_type','operation_type','status'],
             'cashier_v3_sales_order'=>['id','tenant_id','store_id','source_document_type',
-                'source_document_id','business_date'],
+                'source_document_id','business_date','order_id','member_id','contract_version','order_no',
+                'order_status','order_direction'],
         ];
         $names = [];
         try {
@@ -104,19 +109,32 @@ final class StoreItemSales007SourceCoverageServices
                 $names[$table] = '`'.$name.'`';
             }
         } catch (\Throwable $error) { return $this->unverified('STORE_ITEM_007_SOURCE_UNAVAILABLE'); }
+        // Accepted import plan fixes order_id to IMP007-{oldId}-sale; use its unique key, then still verify the original source identity.
         $storeList = implode(',', array_map('intval', $stores));
         $old = $names['store_order']; $cart = $names['store_order_cart_info'];
         $product = $names['store_product']; $shop = $names['system_store'];
         $combo = $names['combination_order']; $header = $names['cashier_v3_sales_order'];
+        $receipt = $names['cashier_v3_card_purchase_receipt'];
+        $visibility=ReportLegacyArchiveProofServices::visibilitySql('o','h',
+            trim($names['cashier_v3_order_lifecycle_operation'],'`'),trim($receipt,'`'));
         $base = "FROM {$old} o INNER JOIN {$cart} c ON c.oid=o.id AND IFNULL(c.cart_type,0)=0 "
             ."INNER JOIN {$product} cp ON cp.id=c.product_id "
             ."LEFT JOIN {$product} parent ON parent.id=cp.pid AND cp.pid>0 "
             ."INNER JOIN {$shop} ss ON ss.id=o.store_id AND ss.is_del=0 "
-            ."LEFT JOIN {$header} h ON h.tenant_id='0' AND h.store_id=o.store_id "
+            ."LEFT JOIN {$header} h ON h.tenant_id='0' AND h.order_id=CONCAT('IMP007-',o.id,'-sale') AND h.store_id=o.store_id "
             ."AND h.source_document_type='legacy_store_order' AND h.source_document_id=CAST(o.id AS CHAR) "
-            ."WHERE o.store_id IN ({$storeList}) AND o.paid=1 AND o.is_system_del=0 "
+            ."WHERE o.store_id IN ({$storeList}) AND o.paid=1 AND {$visibility} "
             ."AND o.is_del=0 AND o.refund_status IN (0,3) AND IFNULL(o.is_auto,0)<>1 "
             ."AND (o.pid IN (0,-2) OR o.pid>0) AND o.order_type=0 "
+            // A newly issued V3 card has an old-table entitlement carrier, not
+            // another legacy sale. Only an exact completed receipt plus its
+            // same-member/store sales header proves that exclusion.
+            ."AND NOT EXISTS (SELECT 1 FROM {$receipt} cr JOIN {$header} ch "
+            ."ON ch.tenant_id=cr.tenant_id AND ch.order_id=cr.sales_order_id "
+            ."AND ch.store_id=cr.store_id AND ch.member_id=cr.member_id "
+            ."AND ch.source_document_type IN ('cashier_snapshot','sales_order') "
+            ."WHERE cr.legacy_order_id=o.id AND cr.tenant_id='0' "
+            ."AND cr.store_id=o.store_id AND cr.member_id=o.uid AND cr.status='completed') "
             ."AND cp.product_type IN (0,5,6) "
             ."AND IFNULL(NULLIF(parent.store_name,''),cp.store_name)<>'' "
             ."AND ((o.pay_type<>'combination' AND IFNULL(o.cash_choose,0)<>9) "

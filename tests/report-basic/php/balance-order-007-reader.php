@@ -111,4 +111,15 @@ try {
 } catch (InvalidArgumentException $e) {
     check(strpos($e->getMessage(), '权限') !== false, '权限失败原因');
 }
+// 旧总额只作总额投影；历史角分保留，不能伪装本金/赠金或被当作负扣款。
+$legacyTotal = ['fact_id'=>'historical-007-balance:13','source_kind'=>'historical_007_original',
+    'store_id'=>1,'store_name_snapshot'=>'一店','member_id'=>8,'business_date'=>'2026-10-02','amount_cents'=>243750];
+$legacyReader = new BalanceOrder007ReadServices(static fn(): array => [$legacyTotal], static fn(): array => [],
+    static fn(): array => ['balance_unmapped'=>0,'recharge_unmapped'=>0], static fn(): array => []);
+$legacyResult = $legacyReader->read(BalanceOrder007ReadServices::DETAIL,[1],$scope);
+check($legacyResult['complete'] && (float)$legacyResult['rows'][0]['balance_amount']===2437.5,
+    '旧实际余额总额保留分，不生成本金赠金拆分');
+$duplicateLegacy = new BalanceOrder007ReadServices(static fn(): array => [$legacyTotal,$legacyTotal],static fn(): array => [],
+    static fn(): array => ['balance_unmapped'=>0,'recharge_unmapped'=>0],static fn(): array => []);
+check(!$duplicateLegacy->read(BalanceOrder007ReadServices::DETAIL,[1],$scope)['complete'], '重复原凭据不能重复加总');
 echo "balance-order-007-reader PASS\n";

@@ -6,7 +6,7 @@ namespace app\services\report;
 use think\facade\Db;
 
 /**
- * PK 六个月底标只读桥。六个月每一天均须落在 V3 正式覆盖期内；
+ * PK 六个月底标只读桥。六个月数据由统一V3及已认证007原来源共同核对；
  * 原单现金与合作方实配由统一事实层认证，历史调整只读取授权门店自身。
  */
 final class Sidebar007PkBottomReadServices
@@ -15,7 +15,7 @@ final class Sidebar007PkBottomReadServices
     private $partnerReader;
     private $adjustmentReader;
 
-    /** 注入点仅供合同；正式路径不会用旧金额替代缺失的 V3 收款事实。 */
+    /** 注入点仅供合同；正式路径复用已认证原单收款和合作方来源，不以固定上线日期代替来源核查。 */
     public function __construct(?callable $cashReader=null,?callable $partnerReader=null,
         ?callable $adjustmentReader=null)
     {
@@ -42,8 +42,6 @@ final class Sidebar007PkBottomReadServices
         $start=$first->modify('-6 months')->format('Y-m-d');
         $end=$first->modify('-1 day')->format('Y-m-d');
         $scope=['start'=>$start,'end'=>$end];
-        if($start<StoreUnifiedReportServices::COVERAGE_START)
-            return $this->gap($stores,$scope,'PK_BOTTOM_BEFORE_V3_COVERAGE');
         $cash=($this->cashReader)($stores,$scope);
         $partner=($this->partnerReader)($stores,$scope);
         $adjustments=($this->adjustmentReader)($stores,$start,$first->format('Y-m-d'));
@@ -58,21 +56,24 @@ final class Sidebar007PkBottomReadServices
             $amount=$this->cents($row['old_yeji']??null);
             $adjusted[$id]=$this->sum($adjusted[$id],$amount);
         }
-        $out=[];$gaps=[];
+        $out=[];$gaps=[];$components=[];
         foreach($stores as $id){
             $money=$cash['by_store'][$id]??null;
             $share=$partner['by_store'][$id]??null;
             if(!is_array($money)||($money['complete']??false)!==true
                 ||!is_int($money['amount_cents']??null)||!is_int($share)){
                 $out[$id]=null;$gaps[]=['store_id'=>$id,
-                    'code'=>'PK_BOTTOM_SIX_MONTH_SOURCE_UNVERIFIED'];continue;
+                    'code'=>'PK_BOTTOM_SIX_MONTH_SOURCE_UNVERIFIED',
+                    'cash_gaps'=>$money['gaps']??[],'partner_gaps'=>$partner['gaps']??[]];continue;
             }
             $total=$this->sum($this->sum($money['amount_cents'],-$share),$adjusted[$id]);
             // 007 bcdiv(..., 6) 在 PHP 默认 scale=0，按元截去小数。
             $out[$id]=intdiv($total,600)*100;
+            $components[$id]=['cash_cents'=>$money['amount_cents'],'partner_cents'=>$share,
+                'adjustment_cents'=>$adjusted[$id],'six_month_net_cents'=>$total];
         }
         return ['by_store'=>$out,'complete'=>$gaps===[],'gaps'=>$gaps,
-            'scope'=>$scope,'source'=>'certified_v3_six_month_cash_partner_and_store_adjustment'];
+            'scope'=>$scope,'components'=>$components,'source'=>'certified_original_six_month_cash_partner_and_store_adjustment'];
     }
 
     /** 仅按授权门店取历史手录调整；原 007 漏店条件的全店求和不再沿用。 */
@@ -103,10 +104,4 @@ final class Sidebar007PkBottomReadServices
         return $left+$right;
     }
 
-    private function gap(array $stores,array $scope,string $code):array
-    {
-        return ['by_store'=>array_fill_keys($stores,null),'complete'=>false,
-            'gaps'=>[['code'=>$code,'message'=>'此前六个月历史事实未完整覆盖，底标显示为“-”。']],
-            'scope'=>$scope,'source'=>'certified_v3_six_month_cash_partner_and_store_adjustment'];
-    }
 }

@@ -98,14 +98,19 @@ final class ProductSales007SourceCoverageServices
     private function legacySource(array $stores,array $range): array
     {
         $required=[
-            'store_order'=>['id','order_id','store_id','paid','is_system_del','is_del','refund_status',
+            'store_order'=>['id','order_id','uid','store_id','paid','is_system_del','is_del','refund_status',
                 'is_auto','pid','order_type','pay_type','cash_choose','cash_pay_price','yue_pay_price',
                 'pay_price'],
             'store_order_cart_info'=>['id','oid','cart_id','cart_type','product_type','cash_pay_amount',
                 'yue_pay_amount','card_upgrade_amount','debt_amount','pay_price'],
             'staff_yeji'=>['order_id','cart_id','type','status'],
             'combination_order'=>['order_id','cash_choose'],
-            'cashier_v3_sales_order'=>['id','tenant_id','store_id','source_document_id','source_document_type','business_date'],
+            'cashier_v3_sales_order'=>['id','tenant_id','store_id','source_document_id','source_document_type','business_date','order_id','member_id','contract_version','order_no',
+                'order_status','order_direction'],
+            'cashier_v3_card_purchase_receipt'=>['tenant_id','legacy_order_id','sales_order_id',
+                'store_id','member_id','status','card_holder_id'],
+            'cashier_v3_order_lifecycle_operation'=>['tenant_id','store_id','source_order_id',
+                'source_type','operation_type','status'],
         ];
         $names=[];
         try{
@@ -126,6 +131,9 @@ final class ProductSales007SourceCoverageServices
         // store IDs are positive integers and dates are exact YYYY-MM-DD.
         $storeList=implode(',',array_map('intval',$stores));
         $start=$range['start'];$end=$range['end'];
+        $visibility=ReportLegacyArchiveProofServices::visibilitySql('o','h',
+            trim($names['cashier_v3_order_lifecycle_operation'],'`'),
+            trim($names['cashier_v3_card_purchase_receipt'],'`'));
         $cash="CASE WHEN IFNULL(c.cash_pay_amount,0)>0 THEN c.cash_pay_amount "
             ."WHEN IFNULL(c.yue_pay_amount,0)=0 AND IFNULL(c.card_upgrade_amount,0)=0 "
             ."AND IFNULL(c.debt_amount,0)=0 AND IFNULL(o.cash_pay_price,0)>0 "
@@ -138,10 +146,10 @@ final class ProductSales007SourceCoverageServices
             ."o.store_id,o.id old_order_id,c.id old_cart_detail_id,h.business_date,{$cash} cash_amount,{$balance} balance_amount "
             ."FROM {$names['store_order']} o "
             ."INNER JOIN {$names['store_order_cart_info']} c ON c.oid=o.id AND IFNULL(c.cart_type,0)=0 "
-            ."LEFT JOIN {$names['cashier_v3_sales_order']} h ON h.tenant_id='0' "
+            ."LEFT JOIN {$names['cashier_v3_sales_order']} h ON h.tenant_id='0' AND h.order_id=CONCAT('IMP007-',o.id,'-sale') "
             ."AND h.store_id=o.store_id AND h.source_document_id=CAST(o.id AS CHAR) "
             ."AND h.source_document_type='legacy_store_order' "
-            ."WHERE o.store_id IN ({$storeList}) AND o.paid=1 AND o.is_system_del=0 AND o.is_del=0 "
+            ."WHERE o.store_id IN ({$storeList}) AND o.paid=1 AND {$visibility} AND o.is_del=0 "
             ."AND o.refund_status IN (0,3) AND IFNULL(o.is_auto,0)<>1 "
             ."AND (o.pid IN (0,-2) OR o.pid>0) AND o.order_type=0 "
             ."AND IFNULL(c.product_type,0)=0 "

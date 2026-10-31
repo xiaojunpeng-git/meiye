@@ -8,7 +8,7 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
 use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
 
-/** 007 核销明细的 V3 服务事实投影；旧核销 ID 与 V3 服务 ID 不作伪等价。 */
+/** 007 核销明细的 V3 与受控历史服务投影；来源明确区分，旧核销 ID 不伪装成 V3 服务 ID。 */
 final class WriteoffDetail007ReadServices
 {
     private $serviceReader;
@@ -16,12 +16,14 @@ final class WriteoffDetail007ReadServices
     private $sourceReader;
     private $coverageReader;
     private $saleProjectAmountReader;
+    private $historicalEnabled;
 
     /** 测试可注入只读事实；生产入口仍只读已认证门店内的完成服务。 */
     public function __construct(?callable $serviceReader = null, ?callable $amountReader = null,
         ?callable $sourceReader = null, ?callable $coverageReader = null,
         ?callable $saleProjectAmountReader = null)
     {
+        $this->historicalEnabled = $serviceReader === null;
         $this->serviceReader = $serviceReader ?: [$this, 'services'];
         $this->amountReader = $amountReader ?: static function (array $stores, array $range, int $employee): array {
             $reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
@@ -43,6 +45,15 @@ final class WriteoffDetail007ReadServices
         if (!$stores) return $this->project([], [], [], $stores, $range);
         return Db::transaction(function () use ($stores,$range,$employee): array {
             $coverage=($this->coverageReader)($stores,$range);
+            $historical=['services'=>[],'amounts'=>[],'sources'=>['phones'=>[],'store_names'=>[],'ordering_store_ids'=>[]],'gaps'=>[]];
+            if($this->historicalEnabled){
+                $adapter=new HistoricalCardService007ReadServices();$old=$adapter->readServices($stores,$range);
+                if($old['complete']){
+                    $coverage['gaps']=array_values(array_filter($coverage['gaps']??[],static function($g){return($g['code']??'')!=='LEGACY_WRITEOFF_V3_UNMAPPED';}));
+                    $historical=$adapter->reportProjection($old,$employee);
+                }
+                $coverage['gaps']=array_merge($coverage['gaps']??[],$old['gaps'],$historical['gaps']);$coverage['complete']=!$coverage['gaps'];
+            }
             if(!($coverage['complete']??false))return $this->failClosed($stores,$range,$coverage);
             $services = ($this->serviceReader)($stores,$range,$employee);
             $this->cap($services);
@@ -51,6 +62,9 @@ final class WriteoffDetail007ReadServices
             $immediate=($this->saleProjectAmountReader)($stores,$services,$amounts);
             $amounts=array_merge($amounts,$immediate['rows']);$this->cap($amounts);
             $sources = ($this->sourceReader)($stores,$services);
+            // Same formatter and amount pairing serve V3 and explicitly labelled historical sources.
+            $services=array_merge($services,$historical['services']);$amounts=array_merge($amounts,$historical['amounts']);
+            foreach($historical['sources']as$key=>$entries)foreach($entries as$id=>$value)$sources[$key][$id]=$value;
             $result=$this->project($services,$amounts,$sources,$stores,$range);
             $result['gaps']=array_merge($result['gaps'],$immediate['gaps']);
             $result['complete']=$result['gaps']===[];
@@ -97,7 +111,7 @@ final class WriteoffDetail007ReadServices
         foreach($services as $service){
             $type=(string)($service['source_document_type']??'');
             $id=(int)($service['source_document_id']??0);
-            if($type==='direct')$directServices[json_encode([(int)$service['store_id'],
+            if(in_array($type,['direct','reservation'],true))$directServices[json_encode([(int)$service['store_id'],
                 (string)$service['checkout_request_id'],(string)$service['source_line_id']])]=$service;
             if($id<=0)continue;
             if(in_array($type,['legacy_writeoff','legacy_paid_project'],true))$oldIds[$id]=true;
@@ -119,7 +133,7 @@ final class WriteoffDetail007ReadServices
                 ->field('id,oid,uid,relation_id,product_id,status')->select()->toArray();
             foreach($rows as $row)$old[(int)$row['id']]=$row;
         }
-        // Direct redemption carries its purchased entitlement's original
+        // Direct and reservation redemption carry the purchased entitlement's original
         // order primary key. Read only those scoped writeoff facts; do not
         // infer the ordering store from today's member ownership.
         $directWriteoffs=[];$directOriginIds=[];$holderIds=[];
@@ -175,7 +189,7 @@ final class WriteoffDetail007ReadServices
                 if($header&&(int)$header['member_id']===$member)$ordering[$factId]=(int)$header['store_id'];
                 continue;
             }
-            if($type==='direct'){
+            if(in_array($type,['direct','reservation'],true)){
                 $key=json_encode([(int)$service['store_id'],(string)$service['checkout_request_id'],
                     (string)$service['source_line_id']]);
                 $writeoff=$directWriteoffs[$key]??null;
@@ -239,7 +253,8 @@ final class WriteoffDetail007ReadServices
             if($amount===null)$gaps[]=['service_fact_id'=>$id,'code'=>'WRITEOFF_AMOUNT_MISSING',
                 'message'=>'完成服务缺少对应消耗事实；核销金额不能显示为0。'];
             unset($money[$line]);
-            $names=$this->craftsmanNames((string)($service['craftsmen_snapshot_json']??''));
+            $names=$this->craftsmanNames((string)($service['craftsmen_snapshot_json']??''),
+                (string)($service['source_document_type']??''));
             if($names===null){$names=[];$gaps[]=['service_fact_id'=>$id,'code'=>'CRAFTSMEN_SNAPSHOT_INVALID',
                 'message'=>'手艺人快照无法可靠解析。'];}
             $memberId=(int)($service['member_id']??0);
@@ -332,8 +347,31 @@ final class WriteoffDetail007ReadServices
     }
 
     /** 007 手艺人带点/轮标记；只用完成时冻结的人名与 is_point_customer，不查当前任职。 */
-    private function craftsmanNames(string $json):?array
+    private function craftsmanNames(string $json,string $sourceType=''):?array
     {
+        // Reservation completion freezes a smaller personnel contract than
+        // checkout. Read its own immutable name/point flag, never today's staff.
+        $people=json_decode($json,true);
+        $imported=in_array($sourceType,['legacy_writeoff','legacy_paid_project'],true)
+            &&is_array($people)&&($people===[]||isset($people[0]['employeeId'],$people[0]['name']));
+        if($sourceType==='reservation'||$imported){
+            // The verified historical importer freezes employee IDs rather
+            // than store-staff IDs. Preserve that distinct identity contract.
+            $identity=$imported?'employeeId':'staffId';
+            if(!is_array($people)||($people!==[]&&array_keys($people)!==range(0,count($people)-1))
+                ||count($people)>20)return null;
+            $names=[];$seen=[];
+            foreach($people as $person){
+                if(!is_array($person)||!isset($person[$identity],$person['name'])
+                    ||!is_int($person[$identity])||$person[$identity]<=0
+                    ||isset($seen[$person[$identity]])||!is_string($person['name'])
+                    ||trim($person['name'])===''||!array_key_exists('isPointCustomer',$person)
+                    ||!is_bool($person['isPointCustomer']))return null;
+                $seen[$person[$identity]]=true;
+                $names[]=trim($person['name']).($person['isPointCustomer']?'(点)':'(轮)');
+            }
+            return array_values(array_unique($names));
+        }
         try {
             $people=CashierV3CheckoutCraftsmenSnapshot::decode($json);
             return array_values(array_unique(array_filter(array_map(

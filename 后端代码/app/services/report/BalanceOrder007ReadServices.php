@@ -7,7 +7,7 @@ use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use think\facade\Db;
 
 /**
- * 007 余额订单两表的 V3 事实投影。余额支付与充值分别读取原始事实，
+ * 007 余额订单两表的统一只读投影。新业务读V3事实，未迁旧单经身份和状态核验后读取原凭据，
  * 先按授权门店、会员、业务日归集，再做对照；旧 SQL 的同日充值重复连接和跨店串算不能复现。
  */
 final class BalanceOrder007ReadServices
@@ -20,7 +20,7 @@ final class BalanceOrder007ReadServices
     private $legacyCoverage;
     private $memberProfiles;
 
-    /** 可注入只读事实加载器做独立合同测试；生产始终从 V3 不可变事实读取。 */
+    /** 可注入只读事实加载器做独立合同测试；生产读取V3事实与明确标识、同源排重的历史兼容来源。 */
     public function __construct(?callable $balanceFacts = null, ?callable $rechargeFacts = null,
         ?callable $legacyCoverage = null, ?callable $memberProfiles = null)
     {
@@ -78,7 +78,7 @@ final class BalanceOrder007ReadServices
             'table_layout' => ['summary_position' => 'none'],
             'metric_version' => 'balance-order-007-v3-facts-v1',
             'coverage_start' => StoreUnifiedReportServices::COVERAGE_START,
-            'coverage' => '只覆盖已记录的 V3 余额支付和充值收款事实；未迁入的历史旧单不得显示为零',
+            'coverage' => 'V3余额支付和充值事实，加上已核验且尚未迁入的007原单；同原单只计一次',
             'limitations' => ['余额支付和充值按同一授权门店及会员配对；充值每笔事实只计一次。',
                 '不包含欠款补交、余额退款、已作废或已退款原单。'],
             'data_as_of' => time()];
@@ -148,8 +148,9 @@ final class BalanceOrder007ReadServices
             ->whereIn('p.balance_change_type', ['order_pay', 'order_payment'])->where('p.member_id', '>', 0);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         $this->excludeRefunded($query, 'sales');
-        return $query->field('p.fact_id,p.store_id,p.store_name_snapshot,p.member_id,p.member_name_snapshot,p.business_date,p.principal_delta_cents,p.bonus_delta_cents')
+        $rows = $query->field('p.fact_id,p.store_id,p.store_name_snapshot,p.member_id,p.member_name_snapshot,p.business_date,p.principal_delta_cents,p.bonus_delta_cents')
             ->limit(self::MAX_FACTS + 1)->select()->toArray();
+        return array_merge($rows, $this->legacyRows('balance', $stores, $range));
     }
 
     /** 充值仅取原充值单成功收款，不把欠款补交或跨店收款充作同日充值。 */
@@ -165,13 +166,14 @@ final class BalanceOrder007ReadServices
             ->where('p.member_id', '>', 0);
         (new StoreReportNormalDataScopeServices())->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
         $this->excludeRefunded($query, 'recharge');
-        return $query->field('p.fact_id,p.store_id,p.store_name_snapshot,p.member_id,p.member_name_snapshot,p.business_date,p.amount_cents')
+        $rows = $query->field('p.fact_id,p.store_id,p.store_name_snapshot,p.member_id,p.member_name_snapshot,p.business_date,p.amount_cents')
             ->limit(self::MAX_FACTS + 1)->select()->toArray();
+        return array_merge($rows, $this->legacyRows('recharge', $stores, $range));
     }
 
     /**
      * 007 原有效单若仍未归档，就不能仅用部分 V3 事实给出零或小额。
-     * 旧表只用于完整性审计，不把旧金额混进新的统一事实投影。
+     * 日期缺失仍阻断；日期完整的旧原凭据交兼容读取并明确保留来源。
      */
     private function auditLegacyCoverage(array $stores, array $range): array
     {
@@ -191,42 +193,56 @@ final class BalanceOrder007ReadServices
         if ((int)$missingBalanceTime > 0 || (int)$missingRechargeTime > 0) {
             return ['balance_unmapped' => 0, 'recharge_unmapped' => 0, 'time_missing' => 1];
         }
-        $balance = (clone $balanceSource)->whereBetween('legacy_balance.pay_time', [$from, $until])
-            ->whereNotExists(static function ($proof): void {
-                $proof->name('cashier_v3_balance_fact')->alias('legacy_balance_v3')
-                    ->whereRaw("legacy_balance_v3.tenant_id='0'")
-                    ->whereRaw('legacy_balance_v3.store_id=legacy_balance.store_id')
-                    ->whereRaw('legacy_balance_v3.member_id=legacy_balance.uid')
-                    ->whereRaw('legacy_balance_v3.order_no_snapshot=legacy_balance.order_id')
-                    ->where('legacy_balance_v3.source_document_type', 'legacy_store_order')
-                    ->where('legacy_balance_v3.balance_change_type', 'order_pay')
-                    ->where('legacy_balance_v3.status', 'effective')
-                    ->where('legacy_balance_v3.fact_direction', 'forward');
-            })->limit(1)->value('legacy_balance.id');
-        if ((int)$balance > 0) return ['balance_unmapped' => 1, 'recharge_unmapped' => 0];
-        // 充值只影响同店、同会员、同 V3 业务日有余额事实的对照人口。
-        $recharge = (clone $rechargeSource)->whereBetween('legacy_recharge.pay_time', [$from, $until])
-            ->whereExists(static function ($balanceFact): void {
-                $balanceFact->name('cashier_v3_balance_fact')->alias('paired_balance_fact')
-                    ->whereRaw("paired_balance_fact.tenant_id='0'")
-                    ->whereRaw('paired_balance_fact.store_id=legacy_recharge.store_id')
-                    ->whereRaw('paired_balance_fact.member_id=legacy_recharge.uid')
-                    ->whereRaw('paired_balance_fact.business_date=DATE(FROM_UNIXTIME(legacy_recharge.pay_time))')
-                    ->where('paired_balance_fact.status', 'effective')
-                    ->where('paired_balance_fact.fact_direction', 'forward')
-                    ->whereIn('paired_balance_fact.balance_change_type', ['order_pay', 'order_payment']);
-            })
-            ->whereNotExists(static function ($proof): void {
-                $proof->name('cashier_v3_payment_fact')->alias('legacy_recharge_v3')
-                    ->whereRaw("legacy_recharge_v3.tenant_id='0'")
-                    ->whereRaw('legacy_recharge_v3.store_id=legacy_recharge.store_id')
-                    ->whereRaw('legacy_recharge_v3.member_id=legacy_recharge.uid')
-                    ->whereRaw('legacy_recharge_v3.order_no_snapshot=legacy_recharge.order_id')
-                    ->where('legacy_recharge_v3.source_document_type', 'recharge')
-                    ->where('legacy_recharge_v3.status', 'effective')
-                    ->where('legacy_recharge_v3.fact_direction', 'forward');
-            })->limit(1)->value('legacy_recharge.id');
-        return ['balance_unmapped' => 0, 'recharge_unmapped' => (int)$recharge > 0 ? 1 : 0];
+        // 日期完整的未迁旧单由同一后端兼容读取，不再误报为必须先造新事实。
+        return ['balance_unmapped'=>0, 'recharge_unmapped'=>0];
+    }
+
+    /**
+     * 未迁原凭据只投影实际总额，不伪造本金/赠金分摊或新的余额事件。
+     * 采用已批准迁入业务日规则（原pay_time上海日），原单同源V3存在即不重复。
+     */
+    private function legacyRows(string $kind,array $stores,array $range): array
+    {
+        $alias=$kind==='balance'?'legacy_balance':'legacy_recharge';
+        $query=$kind==='balance'?$this->legacyBalanceCandidate($stores):$this->legacyRechargeCandidate($stores);
+        $zone=new \DateTimeZone('Asia/Shanghai');
+        $from=(new \DateTimeImmutable($range['start'].' 00:00:00',$zone))->getTimestamp();
+        $until=(new \DateTimeImmutable($range['end'].' 23:59:59',$zone))->getTimestamp();
+        $query->whereBetween($alias.'.pay_time',[$from,$until]);
+        $table=$kind==='balance'?'cashier_v3_balance_fact':'cashier_v3_payment_fact';
+        $query->whereNotExists(static function($proof)use($table,$alias,$kind):void{
+            $proof->name($table)->alias('old_report_mapped')->where('old_report_mapped.tenant_id','0')
+                ->whereRaw('old_report_mapped.store_id='.$alias.'.store_id')
+                ->whereRaw('old_report_mapped.member_id='.$alias.'.uid')
+                ->whereRaw('old_report_mapped.order_no_snapshot='.$alias.'.order_id')
+                ->where('old_report_mapped.source_document_type',$kind==='balance'?'legacy_store_order':'recharge');
+            // 连已冲销原事实也算已迁，不能因status变化从旧壳重新复活一次。
+            if($kind==='balance')$proof->whereIn('old_report_mapped.balance_change_type',['order_pay','order_payment']);
+        });
+        $query->whereNotExists(static function($terminal)use($alias):void{
+            $terminal->name('cashier_v3_sales_order')->alias('old_report_header')
+                ->join('cashier_v3_order_lifecycle_operation old_report_terminal',
+                    'old_report_terminal.tenant_id=old_report_header.tenant_id AND old_report_terminal.store_id=old_report_header.store_id AND old_report_terminal.source_order_id=old_report_header.order_id')
+                ->where('old_report_header.tenant_id','0')->where('old_report_header.source_document_type','legacy_store_order')
+                ->whereRaw('old_report_header.source_document_id=CAST('.$alias.'.id AS CHAR)')
+                ->whereRaw('old_report_header.store_id='.$alias.'.store_id')
+                ->whereRaw('old_report_header.member_id='.$alias.'.uid')
+                ->whereRaw('old_report_header.order_no='.$alias.'.order_id')
+                ->where('old_report_terminal.source_type','sales')->whereIn('old_report_terminal.operation_type',['refund','void'])
+                ->where('old_report_terminal.status','succeeded');
+        });
+        $raw=$query->join('system_store old_report_store','old_report_store.id='.$alias.'.store_id')
+            ->field($alias.'.id,'.$alias.'.uid,'.$alias.'.store_id,'.$alias.'.pay_time,'.$alias.'.'.($kind==='balance'?'yue_pay_price':'pay_price').' original_amount,old_report_store.name')
+            ->order($alias.'.id','asc')->limit(self::MAX_FACTS+1)->select()->toArray();
+        $rows=[];
+        foreach($raw as $row){
+            $amount=\app\services\report\query\BasicRegistrationQueryProvider::cents($row['original_amount']);
+            $rows[]=['fact_id'=>'historical-007-'.$kind.':'.$row['id'],'source_kind'=>'historical_007_original',
+                'store_id'=>(int)$row['store_id'],'store_name_snapshot'=>(string)$row['name'],'member_id'=>(int)$row['uid'],
+                'business_date'=>(new \DateTimeImmutable('@'.(int)$row['pay_time']))->setTimezone($zone)->format('Y-m-d'),
+                'amount_cents'=>$amount];
+        }
+        return $rows;
     }
 
     /** 007 旧有效余额单资格；这里只用身份和支付秒数审计迁入完整性。 */
@@ -235,6 +251,7 @@ final class BalanceOrder007ReadServices
         return Db::name('store_order')->alias('legacy_balance')
             ->whereIn('legacy_balance.store_id', $stores)
             ->where('legacy_balance.paid', 1)->where('legacy_balance.is_system_del', 0)
+            ->where('legacy_balance.pay_type','<>','cashier_v3')
             ->where('legacy_balance.is_del', 0)->where('legacy_balance.refund_status', 0)
             ->whereRaw('IFNULL(legacy_balance.is_auto,0)<>1')
             ->whereRaw('(legacy_balance.pid>=0 OR legacy_balance.pid=-2)')
@@ -249,6 +266,7 @@ final class BalanceOrder007ReadServices
             ->whereIn('legacy_recharge.store_id', $stores)
             ->where('legacy_recharge.order_type', 1)->where('legacy_recharge.paid', 1)
             ->where('legacy_recharge.is_system_del', 0)->where('legacy_recharge.refund_status', 0)
+            ->where('legacy_recharge.pay_type','<>','cashier_v3')
             ->where('legacy_recharge.uid', '>', 0)->where('legacy_recharge.pay_price', '>', 0);
     }
 
@@ -278,7 +296,11 @@ final class BalanceOrder007ReadServices
             || $member < 1 || !in_array($store, $stores, true) || $day < $range['start'] || $day > $range['end']
             || !self::validDate($day)) return null;
         $seen[$kind . ':' . $id] = true;
-        if ($kind === 'balance') {
+        if ($kind === 'balance' && ($fact['source_kind'] ?? '') === 'historical_007_original') {
+            // 旧凭据只有实际余额总额，绝不伪称为本金或赠金任一项。
+            $amount = $this->integer($fact['amount_cents'] ?? null);
+            if ($amount === null || $amount <= 0) return null;
+        } elseif ($kind === 'balance') {
             $principal = $this->integer($fact['principal_delta_cents'] ?? null);
             $bonus = $this->integer($fact['bonus_delta_cents'] ?? null);
             if ($principal === null || $bonus === null || $principal > 0 || $bonus > 0) return null;
@@ -419,7 +441,7 @@ final class BalanceOrder007ReadServices
             'row_id' => '按授权门店、会员和业务日组成的稳定行键；汇总表按授权门店组成。',
             'store_id' => '交易门店的稳定编号，用于权限和精确筛选。',
             'member_id' => '会员的稳定编号，用于同店同人充值配对。',
-            'store_name' => '交易发生时记录的门店名称。',
+            'store_name' => '统一事实的门店名称快照；历史原凭据按其原交易门店编号关联门店名称。',
             'business_date' => '交易结算所属的业务日期。',
             'user_info' => '优先显示会员当前昵称，昵称为空时显示交易记录中的姓名；后接会员编号，已注销会员附加标识。',
             'balance_amount' => '有效原销售订单正向余额扣款，按授权门店、会员和业务日归集；单位元。',

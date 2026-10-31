@@ -16,15 +16,25 @@ final class StoreItemSales007ReadServices
     private $cashReader;
     private $categoryResolver;
     private $coverageReader;
+    private $historicalEnabled;
 
     /** 可注入只读事实源以验证归组和守恒；生产默认使用统一 V3 原结账事实。 */
     public function __construct(?callable $saleReader = null, ?callable $cashReader = null,
         ?callable $categoryResolver = null, ?callable $coverageReader = null)
     {
+        $this->historicalEnabled=$saleReader===null;
         $this->saleReader = $saleReader ?: [$this, 'saleFacts'];
         $this->cashReader = $cashReader ?: [$this, 'originalCash'];
         $this->categoryResolver = $categoryResolver ?: static function (array $links): array {
-            return (new StoreReportCurrentProductCategoryServices())->resolve($links);
+            $resolved=(new StoreReportCurrentProductCategoryServices())->resolve($links);
+            // 007 explicitly groups existing products without a category under 未分类.
+            // A native custom-card carrier has no platform category by design; never invent one.
+            $ids=array_values(array_unique(array_column($links,'product_id')));$catalog=[];
+            foreach(array_chunk($ids,300)as$chunk)foreach(Db::name('store_product')->whereIn('id',$chunk)->field('id,type,relation_id')->select()->toArray()as$p)$catalog[(int)$p['id']]=$p;
+            foreach($links as$i=>$link){$p=$catalog[$link['product_id']]??null;
+                if((int)($resolved[$i]['id']??0)===0&&$p&&(((int)$p['type']===1&&(int)$p['relation_id']===$link['store_id'])||((int)$p['type']===0&&(int)$p['relation_id']===0)))$resolved[$i]=['id'=>0,'path'=>'未分类','uncategorized'=>true];
+            }
+            return $resolved;
         };
         // Local 007 snapshot type-5 SQL and the manually opened page both have
         // five columns. Eligibility is audited per old cart detail and V3 line.
@@ -45,7 +55,13 @@ final class StoreItemSales007ReadServices
         return Db::transaction(function () use ($stores, $range, $fields): array {
             $sales = ($this->saleReader)($stores, $range);
             $this->checkSize($sales);
-            $coverage=($this->coverageReader)($stores,$range,$sales);
+            $history=['rows'=>[],'gaps'=>[],'complete'=>true];
+            if($this->historicalEnabled){
+                $history=(new HistoricalSales007ReadServices())->read('store_items',$stores,$range);
+                // Every imported original is covered by the same 007 query; keep only native V3 facts here.
+                $sales=array_values(array_filter($sales,static function($r){return($r['source_document_type']??'')!=='legacy_store_order';}));
+                $coverage=['complete'=>$history['complete'],'gaps'=>$history['gaps'],'eligible_legacy_fact_ids'=>[],'historical_rows'=>count($history['rows'])];
+            }else $coverage=($this->coverageReader)($stores,$range,$sales);
             if(!($coverage['complete']??false))return $this->failClosed($fields,$stores,$range,$coverage);
             // Old SQL excludes some paid carts (old-card payment, invalid
             // product type, etc.). V3 facts for those carts must not leak into
@@ -65,6 +81,15 @@ final class StoreItemSales007ReadServices
             }
             $categories = ($this->categoryResolver)($links);
             $result=$this->result($sales, $fields, $stores, $range, $cash, $categories);
+            $merged=[];
+            foreach($result['rows']as$row){$key=json_encode([$row['store_id'],$row['category_path'],$row['item_name']]);$merged[$key]=$row;}
+            foreach($history['rows']as$old){
+                $key=json_encode([(int)$old['store_id'],(string)$old['分类'],(string)$old['名称']]);
+                if(!isset($merged[$key]))$merged[$key]=['row_id'=>'store_item_007:'.hash('sha256',$key),'store_id'=>(int)$old['store_id'],'store_name'=>$old['门店'],'category_id'=>0,'category_path'=>$old['分类'],'item_id'=>0,'item_name'=>$old['名称'],'sales_quantity'=>0.0,'sales_performance'=>0.0];
+                $merged[$key]['sales_quantity']+=(float)$old['销售数量'];
+                if($merged[$key]['sales_performance']!==null)$merged[$key]['sales_performance']=round($merged[$key]['sales_performance']+(float)$old['销售业绩'],2);
+            }
+            $result['rows']=array_values($merged);$this->checkSize($result['rows']);
             $result['source_coverage']=$coverage;
             return $result;
         });
@@ -247,12 +272,12 @@ final class StoreItemSales007ReadServices
             $itemName = trim((string)($sale['item_name'] ?? ''));
             $categoryId = (int)($category['id'] ?? 0);
             $categoryPath = (string)($category['path'] ?? '');
-            if ($itemId <= 0 || $itemName === '' || $categoryId <= 0) {
+            if ($itemId <= 0 || $itemName === '' || ($categoryId <= 0&&!($category['uncategorized']??false))) {
                 $gaps[] = ['fact_id'=>$factId, 'code'=>'STORE_ITEM_IDENTITY_UNRESOLVED',
                     'message'=>'原成交品项或当前分类无法可靠定位；保留原销售事实，不猜名称或分类。'];
             }
             // 身份不明时单事实独立成行，避免多个无身份品项被错误合并。
-            $identity = $itemId > 0 && $itemName !== '' && $categoryId > 0
+            $identity = $itemId > 0 && $itemName !== '' && ($categoryId > 0||($category['uncategorized']??false))
                 ? [$storeId, $categoryId, $itemId, $itemName]
                 : [$storeId, 'unresolved', $factId];
             $key = hash('sha256', json_encode($identity, JSON_UNESCAPED_UNICODE));

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__.'/../../../后端代码/vendor/autoload.php';
+require (getenv('BACKEND_ROOT')?:__DIR__.'/../../../后端代码').'/vendor/autoload.php';
 
 use app\services\report\Sidebar007SoldProjectCountReadServices;
 
@@ -41,4 +41,9 @@ try{$outside->read([7,8],['start'=>'2026-10-01','end'=>'2026-10-30']);
     throw new RuntimeException('销售项目越权未拒绝');}
 catch(LogicException $expected){}
 
+$hybrid=new Sidebar007SoldProjectCountReadServices($sales,$coverage,static fn():array=>['complete'=>true,'gaps'=>[],'rows'=>[['store_id'=>7,'销售数量'=>'6.5']]]);
+$combined=$hybrid->read([7,8],['start'=>'2026-10-01','end'=>'2026-10-30']);
+checkSold($combined['complete']&&$combined['by_store']===[7=>9.5,8=>0],'旧来源含已迁及未迁数量只计一次，保留小数项目数量');
+$outsideHistory=new Sidebar007SoldProjectCountReadServices($sales,$coverage,static fn():array=>['complete'=>true,'gaps'=>[],'rows'=>[['store_id'=>9,'销售数量'=>'1']]]);
+try{$outsideHistory->read([7,8],['start'=>'2026-10-01','end'=>'2026-10-30']);throw new RuntimeException('历史数量越权未拒绝');}catch(LogicException$expected){}
 echo "sidebar-007-sold-project-count-contract PASS\n";

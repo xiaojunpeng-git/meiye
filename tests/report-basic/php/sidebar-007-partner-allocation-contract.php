@@ -45,7 +45,11 @@ reject(static fn()=>$reader->read([7],$range,
     static fn(): array => [['store_id'=>7,'partner_amount_cents'=>'1.2','outsourced_amount_cents'=>0,
         'refund_deduction_cents'=>0,'unclassified_rows'=>0,'unsigned_reversal_rows'=>0]]),
     '金额必须使用整数分');
-reject(static fn()=>$reader->read([7],['start'=>'2026-07-01','end'=>'2026-07-30'],
-    static fn(): array => []),'V3 覆盖前不能把缺历史事实当零');
+$historical=$reader->read([7],['start'=>'2026-07-01','end'=>'2026-07-30'],static fn():array=>[],
+    static fn():array=>['complete'=>true,'gaps'=>[],'rows'=>[['store_id'=>7,'partner_amount_cents'=>9850]]]);
+check($historical['complete']&&$historical['by_store'][7]===9850,'已认证原分配不受V3上线日期误挡');
+$missingOld=$reader->read([7],['start'=>'2026-07-01','end'=>'2026-07-30'],static fn():array=>[],
+    static fn():array=>['complete'=>false,'gaps'=>[['code'=>'ORIGINAL_IDENTITY']],'rows'=>[]]);
+check(!$missingOld['complete']&&$missingOld['by_store'][7]===null,'历史来源不完整不能用现有V3零行推成零');
 
 echo "sidebar-007-partner-allocation-contract PASS\n";

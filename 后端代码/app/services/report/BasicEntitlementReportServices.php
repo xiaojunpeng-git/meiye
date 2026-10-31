@@ -21,6 +21,8 @@ final class BasicEntitlementReportServices
     public const UNCONSUMED_COMPONENT_SOURCE = 'internal_unconsumed_components_007';
     /** Internal-only source for the same card population in store summary. */
     public const UNCONSUMED_SUMMARY_SOURCE = 'internal_unconsumed_summary_007';
+    /** 仅供007权益投影调用，按会员当前所属店授权；不是可由浏览器选择的菜单代码。 */
+    public const CUSTOMER_RIGHTS_SOURCE = 'internal_customer_rights_007';
 
     /** Only genuinely readable reports may be registered by the Host. */
     public static function codes(): array
@@ -32,6 +34,7 @@ final class BasicEntitlementReportServices
     public static function definitions(string $code): array
     {
         if ($code === self::UNCONSUMED_COMPONENT_SOURCE) $code = 'basic_customer_entitlements';
+        if ($code === self::CUSTOMER_RIGHTS_SOURCE) $code = 'basic_customer_entitlements';
         if ($code === self::UNCONSUMED_SUMMARY_SOURCE) $code = 'basic_unconsumed_summary';
         self::assertCode($code);
         $columns = [
@@ -107,8 +110,14 @@ final class BasicEntitlementReportServices
      */
     public function read(string $code, array $stores, array $input): array
     {
+        // 007四表按当前会员所属店归集全部合法卡项。仅内部source代码启用，
+        // 通用资产查询仍要求卡来源店也在权限内，不能被前端参数放宽。
+        $memberStoreReport = in_array($code, [self::CUSTOMER_RIGHTS_SOURCE,
+            self::UNCONSUMED_COMPONENT_SOURCE, self::UNCONSUMED_SUMMARY_SOURCE], true);
+        $customerRightsReport = $code === self::CUSTOMER_RIGHTS_SOURCE;
         $includeExhaustedForReport = in_array($code,
             [self::UNCONSUMED_COMPONENT_SOURCE, self::UNCONSUMED_SUMMARY_SOURCE], true);
+        if ($code === self::CUSTOMER_RIGHTS_SOURCE) $code = 'basic_customer_entitlements';
         if ($code === self::UNCONSUMED_COMPONENT_SOURCE) $code = 'basic_customer_entitlements';
         if ($code === self::UNCONSUMED_SUMMARY_SOURCE) $code = 'basic_unconsumed_summary';
         $fields = self::definitions($code);
@@ -153,7 +162,11 @@ final class BasicEntitlementReportServices
             $details = $reader->readAiRightsSet($ids, $operator, $scope, null, $includeExhaustedForReport);
             // The shared member reader intentionally includes cross-store cards.
             // Verify numeric holder identity, never infer its scope from a name.
-            if ($code === 'basic_customer_entitlements') {
+            if ($memberStoreReport) {
+                $holders = $this->reportHolders($ids, $customerRightsReport, $stores, $scope->tenantId());
+                $projectSources = $code === 'basic_customer_entitlements'
+                    ? $this->customerProjectSources($details, $holders, $stores, true) : [];
+            } elseif ($code === 'basic_customer_entitlements') {
                 $holders = Db::name('user_card_holder')->whereIn('uid', $ids)->column('id,uid,oid,store_id', 'id');
                 $projectSources = $this->customerProjectSources($details, $holders, $stores);
             } else {
@@ -176,12 +189,19 @@ final class BasicEntitlementReportServices
                 foreach ($detail['cards'] as $card) {
                     if ($card['statusCode'] !== 'enabled') continue;
                     $holder = (int)$card['id'];
+                    // 原单已删除/退款等不符合007资格的卡先排除；其来源店缺失
+                    // 不能阻断其他合法会员的整张报表，也不能进入权益合计。
+                    if ($memberStoreReport && !isset($holders[$holder])) continue;
                     if (!array_key_exists($holder, $holders)) throw new \RuntimeException('ENTITLEMENT_HOLDER_IDENTITY_MISSING');
-                    $cardStore = (int)($code === 'basic_customer_entitlements' ? $holders[$holder]['store_id'] : $holders[$holder]);
+                    if ($memberStoreReport && (int)$holders[$holder]['uid'] !== $id)
+                        throw new \RuntimeException('ENTITLEMENT_HOLDER_MEMBER_MISMATCH');
+                    $cardStore = (int)($code === 'basic_customer_entitlements' || $memberStoreReport ? $holders[$holder]['store_id'] : $holders[$holder]);
                     // Storeless migrated rights require an explicit attribution
                     // authority. Never silently classify them under the viewer.
-                    if ($cardStore <= 0) throw new \RuntimeException('ENTITLEMENT_HOLDER_STORE_UNRESOLVED');
-                    if (!in_array($cardStore, $stores, true)) continue;
+                    if (!$memberStoreReport) {
+                        if ($cardStore <= 0) throw new \RuntimeException('ENTITLEMENT_HOLDER_STORE_UNRESOLVED');
+                        if (!in_array($cardStore, $stores, true)) continue;
+                    }
                     if ($code === 'basic_customer_entitlements') {
                         foreach ($card['projects'] as $project) {
                             $projectId = (int)$project['id'];
@@ -246,7 +266,7 @@ final class BasicEntitlementReportServices
         } while (count($members) === 100);
         ksort($groups, SORT_NUMERIC);
         foreach ($groups as $group) $rows[] = $group['base'] + self::yuan($group['cents']);
-        $sources = self::sources($fields);
+        $sources = self::sources($fields, $memberStoreReport);
         if ($code === 'basic_customer_entitlements') {
             $sources['rights_amount'] = '每条卡内项目由统一会员权益服务返回的当前剩余金额，单位元保留分；共享或期限权益不保证可相加，因此本列不提供合计；储值行不适用。';
             $sources['asset_type'] = '独立储值行保存本会员本金与赠金，每条卡内项目另占一行；本金、赠金不重复分配到项目行。';
@@ -259,13 +279,39 @@ final class BasicEntitlementReportServices
             'coverage_start' => null, 'complete' => true, 'drilldowns' => [],
             'limitations' => [
                 '本次已确认仅交付查询当天的实时资产，不提供历史日期查询，也不代表当天闭店余额。',
-                '归集到会员当前所属门店；卡项来源门店也须在本次授权范围内。',
+                $memberStoreReport ? '按007归集到本次授权会员当前所属门店；购卡店只用于追溯，不改变会员范围。'
+                    : '归集到会员当前所属门店；卡项来源门店也须在本次授权范围内。',
                 '当前报表不包含优惠券、独立赠品和预售库存；不生成没有权威依据的购买额或已使用额。',
                 '储值和卡项在明细中分行展示，空金额表示本行不适用；储值不随卡项重复计算。',
             ],
             'metric_version' => $includeExhaustedForReport ? 'basic-unconsumed-project-all-status-read-v1'
                 : ($code === 'basic_customer_entitlements' ? 'basic-customer-project-entitlement-current-v1' : 'basic-entitlement-current-v1'),
-            'coverage' => '当前有效会员储值与当前有效卡项；会员所属店与卡项来源店均限本次授权门店。非优惠券、赠品及预售库存报表。'];
+            'coverage' => $memberStoreReport ? '007有效原单卡项，归集至已授权的会员当前所属门店；不回填或猜测原购卡店。'
+                : '当前有效会员储值与当前有效卡项；会员所属店与卡项来源店均限本次授权门店。非优惠券、赠品及预售库存报表。'];
+    }
+
+    /** 原单资格来自007配置SQL；只裁剪读取人口，不写卡来源、归属或权益值。 */
+    private function reportHolders(array $memberIds, bool $customerRights, array $stores, string $tenant): array
+    {
+        $base = Db::name('user_card_holder')->alias('h')->join('store_order o', 'o.id=h.oid')
+            ->whereIn('h.uid', $memberIds)->where('o.paid', 1)->where('o.is_del', 0)
+            ->whereIn('o.refund_status', $customerRights ? [0,3] : [0]);
+        $query = (clone $base)->where('o.is_system_del', 0);
+        if ($customerRights) $query->whereRaw('IFNULL(o.is_auto,0)<>1 AND (o.pid IN (0,-2) OR o.pid>0)');
+        else $query->where('o.order_type', 0)->where('o.uid', '>', 0);
+        $holders = $query->column('h.id,h.uid,h.oid,h.store_id', 'h.id');
+        // 导入器的隐藏零元技术单不是作废业务。只认迁入范围权威及其所属组织，
+        // 不按客户域名/订单号猜测，不恢复已删除的持卡和迁入范围记录。
+        $imported = (clone $base)->where('h.is_del',0)->where('h.store_id',0)
+            ->where('o.store_id',0)->where('o.is_system_del',1)->where('o.mark','migration_entitlement')
+            ->column('h.id,h.uid,h.oid,h.store_id', 'h.id');
+        $allowed = [];
+        foreach ($stores as $store) foreach (\app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+            array_keys($imported), $tenant, (int)$store) as $id) $allowed[(int)$id] = true;
+        foreach ($imported as $id=>$holder) if (isset($allowed[(int)$id])) {
+            $holder['imported_entitlement'] = true; $holders[$id] = $holder;
+        }
+        return $holders;
     }
 
     /**
@@ -274,13 +320,15 @@ final class BasicEntitlementReportServices
      * resolver on its persisted product identity (including cross-store items).
      * No card-shell category or product-name matching is permitted.
      */
-    private function customerProjectSources(array $details, array $holders, array $stores): array
+    private function customerProjectSources(array $details, array $holders, array $stores, bool $memberStoreReport = false): array
     {
-        $ids = []; $orderIds = [];
+        $ids = []; $orderIds = []; $importedOrders = [];
         foreach ($details as $detail) foreach ($detail['cards'] as $card) {
             $holder = $holders[(int)$card['id']] ?? null;
-            if ($card['statusCode'] !== 'enabled' || !$holder || !in_array((int)$holder['store_id'], $stores, true)) continue;
+            if ($card['statusCode'] !== 'enabled' || !$holder
+                || (!$memberStoreReport && !in_array((int)$holder['store_id'], $stores, true))) continue;
             $orderIds[(int)$holder['oid']] = true;
+            if (!empty($holder['imported_entitlement'])) $importedOrders[(int)$holder['oid']] = true;
             foreach ($card['projects'] as $project) $ids[(int)$project['id']] = true;
         }
         $orders = []; $items = [];
@@ -301,6 +349,7 @@ final class BasicEntitlementReportServices
             $orderId = (int)$item['oid'];
             if (!isset($orders[$orderId]) || $orders[$orderId] === '') throw new \RuntimeException('ENTITLEMENT_PROJECT_ORDER_MISSING');
             $result[$id] = ['origin_order_id' => $orderId, 'order_no' => $orders[$orderId],
+                'imported_entitlement' => isset($importedOrders[$orderId]),
                 'product_id' => (int)$item['product_id'], 'category_id' => $categories[$id]['id'] ?? null,
                 'category_name' => $categories[$id]['path'] ?? '未分类'];
         }
@@ -381,7 +430,7 @@ final class BasicEntitlementReportServices
     }
 
     /** Every published column has a business explanation, including nullable cells. */
-    private static function sources(array $fields): array
+    private static function sources(array $fields, bool $memberStoreReport = false): array
     {
         $sources = [
             'store_id' => '会员当前所属门店的稳定标识，仅限本次有权查询的门店。',
@@ -408,6 +457,10 @@ final class BasicEntitlementReportServices
             'origin_order_id' => '持卡实例和项目明细共同核实的原订单稳定标识。',
             'order_no' => '该卡内项目所属原订单实际保存的订单号，不将数字订单ID冒充订单号。',
         ];
+        if ($memberStoreReport) {
+            $sources['card_store_id'] = '卡项原来源门店的追溯标识；查询权限按会员当前所属门店及有效会员关系核验，不重写原购店。';
+            $sources['rights_amount'] = '授权门店当前有效会员的合法持卡剩余权益，按统一权益权威计算；原购店不改变会员归集门店，迁入卡仍须有正式范围证明。';
+        }
         $result = [];
         foreach ($fields as $field) $result[$field['key']] = $sources[$field['key']];
         return $result;

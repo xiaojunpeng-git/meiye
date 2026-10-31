@@ -7,16 +7,20 @@ use think\facade\Db;
 
 /**
  * 门店统计“销售项目数”按有效原销售行求项目/卡项数量。
- * 旧购物车必须经原主键逐行覆盖审计；金额和数量只从 V3 正式事实读取。
+ * 旧购物车复用已认证007只读销售桥；新交易取V3正式事实，已迁原单不重复计数。
  */
 final class Sidebar007SoldProjectCountReadServices
 {
     private $saleReader;
     private $coverageReader;
+    private $historicalReader;
+    private $historicalEnabled;
 
     /** 注入点只供合同；正式来源为同一统一销售事实与旧人口覆盖门禁。 */
-    public function __construct(?callable $saleReader=null,?callable $coverageReader=null)
+    public function __construct(?callable $saleReader=null,?callable $coverageReader=null,?callable $historicalReader=null)
     {
+        $this->historicalEnabled=$saleReader===null||$historicalReader!==null;
+        $this->historicalReader=$historicalReader ?: static function(array$stores,array$range):array{return(new HistoricalSales007ReadServices())->read('store_items',$stores,$range);};
         $this->saleReader=$saleReader ?: [$this,'sales'];
         $this->coverageReader=$coverageReader ?: [new StoreItemSales007SourceCoverageServices(),'read'];
     }
@@ -45,7 +49,15 @@ final class Sidebar007SoldProjectCountReadServices
                 throw new \LogicException('销售项目事实越权或重复');
             $seen[$factId]=true;
         }
-        $coverage=($this->coverageReader)($stores,$range,$sales);
+        $history=['rows'=>[],'complete'=>true,'gaps'=>[]];
+        if($this->historicalEnabled){
+            // The same old SQL and approved payment business day serve the visible sales report and this count.
+            // Never waive a missing-V3-fact gate without actually reading its original quantity.
+            $history=($this->historicalReader)($stores,$range);
+            if(!is_array($history)||!is_array($history['rows']??null)||count($history['rows'])>10000||!is_bool($history['complete']??null))throw new \LogicException('历史销售数量来源无效');
+            $sales=array_values(array_filter($sales,static function($r){return($r['source_document_type']??'')!=='legacy_store_order';}));
+            $coverage=['complete'=>$history['complete'],'gaps'=>$history['gaps']??[],'historical_rows'=>count($history['rows']),'eligible_legacy_fact_ids'=>[]];
+        }else $coverage=($this->coverageReader)($stores,$range,$sales);
         if(!is_array($coverage)||!is_bool($coverage['complete']??null))
             throw new \LogicException('销售项目旧来源覆盖无效');
         if(!$coverage['complete'])return ['by_store'=>array_fill_keys($stores,null),
@@ -64,8 +76,14 @@ final class Sidebar007SoldProjectCountReadServices
                 throw new \LogicException('销售项目数量无效或溢出');
             $count[$id]+=$number;
         }
+        foreach($history['rows']as$row){
+            $id=(int)($row['store_id']??0);$quantity=$row['销售数量']??null;
+            if(!isset($allowed[$id])||!is_numeric($quantity)||(float)$quantity<0||!is_finite((float)$quantity)||(float)$quantity>PHP_INT_MAX-$count[$id])throw new \LogicException('历史销售数量越权或无效');
+            $count[$id]+=(float)$quantity;
+        }
+        foreach($count as$id=>$value)$count[$id]=floor((float)$value)===(float)$value?(int)$value:round($value,6);
         return ['by_store'=>$count,'complete'=>true,'gaps'=>[],
-            'source_coverage'=>$coverage,'source'=>'v3_original_sale_quantity_with_007_cart_coverage'];
+            'source_coverage'=>$coverage,'source'=>$this->historicalEnabled?'original_007_quantity_plus_native_v3':'v3_original_sale_quantity_with_007_cart_coverage'];
     }
 
     /** 正向有效原销售事实排成功作废及冲销，取业务日期而非旧下单日。 */

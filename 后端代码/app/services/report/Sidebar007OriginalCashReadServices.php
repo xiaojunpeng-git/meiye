@@ -6,24 +6,29 @@ namespace app\services\report;
 use think\facade\Db;
 
 /**
- * 007 PK/门店统计共用的原单现金读取边界。金额只能来自已保存 V3 正向收款；
- * 旧订单与组合支付仅用于资格和覆盖证明，不能以旧金额填补缺失的 V3 事实。
+ * 007 PK/门店统计共用的原单现金读取边界。原生金额来自 V3 正向收款；
+ * 未迁历史销售/充值只复用统一旧收款资格Reader，明确保留原来源，绝不伪造销售头。
  */
 final class Sidebar007OriginalCashReadServices
 {
     private $paymentReader;
     private $legacyReader;
+    private $receiptReader;
 
     /** 独立注入点只用于合同测试和本地对账，正式读取限定 tenant=0 与授权门店。 */
-    public function __construct(?callable $paymentReader = null, ?callable $legacyReader = null)
+    public function __construct(?callable $paymentReader = null, ?callable $legacyReader = null, ?callable $receiptReader = null)
     {
         $this->paymentReader = $paymentReader ?: [$this, 'payments'];
         $this->legacyReader = $legacyReader ?: [$this, 'legacyOrders'];
+        $this->receiptReader=$receiptReader ?: ($paymentReader ? static fn():array=>[] : static function(array $stores,array $range,array $originalIds):array{
+            $reader=new StoreReconciliationReceiptReader();
+            return $reader->receipts($stores,$reader->methods(),['start_date'=>$range['start'],'end_date'=>$range['end']],'0',true,$originalIds);
+        });
     }
 
     /**
      * 每店有任何来源身份、旧单覆盖或旧金额差异即不认证该店总额；其他店可独立认证。
-     * 旧金额差异仅作审计标记，返回金额永远是 V3 收款事实之和。
+     * 已迁原单仍按 V3 严格对账；未迁原单须经共用旧收款资格逐单认证。
      */
     public function read(array $stores, array $range): array
     {
@@ -37,14 +42,14 @@ final class Sidebar007OriginalCashReadServices
             if (!$date || $date->format('Y-m-d') !== $value)
                 throw new \InvalidArgumentException('原单现金日期无效');
         }
-        if ($range['start'] > $range['end'] || $range['start'] < StoreUnifiedReportServices::COVERAGE_START)
-            throw new \InvalidArgumentException('原单现金日期超出覆盖范围');
+        if ($range['start'] > $range['end'])
+            throw new \InvalidArgumentException('原单现金日期倒置');
         $facts = ($this->paymentReader)($stores,$range);
         $expected = ($this->legacyReader)($stores,$range);
         if (!is_array($facts) || !is_array($expected) || count($facts)>50000 || count($expected)>50000)
             throw new \RuntimeException('原单现金来源超出安全范围');
         $amounts=array_fill_keys($stores,0);$gaps=[];$seenFacts=[];$seenPayments=[];$amountsByOrder=[];
-        $legacyPaid=[];$expectedByOrder=[];
+        $legacyPaid=[];$expectedByOrder=[];$historicalCandidates=[];$historicalOrders=[];
         foreach ($expected as $order) {
             $store=$this->id($order['store_id']??null,$stores);
             if(($order['business_date_unresolved']??false)===true){
@@ -56,6 +61,7 @@ final class Sidebar007OriginalCashReadServices
             $cents=$this->cents($order['expected_cents']??null);
             if ($key===$store.'|' || isset($expectedByOrder[$key])) throw new \LogicException('旧原单身份缺失或重复');
             $expectedByOrder[$key]=$cents;
+            if(($order['unmigrated_original']??false)===true)$historicalCandidates[$key]=$order;
         }
         foreach ($facts as $fact) {
             $store=$this->id($fact['store_id']??null,$stores);
@@ -104,6 +110,41 @@ final class Sidebar007OriginalCashReadServices
             // 后补款和身份不完整的收款永不进入类别指标。
             $amountsByOrder[$store][$order]=($amountsByOrder[$store][$order]??0)+$amount;
         }
+        $v3Amounts=$amounts;
+        // Shared receipt qualification proves each original sale/recharge, including combination
+        // lines and its business day. Existing V3 payments win; mismatches stay explicit gaps.
+        if($historicalCandidates){
+            $byNo=[];$sums=[];$seen=[];
+            foreach($historicalCandidates as $key=>$old){
+                $match=$old['store_id'].'|'.$old['document_no'];
+                if(isset($byNo[$match]))throw new \LogicException('历史原单单号重复');
+                $byNo[$match]=$key;
+            }
+            foreach(($this->receiptReader)($stores,$range,array_map(static fn(array $old):int=>(int)$old['source_order_id'],array_values($historicalCandidates))) as $receipt){
+                if(!in_array($receipt['source_kind']??'', ['历史订单收款','历史组合收款'],true))continue;
+                $match=($receipt['store_id']??0).'|'.($receipt['document_no']??'');
+                $key=$byNo[$match]??null;if($key===null)continue;
+                $old=$historicalCandidates[$key];$id=(string)($receipt['receipt_id']??'');
+                if($id===''||isset($seen[$id])||(int)($receipt['member_id']??-1)!==$old['member_id']
+                    ||($receipt['business_date']??'')!==$old['business_date'])
+                    throw new \LogicException('历史原单收款身份重复或不一致');
+                $seen[$id]=true;$sums[$key]=($sums[$key]??0)+$this->cents($receipt['amount_cents']??null);
+            }
+            foreach($historicalCandidates as $key=>$old){
+                if(isset($legacyPaid[$key])||!isset($sums[$key]))continue;
+                $amount=$sums[$key];$store=$old['store_id'];
+                if($amount!==$expectedByOrder[$key]){
+                    $gaps[$store][]=['code'=>'ORIGINAL_CASH_HISTORICAL_RECEIPT_AMOUNT_DIFF','source_order_id'=>$old['source_order_id'],
+                        'expected_cents'=>$expectedByOrder[$key],'receipt_cents'=>$amount];continue;
+                }
+                $id='historical:order:'.$old['source_order_id'];
+                $legacyPaid[$key]=$amount;$amounts[$store]+=$amount;$amountsByOrder[$store][$id]=$amount;
+                $historicalOrders[]=['source_kind'=>'historical_007_original_receipt','store_id'=>$store,'order_id'=>$id,
+                    'business_date'=>$old['business_date'],'member_id'=>$old['member_id'],
+                    'legacy_source_id'=>$old['legacy_source_id'],'friend'=>$old['friend'],
+                    'cash_identity_verified'=>true];
+            }
+        }
         foreach ($expectedByOrder as $key=>$oldCents) {
             [$store]=explode('|',$key,2);$actual=$legacyPaid[$key]??null;
             if ($actual===null && $oldCents>0) $gaps[(int)$store][]=[
@@ -115,17 +156,18 @@ final class Sidebar007OriginalCashReadServices
         $byStore=[];
         foreach ($stores as $store) $byStore[$store]=[
             'store_id'=>$store,'amount_cents'=>empty($gaps[$store])?$amounts[$store]:null,
-            'v3_candidate_cents'=>$amounts[$store], 'complete'=>empty($gaps[$store]),
+            'v3_candidate_cents'=>$v3Amounts[$store], 'certified_historical_cents'=>$amounts[$store]-$v3Amounts[$store], 'complete'=>empty($gaps[$store]),
             'gaps'=>$gaps[$store]??[]];
         $certifiedOrders=[];
         foreach($stores as $store)$certifiedOrders[$store]=empty($gaps[$store])
             ?($amountsByOrder[$store]??[]):[];
-        return ['by_store'=>$byStore,'by_order'=>$certifiedOrders,'source'=>'cashier_v3_payment_fact',
-            'definition'=>'007-original-sales-and-recharge-cash-v3',
+        return ['by_store'=>$byStore,'by_order'=>$certifiedOrders,'source'=>'cashier_v3_payment_fact_and_certified_historical_receipts',
+            'definition'=>'007-original-sales-and-recharge-cash-v3-and-certified-original-receipt',
+            'historical_orders'=>$historicalOrders,
             'complete'=>count($gaps)===0,'gaps'=>$gaps];
     }
 
-    /** 事实金额必须是已保存整数分；旧原单金额也只作相等性证明。 */
+    /** 事实与受控原收款金额必须为整数分；原单金额仍需逐笔相等性证明。 */
     private function cents($value): int
     {
         if (!is_int($value) && !(is_string($value)&&preg_match('/^\d{1,15}$/D',$value)))
@@ -201,8 +243,8 @@ final class Sidebar007OriginalCashReadServices
     }
 
     /**
-     * 旧订单只用于检查每笔迁入收款覆盖。007 直接支付取 pay_price，组合
-     * 按有效组合行求和；这些旧金额绝不进入上方返回的现金业绩。
+     * 旧订单检查迁入覆盖并为未迁原单建立待核身份。007 直接支付取 pay_price，
+     * 组合按有效行求和；只有共享收款Reader逐单同额认证后才纳入历史金额。
      */
     private function legacyOrders(array $stores,array $range): array
     {
@@ -226,7 +268,7 @@ final class Sidebar007OriginalCashReadServices
         $migratedOrders=[];
         foreach(array_chunk(array_values(array_unique($headerIds)),500) as $ids){
             foreach($this->legacyBaseQuery($stores)->whereIn('id',$ids)
-                ->field('id,store_id,pay_type,pid,cash_choose,pay_price,pay_time,is_system_del')
+                ->field('id,order_id,uid,source,service_object,order_type,store_id,pay_type,pid,cash_choose,pay_price,pay_time,is_system_del')
                 ->limit(50001)->select()->toArray() as $old)
                 $migratedOrders[(int)$old['id']]=$old;
         }
@@ -238,7 +280,7 @@ final class Sidebar007OriginalCashReadServices
                 $pay->whereBetween('pay_time',[$from,$until])
                     ->whereOrRaw('pay_time IS NULL OR pay_time=0');
             })
-            ->field('id,store_id,pay_type,pid,cash_choose,pay_price,pay_time,is_system_del')
+            ->field('id,order_id,uid,source,service_object,order_type,store_id,pay_type,pid,cash_choose,pay_price,pay_time,is_system_del')
             ->limit(50001)->select()->toArray();
         if(count($candidates)>50000)throw new \RuntimeException('旧原单覆盖超过安全范围');
         foreach(array_chunk($candidates,500) as $batch){
@@ -280,7 +322,11 @@ final class Sidebar007OriginalCashReadServices
             }
             if($amount>0)$out[]=['store_id'=>(int)$order['store_id'],
                 'source_order_id'=>(string)$id,'expected_cents'=>$amount,
-                'business_date_unresolved'=>$dateState==='unresolved'];
+                'business_date_unresolved'=>$dateState==='unresolved',
+                'unmigrated_original'=>($order['migrated_header_id']??null)===null&&in_array((int)$order['order_type'],[0,1],true),
+                'document_no'=>(string)$order['order_id'],'member_id'=>(int)$order['uid'],
+                'legacy_source_id'=>(int)$order['source'],'friend'=>trim((string)$order['service_object'])==='朋友',
+                'business_date'=>($order['migrated_business_date']??null)?:($dateState==='unresolved'?'':(new \DateTimeImmutable('@'.(int)$order['pay_time']))->setTimezone($zone)->format('Y-m-d'))];
         }
         return $out;
     }

@@ -7,7 +7,7 @@ use think\facade\Db;
 
 /**
  * 007 门店消耗/服务客数的服务订单桥。旧子单按 link_id 精确连接 V3 原
- * 核销服务，同一核销关联两笔有效子单时保留两笔；金额与业务日仍取 V3。
+ * 核销服务，同一核销关联两笔有效子单时保留两笔；原生金额与业务日取 V3；认证历史来源采用已批准的原核销金额和业务日。
  * 新 V3 服务按其正式服务单身份计一次，授权店只看自身归属的结果。
  */
 final class Sidebar007ServiceOrderReadServices
@@ -62,7 +62,7 @@ final class Sidebar007ServiceOrderReadServices
                 if(!ctype_digit($old)||(int)$old<1||isset($legacyIds[(int)$old]))
                     throw new \LogicException('旧核销来源身份无效或重复');
                 $legacyIds[(int)$old]=$fact;
-            }elseif(!in_array($type,['direct','sales_order'],true))
+            }elseif(!in_array($type,['direct','sales_order','reservation'],true))
                 throw new \LogicException('未知服务订单来源');
         }
         $old=($this->legacyOrderReader)($stores,$range,array_keys($legacyIds));
@@ -87,7 +87,10 @@ final class Sidebar007ServiceOrderReadServices
             if((int)($order['uid']??-1)!==(int)$fact['member_id']
                 ||$oldFriend!==$v3Friend
                 ||$origin<1||(int)($order['link_order']??0)!==$origin
-                ||$this->oldMoney($order['pay_price']??null)!==(int)$fact['amount_cents'])
+                // Historical consumption uses the explicitly approved original writeoff amount;
+                // old suborder pay_price may retain a different fractional settlement amount.
+                ||(($fact['source_kind']??'')!=='historical_007_card_service'
+                    &&$this->oldMoney($order['pay_price']??null)!==(int)$fact['amount_cents']))
                 return $this->gap($stores,[['code'=>'LEGACY_SERVICE_ORDER_IDENTITY_OR_AMOUNT_DIFF',
                     'source_order_id'=>$orderId]]);
         }
@@ -129,6 +132,11 @@ final class Sidebar007ServiceOrderReadServices
         return ['by_store'=>$byStore,
             'store_ids'=>$stores,'complete'=>true,'gaps'=>[],
             'qualified_entries'=>$qualifiedEntries,
+            // Exact certified period population for downstream personnel coverage; never scan all history.
+            'service_rows'=>$source['rows'],
+            // Preserve the adapter provenance for the shared original-personnel projection.
+            'historical_services'=>array_values(array_filter($source['rows'],static fn(array $r):bool=>
+                ($r['source_kind']??'')==='historical_007_card_service')),
             'source'=>'certified_v3_service_amount_by_007_service_order'];
     }
 
@@ -147,12 +155,13 @@ final class Sidebar007ServiceOrderReadServices
         $entries[]=['store_id'=>$store,'business_date'=>$day,'member_id'=>$member,
             'friend'=>$object==='friend','order_id'=>'service:'.$order,
             'service_fact_id'=>(string)$fact['service_fact_id'],
+            'source_kind'=>(string)($fact['source_kind']??'v3_service_fact'),
             'aftercare_cash_eligible'=>$aftercareEligible];
         $key=($member===0||$object==='friend')?'order:'.$order:'member:'.$day.':'.$member;
         if(!isset($seen[$store][$key])){$seen[$store][$key]=true;++$counts[$store];}
     }
 
-    /** 旧金额只核对来源，不用于填报表；历史归整差异留缺口。 */
+    /** 旧子单金额只校验已迁 V3 身份；未迁历史金额由统一原核销桥认证。 */
     private function oldMoney($value):?int
     {
         if(!preg_match('/^(\d{1,13})(?:\.(\d{1,2})(?:0{1,4})?)?$/D',(string)$value,$parts))
@@ -167,10 +176,16 @@ final class Sidebar007ServiceOrderReadServices
         foreach(array_chunk($legacyIds,500) as $ids){
             $batch=Db::name('store_order')->whereIn('store_id',$stores)
                 ->whereIn('link_id',$ids)->where('order_type',2)->where('paid',1)
-                ->where('refund_status',0)->where('is_system_del',0)
-                ->field('id,store_id,uid,link_id,link_order,service_object,pay_price,pay_type,cash_choose')
+                ->where('refund_status',0)->whereIn('is_system_del',[0,1])
+                ->field('*')
                 ->limit(100001)->select()->toArray();
             if(count($batch)>100000)throw new \RuntimeException('服务子单超过安全范围');
+            // Complete rows are required for the independent archive fingerprint. Only
+            // exact sealed-result proofs admit archived children; other deletion stays excluded.
+            $certified=(new ServiceOrderArchiveProvenanceServices())->certified($batch);
+            $batch=array_values(array_filter($batch,static fn(array $row):bool=>
+                (int)$row['is_system_del']===0||isset($certified[(int)$row['id']])));
+
             $combinationIds=[];
             foreach($batch as $row)if((string)($row['pay_type']??'')==='combination')
                 $combinationIds[]=(int)$row['id'];
@@ -197,19 +212,34 @@ final class Sidebar007ServiceOrderReadServices
     }
 
     /**
-     * 归属店有跨店旧子单且执行店不在授权范围时拒绝局部结果。
-     * 无 V3 事实的旧跨店子单缺业务日，仍须保守阻断，不能用旧 add_time
-     * 判定它不属于当前期间而悄悄漏掉。
+     * 跨店子单只阻断本期：已迁服务用事实业务日，未迁原核销采用已批准
+     * 的 add_time 导入业务日。不能让数年前跨店记录永久阻断每月报表；
+     * 本期真正的授权外来源仍保留缺口，不擅自扩大调用者门店权限。
      */
     private function crossStoreCount(array $stores,array $range):int
     {
-        $count=Db::name('store_order')->alias('o')
+        $zone=new \DateTimeZone('Asia/Shanghai');
+        $start=(new \DateTimeImmutable($range['start'],$zone))->getTimestamp();
+        $end=(new \DateTimeImmutable($range['end'],$zone))->modify('+1 day')->getTimestamp();
+        $rows=Db::name('store_order')->alias('o')
             ->join('store_order_writeoff w','w.id=o.link_id')
+            ->leftJoin('cashier_v3_entitlement_service_fact s',
+                "s.tenant_id='0' AND s.source_document_type IN ('legacy_writeoff','legacy_paid_project') AND s.source_document_id=CAST(w.id AS CHAR)")
             ->whereIn('o.store_id',$stores)->whereNotIn('w.relation_id',$stores)
             ->where('o.order_type',2)->where('o.paid',1)->where('o.refund_status',0)
-            ->where('o.is_system_del',0)
-            ->count();
-        return (int)$count;
+            ->whereIn('o.is_system_del',[0,1])
+            ->where(function($q)use($range,$start,$end):void{
+                $q->whereBetween('s.business_date',[$range['start'],$range['end']])
+                    ->whereOr(function($missing)use($start,$end):void{
+                        $missing->whereNull('s.service_fact_id')->where(function($day)use($start,$end):void{
+                            $day->whereBetween('w.add_time',[$start,$end-1])->whereOr('w.add_time','<=',0);
+                        });
+                    });
+            })->field('o.*')->distinct(true)->limit(100001)->select()->toArray();
+        if(count($rows)>100000)throw new \RuntimeException('跨店原服务子单超过安全范围');
+        $certified=(new ServiceOrderArchiveProvenanceServices())->certified($rows);
+        return count(array_filter($rows,static fn(array $row):bool=>
+            (int)$row['is_system_del']===0||isset($certified[(int)$row['id']])));
     }
 
     private function gap(array $stores,array $gaps):array

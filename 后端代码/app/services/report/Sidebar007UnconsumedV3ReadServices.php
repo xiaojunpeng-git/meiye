@@ -130,7 +130,7 @@ final class Sidebar007UnconsumedV3ReadServices
                 $project = (int)($item['project_detail_id'] ?? 0);
                 $identity = $holder.':'.$project;
                 if ($holder < 1 || $project < 1 || isset($seen[$identity])
-                    || !in_array((int)($item['card_store_id'] ?? 0), $stores, true)) {
+                    || !in_array((int)($item['store_id'] ?? 0), $stores, true)) {
                     throw new \LogicException('V3 项目组件身份重复或越权');
                 }
                 $seen[$identity] = true; $projects[] = $item;
@@ -228,7 +228,7 @@ final class Sidebar007UnconsumedV3ReadServices
         $sale = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(array_values($orders), array_values($carts));
         $rules = (new CashierV3CardRuleEntitlementAuthorityServices())->authoritiesForHolders(
             CashierV3ScopeResolver::TENANT_SCOPE_ID, array_keys($holderIds));
-        $v3Used = []; $legacyRows = []; $legacyMapped = []; $invalidUsed = []; $v3Facts = []; $writeoffIds = [];
+        $v3Used = []; $legacyMapped = []; $invalidUsed = []; $v3Facts = []; $writeoffIds = [];
         foreach (array_chunk(array_keys($holderIds), 200) as $chunkHolderIds) {
             foreach (Db::name('cashier_v3_entitlement_writeoff_fact')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 // The fact index starts with tenant and holder. Adding a
@@ -257,15 +257,21 @@ final class Sidebar007UnconsumedV3ReadServices
                 }
             }
         }
-        foreach (array_chunk(array_keys($byDetail), 200) as $chunk) {
-            foreach (Db::name('store_order_writeoff')->whereIn('order_cart_id', $chunk)->where('status', 0)
-                ->field('id,order_cart_id,uid')->select()->toArray() as $fact) {
-                $id = (int)$fact['order_cart_id']; $project = $byDetail[$id] ?? null;
-                if (!$project || (int)$fact['uid'] !== (int)$project['member_id']) {
-                    $invalidUsed[$id] = true; continue;
-                }
-                $legacyRows[$id][] = (int)$fact['id'];
-            }
+        // 旧核销统一走共享007兼容Reader；它核实原单、组件、持卡、终态与
+        // 已迁同源排重，不能在本表复制旧SQL或以购卡额减当前余额猜已用额。
+        $historical = (new HistoricalCardService007ReadServices())->readComponents(array_values($byDetail));
+        foreach ($historical['gaps'] as $gap) {
+            $detail = (int)($gap['project_detail_id'] ?? 0);
+            if (isset($byDetail[$detail])) $invalidUsed[$detail] = true;
+            else foreach ($byDetail as $id => $_) $invalidUsed[$id] = true;
+        }
+        foreach ($historical['rows'] as $receipt) {
+            $id = (int)$receipt['project_detail_id'];
+            if (!isset($byDetail[$id])) throw new \LogicException('历史核销投影越出授权组件');
+            $amount = $receipt['amount_cents'];
+            if (!is_int($amount) || $amount < 0 || ($v3Used[$id] ?? 0) > PHP_INT_MAX - $amount)
+                throw new \LogicException('历史已用金额无效或溢出');
+            $v3Used[$id] = ($v3Used[$id] ?? 0) + $amount;
         }
         // 服务作废保留原核销事实，再以返还事实加成功操作证明取消；
         // 仅有返还草稿不能从已用额中扣除。
@@ -294,9 +300,31 @@ final class Sidebar007UnconsumedV3ReadServices
         $out = [];
         foreach ($byDetail as $id => $project) {
             $cart = $carts[$id] ?? null; $order = $orders[(int)$project['origin_order_id']] ?? null;
-            if (!$cart || !$order || (int)$cart['oid'] !== (int)$order['id']
-                || (int)$order['uid'] !== (int)$project['member_id']
-                || !in_array((int)$order['store_id'], $stores, true)) continue;
+            if (!$cart || !$order || (int)$cart['oid'] !== (int)$order['id']) continue;
+            // 原购买额随合法转卡保留；订单买家不应被改成现持卡人。
+            if ((int)$order['uid'] !== (int)$project['member_id']
+                && !(new ReportCardTransferProofServices())->memberIds((int)$project['card_holder_id'],
+                    (int)$order['id'], (int)$order['uid'], (int)$project['member_id'])) continue;
+            // 权威源已按当前会员所属店裁剪并校验持卡/组件身份；007允许本店
+            // 会员持有外店购买的卡，不能再次按原购店过滤而伪造金额缺口。
+            if (($project['imported_entitlement'] ?? false) === true) {
+                // 隐藏技术单的0元不是历史购买额。只有单一原组件可直接使用
+                // 迁入审计保存的购买金额；多组件无分配证明时不重复整卡金额。
+                $componentCount = 0;
+                foreach ($carts as $component) if ((int)$component['oid'] === (int)$order['id']) ++$componentCount;
+                $sourcePaid = \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::sourcePaidPrice(
+                    (int)$project['card_holder_id'], CashierV3ScopeResolver::TENANT_SCOPE_ID);
+                if ($sourcePaid !== null) {
+                    $sourcePaidCents = $this->moneyCents($sourcePaid);
+                    // 原总实付确为0时，每组件购买额必为0，无需猜分配权重。
+                    if ($componentCount === 1 || $sourcePaidCents === 0)
+                        $out[$id]['purchase_amount'] = $sourcePaidCents / 100;
+                }
+                // 当前余次是导入截面，不证明导入前已用金额为0；历史核销未迁
+                // 到完整可追溯事实前，不能仅累加导入后的核销冒充全历史已用额。
+                $out[$id]['used_amount'] = null;
+                continue;
+            }
             // 007 only exposes paid, nondeleted, nonrefunded original orders.
             // Its unconsumed SQL does not add the separate rights-table gift
             // exclusion, so keep this report's card population independent.
@@ -330,11 +358,7 @@ final class Sidebar007UnconsumedV3ReadServices
                     }
                 }
             }
-            // Every old effective writeoff must have one exact V3 source ID.
-            // The old amount is never added; it only checks migration coverage.
-            foreach ($legacyRows[$id] ?? [] as $legacyId) {
-                if (($legacyMapped[$legacyId] ?? null) !== $id) $invalidUsed[$id] = true;
-            }
+            // 新事实与经核实且未重复的旧来源由同一后端累加，缺源行保持显式缺口。
             if (!isset($invalidUsed[$id]))
                 $out[$id]['used_amount'] = ($v3Used[$id] ?? 0) / 100;
         }

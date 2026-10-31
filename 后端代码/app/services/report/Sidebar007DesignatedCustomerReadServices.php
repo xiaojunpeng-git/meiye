@@ -47,7 +47,7 @@ final class Sidebar007DesignatedCustomerReadServices
         if(!is_array($services)||!is_bool($services['complete']??null))
             throw new \LogicException('指定客服务来源无效');
         if(!$services['complete'])return $this->gap($stores,$services['gaps']??[]);
-        $coverage=($this->legacyCoverageReader)($stores,$range);
+        $coverage=($this->legacyCoverageReader)($stores,$range,$services);
         if(!is_array($coverage)||!is_bool($coverage['complete']??null))
             throw new \LogicException('指定客历史劳务覆盖无效');
         if(!$coverage['complete'])return $this->gap($stores,$coverage['gaps']??[]);
@@ -62,7 +62,7 @@ final class Sidebar007DesignatedCustomerReadServices
         if(!is_array($metric)||!is_array($metric['detail_context_by_labor_key']??null))
             throw new \LogicException('指定客劳务事实来源无效');
         $allowed=array_fill_keys($stores,true);$counts=array_fill_keys($stores,0);$seen=[];
-        foreach($metric['detail_context_by_labor_key'] as $line){
+        foreach(array_merge(array_values($metric['detail_context_by_labor_key']),$coverage['historical_contexts']??[]) as $line){
             if(!is_array($line))throw new \LogicException('指定客劳务行无效');
             $id=(int)($line['store_id']??0);
             if(!isset($allowed[$id]))throw new \LogicException('指定客劳务越权');
@@ -85,28 +85,39 @@ final class Sidebar007DesignatedCustomerReadServices
         }
         return ['by_store'=>$counts,'complete'=>true,'gaps'=>[],
             'legacy_coverage'=>$coverage,'excluded_friend_source'=>$excluded,
-            'source'=>'v3_point_labor_customer_identity'];
+            'source'=>'certified_v3_and_original_007_point_labor_identity'];
     }
 
     /**
-     * 历史点客记录只用于证明没有漏迁；实际人数来自V3。无V3服务身份、
-     * 无对应有效点客劳动分配时整批留空，不以旧记录补数。
+     * 本期已认证的迁入服务逐原核销核对点客分配；未迁服务复用已批准的原核销
+     * 人员桥。两组互斥，不能用历史全量关联阻断当前期间或重复计客。
      */
-    private function legacyCoverage(array $stores,array $range):array
+    private function legacyCoverage(array $stores,array $range,array $services):array
     {
         $performanceTable=Db::name('cashier_v3_performance_fact')->getTable();
         if(!is_string($performanceTable)
             ||!preg_match('/^[A-Za-z0-9_]+$/D',$performanceTable))
             throw new \LogicException('点客劳务事实表名无效');
-        $rows=Db::name('staff_yeji')->alias('y')
+        $ids=[];
+        foreach($services['service_rows']??[] as $service)
+            if(in_array($service['source_document_type']??'',['legacy_writeoff','legacy_paid_project'],true)
+                &&($service['source_kind']??'')!=='historical_007_card_service')
+                $ids[]=(int)$service['source_document_id'];
+        $rows=[];
+        foreach(array_chunk(array_values(array_unique($ids)),200) as $chunk){
+        $batch=Db::name('staff_yeji')->alias('y')
+            // Original staff_id identifies employment, while V3 employee_id identifies the person.
+            ->leftJoin('system_store_staff staff','staff.id=y.staff_id')
             ->leftJoin('cashier_v3_entitlement_service_fact s',
                 "s.tenant_id='0' AND s.store_id=y.store_id AND s.source_document_type IN ('legacy_writeoff','legacy_paid_project') AND s.source_document_id=CAST(y.link_id AS CHAR)")
             ->leftJoin('cashier_v3_performance_fact p',
-                "p.tenant_id=s.tenant_id AND p.store_id=s.store_id AND p.checkout_request_id=s.checkout_request_id AND p.source_line_id=s.source_line_id AND p.employee_id=y.staff_id AND p.performance_type='labor_performance_allocated' AND p.status='effective' AND p.fact_direction='forward' AND p.role_snapshot LIKE '%:point' AND NOT EXISTS (SELECT 1 FROM `{$performanceTable}` rv WHERE rv.tenant_id=p.tenant_id AND rv.reversal_of=p.fact_id AND rv.fact_direction='reversal' AND rv.status='effective')")
-            ->whereIn('y.store_id',$stores)->where('y.type',3)
+                "p.tenant_id=s.tenant_id AND p.store_id=s.store_id AND p.checkout_request_id=s.checkout_request_id AND p.source_line_id=s.source_line_id AND p.employee_id=staff.employee_id AND p.performance_type='labor_performance_allocated' AND p.status='effective' AND p.fact_direction='forward' AND p.role_snapshot LIKE '%:point' AND NOT EXISTS (SELECT 1 FROM `{$performanceTable}` rv WHERE rv.tenant_id=p.tenant_id AND rv.reversal_of=p.fact_id AND rv.fact_direction='reversal' AND rv.status='effective')")
+            ->whereIn('y.store_id',$stores)->whereIn('y.link_id',$chunk)->where('y.type',3)
             ->where('y.is_dian',1)->where('y.status',0)
             ->field('y.id old_id,s.service_fact_id,s.business_date,p.fact_id point_fact_id')
             ->limit(50001)->select()->toArray();
+        $rows=array_merge($rows,$batch);
+        }
         if(count($rows)>50000)return ['complete'=>false,
             'gaps'=>[['code'=>'DESIGNATED_LEGACY_SOURCE_TOO_LARGE']]];
         $gaps=[];$seen=[];
@@ -123,10 +134,27 @@ final class Sidebar007DesignatedCustomerReadServices
             $day=(string)($row['business_date']??'');
             if($day>=$range['start']&&$day<=$range['end']
                 &&(string)($row['point_fact_id']??'')===''){
-                $gaps[]=['code'=>'DESIGNATED_POINT_LABOR_FACT_MISSING'];break;
+                $gaps[]=['code'=>'DESIGNATED_POINT_LABOR_FACT_MISSING','source_labor_id'=>$id,'service_fact_id'=>$service];break;
             }
         }
-        return ['complete'=>$gaps===[],'gaps'=>$gaps,'legacy_rows'=>count($rows)];
+        // The approved original service bridge excludes migrated writeoffs. Its personnel
+        // therefore contributes exactly once and shares member/day deduplication with V3.
+        $historical=$services['historical_services']??[];$contexts=[];
+        if($historical){
+            $people=(new HistoricalCardService007ReadServices())->personnel($historical);
+            $gaps=array_merge($gaps,$people['gaps']);$by=[];
+            foreach($historical as $service)$by[(int)$service['source_writeoff_id']]=$service;
+            foreach($people['rows'] as $person){
+                if(!$person['is_point_customer'])continue;
+                $service=$by[$person['source_writeoff_id']];$member=(int)$service['member_id'];
+                $subject=$member===0||$service['service_object']==='friend'
+                    ?'record:historical-labor:'.$person['source_labor_id']:'member:'.$member;
+                $contexts[]=['store_id'=>$person['service_store_id'],'business_date'=>$person['business_date'],
+                    'subject'=>$subject,'point'=>true];
+            }
+        }
+        return ['complete'=>$gaps===[],'gaps'=>$gaps,'legacy_rows'=>count($rows),
+            'historical_contexts'=>$contexts];
     }
 
     /** 被通用指标跳过的朋友服务按原点客劳务记录逐条补算。 */
@@ -197,6 +225,6 @@ final class Sidebar007DesignatedCustomerReadServices
     private function gap(array $stores,array $gaps):array
     {
         return ['by_store'=>array_fill_keys($stores,null),'complete'=>false,
-            'gaps'=>$gaps,'source'=>'v3_point_labor_customer_identity'];
+            'gaps'=>$gaps,'source'=>'certified_v3_and_original_007_point_labor_identity'];
     }
 }
