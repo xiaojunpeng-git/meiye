@@ -13,13 +13,16 @@ final class Sidebar007PartnerServiceAllocationReadServices
 {
     private $serviceReader;
     private $factReader;
+    private $historicalPersonnelReader;
 
-    /** 注入只供合同测试；正式人员类型与分配额均来自不可变 V3 劳务事实。 */
-    public function __construct(?callable $serviceReader=null,?callable $factReader=null)
+    /** 注入只供合同测试；原生分配来自唯一 V3 事实；旧分配只走共享认证原核销人员桥。 */
+    public function __construct(?callable $serviceReader=null,?callable $factReader=null,?callable $historicalPersonnelReader=null)
     {
         $this->serviceReader=$serviceReader ?: static fn(array $stores,array $range):array=>
             (new Sidebar007ServiceOrderReadServices())->read($stores,$range);
         $this->factReader=$factReader ?: [$this,'laborFacts'];
+        $this->historicalPersonnelReader=$historicalPersonnelReader ?: static fn(array $rows):array=>
+            (new HistoricalCardService007ReadServices())->personnel($rows);
     }
 
     /** 对同一核销的两张旧子单分别归店，partner 扣减也逐子单同样计两笔。 */
@@ -43,10 +46,42 @@ final class Sidebar007PartnerServiceAllocationReadServices
                 throw new \LogicException('店内消耗子单身份越权或缺失');
             $serviceIds[$factId]=true;
         }
-        $facts=($this->factReader)($stores,array_keys($serviceIds));
+        // Historical rows keep their original identity; never fabricate V3 personnel facts.
+        $historical=$source['historical_services']??[];$oldIds=[];$historicalByService=[];
+        foreach($historical as $row){
+            $id=(string)($row['service_fact_id']??'');$old=(int)($row['source_writeoff_id']??0);
+            if(($row['source_kind']??'')!=='historical_007_card_service'||$old<1
+                ||$id!=='historical:writeoff:'.$old||!isset($serviceIds[$id])||isset($oldIds[$old])
+                ||!isset($allowed[(int)($row['service_store_id']??0)]))
+                throw new \LogicException('历史服务合作方来源身份无效');
+            $oldIds[$old]=$id;
+            $historicalByService[$id]=['store_id'=>(int)$row['service_store_id'],
+                'labor_amount_cents'=>0,'partner_cents'=>0,'has_labor_fact'=>true,'certified_zero_allocation'=>false];
+        }
+        if($historical){
+            $oldPeople=($this->historicalPersonnelReader)($historical);
+            if(!($oldPeople['complete']??false))return $this->gap($stores,$oldPeople['gaps']??[]);
+            $seenOld=[];
+            foreach($oldPeople['rows'] as $person){
+                $old=(int)($person['source_writeoff_id']??0);$labor=(int)($person['source_labor_id']??0);
+                $id=$oldIds[$old]??'';$amount=$person['amount_cents']??null;
+                if($id===''||$labor<1||isset($seenOld[$labor])||!is_int($amount)||$amount<0
+                    ||($person['source_kind']??'')!=='historical_007_card_labor'
+                    ||(int)($person['service_store_id']??0)!==$historicalByService[$id]['store_id']
+                    ||!in_array($person['employee_type_snapshot']??'', ['internal','partner'],true))
+                    throw new \LogicException('历史服务人员分配身份无效');
+                $seenOld[$labor]=true;
+                if($person['employee_type_snapshot']==='partner'){
+                    if($historicalByService[$id]['partner_cents']>PHP_INT_MAX-$amount)
+                        throw new \OverflowException('历史服务合作方分配溢出');
+                    $historicalByService[$id]['partner_cents']+=$amount;
+                }
+            }
+        }
+        $facts=($this->factReader)($stores,array_values(array_diff(array_keys($serviceIds),array_values($oldIds))));
         if(!is_array($facts)||count($facts)>100000)
             throw new \LogicException('合作方服务劳务来源过大');
-        $byService=[];$seenFact=[];$gaps=[];
+        $byService=$historicalByService;$seenFact=[];$gaps=[];
         foreach($facts as $row){
             $service=(string)($row['service_fact_id']??'');
             $store=(int)($row['service_store_id']??0);
@@ -66,6 +101,7 @@ final class Sidebar007PartnerServiceAllocationReadServices
             $byService[$service]['labor_amount_cents']=$laborInteger;
             $byService[$service]['partner_cents']??=0;
             $byService[$service]['has_labor_fact']??=false;
+            $byService[$service]['certified_zero_allocation']=$this->zeroAllocationSnapshot($row);
             $factId=(string)($row['fact_id']??'');
             if($factId==='')continue;
             if(isset($seenFact[$factId]))throw new \LogicException('合作方劳务事实重复');
@@ -77,9 +113,9 @@ final class Sidebar007PartnerServiceAllocationReadServices
             $direction=(string)($row['fact_direction']??'');
             $amount=$row['amount_cents']??null;
             if($employee<1||!in_array($type,['internal','partner','outsourced'],true)
-                ||$version<1||!in_array($direction,['forward','reversal'],true)
+                ||($version<1&&(int)($row['employee_type_certified']??0)!==1)||!in_array($direction,['forward','reversal'],true)
                 ||!is_numeric($amount)||!preg_match('/^-?(?:0|[1-9][0-9]*)$/D',(string)$amount)){
-                $gaps[]=['code'=>'PARTNER_SERVICE_EMPLOYEE_SNAPSHOT_UNVERIFIED'];break;
+                $gaps[]=['code'=>'PARTNER_SERVICE_EMPLOYEE_SNAPSHOT_UNVERIFIED','fact_id'=>$factId,'service_fact_id'=>$service];break;
             }
             $amount=filter_var((string)$amount,FILTER_VALIDATE_INT);
             if($amount===false){$gaps[]=['code'=>'PARTNER_SERVICE_AMOUNT_OUT_OF_RANGE'];break;}
@@ -94,10 +130,11 @@ final class Sidebar007PartnerServiceAllocationReadServices
                 $byService[$service]['partner_cents']=$current+$amount;
             }
         }
+        if($gaps!==[])return $this->gap($stores,$gaps);
         foreach(array_keys($serviceIds) as $factId){
             $item=$byService[$factId]??null;
             if($item===null){$gaps[]=['code'=>'PARTNER_SERVICE_FACT_MISSING'];break;}
-            if($item['labor_amount_cents']>0&&!$item['has_labor_fact']){
+            if($item['labor_amount_cents']>0&&!$item['has_labor_fact']&&!$item['certified_zero_allocation']){
                 $gaps[]=['code'=>'PARTNER_SERVICE_LABOR_FACT_MISSING'];break;
             }
         }
@@ -123,10 +160,37 @@ final class Sidebar007PartnerServiceAllocationReadServices
             'gaps'=>[],'source'=>'service_order_consumption_minus_same_service_partner_labor'];
     }
 
+    /**
+     * 原生完成服务在金额、劳务费、项目数均为零时不会写劳动分配事实。
+     * 只能由该次服务的完整冻结人员快照证明这个合法零，不能凭正消耗
+     * 基数、当前员工档案或空快照推定零；任何非零分配仍必须有事实。
+     */
+    private function zeroAllocationSnapshot(array $row):bool
+    {
+        if(!in_array($row['source_document_type']??'', ['direct','sales_order','reservation'],true))return false;
+        $people=json_decode((string)($row['craftsmen_snapshot_json']??''),true);
+        if(!is_array($people)||!$people||array_keys($people)!==range(0,count($people)-1))return false;
+        foreach($people as $person){
+            if(!is_array($person)||(int)($person['employee_id']??0)<1
+                ||(int)($person['staff_id']??0)<1
+                ||(int)($person['store_id']??0)!==(int)$row['service_store_id']
+                ||(int)($person['employee_type_authority_version']??0)<1
+                ||!in_array($person['employee_type_snapshot']??'', ['internal','partner','outsourced'],true)
+                ||!array_key_exists('amount_cents',$person)||(string)$person['amount_cents']!=='0'
+                ||!array_key_exists('labor_fee_cents',$person)||(string)$person['labor_fee_cents']!=='0'
+                ||!array_key_exists('project_count_decimal',$person)||(string)$person['project_count_decimal']!=='0'
+                ||(string)($person['project_count_half_units']??0)!=='0')return false;
+        }
+        return true;
+    }
+
     /** 只按认证服务ID读取同次有效劳动分配；原分配与有效冲销均保留符号。 */
     private function laborFacts(array $stores,array $serviceIds):array
     {
         $out=[];
+        // 旧导入可能有冻结人员类型但无当前档案版本；只接受独立认证表
+        // 与完整事实指纹相符的来源证明，不能按当前人员或ID前缀放行。
+        $unknown=ImportedPerformanceTypeProvenanceServices::unverifiedSql('p');
         foreach(array_chunk($serviceIds,500) as $chunk){
             $rows=Db::name('cashier_v3_entitlement_service_fact')->alias('s')
                 ->leftJoin('cashier_v3_performance_fact p',
@@ -134,8 +198,9 @@ final class Sidebar007PartnerServiceAllocationReadServices
                 ->where('s.tenant_id','0')->whereIn('s.store_id',$stores)
                 ->whereIn('s.service_fact_id',$chunk)
                 ->field('s.service_fact_id,s.store_id service_store_id,s.labor_amount_cents,'
-                    .'p.fact_id,p.employee_id,p.employee_type_snapshot,'
+                    .'s.source_document_type,s.craftsmen_snapshot_json,p.fact_id,p.employee_id,p.employee_type_snapshot,'
                     .'p.employee_type_authority_version,p.fact_direction,p.amount_cents')
+                ->fieldRaw('IF(NOT '.$unknown.',1,0) employee_type_certified')
                 ->limit(100001)->select()->toArray();
             if(count($rows)>100000)throw new \RuntimeException('合作方劳务事实超过安全范围');
             $out=array_merge($out,$rows);

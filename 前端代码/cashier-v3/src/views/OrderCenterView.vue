@@ -465,10 +465,13 @@ function orderSalesAttributionQuery(query) {
   if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => !hiddenSalesAttributionKeys.has(key))
   return result
 }
-const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)).map(item => (
-  item?.key === 'craftsman' && !orderLaborFeeVisible.value
+const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)).map(item => {
+  const presented = item?.key === 'craftsman' && !orderLaborFeeVisible.value
     ? { ...item, label: '手艺人（类型，业绩，项目数）' } : item
-))
+  // 欠款列受实例开关控制，能力白名单可合法移除它；不能因一个
+  // 关闭字段把整个订单页的更多筛选能力一起关闭。
+  return presented?.key === 'debt_amount' ? { ...presented, permissionFiltered: true } : presented
+})
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
@@ -3839,9 +3842,10 @@ watch(isPlatformReadOnly, (readOnly) => {
 }, { immediate: true })
 
 watch(activeTabKey, () => {
-  // 平台页没有可保存的统一查询设置；它与门店页都由当天默认查询直接
-  // 驱动，避免工具栏显示值与首屏后端结果再次分叉。
-  if (!isPlatformReadOnly.value) activeUnifiedQuery.value?.load({ silent: true })
+  // 平台页也必须读取当前页签的服务端字段白名单，否则“更多筛选”
+  // 会因缺少可验证的筛选字段而安全隐藏。平台写入和导出仍由
+  // activeQueryCapability 及平台 HTTP adapter 双重关闭。
+  activeUnifiedQuery.value?.load({ silent: true })
 }, { immediate: true })
 
 watch(
@@ -3934,9 +3938,9 @@ onBeforeUnmount(() => {
       <button type="button" class="button button--text" @click="leaveSalesReportDrilldown">退出报表筛选</button>
     </p>
 
-    <!-- 门店各订单页复用动态统计筛选；平台只读和报表下钻仍保留原入口及约束。 -->
+    <!-- 门店与平台订单页复用同一最新版动态筛选；平台仍由后端强制权限且保持只读。 -->
     <OrderCenterReportQueryToolbar
-      v-if="!isPlatformReadOnly && !serviceReportDrilldown && !salesReportDrilldown"
+      v-if="!serviceReportDrilldown && !salesReportDrilldown"
       :key="`${state.stateContextId}:${activeTabKey}`"
       :page-code="activeTab.pageCode"
       :page-name="activeTab.label"
@@ -3958,6 +3962,15 @@ onBeforeUnmount(() => {
       @query="queryRecords"
     >
       <template #primary-actions>
+        <OrganizationStoreScopePicker
+          v-if="isPlatformReadOnly"
+          v-model="platformScopeStoreIds"
+          :tree="platformScopePicker.tree"
+          :allowed-store-ids="platformScopePicker.allowedStoreIds"
+          :label="platformScopePicker.label"
+          :loading="platformScopePicker.loading"
+          @change="changePlatformOrderScope"
+        />
         <button
           v-if="activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
           type="button"

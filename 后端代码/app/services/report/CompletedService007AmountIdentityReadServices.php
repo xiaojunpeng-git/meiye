@@ -8,7 +8,7 @@ use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
 
 /**
- * Internal 007 order bridge input: one exact V3 completed service and its
+ * Internal 007 order bridge input: one exact V3 or explicitly historical completed service and its
  * settled consumption amount per row. It never equates an old suborder ID to
  * a V3 ID or changes the amount semantics of the visible consumption report.
  */
@@ -20,11 +20,12 @@ final class CompletedService007AmountIdentityReadServices
     private $coverageReader;
     private $immediateReader;
     private $legacyReader;
+    private $historicalReader;
 
     /** Injectable bounded readers let contracts prove identity and fail-closed behavior without a database. */
     public function __construct(?callable $serviceReader = null, ?callable $amountReader = null,
         ?callable $snapshotReader = null, ?callable $coverageReader = null, ?callable $immediateReader = null,
-        ?callable $legacyReader = null)
+        ?callable $legacyReader = null, ?callable $historicalReader = null)
     {
         $this->serviceReader = $serviceReader ?: static function (array $stores, array $range): array {
             return RegisteredMetricReadServices::withCurrentReportProductCategory()
@@ -38,12 +39,14 @@ final class CompletedService007AmountIdentityReadServices
         $this->coverageReader = $coverageReader ?: [new ItemConsumption007SourceCoverageServices(), 'read'];
         $this->immediateReader = $immediateReader ?: [new SaleProjectConsumption007AmountReadServices(), 'read'];
         $this->legacyReader = $legacyReader ?: [$this, 'legacySources'];
+        // Injected metric fixtures remain independent; production uses one shared, labelled historical adapter.
+        $this->historicalReader = $historicalReader ?: ($serviceReader ? static function(){return ['complete'=>true,'rows'=>[],'gaps'=>[],'disabled'=>true];} : [new HistoricalCardService007ReadServices(),'readServices']);
     }
 
     /**
-     * The caller supplies only server-authorized stores. Old writeoff coverage
-     * is checked over those stores without an old-date restriction; result
-     * dates come exclusively from V3 business_date. Any gap retracts all rows.
+     * The caller supplies only server-authorized stores. V3 identity conflicts remain blocking;
+     * missing historical IDs are covered by the shared adapter in the approved business-date range.
+     * Historical rows are labelled separately and never persisted as new V3 facts.
      *
      * @return array{rows:array,complete:bool,gaps:array,source_coverage:array}
      */
@@ -55,7 +58,14 @@ final class CompletedService007AmountIdentityReadServices
             ['complete'=>true, 'legacy_candidates'=>0, 'gaps'=>[]]];
         return Db::transaction(function () use ($stores, $range): array {
             $coverage = ($this->coverageReader)($stores, $range);
-            if (!($coverage['complete'] ?? false)) return $this->failClosed($coverage, $coverage['gaps'] ?? []);
+            $historical=($this->historicalReader)($stores,$range);
+            // The adapter checks unmigrated original IDs in the approved historical business-date range.
+            // A missing old fact in another month no longer blocks this month's complete result.
+            if(!($historical['disabled']??false)&&($historical['complete']??false)){
+                $coverage['gaps']=array_values(array_filter($coverage['gaps']??[],static function($g){return($g['code']??'')!=='LEGACY_WRITEOFF_V3_UNMAPPED';}));
+                $coverage['complete']=!$coverage['gaps'];
+            }
+            if (!($coverage['complete'] ?? false)||!($historical['complete']??false)) return $this->failClosed($coverage, array_merge($coverage['gaps']??[],$historical['gaps']??[]));
             $services = ($this->serviceReader)($stores, $range);
             $amounts = ($this->amountReader)($stores, $range);
             $this->cap($services); $this->cap($amounts);
@@ -65,8 +75,17 @@ final class CompletedService007AmountIdentityReadServices
             $amounts = array_merge($amounts, $immediate['rows'] ?? []);
             $this->cap($amounts);
             $legacy = ($this->legacyReader)($snapshots);
-            return $this->project($services, $amounts, $snapshots, $stores, $range,
+            $result=$this->project($services, $amounts, $snapshots, $stores, $range,
                 $coverage, $immediate['gaps'] ?? [], $legacy);
+            if(!($result['complete']??false))return$result;
+            foreach($historical['rows']??[]as$old){
+                $id='historical:writeoff:'.$old['source_writeoff_id'];
+                $result['rows'][]=array_merge($old,['service_fact_id'=>$id,'source_document_type'=>'legacy_writeoff',
+                    'source_document_id'=>(string)$old['source_writeoff_id'],'store_id'=>$old['service_store_id'],
+                    'document_id'=>$id,'checkout_request_id'=>$id,'source_line_id'=>$id,
+                    'legacy_origin_order_id'=>$old['origin_order_id']]);
+            }
+            $this->cap($result['rows']);return$result;
         });
     }
 
@@ -173,9 +192,20 @@ final class CompletedService007AmountIdentityReadServices
             }
             $type = (string)($snapshot['source_document_type'] ?? '');
             $sourceId = (string)($snapshot['source_document_id'] ?? '');
-            if (!in_array($type, ['legacy_writeoff', 'legacy_paid_project', 'sales_order', 'direct'], true)
+            if (!in_array($type, ['legacy_writeoff', 'legacy_paid_project', 'sales_order', 'direct', 'reservation'], true)
                 || ($type !== 'direct' && (!ctype_digit($sourceId) || (int)$sourceId <= 0))) {
                 $gaps[] = ['code'=>'SERVICE_SOURCE_UNRECOGNIZED', 'service_fact_id'=>$id];
+                continue;
+            }
+            // 预约完成和直接核销写入同一组服务/消耗事实；不能因入口不同漏掉
+            // 已完成服务。其请求、项目行及正式服务单身份须符合预约写入契约，
+            // 不接受只把未知来源改名为 reservation 的伪关联。
+            if ($type === 'reservation' && (
+                (string)$snapshot['checkout_request_id'] !== 'reservation:' . $sourceId
+                || !preg_match('/^reservation:' . preg_quote($sourceId, '/') . ':[1-9][0-9]*$/D',
+                    (string)$snapshot['source_line_id'])
+                || !ctype_digit((string)$snapshot['document_id']) || (int)$snapshot['document_id'] < 1)) {
+                $gaps[] = ['code'=>'RESERVATION_SERVICE_IDENTITY_MISMATCH', 'service_fact_id'=>$id];
                 continue;
             }
             $legacyOrigin = null;

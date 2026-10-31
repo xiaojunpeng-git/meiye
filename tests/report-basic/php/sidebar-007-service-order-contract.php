@@ -60,4 +60,20 @@ $gap=(new Sidebar007ServiceOrderReadServices($incomplete,$legacy,$cross))->read(
 checkOrder(!$gap['complete']&&$gap['by_store'][8]['service_customer_count']===null,
     '逐服务金额不完整时所有指标回收');
 
+// A native completed reservation counts once by formal service document and
+// participates in the same member/day deduplication as direct completed service.
+$bookingFacts=$facts;$bookingFacts[1]['source_document_type']='reservation';
+$bookingFacts[1]['source_document_id']='10';
+$bookingReader=static fn():array=>['complete'=>true,'gaps'=>[],'rows'=>$bookingFacts];
+$booking=(new Sidebar007ServiceOrderReadServices($bookingReader,$legacy,$cross))->read([7,8],$range);
+checkOrder($booking['complete']&&$booking['by_store']===$result['by_store'],
+    '预约已完成服务须与直接核销同金额同去重，不因来源入口漏计');
+// Only the explicitly certified historical adapter uses original writeoff price.
+$historic=$facts;$historic[0]['source_kind']='historical_007_card_service';
+$histReader=static fn():array=>['complete'=>true,'gaps'=>[],'rows'=>$historic];
+$h=(new Sidebar007ServiceOrderReadServices($histReader,$amountDiff,$cross))->read([7,8],$range);
+checkOrder($h['complete']&&$h['by_store'][7]['consumption_amount_cents']===2100
+    &&count($h['historical_services'])===1,'已批准旧核销金额不被旧子单不同精度的pay_price覆盖');
+$h=(new Sidebar007ServiceOrderReadServices($histReader,$wrongOrigin,$cross))->read([7,8],$range);
+checkOrder(!$h['complete'],'历史金额口径豁免不能绕过原单/客户身份验证');
 echo "sidebar-007-service-order-contract PASS\n";

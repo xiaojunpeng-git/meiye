@@ -93,10 +93,13 @@ final class CrossStoreSettlement007ReadServices
             $seen[$id]=true;
             $identity=(string)$fact['order_id'].':'.$target.':'.(int)$fact['member_id'];
             $order=$orders[$identity]??null;
-            if(!$order||!isset($order['kua_store'])){
+            if(!$order||!array_key_exists('kua_store',$order)){
                 ++$missingCounterparty;
                 continue;
             }
+            // 007 only admits kua_store>0. An existing original column with
+            // NULL/0 is excluded by that eligibility rule, not an unknown
+            // cross-store transaction; never infer today's member store.
             $origin=(int)$order['kua_store'];
             if($origin===0||$origin===$target||!isset($allowed[$origin]))continue;
             if(!isset($visible[$origin])&&!isset($visible[$target]))continue;
@@ -122,7 +125,7 @@ final class CrossStoreSettlement007ReadServices
                 ->whereRaw('NOT EXISTS (SELECT 1 FROM eb_store_order scope_o '
                     .'WHERE scope_o.order_id=p.order_id AND scope_o.store_id=p.store_id '
                     .'AND scope_o.uid=p.member_id AND scope_o.order_type=0 AND scope_o.paid=1 '
-                    .'AND scope_o.kua_store IS NOT NULL)')
+                    .')')
                 ->fieldRaw('1 marker')->limit(1)->select()->toArray();
             if($unknown!==[])$gaps[]=['code'=>'CROSS_STORED_VALUE_OUTSIDE_DIRECTION_UNVERIFIED',
                 'message'=>'外店存在未冻结对手店的储值交易，无法认证是否由本店承担结算；不读取其金额或会员。'];
@@ -152,7 +155,12 @@ final class CrossStoreSettlement007ReadServices
         $sourceSql='SELECT 1 FROM eb_cashier_v3_sales_order scope_s '
             .'JOIN eb_store_order scope_o ON scope_o.id=scope_s.source_document_id '
             .'WHERE scope_s.tenant_id=p.tenant_id AND scope_s.order_id=p.order_id '
-            ."AND scope_s.source_document_type='legacy_store_order' ";
+            ."AND scope_s.source_document_type='legacy_store_order' "
+            ."AND p.source_document_type='legacy_store_order' "
+            ."AND scope_s.store_id=p.store_id AND scope_s.member_id=p.member_id "
+            ."AND scope_o.store_id=p.store_id AND scope_o.uid=p.member_id "
+            ."AND scope_o.order_id=scope_s.source_document_no_snapshot "
+            ."AND scope_o.order_type=0 AND scope_o.paid=1 ";
         $query->whereRaw('(p.store_id IN ('.$visibleSql.') OR EXISTS ('.$sourceSql
             .'AND scope_o.kua_store IN ('.$visibleSql.')))');
         $facts=$query->field('p.fact_id,p.store_id,p.member_id,p.order_id,p.source_document_type,'
@@ -180,7 +188,7 @@ final class CrossStoreSettlement007ReadServices
         $result=$this->projectOrderPay($facts,$orders,$headers,$enabled,$stores);
         if(array_diff($enabled,$stores)!==[]){
             $unknown=$outsideAudit->whereNotIn('p.store_id',$stores)
-                ->whereRaw('NOT EXISTS ('.$sourceSql.'AND scope_o.kua_store IS NOT NULL)')
+                ->whereRaw('NOT EXISTS ('.$sourceSql.')')
                 ->fieldRaw('1 marker')->limit(1)->select()->toArray();
             if($unknown!==[])$result['data_gaps'][]=[
                 'code'=>'CROSS_ORDER_PAY_OUTSIDE_DIRECTION_UNVERIFIED',
@@ -213,11 +221,14 @@ final class CrossStoreSettlement007ReadServices
                     'message'=>'原单余额扣款缺少一对一的旧订单与 V3 来源身份，不能推算跨店方向。'];
                 continue;
             }
-            if(!isset($order['kua_store'])){
+            if(!array_key_exists('kua_store',$order)){
                 $gaps[]=['code'=>'CROSS_STORE_ORDER_PAY_DIRECTION_MISSING','fact_id'=>$factId,
                     'message'=>'原订单没有冻结的跨店来源门店，不能推算结算方向。'];
                 continue;
             }
+            // 007 only admits kua_store>0. An existing original column with
+            // NULL/0 is excluded by that eligibility rule, not an unknown
+            // cross-store transaction; never infer today's member store.
             $origin=(int)$order['kua_store'];
             if($origin===0||$origin===$target)continue;
             if(!isset($allowed[$origin]))continue;

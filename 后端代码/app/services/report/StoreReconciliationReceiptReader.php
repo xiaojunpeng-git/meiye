@@ -57,34 +57,55 @@ final class StoreReconciliationReceiptReader
     }
 
     /**
-     * 一次有界、一致读取产生可追溯的收款明细。下单日期沿用原单add_time；
-     * 新业务以收款来源的业务日入表。刷单使用登记日期，且只作为独立人工行。
+     * 一次有界、一致读取产生可追溯的收款明细。默认保留原门店对账add_time契约；
+     * 每日汇总显式传businessDateMode，沿批准迁入规则按业务日。新业务始终
+     * 以收款来源业务日入表；刷单使用登记日期，只作为独立人工行。
      */
-    public function receipts(array $stores, array $methods, array $range, string $tenant): array
+    public function receipts(array $stores, array $methods, array $range, string $tenant, bool $businessDateMode = false, ?array $originalOrderIds = null): array
     {
         if (!$stores) return [];
+        if($originalOrderIds!==null){
+            if(!$businessDateMode)throw new \InvalidArgumentException('原单限定读取必须采用业务日');
+            foreach($originalOrderIds as $id)if(!is_int($id)||$id<1)throw new \InvalidArgumentException('原收款订单ID无效');
+            $originalOrderIds=array_values(array_unique($originalOrderIds));
+            if(!$originalOrderIds)return [];
+        }
         $timezone = new \DateTimeZone('Asia/Shanghai');
         $times = [(new \DateTimeImmutable($range['start_date'] . ' 00:00:00', $timezone))->getTimestamp(),
             (new \DateTimeImmutable($range['end_date'] . ' 23:59:59', $timezone))->getTimestamp()];
         $out = [];
+        // 每日汇总显式选择业务日模式；原门店对账默认add_time契约不变。
+        $businessDates = $businessDateMode ? $this->legacyBusinessDates($stores, $range, $tenant, $timezone) : [];
+        // Optional exact original IDs narrow an already authorized business-date scope.
+        // Historical gap repair must not re-audit every archived order in a store/month.
+        // Omitting this argument preserves the full reconciliation contract unchanged.
+        if($originalOrderIds!==null)$businessDates=array_intersect_key($businessDates,array_fill_keys($originalOrderIds,true));
+
         // 一次核实归档证明，后续通道查询复用ID白名单，避免每格/每单重复运行关联子查询。
-        $this->verifiedArchivedIds = $this->archivedLegacyOrderIds($stores, $times, $tenant);
+        $this->verifiedArchivedIds = $this->archivedLegacyOrderIds($stores, $times, $tenant,
+            $businessDateMode ? array_keys($businessDates) : null);
         $archived = function ($query, string $alias): void { $this->legacyVisibility($query, $alias); };
         foreach ($methods as $method) {
             if (empty($method['legacy_id'])) continue;
-            $where = ['time' => $times, 'cash_choose' => (int)$method['legacy_id']];
-            $direct = ValidCashOrderServices::storeCashIncomeByCashChooseQuery($where, $archived)->whereIn('store_id', $stores)
-                ->field('id,order_id,store_id,add_time,uid')->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
+            $where = ['time' => $businessDateMode ? [] : $times, 'cash_choose' => (int)$method['legacy_id']];
+            $directQuery = ValidCashOrderServices::storeCashIncomeByCashChooseQuery($where, $archived)->whereIn('store_id', $stores);
+            if ($businessDateMode) $directQuery->whereIn('id', array_keys($businessDates) ?: [0]);
+            $direct = $directQuery->field('id,id source_order_id,order_id,store_id,add_time,uid')->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
             foreach ($direct as $row) {
-                $out[] = $this->legacy($row, $method['code'], false, $timezone);
+                $out[] = $this->legacy($row, $method['code'], false, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             }
-            $combined = ValidCashOrderServices::combinationCashByCashChooseQuery($where, $archived)->whereIn('b.store_id', $stores)
-                ->field('a.id,b.order_id,b.store_id,b.add_time,b.uid')->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
+            $combinedQuery = ValidCashOrderServices::combinationCashByCashChooseQuery($where, $archived)->whereIn('b.store_id', $stores);
+            if ($businessDateMode) $combinedQuery->whereIn('b.id', array_keys($businessDates) ?: [0]);
+            $combined = $combinedQuery->field('a.id,b.id source_order_id,b.order_id,b.store_id,b.add_time,b.uid')->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
-            foreach ($combined as $row) $out[] = $this->legacy($row, $method['code'], true, $timezone);
+            foreach ($combined as $row) $out[] = $this->legacy($row, $method['code'], true, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             $this->bounded($out);
         }
+
+        // An explicit original-ID request returns only those original receipts, never
+        // unrelated native payments or manual registrations from the same store/month.
+        if($originalOrderIds!==null)return $out;
 
         // V3技术卡载体的pay_type不是旧实际支付方式，旧资格查询不会选入；
         // legacy_store_order事实仅是上方同一旧单的迁移投影，必须排除以防双算。
@@ -169,19 +190,21 @@ final class StoreReconciliationReceiptReader
     }
 
     /** 归档证明只读一次，范围、原实体身份和有效生命周期均在数据库内核实。 */
-    private function archivedLegacyOrderIds(array $stores, array $times, string $tenant): array
+    private function archivedLegacyOrderIds(array $stores, array $times, string $tenant, ?array $businessOrderIds = null): array
     {
         $proof = Db::name('cashier_v3_sales_order')->alias('h')
             ->join('store_order o', 'h.source_document_id=CAST(o.id AS CHAR) AND h.order_no=o.order_id AND h.store_id=o.store_id AND h.member_id=o.uid')
             ->where('h.tenant_id', $tenant)->where('h.contract_version', 'legacy-import-data-v1')
             ->where('h.source_document_type', 'legacy_store_order')->where('h.order_status', 'settled')->where('h.order_direction', 'forward')
-            ->whereIn('o.store_id', $stores)->whereBetween('o.add_time', $times)->where('o.is_system_del', 1)
+            ->whereIn('o.store_id', $stores)->where('o.is_system_del', 1)
             ->whereNotExists(static function ($reversal): void {
                 $reversal->name('cashier_v3_order_lifecycle_operation')->alias('reconciliation_import_reversal')
                     ->whereRaw('reconciliation_import_reversal.tenant_id=h.tenant_id')->whereRaw('reconciliation_import_reversal.store_id=h.store_id')
                     ->whereRaw('reconciliation_import_reversal.source_order_id=h.order_id')->where('reconciliation_import_reversal.source_type', 'sales')
                     ->whereIn('reconciliation_import_reversal.operation_type', ['refund','void'])->where('reconciliation_import_reversal.status', 'succeeded');
             });
+        if ($businessOrderIds === null) $proof->whereBetween('o.add_time', $times);
+        else $proof->whereIn('o.id', $businessOrderIds ?: [0]);
         $this->excludeImportedCardReversal($proof, 'h.tenant_id', 'h.store_id', 'h.order_id');
         $rows = $proof->field('o.id')->limit(self::LIMIT + 1)->select()->toArray();
         $this->bounded($rows);
@@ -202,12 +225,63 @@ final class StoreReconciliationReceiptReader
         });
     }
 
+    /**
+     * 复用已批准010迁入时间规则：未迁旧单支付秒数转上海业务日，已迁单
+     * 以身份完整匹配的正式销售头business_date为准。只生成只读日期索引，
+     * 收款资格/金额仍由既有ValidCashOrderServices决定，不把目录价作实收。
+     */
+    private function legacyBusinessDates(array $stores, array $range, string $tenant, \DateTimeZone $zone): array
+    {
+        $headers = Db::name('cashier_v3_sales_order')->alias('h')
+            ->join('store_order o','h.source_document_id=CAST(o.id AS CHAR) AND h.order_no=o.order_id AND h.store_id=o.store_id AND h.member_id=o.uid')
+            ->where('h.tenant_id',$tenant)->where('h.source_document_type','legacy_store_order')
+            ->where('h.contract_version','legacy-import-data-v1')->whereIn('h.store_id',$stores)
+            ->field('o.id,h.order_id,h.business_date,h.order_status,h.order_direction')->limit(self::LIMIT+1)->select()->toArray();
+        $this->bounded($headers);$mapped=[];$inside=[];$blocked=[];
+        // 正式迁入后发生成功退款/作废时，旧壳未同步状态也不能复活该收款。
+        $reversed=[];
+        foreach(array_chunk(array_column($headers,'order_id'),200) as $orderIds){
+            $operations=Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id',$tenant)
+                ->whereIn('store_id',$stores)->where('source_type','sales')->whereIn('source_order_id',$orderIds)
+                ->whereIn('operation_type',['refund','void'])->where('status','succeeded')
+                ->field('source_order_id')->select()->toArray();
+            foreach($operations as $operation)$reversed[(string)$operation['source_order_id']]=true;
+        }
+        foreach($headers as $header){
+            $id=(int)$header['id'];$day=(string)$header['business_date'];
+            if($header['order_status']!=='settled'||$header['order_direction']!=='forward'
+                ||isset($reversed[(string)$header['order_id']])){$blocked[$id]=true;continue;}
+            if(isset($mapped[$id]))throw new \RuntimeException('DAILY_BUSINESS_DATE_AMBIGUOUS: 同一旧单存在多个正式业务日期来源。');
+            $parsed=\DateTimeImmutable::createFromFormat('!Y-m-d',$day,$zone);
+            if(!$parsed||$parsed->format('Y-m-d')!==$day)throw new \RuntimeException('DAILY_BUSINESS_DATE_INVALID: 正式业务日期无效。');
+            $mapped[$id]=$day;if($day>=$range['start_date']&&$day<=$range['end_date'])$inside[]=$id;
+        }
+        $from=(new \DateTimeImmutable($range['start_date'].' 00:00:00',$zone))->getTimestamp();
+        $until=(new \DateTimeImmutable($range['end_date'].' 23:59:59',$zone))->getTimestamp();
+        $query=Db::name('store_order')->whereIn('store_id',$stores)->where('paid',1)
+            ->whereIn('pay_type',['weixin','alipay','cash','offline','combination'])
+            ->whereIn('order_type',[0,1])->where('refund_status',0);
+        $rows=$query->where(static function($q)use($from,$until,$inside):void{
+            $q->whereBetween('pay_time',[$from,$until]);if($inside)$q->whereOr('id','in',$inside);
+        })->field('id,pay_time')->limit(self::LIMIT+1)->select()->toArray();
+        $this->bounded($rows);$dates=[];
+        foreach($rows as $row){
+            $id=(int)$row['id'];if(isset($blocked[$id]))continue;$day=$mapped[$id]??null;
+            if($day===null){
+                if((int)$row['pay_time']<=0)throw new \RuntimeException('DAILY_BUSINESS_DATE_UNRESOLVED: 旧单缺已批准业务日期来源。');
+                $day=(new \DateTimeImmutable('@'.(int)$row['pay_time']))->setTimezone($zone)->format('Y-m-d');
+            }
+            if($day>=$range['start_date']&&$day<=$range['end_date'])$dates[$id]=$day;
+        }
+        return $dates;
+    }
+
     /** 金额解析采用既有十进制边界，旧历史分值保持可追溯，不触发新收银写入。 */
-    private function legacy(array $row, string $method, bool $combined, \DateTimeZone $timezone): array
+    private function legacy(array $row, string $method, bool $combined, \DateTimeZone $timezone, ?string $businessDate = null): array
     {
         return ['receipt_id' => ($combined ? 'legacy-combination:' : 'legacy-order:') . $row['id'] . ':' . $method,
             'store_id' => (int)$row['store_id'], 'method_code' => $method,
-            'business_date' => (new \DateTimeImmutable('@' . (int)$row['add_time']))->setTimezone($timezone)->format('Y-m-d'),
+            'business_date' => $businessDate ?? (new \DateTimeImmutable('@' . (int)$row['add_time']))->setTimezone($timezone)->format('Y-m-d'),
             'amount_cents' => BasicRegistrationQueryProvider::cents($row['reconciliation_amount']),
             'document_no' => (string)$row['order_id'], 'member_id' => (int)$row['uid'],
             'source_kind' => $combined ? '历史组合收款' : '历史订单收款', 'combined' => $combined];

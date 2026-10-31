@@ -71,4 +71,24 @@ checkCategory($withCertifiedZero['by_store'][7]['sales_data'][0]===2
     &&$withCertifiedZero['by_store'][7]['sales_data'][1]===30000,
     '已证明纯余额或全额优惠的零现金销售须计客、不增现金');
 
+$oldNoSource=static function()use($orders):array{
+    $rows=$orders();$rows[]=['store_id'=>7,'order_id'=>'OLD-NO-SOURCE','source_id'=>0,
+        'legacy_source_id'=>0,'cash_identity_verified'=>false];return $rows;
+};
+$excluded=(new Sidebar007SalesCategoryReadServices($cash,$oldNoSource,$partner))->read([7,8],$period,$mapping);
+checkCategory($excluded['by_store'][7]===$result['by_store'][7],
+    '007旧source0不属于普通来源人口，不因此要求零现金证明或改变独立现金总额');
+$historicCash=$cash();$historicCash['by_order'][7]['historical:order:10']=10000;
+$historicCash['historical_orders']=[['source_kind'=>'historical_007_original_receipt','store_id'=>7,
+    'order_id'=>'historical:order:10','business_date'=>'2026-10-10','member_id'=>9,'friend'=>false,
+    'legacy_source_id'=>6,'cash_identity_verified'=>true]];
+$historic=(new Sidebar007SalesCategoryReadServices(static fn():array=>$historicCash,$orders,$partner))->read([7,8],$period,$mapping);
+checkCategory($historic['by_store'][7]['sales_data'][12]===2&&$historic['by_store'][7]['sales_data'][13]===20000,
+    '原充值通过已执行字典映射计续卡，不伪造V3销售头');
+$oldCard=static function()use($orders):array{
+    $rows=$orders();$rows[]=['store_id'=>7,'order_id'=>'OLD-CARD','source_id'=>25,'legacy_source_id'=>7,
+        'old_card_entry_excluded'=>true,'cash_identity_verified'=>false];return $rows;
+};
+$excluded=(new Sidebar007SalesCategoryReadServices($cash,$oldCard,$partner))->read([7,8],$period,$mapping);
+checkCategory($excluded['by_store'][7]===$result['by_store'][7],'旧卡录入资格排除，不冒充缺现金成交');
 echo "sidebar-007-sales-category-read-contract PASS\n";

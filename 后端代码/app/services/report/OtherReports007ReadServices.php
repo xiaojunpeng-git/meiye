@@ -30,7 +30,7 @@ final class OtherReports007ReadServices
         $this->followupSource = $followupSource ?? [$this, 'loadFollowup'];
         $this->nativeFollowupSource = $nativeFollowupSource ?? [$this, 'loadNativeFollowup'];
         $this->rightsSource = $rightsSource ?? static function (array $stores, array $input): array {
-            return (new BasicEntitlementReportServices())->read(self::RIGHTS, $stores, $input);
+            return (new BasicEntitlementReportServices())->read(BasicEntitlementReportServices::CUSTOMER_RIGHTS_SOURCE, $stores, $input);
         };
         $this->rightsPopulation = $rightsPopulation ?? [$this, 'loadRightsPopulation'];
     }
@@ -133,7 +133,7 @@ final class OtherReports007ReadServices
             if ($code === '' || $name === '' || isset($methods[$code])) return $this->gap($result, 'DAILY_METHOD_INVALID', '支付方式目录不完整或重复。');
             $methods[$code] = true;
             $row = ['row_id' => 'daily-007:' . $code, 'method_code' => $code,
-                'payment_name' => $name, 'total_amount' => 0];
+                'payment_name' => $name, 'total_amount' => 0, 'store_ids' => $stores];
             for ($day = 1; $day <= 31; ++$day) $row['day_' . $day] = 0;
             $rows[$code] = $row;
         }
@@ -269,9 +269,16 @@ final class OtherReports007ReadServices
                 || !in_array($store, $stores, true) || (int)$balances[$id]['store_id'] !== $store) {
                 return $this->gap($result, 'RIGHTS_PROJECT_IDENTITY', '卡内项目与会员储值身份不能精确关联。');
             }
-            if (!isset($population[$project])) continue;
-            if ((int)$population[$project]['member_id'] !== $id || (int)$population[$project]['store_id'] !== $store)
-                return $this->gap($result, 'RIGHTS_PROJECT_IDENTITY', '有效项目所属会员或门店无法核实。');
+            // 已认证迁入权益用组织范围+当前持卡权威确认，不要求零元隐藏技术单
+            // 伪装007正常销售；普通旧单仍必须与007资格及会员身份精确一致。
+            $imported = ($row['imported_entitlement'] ?? false) === true;
+            if (!isset($population[$project]) && !$imported) continue;
+            if (!$imported && ((int)$population[$project]['member_id'] !== $id || (int)$population[$project]['store_id'] !== $store)) {
+                // 转卡不改历史购买人；只有正式成功整链到当前持卡人，才允许这项身份差异。
+                $chain = (new ReportCardTransferProofServices())->memberIds($holder,
+                    (int)($row['origin_order_id'] ?? 0), (int)$population[$project]['member_id'], $id);
+                if (!$chain) return $this->gap($result, 'RIGHTS_PROJECT_IDENTITY', '有效项目所属会员或门店无法核实。');
+            }
             unset($population[$project]);
             $rows[] = ['row_id' => 'rights-007:' . $holder . ':' . $project,
                 'store_id' => $store, 'member_id' => $id, 'card_holder_id' => $holder,
@@ -291,13 +298,13 @@ final class OtherReports007ReadServices
         $result['as_of_date'] = $source['as_of_date'] ?? null;
         $result['coverage'] = '当前有效卡内项目且剩余次数大于零；储值取同一会员当前权威余额。';
         $result['limitations'] = ['本金、赠金随每条权益项目重复展示，不能逐行求和；不提供历史时点重建。',
-            '卡项来源门店也须在已授权范围内，不能通过会员所属门店越权读取。'];
+            '按007以会员当前所属店控制范围；购卡店仅追溯，不扩大可见会员范围。'];
         return $result;
     }
 
     /**
      * 只读 007 原 SQL 的项目资格：有效原单、非赠送卡内项目、未过期且
-     * 仍有次数，会员当前所属门店须在授权范围内。本源只审计人口，所有
+     * 仍有次数，会员当前所属门店须在授权范围内；按已确认规则排除非权益外壳、已删除/升级持卡与耗尽共享池。本源只审计人口，所有
      * 余额和剩余次数仍从当前权益权威读取，不回算旧表金额。
      */
     private function loadRightsPopulation(array $stores): array
@@ -332,6 +339,21 @@ final class OtherReports007ReadServices
                 ->where('ci.write_surplus_times', '>', 0)
                 ->whereRaw('(ci.write_end=0 OR ci.write_end>=UNIX_TIMESTAMP(NOW()))')
                 ->whereRaw("IFNULL(NULLIF(parent.store_name,''),cp.store_name)<>''")
+                // 旧SQL把卡外壳、已删/升级持卡和耗尽共享池的候选项目也算有效。
+                // 按已确认当前合法资产口径审计真实组件，不为这些残留补造权益。
+                ->where('ci.cart_type',2)->where('ci.product_type',6)
+                ->where('u.status',1)->whereNull('u.delete_time')
+                ->whereRaw('IFNULL(o.card_upgrade_use_oid,0)=0')
+                ->whereExists(static function($holder):void{
+                    $holder->name('user_card_holder')->alias('rights_live_holder')
+                        ->whereRaw('rights_live_holder.oid=ci.oid')->where('rights_live_holder.is_del',0);
+                })
+                ->whereNotExists(static function($rule):void{
+                    $rule->name('cashier_v3_card_rule_state')->alias('rights_exhausted_rule')
+                        ->join('user_card_holder rights_rule_holder','rights_rule_holder.id=rights_exhausted_rule.card_holder_id')
+                        ->where('rights_exhausted_rule.tenant_id','0')->whereRaw('rights_rule_holder.oid=ci.oid')
+                        ->where('rights_exhausted_rule.rule_type','choice_count')->where('rights_exhausted_rule.shared_remaining_times','<=',0);
+                })
                 ->field('ci.id,ci.uid,u.belong_store_id')->select()->toArray();
             foreach ($query as $row) {
                 $id = (int)$row['id'];
@@ -343,150 +365,16 @@ final class OtherReports007ReadServices
         return $population;
     }
 
+    /** 复用已验收收款兼容边界，显式按业务日归集；不再复制一套原单/支付审计。 */
     private function loadDaily(array $stores, array $range): array
     {
-        $types = Db::name('cash_type')->where('id', '<>', 9)->order('id', 'asc')
-            ->field('id,name')->select()->toArray();
-        $methods = []; $byName = [];
-        foreach ($types as $type) {
-            $id = (int)$type['id']; $name = trim((string)$type['name']);
-            if ($id < 1 || $name === '' || isset($byName[$name])) {
-                throw new \RuntimeException('DAILY_METHOD_DIRECTORY_INVALID: 支付方式目录无法精确识别。');
-            }
-            $methods[] = ['code' => 'legacy_' . $id, 'name' => $name]; $byName[$name] = $id;
-        }
-        $methods[] = ['code' => 'brush_douyin', 'name' => '抖音刷单'];
-        $methods[] = ['code' => 'brush_dianping', 'name' => '大众刷单'];
-        $timezone = new \DateTimeZone('Asia/Shanghai');
-        $from = (new \DateTimeImmutable($range['start'] . ' 00:00:00', $timezone))->getTimestamp();
-        $until = (new \DateTimeImmutable($range['end'] . ' 23:59:59', $timezone))->getTimestamp();
-        $payment = Db::name('cashier_v3_payment_fact')->alias('p')
-            ->leftJoin('cashier_v3_payment_collection c', 'c.tenant_id=p.tenant_id AND c.store_id=p.store_id AND c.collection_id=p.collection_reference')
-            ->leftJoin('cashier_v3_sales_order h', "h.tenant_id=p.tenant_id AND h.store_id=p.store_id AND h.order_id=p.order_id AND h.source_document_type='legacy_store_order'")
-            ->leftJoin('store_order o', 'CAST(o.id AS CHAR)=h.source_document_id AND o.store_id=h.store_id AND o.order_id=h.order_no')
-            ->where('p.tenant_id', '0')->whereIn('p.store_id', $stores)
-            ->where('p.status', 'effective')->where('p.fact_direction', 'forward')
-            ->whereIn('p.fact_type', ['payment_collected', 'payment_received'])
-            ->where('p.payment_method', '<>', 'old_card_entry')
-            // 全部收款与统一报表共用 V3 业务日；旧单下单时间只保留在迁入覆盖审计。
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->whereNotExists(static function ($operation): void {
-                $operation->name('cashier_v3_order_lifecycle_operation')->alias('daily_007_cancel')
-                    ->whereRaw('daily_007_cancel.tenant_id=p.tenant_id')
-                    ->whereRaw('daily_007_cancel.store_id=p.store_id')
-                    ->whereRaw("((daily_007_cancel.source_type='sales' AND daily_007_cancel.source_order_id=p.order_id)"
-                        . " OR (daily_007_cancel.source_type='recharge' AND CONCAT('RCH:',daily_007_cancel.source_order_id)=p.order_id))")
-                    ->whereIn('daily_007_cancel.operation_type', ['refund', 'void'])
-                    ->where('daily_007_cancel.status', 'succeeded');
-            })
-            ->field('p.fact_id,p.store_id,p.business_date,p.source_document_type,p.payment_method,p.amount_cents,c.payment_method_name_snapshot,o.id source_order_id,o.paid,o.refund_status,o.is_del,o.order_type,o.cash_choose,h.order_status,h.order_direction')
-            ->limit(self::LIMIT + 1)->select()->toArray();
-        if (count($payment) > self::LIMIT) throw new \RuntimeException('DAILY_SOURCE_LIMIT: 收款事实过多，请缩小范围。');
-        $fixed = ['unionpay' => 1, 'dianping_voucher' => 2, 'douyin_voucher' => 3,
-            'wechat' => 4, 'partner_collection' => 6, 'cash' => 7];
-        $newNames = ['alipay' => '支付宝', 'other_collection' => '其他收款'];
-        $receipts = [];
-        foreach ($payment as $fact) {
-            $legacy = $fact['source_document_type'] === 'legacy_store_order';
-            if ($legacy) {
-                if ($fact['source_order_id'] === null) {
-                    throw new \RuntimeException('DAILY_SOURCE_IDENTITY_UNVERIFIED: 迁入旧单收款缺少原单身份凭据。');
-                }
-                if ((int)$fact['paid'] !== 1 || (int)$fact['is_del'] !== 0
-                    || (int)$fact['refund_status'] !== 0
-                    || !in_array((int)$fact['order_type'], [0, 1], true)
-                    || (int)$fact['cash_choose'] === 9
-                    || $fact['order_status'] !== 'settled' || $fact['order_direction'] !== 'forward') continue;
-            } else {
-                if (!in_array($fact['source_document_type'],
-                    ['sales_order', 'cashier_snapshot', 'cashier_workspace', 'checkout', 'recharge'], true)) continue;
-            }
-            $date = (string)$fact['business_date'];
-            $method = (string)$fact['payment_method']; $sourceName = trim((string)($fact['payment_method_name_snapshot'] ?? ''));
-            if ($sourceName !== '' && isset($byName[$sourceName])) {
-                $code = 'legacy_' . $byName[$sourceName];
-            } elseif (isset($fixed[$method])) {
-                $code = 'legacy_' . $fixed[$method];
-            } elseif ($method === 'other_collection' && $sourceName !== '') {
-                // 旧银行转账、其他收款与充值赠送均可编码为 other_collection；
-                // 必须由正式收款行冻结的原支付方式名称精确判别。
-                throw new \RuntimeException('DAILY_METHOD_SOURCE_UNMAPPED: 原支付方式名称无法对应目录。');
-            } elseif (isset($newNames[$method])) {
-                $code = 'v3_' . $method;
-                if (!in_array($code, array_column($methods, 'code'), true)) {
-                    $methods[] = ['code' => $code, 'name' => $newNames[$method]];
-                }
-            } else {
-                throw new \RuntimeException('DAILY_METHOD_SOURCE_UNMAPPED: 收款方式无权威映射。');
-            }
-            $receipts[] = ['receipt_id' => 'payment:' . $fact['fact_id'], 'store_id' => (int)$fact['store_id'],
-                'business_date' => $date, 'method_code' => $code, 'amount_cents' => $fact['amount_cents']];
-        }
-        // 刷单登记是独立人工权威，不进入实际收款事实；沿用 007 的登记日期。
-        $registrations = Db::name('salary_store')->whereIn('store_id', $stores)
-            ->whereBetween('date', [$from, $until])->field('id,store_id,date,salary_info')
-            ->limit(self::LIMIT + 1)->select()->toArray();
-        if (count($registrations) > self::LIMIT) throw new \RuntimeException('DAILY_REGISTRATION_LIMIT: 刷单登记过多。');
-        foreach ($registrations as $registration) {
-            $info = json_decode((string)$registration['salary_info'], true);
-            if (!is_array($info)) {
-                if (strpos((string)$registration['salary_info'], 'shuadan') !== false) {
-                    throw new \RuntimeException('DAILY_REGISTRATION_INVALID: 刷单登记内容无效。');
-                }
-                continue;
-            }
-            $platform = (string)($info['shuadanpingtai'] ?? '');
-            if (!in_array($platform, ['抖音', '大众'], true)) continue;
-            $amount = $this->yuanToCents($info['shuadanjine'] ?? null);
-            if ($amount === null) throw new \RuntimeException('DAILY_REGISTRATION_INVALID: 刷单金额无效。');
-            $receipts[] = ['receipt_id' => 'registration:' . $registration['id'],
-                'store_id' => (int)$registration['store_id'],
-                'business_date' => (new \DateTimeImmutable('@' . (int)$registration['date']))->setTimezone($timezone)->format('Y-m-d'),
-                'method_code' => $platform === '抖音' ? 'brush_douyin' : 'brush_dianping',
-                'amount_cents' => $amount];
-        }
-        // 旧订单仍可能尚未迁入统一收款事实。这里只读身份与资格做缺口审计，
-        // 不从旧金额补造 V3 事实或返回看似完整的每日合计。
-        $legacySource = Db::name('store_order')->alias('legacy_daily')
-            ->whereIn('legacy_daily.store_id', $stores)
-            ->where('legacy_daily.paid', 1)->where('legacy_daily.is_del', 0)
-            ->where('legacy_daily.refund_status', 0)->whereIn('legacy_daily.order_type', [0, 1])
-            ->where('legacy_daily.cash_choose', '<>', 9)
-            ->whereRaw('(legacy_daily.pid>=0 OR legacy_daily.pid=-2)')
-            ->whereRaw("(legacy_daily.cash_pay_price>0 OR EXISTS (SELECT 1 FROM eb_combination_order legacy_comb"
-                . " WHERE legacy_comb.order_id=legacy_daily.id AND legacy_comb.active_pay=2"
-                . " AND legacy_comb.cash_choose<>9 AND legacy_comb.price>0))");
-        // 支付时间缺失无法放进任何日期区间，必须独立标记，不能回退创建时间。
-        $unresolved = (clone $legacySource)->whereRaw('(legacy_daily.pay_time IS NULL OR legacy_daily.pay_time=0)')
-            ->limit(1)->value('legacy_daily.id');
-        $unmapped = (clone $legacySource)->whereBetween('legacy_daily.pay_time', [$from, $until])
-            ->whereNotExists(static function ($proof): void {
-                $proof->name('cashier_v3_payment_fact')->alias('daily_migrated')
-                    ->whereRaw('daily_migrated.tenant_id=\'0\'')
-                    ->whereRaw('daily_migrated.store_id=legacy_daily.store_id')
-                    ->whereRaw('daily_migrated.order_no_snapshot=legacy_daily.order_id')
-                    ->where('daily_migrated.status', 'effective')
-                    ->where('daily_migrated.fact_direction', 'forward')
-                    ->whereIn('daily_migrated.fact_type', ['payment_received', 'payment_collected']);
-            })->count('legacy_daily.id');
-        $gaps = (int)$unmapped > 0 ? [['code' => 'DAILY_LEGACY_PAYMENT_NOT_MIGRATED',
-            'message' => '查询范围内仍有未迁入 V3 收款事实的旧有效订单；每日合计不可核实。',
-            'source_rows' => (int)$unmapped]] : [];
-        return ['methods' => $methods, 'receipts' => $receipts, 'data_gaps' => $gaps,
-            'unresolved_legacy_count' => (int)$unresolved > 0 ? 1 : 0];
+        $reader = new StoreReconciliationReceiptReader();
+        $methods = $reader->methods();
+        $receipts = $reader->receipts($stores, $methods,
+            ['start_date'=>$range['start'], 'end_date'=>$range['end']], '0', true);
+        return ['methods'=>$methods, 'receipts'=>$receipts, 'data_gaps'=>[], 'unresolved_legacy_count'=>0];
     }
 
-    /** 人工登记按十进制元解析，保持历史分精度且拒绝非数字内容。 */
-    private function yuanToCents($value): ?int
-    {
-        $text = trim((string)$value);
-        if (!preg_match('/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $text)) return null;
-        $parts = explode('.', $text, 2); $fraction = str_pad($parts[1] ?? '', 2, '0');
-        $number = bcadd(bcmul($parts[0], '100', 0), ($parts[0][0] ?? '') === '-' ? '-' . $fraction : $fraction, 0);
-        return $this->cents($number);
-    }
-
-    /** 原单身份证明：正式迁移头与原订单同店同单，销售行与旧明细 ID 精确对应。 */
     private function loadFollowup(array $stores, array $range): array
     {
         $timezone = new \DateTimeZone('Asia/Shanghai');

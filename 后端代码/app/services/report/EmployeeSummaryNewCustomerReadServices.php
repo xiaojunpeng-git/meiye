@@ -19,6 +19,18 @@ final class EmployeeSummaryNewCustomerReadServices
         if(!$sales)return [];
         $orders=array_values(array_unique(array_column($sales,'order_id')));
         $saleRows=$this->bounded('cashier_v3_sale_fact',$stores,$orders,'fact_id,order_id,source_line_id,checkout_request_id,store_id,member_id,business_date,business_source_primary_id,business_source_primary_name_snapshot,source_type,item_id,sale_amount_cents,debt_amount_cents');
+        // 部分迁入行未展开客源，但同一V3已结算原单头已保存冻结客源。
+        // 仅补读同租户/店/单/会员/业务日的头快照，并以迁入审计核身份；
+        // 不读当前旧订单source，不用名称或当前会员来源猜补历史事实。
+        $sourceMapping=(new Sidebar007SourceMappingReadServices())->read();
+        if(($sourceMapping['complete']??false)===true){
+            $headers=$this->bounded('cashier_v3_sales_order',$stores,$orders,
+                'order_id,store_id,member_id,business_date,business_source_primary_id,business_source_primary_name_snapshot,source_document_type',false);
+            $headerMap=[];foreach($headers as$header)$headerMap[$header['store_id'].':'.$header['order_id']]=$header;
+            foreach($saleRows as&$sale)$sale=self::withCertifiedOrderSource($sale,
+                $headerMap[$sale['store_id'].':'.$sale['order_id']]??null,$sourceMapping);
+            unset($sale);
+        }
         $byOrder=[];foreach($saleRows as$s)if($s['business_date']>=$range['start']&&$s['business_date']<=$range['end'])$byOrder[$s['store_id'].':'.$s['order_id']][]=$s;
         $facts=$this->bounded('cashier_v3_performance_fact',$stores,$orders,'fact_id,order_id,store_id,source_document_type');
         $origins=array_column($facts,'source_document_type','fact_id');
@@ -102,12 +114,32 @@ final class EmployeeSummaryNewCustomerReadServices
         $rows=[];
         foreach(array_chunk($orders,300)as$chunk){
             $q=Db::name($table)->where('tenant_id','0')->whereIn('store_id',$stores)->whereIn('order_id',$chunk);
-            if($table==='cashier_v3_sales_order_line')$q->where('line_status','settled')->where('line_direction','forward');
+            if($table==='cashier_v3_sales_order')$q->where('order_status','settled')->where('order_direction','forward');
+            elseif($table==='cashier_v3_sales_order_line')$q->where('line_status','settled')->where('line_direction','forward');
             else{$q->where('status','effective');if($direction)$q->where('fact_direction','forward');}
             $part=$q->field($fields)->limit(self::LIMIT-count($rows)+1)->select()->toArray();$rows=array_merge($rows,$part);
             if(count($rows)>self::LIMIT)throw new \InvalidArgumentException('员工新客来源超过10000条，请缩小查询范围');
         }
         return $rows;
+    }
+
+    /** 只在原销售行完全缺客源时补读原单冻结快照；任何身份冲突保留原缺口。 */
+    public static function withCertifiedOrderSource(array $sale,?array $header,array $mapping):array
+    {
+        if((int)($sale['business_source_primary_id']??0)!==0
+            ||(string)($sale['business_source_primary_name_snapshot']??'')!==''
+            ||$header===null||($mapping['complete']??false)!==true
+            ||($header['source_document_type']??'')!=='legacy_store_order')return $sale;
+        foreach(['order_id','store_id','member_id','business_date']as$key)
+            if(!isset($sale[$key],$header[$key])||(string)$sale[$key]!== (string)$header[$key])return $sale;
+        $id=(int)($header['business_source_primary_id']??0);
+        $old=$mapping['by_v3_id'][$id]??null;
+        $proof=$old===null?null:($mapping['by_007_id'][$old]??null);
+        if($proof===null||(int)($proof['v3_id']??0)!==$id
+            ||(string)($proof['name']??'')!==(string)($header['business_source_primary_name_snapshot']??''))return $sale;
+        $sale['business_source_primary_id']=$id;
+        $sale['business_source_primary_name_snapshot']=(string)$header['business_source_primary_name_snapshot'];
+        return $sale;
     }
 
     /** 007独立计算两类客群：同店同日会员按员工ID排序均分，最后一人接尾差；游客/朋友每条人员记录一客。 */

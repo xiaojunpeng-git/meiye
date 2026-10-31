@@ -23,9 +23,9 @@ checkBottom($ready['complete']&&$ready['scope']===['start'=>'2026-09-01','end'=>
     &&$ready['by_store'][7]===170000&&$ready['by_store'][8]===80000,
     '六个月现金减本店partner实配、加本店调整后除六并截整元');
 $old=$reader->read([7,8],'2026-10');
-checkBottom(!$old['complete']&&$old['by_store'][7]===null
-    &&$old['gaps'][0]['code']==='PK_BOTTOM_BEFORE_V3_COVERAGE',
-    'V3 六个月前覆盖不足时不得按旧金额补数');
+checkBottom($old['complete']&&$old['by_store'][7]===170000
+    &&$old['scope']===['start'=>'2026-04-01','end'=>'2026-09-30'],
+    '已认证007原来源可覆盖上线前六个月，不得用V3上线日期误挡');
 $outside=new Sidebar007PkBottomReadServices($cash,$partner,
     static fn():array=>[['store_id'=>9,'old_yeji'=>'1.00']]);
 try{$outside->read([7,8],'2027-03');throw new RuntimeException('应阻断越权历史调整');}

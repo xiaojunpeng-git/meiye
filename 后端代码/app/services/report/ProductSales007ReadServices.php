@@ -13,11 +13,13 @@ final class ProductSales007ReadServices
     private $personReader;
     private $paymentReader;
     private $coverageReader;
+    private $historicalEnabled;
 
     /** 测试可注入事实，生产只查询已认证门店内的正式销售、人员和收款分摊。 */
     public function __construct(?callable $saleReader = null, ?callable $personReader = null,
         ?callable $paymentReader = null, ?callable $coverageReader = null)
     {
+        $this->historicalEnabled=$saleReader===null;
         $this->saleReader = $saleReader ?: [$this,'sales'];
         $this->personReader = $personReader ?: [$this,'people'];
         $this->paymentReader = $paymentReader ?: [$this,'payments'];
@@ -33,7 +35,12 @@ final class ProductSales007ReadServices
             $sales=($this->saleReader)($stores,$range);$this->cap($sales);
             // The original 007 query can have eligible old product cart lines
             // absent from V3. An empty V3 list alone never proves zero sales.
-            $coverage=($this->coverageReader)($stores,$range,$sales);
+            $history=['rows'=>[],'gaps'=>[],'complete'=>true];
+            if($this->historicalEnabled){
+                $history=(new HistoricalSales007ReadServices())->read('products',$stores,$range,$employee);
+                $sales=array_values(array_filter($sales,static function($r){return($r['source_document_type']??'')!=='legacy_store_order';}));
+                $coverage=['complete'=>$history['complete'],'gaps'=>$history['gaps'],'eligible_legacy_fact_ids'=>[],'historical_rows'=>count($history['rows'])];
+            }else $coverage=($this->coverageReader)($stores,$range,$sales);
             if(!($coverage['complete']??false)){
                 return $this->failClosed($stores,$range,$employee,$coverage);
             }
@@ -45,6 +52,8 @@ final class ProductSales007ReadServices
             $payment=($this->paymentReader)($stores,$sales);
             $this->cap($payment['payments']??[]);$this->cap($payment['allocations']??[]);
             $result=$this->project($sales,$people,$payment,$stores,$range,$employee);
+            foreach($history['rows']as$old)$result['rows'][]=['row_id'=>'historical_product:'.implode(':',[$old['old_order_id'],$old['old_cart_detail_id'],$old['staff_id'],$old['支付方式']]),'source_kind'=>'historical_007_sale','business_date'=>$old['日期'],'store_id'=>(int)$old['store_id'],'store_name'=>$old['门店'],'member_name'=>$old['客户名称'],'product_name'=>$old['商品名称'],'payment_method'=>$old['支付方式'],'amount'=>(float)$old['金额'],'salesperson'=>$old['销售人']];
+            $this->cap($result['rows']);
             foreach($coverage['gaps']??[] as $gap)$result['gaps'][]=$gap;
             $result['complete']=$result['gaps']===[];
             $result['source_coverage']=$coverage;

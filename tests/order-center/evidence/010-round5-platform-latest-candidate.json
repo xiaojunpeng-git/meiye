@@ -1,0 +1,25 @@
+{
+  "scope": "010平台门店订单七个记录入口；业绩区间与业绩提成不包含",
+  "baseHead": "cfe75299e361c9102e1c3c1986d042f0891580bd",
+  "candidateSourceSha256": {
+    "前端代码/admin/src/pages/store/order/center.vue": "b8e4417e24a1cb154fe3012d2f0940da834e0d1fd37d77f908245f3e799ea1bc",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue": "8a53404ca6ce407790464a1bb49719e0c1a26d5aa712f541b12aabe6eee4ec31"
+  },
+  "buildAssets": {
+    "前端代码/cashier-v3/dist/assets/index-939f4202.js": "bc88a9e6261723ec1baaf1273633c3e1a5f2bf746b970a122cae4879def0ef6d",
+    "前端代码/cashier-v3/dist/assets/index-80ee9f12.css": "80ee9f12b5f2e2748cee82dee74a04c9d4bb95b5eb90d4a47bca7218a3f62a6e",
+    "view_admin/js/chunk-02d2f62e.68212393.js": "1276ffcd0472d07bac0b6c684bb7e704923285504453dacac4d187ee9e1903a8"
+  },
+  "verification": [
+    "cashier-v3 npm run build passed",
+    "admin npm run build passed",
+    "seven local candidate platform routes rendered readonly query UI",
+    "seven order metadata PHP contracts passed with isolated sys_config default test bootstrap"
+  ],
+  "limits": [
+    "local candidate has no authenticated 010 business API session",
+    "no 010 deployment or PM acceptance yet"
+  ],
+  "controlledWorktree": "/private/tmp/010-round5-order-center-candidate-20261031",
+  "cleanup": "after candidate accepted and release verified, or candidate withdrawn"
+}

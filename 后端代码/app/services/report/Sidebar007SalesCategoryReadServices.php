@@ -14,14 +14,17 @@ final class Sidebar007SalesCategoryReadServices
     private $cashReader;
     private $orderReader;
     private $partnerOrderReader;
+    private $historicalPartnerReader;
 
     /** 注入点仅供离线合同；正式路径始终从 V3 原单事实及人员分配读取。 */
     public function __construct(?callable $cashReader=null,?callable $orderReader=null,
-        ?callable $partnerOrderReader=null)
+        ?callable $partnerOrderReader=null,?callable $historicalPartnerReader=null)
     {
         $this->cashReader=$cashReader ?: static fn(array $ids,array $period):array=>(new Sidebar007OriginalCashReadServices())->read($ids,$period);
         $this->orderReader=$orderReader ?: [$this,'orders'];
         $this->partnerOrderReader=$partnerOrderReader ?: [$this,'partnerOrders'];
+        $this->historicalPartnerReader=$historicalPartnerReader ?: ($partnerOrderReader ? static fn():array=>['complete'=>true,'rows'=>[],'gaps'=>[]]
+            : static fn(array $stores,array $range):array=>(new HistoricalPartnerSales007ReadServices())->read($stores,$range));
     }
 
     /**
@@ -36,7 +39,22 @@ final class Sidebar007SalesCategoryReadServices
         if(!is_array($cash)||!is_array($cash['by_store']??null)||!is_array($cash['by_order']??null))
             throw new \LogicException('分类指标原单收款结果无效');
         $orders=($this->orderReader)($stores,$range,$cash['by_order']);
+        // Certified original sales/recharges are not V3 sales heads. Their old source identity
+        // is translated only through the same executed 007 dictionary migration audit.
+        $reverse=[];
+        foreach($mapping['by_v3_id'] as $v3=>$old)$reverse[(int)$old][]=(int)$v3;
+        foreach($cash['historical_orders']??[] as $historic){
+            if(($historic['source_kind']??'')!=='historical_007_original_receipt')
+                throw new \LogicException('分类历史收款来源无效');
+            $mapped=$reverse[(int)($historic['legacy_source_id']??0)]??[];
+            $historic['source_id']=count($mapped)===1?$mapped[0]:0;
+            $orders[]=$historic;
+        }
         $partnerRows=($this->partnerOrderReader)($stores,$range);
+        $history=($this->historicalPartnerReader)($stores,$range);
+        if(!($history['complete']??false))return ['by_store'=>[],'after_sales_entries'=>[],
+            'complete'=>false,'gaps'=>$history['gaps']??[]];
+        foreach($history['rows'] as $row)$partnerRows[]=$row+['unclassified_rows'=>0,'unsigned_reversal_rows'=>0];
         if(!is_array($orders)||!is_array($partnerRows)||count($orders)>50000||count($partnerRows)>50000)
             throw new \RuntimeException('分类指标订单结果超过安全范围');
         $allowed=array_fill_keys($stores,true);$orderMap=[];$partner=[];$unknownPartner=[];
@@ -62,13 +80,24 @@ final class Sidebar007SalesCategoryReadServices
             if(($cash['by_store'][$id]['complete']??false)!==true){
                 $gaps[]=['store_id'=>$id,'code'=>'SOURCE_007_ORIGINAL_CASH_UNVERIFIED'];continue;
             }
-            $group=[];$unknown=isset($unknownPartner[$id]);
+            $group=[];$unknown=isset($unknownPartner[$id]);$identityGaps=[];
+            if($unknown)$identityGaps[]=['reason'=>'partner_allocation_identity'];
             $amountByOrder=$cash['by_order'][$id]??[];
+            // 007 ordinary source populations are restricted to real cash_source IDs.
+            // A certified old source=0 is outside that population, not a missing zero-cash
+            // sale. Cash totals remain independent; partner orders retain their own rule.
+            foreach($orderMap[$id]??[] as $orderId=>$row){
+                if((($row['legacy_source_id']??null)===0||($row['old_card_entry_excluded']??false)===true)
+                    &&!isset($partner[$id][(string)$orderId])){
+                    unset($orderMap[$id][$orderId],$amountByOrder[$orderId]);
+                }
+            }
+
             // 无外部收款仍可能是纯余额或全额优惠的已结算销售。只有
             // 成功结账快照证明现金及其他收款均为零时才按零现金计客。
             foreach($orderMap[$id]??[] as $orderId=>$row)if(!array_key_exists((string)$orderId,$amountByOrder)){
                 if(($row['zero_cash_certified']??false)===true)$amountByOrder[(string)$orderId]=0;
-                else $unknown=true;
+                else {$unknown=true;$identityGaps[]=['order_id'=>(string)$orderId,'reason'=>'missing_cash_or_certified_zero'];}
             }
             foreach($amountByOrder as $order=>$amount){
                 $row=$orderMap[$id][(string)$order]??null;
@@ -80,13 +109,18 @@ final class Sidebar007SalesCategoryReadServices
                     ||($row['cash_identity_verified']??false)!==true
                     ||($row['legacy_source_id']??$old)!==$old
                     ||!is_bool($friend)||$date<$range['start']||$date>$range['end']){
-                    $unknown=true;break;
+                    $unknown=true;$identityGaps[]=['order_id'=>(string)$order,'reason'=>'order_source_or_cash_identity',
+                        'order_present'=>$row!==null,'source_id'=>$row['source_id']??null,
+                        'legacy_source_id'=>$row['legacy_source_id']??null,'mapped_source_id'=>$old,
+                        'cash_identity_verified'=>$row['cash_identity_verified']??null,
+                        'friend_identity_known'=>is_bool($friend),'business_date'=>$date];continue;
                 }
                 $group[]=['order_id'=>(string)$order,'source007_id'=>(int)$old,'amount_cents'=>$amount,
                     'member_id'=>$member,'friend'=>$friend,'business_date'=>$date,
                     'partner'=>isset($partner[$id][(string)$order])];
             }
-            if($unknown){$gaps[]=['store_id'=>$id,'code'=>'SOURCE_007_ORDER_IDENTITY_UNVERIFIED'];continue;}
+            if($unknown){$gaps[]=['store_id'=>$id,'code'=>'SOURCE_007_ORDER_IDENTITY_UNVERIFIED',
+                'source_count'=>count($identityGaps),'orders'=>array_slice($identityGaps,0,100)];continue;}
             $values=[];
             foreach([[0,1,2,3],[4,5,6,7],[8,9,10,11]] as $indexes){
                 $sourceGroup=(int)($indexes[0]/4);
@@ -169,6 +203,7 @@ final class Sidebar007SalesCategoryReadServices
         $allSale=Db::name('cashier_v3_sales_order')->where('tenant_id','0')
             ->whereIn('store_id',$stores)->whereBetween('business_date',[$range['start'],$range['end']])
             ->where('order_status','settled')->where('order_direction','forward')
+            ->whereNotExists($this->reversalPredicate('sales',Db::name('cashier_v3_sales_order')->getTable().'.order_id',Db::name('cashier_v3_sales_order')->getTable().'.store_id'))
             ->field('order_id')->limit(50001)->select()->toArray();
         if(count($allSale)>50000)throw new \RuntimeException('客源原销售超过安全范围');
         foreach($allSale as $head)$saleIds[]=(string)$head['order_id'];
@@ -181,6 +216,7 @@ final class Sidebar007SalesCategoryReadServices
                 ->whereIn('h.store_id',$stores)->whereIn('h.order_id',$ids)
                 ->whereBetween('h.business_date',[$range['start'],$range['end']])
                 ->where('h.order_status','settled')->where('h.order_direction','forward')
+                ->whereNotExists($this->reversalPredicate('sales','h.order_id','h.store_id'))
                 ->field('h.store_id,h.order_id,h.business_date,h.member_id,h.business_source_primary_id,h.source_document_type,h.source_document_id,h.sale_amount_cents,'
                     .'q.request_status,q.cash_performance_amount_cents,q.selected_payment_amount_cents,'
                     .'q.balance_deduction_amount_cents,q.debt_amount_cents,q.receivable_amount_cents,q.sales_amount_cents')
@@ -234,12 +270,14 @@ final class Sidebar007SalesCategoryReadServices
                     'source_id'=>(int)$head['business_source_primary_id'],
                     'friend'=>$friendMap[$key]??null,'cash_identity_verified'=>$cashVerified,
                     'zero_cash_certified'=>$zeroCash,
+                    'old_card_entry_excluded'=>$isOld&&$old!==null&&(string)$old['pay_type']!=='combination'&&(int)$old['cash_choose']===9,
                     'legacy_source_id'=>$isOld&&$old!==null?(int)$old['source']:null];
             }
         }
         foreach(array_chunk(array_values(array_unique($rechargeIds)),500) as $ids){
             $rows=Db::name('user_recharge')->whereIn('store_id',$stores)->whereIn('id',$ids)
                 ->where('paid',1)->whereBetween('business_date',[$range['start'],$range['end']])
+                ->whereNotExists($this->reversalPredicate('recharge',Db::name('user_recharge')->getTable().'.id',Db::name('user_recharge')->getTable().'.store_id'))
                 ->field('id,store_id,uid,business_date,business_source_primary_id')->select()->toArray();
             foreach($rows as $row)$out[]=['store_id'=>(int)$row['store_id'],
                 'order_id'=>'RCH:'.$row['id'],'business_date'=>(string)$row['business_date'],
@@ -248,6 +286,7 @@ final class Sidebar007SalesCategoryReadServices
         }
         $paidRecharge=Db::name('user_recharge')->whereIn('store_id',$stores)
             ->whereBetween('business_date',[$range['start'],$range['end']])->where('paid',1)
+            ->whereNotExists($this->reversalPredicate('recharge',Db::name('user_recharge')->getTable().'.id',Db::name('user_recharge')->getTable().'.store_id'))
             ->field('store_id,id')->limit(50001)->select()->toArray();
         if(count($paidRecharge)>50000)throw new \RuntimeException('客源充值原单超过安全范围');
         foreach($paidRecharge as $recharge){
@@ -258,13 +297,30 @@ final class Sidebar007SalesCategoryReadServices
         return $out;
     }
 
+    /** Cash and customer populations must exclude the same successful refund/void events.
+     * Formal heads remain immutable settled records; their status alone cannot prove eligibility.
+     */
+    private function reversalPredicate(string $type,string $order,string $store):callable
+    {
+        return static function($query)use($type,$order,$store):void{
+            $query->name('cashier_v3_order_lifecycle_operation')->alias('category_reversal')
+                ->where('category_reversal.tenant_id','0')->where('category_reversal.source_type',$type)
+                ->whereRaw('category_reversal.store_id='.$store)
+                ->whereRaw('category_reversal.source_order_id='.$order)
+                ->whereIn('category_reversal.operation_type',['refund','void'])->where('category_reversal.status','succeeded');
+        };
+    }
+
     /** 合作方订单只由成交时 partner 人员净实际分配证明，未知人员类型留缺口。 */
     private function partnerOrders(array $stores,array $range):array
     {
-        return Db::name('cashier_v3_performance_fact')->where('tenant_id','0')
+        // 旧导入可能有冻结人员类型但无当前档案版本；只接受独立认证表
+        // 与完整事实指纹相符的来源证明，不能按当前人员或ID前缀放行。
+        $unknown=ImportedPerformanceTypeProvenanceServices::unverifiedSql('pf');
+        return Db::name('cashier_v3_performance_fact')->alias('pf')->where('tenant_id','0')
             ->whereIn('store_id',$stores)->whereBetween('business_date',[$range['start'],$range['end']])
             ->where('status','effective')->where('performance_type','sales_performance_allocated')
-            ->fieldRaw("store_id,order_id,SUM(CASE WHEN employee_type_snapshot='partner' THEN amount_cents ELSE 0 END) partner_amount_cents,SUM(CASE WHEN employee_id>0 AND (employee_type_snapshot NOT IN ('internal','partner','outsourced') OR employee_type_authority_version=0) THEN 1 ELSE 0 END) unclassified_rows,SUM(CASE WHEN employee_type_snapshot='partner' AND fact_direction='reversal' AND amount_cents>0 THEN 1 ELSE 0 END) unsigned_reversal_rows")
+            ->fieldRaw("store_id,order_id,SUM(CASE WHEN employee_type_snapshot='partner' THEN amount_cents ELSE 0 END) partner_amount_cents,SUM(CASE WHEN employee_id>0 AND ".$unknown." THEN 1 ELSE 0 END) unclassified_rows,SUM(CASE WHEN employee_type_snapshot='partner' AND fact_direction='reversal' AND amount_cents>0 THEN 1 ELSE 0 END) unsigned_reversal_rows")
             ->group('store_id,order_id')->limit(50001)->select()->toArray();
     }
 

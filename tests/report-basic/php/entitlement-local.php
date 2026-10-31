@@ -107,6 +107,13 @@ try {
         check(count($customers['rows']) === 105, 'Complete population beyond 100; no deleted/inactive/foreign members');
         check(total($customers['rows'], 'balance_amount') === 105 * 1305, 'Historical cents preserved in yuan numbers');
         check(total($customers['rows'], 'rights_amount') === 0, 'Cross-store card excluded by numeric source-store scope');
+        // 007专用资产报表按会员当前所属店归集外店卡；不能因此包含外店会员，
+        // 也不能改变上面已验证的通用资产双门店权限规则。
+        $reportCustomers = $service->read(Reports::CUSTOMER_RIGHTS_SOURCE, [$store1], $input);
+        check(count($reportCustomers['rows']) === 105 + count($chosenProjects), '007 member-store report includes authorized member cross-store projects');
+        check(total($reportCustomers['rows'], 'rights_amount') > 0, '007 source keeps actual cross-store entitlement amounts');
+        check(!in_array(1999000106, array_column($reportCustomers['rows'], 'member_id'), true), '007 source still excludes foreign-store member');
+        check(total($reportCustomers['rows'], 'balance_amount') === 105 * 1305, '007 source does not multiply or widen member balances');
         check(count(array_unique(array_column($customers['rows'], 'row_id'))) === 105, 'Stable unique member rows');
         $both = $service->read('basic_customer_entitlements', [$store1, $store2], $input);
         check(count($both['rows']) === 106 + count($chosenProjects), 'One balance per member plus one row per actual card project');

@@ -1,0 +1,35 @@
+{
+  "scope": "仅010平台七个门店订单记录入口；业绩区间和业绩提成未改",
+  "acceptedFixedCandidate": "cfe75299 + 两个页面源码指纹，产品经理于2026-10-31明确验收",
+  "businessCommit": "e0e30d8b0a85a2732fa2e35068b172491a891d15",
+  "baselineCommits": [
+    "ea405b0ab63f58c76ab37e6dfd850d475ba316d7",
+    "cfe75299e361c9102e1c3c1986d042f0891580bd"
+  ],
+  "instance": "010",
+  "before": {
+    "adminEntry": "7991fd5376d52d9def2856c96ac8e69c9df5a9574de3f98d4ffd29b9c9e98f76",
+    "cashierEntry": "3886a4ac970e7b54d15191c9f4c50c774984f02e8734f6bbb1d1528e042fac88"
+  },
+  "after": {
+    "adminEntry": "8cafbb499b810aae195c0a679e89180c6b316cd5fa9008d7f8fd72a6df943338",
+    "cashierEntry": "26d6b130f662ae3a8c4a864f49e9daff8e406f7548a2033b"
+  },
+  "backendUnchangedSha256": "53695a62eea602184a9853d8bc7b9c6cd40a1c131970e99907bbe40025bb745a",
+  "backup": "/www/backups/010.cc3798.com/20261031-r5-order-e0e30d8b",
+  "checks": [
+    "fixed commit cashier and platform builds passed",
+    "seven order metadata contracts passed",
+    "remote backend fingerprint matched fixed source",
+    "public entry, order chunk, cashier JS and CSS hashes matched release package",
+    "seven live 010 platform order routes loaded latest iframe and 更多筛选",
+    "010 employee item sales report retained 20 visible rows and total 346",
+    "010 Swoole service active"
+  ],
+  "screenshots": [
+    "tests/order-center/evidence/010-round5-platform-latest-live.png",
+    "tests/order-center/evidence/010-round5-platform-latest-live-final.png"
+  ],
+  "push": "not performed; not authorized",
+  "otherInstances": "unchanged"
+}

@@ -98,4 +98,30 @@ try {
 } catch (LogicException $expected) {
     if ($expected->getMessage() !== '旧原单身份缺失或重复') throw $expected;
 }
+// A labelled historical original may be filled only by the shared certified receipt source.
+$historical=['store_id'=>2,'source_order_id'=>'10','expected_cents'=>9000,'unmigrated_original'=>true,
+    'document_no'=>'OLD10','member_id'=>5,'business_date'=>'2026-10-30','legacy_source_id'=>6,'friend'=>false];
+$receipt=['receipt_id'=>'legacy-order:10:legacy_1','store_id'=>2,'document_no'=>'OLD10','member_id'=>5,
+    'business_date'=>'2026-10-30','amount_cents'=>9000,'source_kind'=>'历史订单收款'];
+$readHistorical=static function(array $rows)use($historical,$day):array{
+    return (new Sidebar007OriginalCashReadServices(static fn():array=>[],static fn():array=>[$historical],
+        static fn():array=>$rows))->read([2],$day);
+};
+$h=$readHistorical([$receipt]);
+if(!$h['complete']||$h['by_order'][2]['historical:order:10']!==9000
+    ||$h['historical_orders'][0]['source_kind']!=='historical_007_original_receipt')
+    throw new RuntimeException('已认证原单收款须保留原来源，不伪造V3订单');
+$bad=$receipt;$bad['amount_cents']=8999;
+if($readHistorical([$bad])['complete'])throw new RuntimeException('旧金额差异不能被兜底隐藏');
+$bad=$receipt;$bad['source_kind']='刷单登记';
+if($readHistorical([$bad])['complete'])throw new RuntimeException('刷单不能冒充原单现金');
+foreach(['member_id'=>6,'business_date'=>'2026-10-29'] as $key=>$value){
+    $bad=$receipt;$bad[$key]=$value;
+    try{$readHistorical([$bad]);throw new RuntimeException('错误身份未拒绝');}catch(LogicException $expected){}
+}
+try{$readHistorical([$receipt,$receipt]);throw new RuntimeException('重复收款未拒绝');}catch(LogicException $expected){}
+$h=(new Sidebar007OriginalCashReadServices($facts,static fn():array=>[$historical],
+    static fn():array=>[$receipt]))->read([2,3],$day);
+if(!$h['complete']||$h['by_store'][2]['amount_cents']!==12000||$h['historical_orders']!==[])
+    throw new RuntimeException('已有V3原收款不可再加一次旧收款');
 echo "sidebar-007-original-cash-read-contract PASS\n";

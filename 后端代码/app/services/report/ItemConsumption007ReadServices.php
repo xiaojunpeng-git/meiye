@@ -7,7 +7,7 @@ namespace app\services\report;
 use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
 
-/** 007 项目消耗分析表的 V3 候选：一条已完成服务只计一次数量和一次消费金额。 */
+/** 007 项目消耗分析表：统一 V3 与受控历史服务来源，每条原服务只计一次数量和金额。 */
 final class ItemConsumption007ReadServices
 {
     private $quantityReader;
@@ -15,12 +15,14 @@ final class ItemConsumption007ReadServices
     private $snapshotReader;
     private $coverageReader;
     private $saleProjectAmountReader;
+    private $historicalEnabled;
 
-    /** 测试可注入只读事实，生产仍从统一注册指标读取，不能回查旧核销表凑数。 */
+    /** 测试可注入只读事实，生产使用统一注册指标及受控历史核销适配器，禁止各报表自行补算。 */
     public function __construct(?callable $quantityReader = null, ?callable $amountReader = null,
         ?callable $snapshotReader = null, ?callable $coverageReader = null,
         ?callable $saleProjectAmountReader = null)
     {
+        $this->historicalEnabled = $quantityReader === null;
         $this->quantityReader = $quantityReader ?: static function (array $stores, array $range, int $employee): array {
             $reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
             return $employee > 0
@@ -49,7 +51,16 @@ final class ItemConsumption007ReadServices
         if (!$stores) return $this->project([], [], [], $stores, $range);
         return Db::transaction(function () use ($stores, $range, $employee): array {
             $coverage = ($this->coverageReader)($stores, $range);
-            if (!($coverage['complete'] ?? false)) return $this->failClosed($stores,$range,$coverage);
+            $historical=['services'=>[],'amounts'=>[],'sources'=>['phones'=>[],'store_names'=>[],'ordering_store_ids'=>[]],'gaps'=>[]];
+            if($this->historicalEnabled){
+                $adapter=new HistoricalCardService007ReadServices();$old=$adapter->readServices($stores,$range);
+                if($old['complete']){
+                    $coverage['gaps']=array_values(array_filter($coverage['gaps']??[],static function($g){return($g['code']??'')!=='LEGACY_WRITEOFF_V3_UNMAPPED';}));
+                    $historical=$adapter->reportProjection($old,$employee);
+                }
+                $coverage['gaps']=array_merge($coverage['gaps']??[],$old['gaps'],$historical['gaps']);$coverage['complete']=!$coverage['gaps'];
+            }
+            if(!($coverage['complete']??false))return $this->failClosed($stores,$range,$coverage);
             $result=$this->project([],[],[],$stores,$range);
             $seen=[];$amountGap=false;
             // A full all-store month can exceed 60,000 immutable service rows.
@@ -61,6 +72,9 @@ final class ItemConsumption007ReadServices
                 $snapshots=($this->snapshotReader)($batch,array_column($quantity,'service_fact_id'));
                 $immediate=($this->saleProjectAmountReader)($batch,array_values($snapshots),$amount);
                 $amount=array_merge($amount,$immediate['rows']);$this->cap($amount);
+                // Feed both authorities into one aggregation, preserving item grouping and avoiding double totals.
+                foreach($historical['services']as$old)if(in_array($old['store_id'],$batch,true)){$quantity[]=$old;$snapshots[$old['service_fact_id']]=$old;}
+                foreach($historical['amounts']as$old)if(in_array($old['store_id'],$batch,true))$amount[]=$old;
                 $part=$this->project($quantity,$amount,$snapshots,$batch,$range);
                 foreach($part['rows'] as $row){
                     if(isset($seen[$row['row_id']]))throw new \LogicException('项目消耗跨批行键重复');
@@ -174,11 +188,11 @@ final class ItemConsumption007ReadServices
             $itemId = (int)($fact['item_id'] ?? $fact['project_id'] ?? 0);
             $categoryId = (int)($fact['category_id'] ?? 0);
             $name = (string)($fact['project_name_snapshot'] ?? $fact['item_name'] ?? '');
-            if ($itemId <= 0 || $categoryId <= 0 || trim($name) === '') {
+            if ($itemId <= 0 || ($categoryId <= 0&&!($fact['category_unclassified']??false)) || trim($name) === '') {
                 $gaps[] = ['service_fact_id'=>$id,'code'=>'PROJECT_IDENTITY_UNRESOLVED',
                     'message'=>'服务项目或当前分类无法可靠定位，保留事实但不猜分类或名称。'];
             }
-            $identity = $itemId > 0 && $categoryId > 0 && trim($name) !== ''
+            $identity = $itemId > 0 && ($categoryId > 0||($fact['category_unclassified']??false)) && trim($name) !== ''
                 ? [$storeId,$categoryId,$itemId,$name] : [$storeId,'unresolved',$id];
             $rowKey = hash('sha256', json_encode($identity, JSON_UNESCAPED_UNICODE));
             if (!isset($rows[$rowKey])) $rows[$rowKey] = [
