@@ -1010,7 +1010,9 @@ final class CashierV3SalesOrderQueryServices
             // 新系统购卡载体有V3发卡回执；不能把它再作为历史消费计一遍。
             ->where('o.pay_type', '<>', 'cashier_v3')
             ->whereNotExists(function ($receipt) {
-                $receipt->name('cashier_v3_card_purchase_receipt')->alias('legacy_receipt')
+                // 与迁移20261030_r25的legacy_order_id前导索引配套：只判断回执是否存在，
+                // 不读取回执正文；全局旧订单主键去重语义保持不变，不能增加会漏掉回执的过滤。
+                $receipt->name('cashier_v3_card_purchase_receipt')->alias('legacy_receipt')->fieldRaw('1')
                     ->whereRaw('legacy_receipt.legacy_order_id=o.id');
             })
             ->where('o.is_debt_repay', 0)
