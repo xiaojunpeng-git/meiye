@@ -313,6 +313,26 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             $cursor = trim((string)($result['paginationCursor']['next'] ?? ''));
             $page++;
         } while ($cursor !== '');
+        // 商城拼团即使刚成团也保存在 store_order，不能只读 V3 单而遗漏它。
+        // 复用既有 Reader 的付款/成团/权限/去重口径，再交统一引擎分页、筛选和导出。
+        // 事实下钻仍只消费其原权威源，不能为显示商城单补造 V3 收款或业绩事实。
+        if (empty($this->sourcePayload['salesPerformanceDrilldown'])) {
+            $legacyPage = 1;
+            $legacyCursor = '';
+            do {
+                $payload = array_replace($this->sourcePayload, ['recordType'=>'sales','page'=>$legacyPage,'pageSize'=>100]);
+                $payload['status'] = ($payload['dataScope'] ?? 'normal') === 'normal' ? 'normal' : ($payload['businessStatus'] ?? '');
+                if ($legacyCursor !== '') $payload['queryCursor'] = $legacyCursor;
+                $legacy = $this->salesQueries->queryHistoricalSalesOrders($payload, $operatorScope, $dataScope);
+                if (count($records) + (int)$legacy['total'] > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS && $legacyPage === 1) {
+                    throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '查询范围超过安全上限，请缩小日期范围。', []);
+                }
+                foreach ($legacy['records'] as $record) $records[] = $record;
+                if (!$legacy['records']) break;
+                $legacyCursor = (string)($legacy['paginationCursor']['next'] ?? '');
+                ++$legacyPage;
+            } while ($legacyCursor !== '');
+        }
         return $records;
     }
 
