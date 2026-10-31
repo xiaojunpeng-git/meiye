@@ -29,6 +29,7 @@
                 <view class="detail-fact"><text class="detail-label">参团时间</text><text class="detail-value">{{ detail.started_at || '--' }}</text></view>
                 <view class="detail-fact"><text class="detail-label">截止时间</text><text class="detail-value">{{ detail.expires_at || '--' }}</text></view>
             </view>
+            <button v-if="canViewGroup" class="detail-group-button" @tap="viewGroup">查看拼团</button>
         </view>
         <view v-if="detailError" class="records-loading" role="status">{{ detailError }}</view>
 		<view class="records-list" v-if="!detailId && records.length">
@@ -97,6 +98,11 @@
 		},
 		computed: {
             ...mapGetters(['isLogin']),
+            /** 入口跟随会员参与记录的权威状态；历史终态不重新进入正在招募的团。 */
+            canViewGroup() {
+                return !!this.detail && this.detail.status === 'pending'
+                    && Number.isInteger(Number(this.detail.group_id)) && Number(this.detail.group_id) > 0;
+            },
             // 空状态明确当前筛选范围，不能把历史已超时记录伪装成正在拼团。
             emptyTitle() {
                 const names = { pending: '暂无拼团中的记录', success: '暂无已成团记录', failed: '暂无未成团记录', refunded: '暂无已退款记录' };
@@ -124,6 +130,11 @@
 			this.homeHide = true;
 		},
 		methods: {
+            /** 与订单详情 goJoinPink 使用同一团根 ID 和目标页，不新建参团或支付操作。 */
+            viewGroup() {
+                if (!this.canViewGroup) return;
+                uni.navigateTo({ url: '/pages/activity/goods_combination_status/index?id=' + Number(this.detail.group_id) });
+            },
             /** 独立只读详情；失败显示在页内，保留返回操作。 */
             async loadDetail() {
                 this.loading = true; this.detailError = '';
@@ -174,6 +185,8 @@
 </script>
 
 <style lang="scss" scoped>
+    .detail-group-button { display: flex; align-items: center; justify-content: center; width: 100%; height: 88rpx; padding: 0 24rpx; margin: 24rpx 0; border-radius: 44rpx; border: 0; background: var(--view-theme); color: #fff; font-size: 28rpx; font-weight: 600; line-height: normal; }
+    .detail-group-button::after { border: 0; }
     /* 与列表横排卡片分离，避免后声明的 .record-card flex 布局覆盖详情。 */
     .detail-facts { padding: 8rpx 24rpx; margin-bottom: 20rpx; background: #fff; border-radius: 20rpx; font-size: 26rpx; color: #555; }
     .detail-fact { display: flex; align-items: flex-start; padding: 20rpx 0; line-height: 1.6; border-bottom: 1rpx solid #f2f2f2; }

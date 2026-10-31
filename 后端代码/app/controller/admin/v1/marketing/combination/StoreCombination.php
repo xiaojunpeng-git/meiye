@@ -104,6 +104,34 @@ class StoreCombination extends AuthController
         return app('json')->success($this->services->combinationStatisticsOrder((int)$id, $where));
     }
 
+    /** 活动流水分页、合计和导出共享同一只读服务及后端范围，不改变旧统计页签。 */
+    public function activityFlow($id)
+    {
+        $reader=new \app\services\activity\combination\CombinationActivityFlowServices();
+        $input=$this->request->getMore([['store_ids',[]],['date_from',''],['date_to',''],['page',1]]);
+        // 组合条件可以是JSON或结构化数组；getMore默认数组会强制/a，把JSON错误转成单元素数组。
+        // 原值直接交统一字段/类型验证器，业务字符串仍只作为ORM绑定值使用。
+        $input['filters']=$this->request->get('filters',[]);
+        $view=(string)$this->request->get('view','list');
+        if (!in_array($view,['list','export','options'],true)) throw new \think\exception\ValidateException('流水视图无效');
+        return $this->success($view==='options' ? $reader->options($this->adminInfo)
+            : $reader->page((int)$id,$input,$this->adminInfo,$view==='export'));
+    }
+
+    /** 只新增活动身份校验；资金操作完整委托原参与订单退款命令，保留整团限制。 */
+    public function refundActivityFlow($id)
+    {
+        if ((string)$this->request->post('action','refund') !== 'refund')
+            throw new \think\exception\ValidateException('活动流水仅支持原订单退款');
+        $reader=new \app\services\activity\combination\CombinationActivityFlowServices();
+        $orderId=(int)$this->request->post('order_id',0);
+        $reader->assertRefundOrder((int)$id,$orderId,$this->adminInfo);
+        // 原领域命令仍决定金额/渠道/权益和幂等；新入口仅要求在团锁内再校验未成团。
+        return $this->success((new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
+            $orderId,(string)$this->request->post('reason',''),(int)$this->request->adminId(),
+            (bool)$this->request->post('retry',false),0,true));
+    }
+
     /**
      * 详情
      * @param $id

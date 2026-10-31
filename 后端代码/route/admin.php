@@ -951,6 +951,9 @@ Route::group('adminapi', function () {
         Route::get('combination/statistics/list/:id', 'v1.marketing.combination.StoreCombination/combinationStatisticsList')->option(['real_name' => '拼团统计列表']);
         //拼团统计订单
         Route::get('combination/statistics/order/:id', 'v1.marketing.combination.StoreCombination/combinationStatisticsOrder')->option(['real_name' => '拼团统计订单']);
+        // 活动流水显式使用原拼团管理与购买门店权限；退款仍由原领域命令保护。
+        Route::get('combination/statistics/flow/:id', 'v1.marketing.combination.StoreCombination/activityFlow')->option(['real_name' => '拼团活动流水']);
+        Route::post('combination/statistics/flow/:id/refund', 'v1.marketing.combination.StoreCombination/refundActivityFlow')->option(['real_name' => '拼团活动流水退款']);
 
         //秒杀时间段列表
         Route::get('seckill/time', 'v1.marketing.seckill.StoreSeckillTime/index')->option(['real_name' => '秒杀时间段列表']);

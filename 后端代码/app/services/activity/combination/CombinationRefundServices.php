@@ -73,12 +73,12 @@ class CombinationRefundServices
     }
 
     /** No amount supplied by the browser is accepted. Admin identity comes from authenticated context. */
-    public function refundOrder(int $orderId, string $reason, int $operatorId = 0, bool $retry = true, int $kickGroupId = 0): array
+    public function refundOrder(int $orderId, string $reason, int $operatorId = 0, bool $retry = true, int $kickGroupId = 0, bool $incompleteGroupOnly = false): array
     {
         $reason = trim($reason);
         if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
-        $claim = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId) {
-            return $this->claimRefund($orderId, $reason, $operatorId, $retry, $kickGroupId);
+        $claim = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, $incompleteGroupOnly) {
+            return $this->claimRefund($orderId, $reason, $operatorId, $retry, $kickGroupId, $incompleteGroupOnly);
         });
         return $this->settleClaim($claim, $operatorId);
     }
@@ -160,15 +160,19 @@ class CombinationRefundServices
     }
 
     /** Caller owns the transaction. Group requests claim every order before ANY channel call is possible. */
-    private function claimRefund(int $orderId, string $reason, int $operatorId, bool $retry, int $kickGroupId): array
+    private function claimRefund(int $orderId, string $reason, int $operatorId, bool $retry, int $kickGroupId, bool $incompleteGroupOnly = false): array
     {
         $send = false;
         $claimed = false;
-        $claim = function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
+        $claim = function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, $incompleteGroupOnly, &$send, &$claimed) {
             $memberIdentity = Db::name('store_pink')->where('order_id_key', $orderId)->find();
             if (!$memberIdentity) throw new ValidateException('拼团订单不存在');
             $rootId = (int)$memberIdentity['k_id'] ?: (int)$memberIdentity['id'];
-            Db::name('store_pink')->where('id', $rootId)->lock(true)->find();
+            $root = Db::name('store_pink')->where('id', $rootId)->lock(true)->find();
+            // 活动流水单笔入口必须在预留退款的同一把团锁下复核，不能用点击前状态绕过刚成团限制。
+            // 整团退款继续由原批量事务调用本方法，默认参数不改变其预留和渠道结算流程。
+            if ($incompleteGroupOnly && (!$root || (int)$root['k_id'] !== 0 || (int)$root['status'] === 2))
+                throw new ValidateException('拼团成功后请使用整团退款');
             $order = Db::name('store_order')->where('id', $orderId)->lock(true)->find();
             if (!$order || !self::isGroupOrder($orderId)) throw new ValidateException('拼团订单不存在');
             $row = Db::name('combination_order_refund')->where('order_id', $orderId)->lock(true)->find();

@@ -9,6 +9,14 @@
 // +----------------------------------------------------------------------
 import request from '@/plugins/request';
 
+/** 活动身份固定在路由；导出携带已提交筛选，退款不由浏览器指定金额或渠道。 */
+export function combinationActivityFlowApi(id, params) {
+  return request({ url: `marketing/combination/statistics/flow/${id}`, method: 'get', params });
+}
+export function combinationActivityFlowRefundApi(id, data) {
+  return request({ url: `marketing/combination/statistics/flow/${id}/refund`, method: 'post', data });
+}
+
 export function combinationGroupExportApi(id) {
   return request({ url: `marketing/combination/order_pink/${id}/export`, method: 'get' });
 }

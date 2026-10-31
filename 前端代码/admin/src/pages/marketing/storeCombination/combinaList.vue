@@ -166,7 +166,8 @@
                             : (row.provider === 'balance' ? '余额' : (row.provider === 'fuyou' ? '富友' : '—'))) },
                     ...[
                         ['原渠道订单号', 'channel_order_no'], ['原支付交易号', 'channel_transaction_id'],
-                        ['渠道退款流水号', 'channel_refund_id'], ['富友退款追踪号', 'fuyou_refund_trace_no'],
+                        // 列名使用通用业务名称，仍读取原渠道追踪字段，不改变历史退款凭据。
+                        ['渠道退款流水号', 'channel_refund_id'], ['退款追踪号', 'fuyou_refund_trace_no'],
                         ['商户退款单号', 'refund_no']
                     ].map(([title, key]) => ({
                         title, key, width: 205,

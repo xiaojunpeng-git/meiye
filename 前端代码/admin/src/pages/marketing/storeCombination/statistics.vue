@@ -18,6 +18,9 @@
       <Tabs v-model="currentTab" @on-click="onClickTab">
         <TabPane v-for="(item, index) in tabs" :label="item.label" :name="item.type" :key="index" />
       </Tabs>
+      <!-- 新流水独立复用原付款/退款记录，旧参与人及订单页签保持各自查询路径。 -->
+      <ActivityFlow v-if="type === 'flow'" :key="id" :activity-id="id" />
+      <template v-else>
       <Form
           ref="pagination"
           :model="pagination"
@@ -86,6 +89,7 @@
             :page-size="pagination.limit"
         />
       </div>
+      </template>
     </Card>
     <!-- 详情模态框-->
     <Modal
@@ -128,6 +132,7 @@
 
 <script>
 import cardsData from '@/components/cards/cards';
+import ActivityFlow from './ActivityFlow.vue';
 import {
   getcombinationStatistics,
   getcombinationStatisticsPeople,
@@ -141,7 +146,7 @@ import {mapState} from "vuex";
 
 export default {
   name: 'index',
-  components: { cardsData },
+  components: { cardsData, ActivityFlow },
   data() {
     return {
       roterPre: Setting.roterPre,
@@ -158,15 +163,16 @@ export default {
       total: 0,
       tabs: [
         {
-          type: '',
+          type: '0',
           label: '活动参与人',
         },
         {
-          type: '',
+          type: '1',
           label: '活动订单',
         },
+        { type:'flow', label:'活动流水' },
       ],
-      currentTab: 0,
+      currentTab: '0',
       loading: false,
       exporting: false,
       thead: [
@@ -366,7 +372,9 @@ export default {
     },
     // 标签切换
     onClickTab() {
-      this.type = this.currentTab;
+      this.type = this.currentTab === 'flow' ? 'flow' : Number(this.currentTab);
+      if (this.type === 'flow') return;
+      this.pagination.page = 1;
       this.getList(this.id);
     },
     // 搜索
