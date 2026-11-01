@@ -36,7 +36,7 @@ final class CashierV3RechargeModule
     // non-cash checkout settlement must never mint member balance.
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
-        'douyin_voucher', 'partner_collection',
+        'douyin_voucher', 'bank_transfer', 'other_income', 'partner_collection',
     ];
 
     public static function install(CashierV3ActionDispatcher $dispatcher): void
@@ -340,10 +340,10 @@ final class CashierV3RechargeModule
         if (!$member || (int)($member['status'] ?? 0) !== 1 || (int)($member['is_del'] ?? 0) !== 0) {
             throw self::failure('recharge_member_unavailable', '该会员不存在或已停用，不能充值。');
         }
-        $selfService = ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member'
-            && (int)($dataScope->operatorProfile()['actor_member_id'] ?? 0) === $memberId;
-        if (!$dataScope->allowsStore($operator->storeId())
-            || (!$selfService && !Db::name('store_user')->where('uid', $memberId)->where('store_id', $operator->storeId())->where('status', 1)->lock(true)->find())) {
+        // 全部会员选择器允许跨店选客，充值沿用同一会员范围，不要求本店关联。
+        // 仍校验操作门店权限；本次充值不新增门店关联、不调店，也不改变会员归属。
+        // 会员本人充值身份由上游可信会话及 submitInTx 的 member_recharge_terms 校验保护。
+        if (!$dataScope->allowsStore($operator->storeId())) {
             throw self::failure('recharge_member_scope_denied', '当前门店没有为该会员充值的权限。');
         }
         return $member;

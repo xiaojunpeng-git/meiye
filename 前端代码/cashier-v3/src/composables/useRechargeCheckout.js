@@ -1,3 +1,5 @@
+import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
+import { configuredActualAccountingMethods } from '@/services/configuredAccountingMethods'
 import { ref } from 'vue'
 import { createCashierV3CommandId, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { cashierV3ResponseEnvelope } from '@/services/cashierV3CheckoutResultContract'
@@ -26,13 +28,15 @@ export function useRechargeCheckout() {
   let rechargeCheckoutMutationTail = Promise.resolve()
   let originalLocalSubmit = null
   // 充值确认只编辑浏览器快照；非现金结算不可充值，服务端最终重验实际收款方式。
-  const localMethods = [
+  let localMethods = [
     ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款']
   ]
 
   function acceptLocalRechargeCheckout(input = {}, session = {}) {
+    // 每次打开重新读取本站配置，旧弹窗的异步结果不得污染新快照。
+    localMethods = localMethods.filter(([id]) => !['bank_transfer', 'other_income'].includes(id))
     const memberId = Number(input.memberId || 0)
     const packageItem = (session.rechargeOptions?.packages || [])
       .find((item) => Number(item.id) === Number(input.rechargePackageId))
@@ -90,6 +94,12 @@ export function useRechargeCheckout() {
       }
     }
     originalLocalSubmit = null
+    Promise.resolve().then(() => loadCheckoutBusinessCatalog()).then((catalog) => {
+      if (rechargeCheckout.value?.orderLines?.[0]?.id !== localId) return
+      const methods = configuredActualAccountingMethods(catalog)
+      localMethods.push(...methods.map((method) => [method.id, method.name]))
+      rechargeCheckout.value.payment.methods.push(...methods)
+    }).catch(() => { /* 配置不可用时不开放新渠道，最终事务仍重验启用状态。 */ })
     return rechargeCheckout.value
   }
 

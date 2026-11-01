@@ -35,7 +35,7 @@ final class CashierV3DebtRepaymentServices
     // Cash methods stay separate from the dedicated, ledger-backed balance tender.
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
-        'partner_collection',
+        'bank_transfer', 'other_income', 'partner_collection',
     ];
 
     /** @var string */

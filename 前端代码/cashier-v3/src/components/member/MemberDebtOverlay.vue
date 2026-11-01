@@ -1,4 +1,5 @@
 <script setup>
+import { configuredActualAccountingMethods } from '@/services/configuredAccountingMethods'
 import { computed, ref, watch } from 'vue'
 import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
@@ -71,7 +72,8 @@ const isRepaymentRewardOpen = ref(false)
 let repaymentSourceLoadToken = 0
 let otherSalespersonSearchToken = 0
 // 欠款补交使用同一套记账收款代码；这里只提供可选项，落账权限和事实由最终提交重验。
-const paymentMethods = [
+const additionalAccountingMethods = ref([])
+const basePaymentMethods = [
   { code: 'cash', label: '现金' },
   { code: 'unionpay', label: '银联' },
   { code: 'wechat', label: '微信' },
@@ -80,9 +82,12 @@ const paymentMethods = [
   { code: 'douyin_voucher', label: '抖音验券' },
   { code: 'partner_collection', label: '合作方收款' }
 ]
+// 可选渠道只在本站配置启用后加入；历史标签不随启停丢失。
+const paymentMethods = computed(() => [...basePaymentMethods, ...additionalAccountingMethods.value
+  .map((method) => ({ code: method.id, label: method.name }))])
 // Prior receipts retain their historical label even though the non-cash
 // method is no longer selectable for a new debt repayment.
-const historicalPaymentMethods = [...paymentMethods, { code: 'other_collection', label: '其他收款' }]
+const historicalPaymentMethods = [...basePaymentMethods, { code: 'bank_transfer', label: '银行转账' }, { code: 'other_income', label: '其他收入' }, { code: 'other_collection', label: '其他收款' }]
 let paymentLineSequence = 0
 
 const records = computed(() => {
@@ -195,7 +200,9 @@ function selectRepayment(record) {
   capturedRepaymentSource.value = { ...initialRepaymentSource.value }
   repaymentRewardAmountCents.value = 0
   isRepaymentRewardOpen.value = false
-  if (businessSourceEnabled.value) loadRepaymentSources()
+  // 渠道开关独立于业务来源开关；来源关闭时仍须读取本站转账配置。
+  additionalAccountingMethods.value = []
+  loadRepaymentSources()
   validationMessage.value = ''
 }
 
@@ -205,10 +212,14 @@ async function loadRepaymentSources() {
   repaymentSourcesError.value = ''
   try {
     const catalog = await loadCheckoutBusinessCatalog()
-    if (token === repaymentSourceLoadToken) repaymentSources.value = catalog.sources
+    if (token === repaymentSourceLoadToken) {
+      repaymentSources.value = catalog.sources
+      additionalAccountingMethods.value = configuredActualAccountingMethods(catalog)
+    }
   } catch (error) {
     if (token === repaymentSourceLoadToken) {
       repaymentSources.value = []
+      additionalAccountingMethods.value = []
       repaymentSourcesError.value = error instanceof Error ? error.message : '来源加载失败，请重试。'
     }
   } finally {

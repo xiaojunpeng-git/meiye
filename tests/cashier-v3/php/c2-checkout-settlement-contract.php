@@ -353,13 +353,15 @@ function checkoutProjectionAggregate(array $result): array
 }
 
 $methods = CashierV3CheckoutSettlementKernel::paymentMethods();
-checkoutAssert('seven receipt methods and one non-cash settlement method are exact', $methods === [
+checkoutAssert('nine receipt methods and one non-cash settlement method are exact', $methods === [
     'cash',
     'unionpay',
     'wechat',
     'alipay',
     'dianping_voucher',
     'douyin_voucher',
+    'bank_transfer',
+    'other_income',
     'partner_collection',
     'other_collection',
 ]);
@@ -667,10 +669,10 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
         && $checkoutProjection['compositionCode'] === 'mixed'
         && $checkoutProjection['composition']['primaryAction'] === 'collect_and_complete'
         && $checkoutProjection['composition']['primaryActionLabel'] === '收款并完成服务');
-checkoutAssert('projection exposes seven receipt methods and other collection without a permissionless old-card button',
+checkoutAssert('projection exposes nine receipt methods and other collection without a permissionless old-card button',
     array_column($checkoutProjection['payment']['methods'], 'id') === [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
-        'partner_collection', 'other_collection',
+        'bank_transfer', 'other_income', 'partner_collection', 'other_collection',
     ]
         && $checkoutProjection['payment']['methods'][0]['canAdd'] === true);
 checkoutAssert('projection payment lines and summary remain exact cents-derived values',

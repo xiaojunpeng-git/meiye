@@ -3570,6 +3570,10 @@ final class CashierV3SalesOrderQueryServices
             'dianping_voucher' => '大众验券',
             'douyin_voucher' => '抖音验券',
             'partner' => '合作方收款',
+                // 银行转账是独立的实际到账方式，不借用其他收款，也不重写历史渠道。
+            'bank_transfer' => '银行转账',
+            // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
+            'other_income' => '其他收入',
             'partner_collection' => '合作方收款',
             'other' => '其他收款',
             'other_collection' => '其他收款',

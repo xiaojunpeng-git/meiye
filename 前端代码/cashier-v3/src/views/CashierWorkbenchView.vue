@@ -1,4 +1,5 @@
 <script setup>
+import { configuredActualAccountingMethods, filterConfiguredAccountingMethods } from '@/services/configuredAccountingMethods'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -1796,7 +1797,7 @@ async function loadInlineCheckoutBusinessSources() {
       const preview = localCheckoutPreview.value
       preview.payment.methods = localCheckoutPaymentMethods(
         preview.lines.filter((line) => ['sale', 'entitlement_service'].includes(cartLineRole(line))),
-        oldCardEnabled
+        oldCardEnabled, catalog
       )
     }
   } catch (error) {
@@ -1805,7 +1806,7 @@ async function loadInlineCheckoutBusinessSources() {
       checkoutBusinessSourcesLoadError.value = checkoutSourceSelectorError(error)
       if (localCheckoutPreview.value?.localDraftPreview === true) {
         const preview = localCheckoutPreview.value
-        preview.payment.methods = preview.payment.methods.filter((method) => String(method?.id || '') !== 'old_card_entry')
+        preview.payment.methods = preview.payment.methods.filter((method) => !['old_card_entry', 'bank_transfer', 'other_income', 'other_collection'].includes(String(method?.id || '')))
       }
     }
   } finally {
@@ -5687,7 +5688,7 @@ async function setLineQuantity(line, event) {
   return result
 }
 
-function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
+function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false, catalog = null) {
   // 本地预览按钮必须与服务端结算方式一致；其他收款只结清应收，
   // 不代表真实到账，也不能绕过最终结账事务或事实校验。
   const methods = [
@@ -5695,6 +5696,8 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
   ].map(([id, name]) => ({ id, name, canAdd: true, cashPerformanceEligible: id !== 'other_collection' }))
+  // 新渠道按本站配置开放，目录失败或其他实例未启用时不显示。
+  methods.splice(2, 0, ...configuredActualAccountingMethods(catalog || {}))
   // 历史补录仅用于卡项和产品销售；仍须单独结算且不形成现金业绩。
   if (oldCardEnabled && lines.length > 0
     && lines.every((line) => cartLineRole(line) === 'sale'
@@ -5702,7 +5705,7 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
     && canUseCashierV3Operation('cashier.v3.cashier.old_card_entry')) {
     methods.push({ id: 'old_card_entry', name: '旧数据录入', canAdd: true, cashPerformanceEligible: false })
   }
-  return methods
+  return filterConfiguredAccountingMethods(methods, catalog)
 }
 
 function localCheckoutPreviewSnapshot() {

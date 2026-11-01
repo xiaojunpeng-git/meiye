@@ -1,3 +1,4 @@
+import { configuredActualAccountingMethods, filterConfiguredAccountingMethods } from '../../../前端代码/cashier-v3/src/services/configuredAccountingMethods.js'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
@@ -24,6 +25,7 @@ const functions = names.map((name) => {
 }).join('\n')
 const identity = (value = []) => structuredClone(value)
 const context = vm.createContext({
+  configuredActualAccountingMethods, filterConfiguredAccountingMethods,
   structuredClone,
   clonePlain: structuredClone,
   localLineServiceSettings: { value: {} },

@@ -22,7 +22,7 @@ final class CashierV3RechargeCheckoutModule
     private const SUBMIT = 'submit-recharge-checkout';
     // 本次充值快照只能携带已确认的记账方式，最终事务还会按同一白名单重验。
     // Recharge increases spendable balance, so non-cash settlement cannot be tendered here.
-    private const METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection'];
+    private const METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','bank_transfer', 'other_income', 'partner_collection'];
 
     public static function install(CashierV3ActionDispatcher $dispatcher): void
     {

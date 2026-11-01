@@ -34,7 +34,7 @@ final class CashierV3SalesOrderPlanV1
     // 销售订单快照只接受正式记账收款代码；旧卡录入保留独立迁入语义。
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
-        'partner_collection', 'other_collection',
+        'bank_transfer', 'other_income', 'partner_collection', 'other_collection',
     ];
 
     private const MAX_PAYMENT_ROWS = 200;

@@ -33,6 +33,10 @@ final class CashierV3PaymentCollectionPlanV1
         'alipay' => '支付宝',
         'dianping_voucher' => '大众验券',
         'douyin_voucher' => '抖音验券',
+        // 银行转账是独立的实际到账方式，不借用其他收款，也不重写历史渠道。
+        'bank_transfer' => '银行转账',
+        // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
+        'other_income' => '其他收入',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
     ];
@@ -755,6 +759,10 @@ final class CashierV3PaymentCollectionPlanV1
             );
             if ($amount < 0) {
                 throw self::failure('payment_collection_amount_invalid');
+            }
+            // 新实际收款方式在最终落账边界再次拒绝小数元，不能只依赖浏览器草稿校验。
+            if (in_array($method, ['bank_transfer', 'other_income'], true) && $amount % 100 !== 0) {
+                throw self::failure('payment_collection_bank_transfer_whole_yuan_required');
             }
             // For an exactly-zero receivable, the selected bookkeeping method
             // is retained on the immutable checkout draft as operational

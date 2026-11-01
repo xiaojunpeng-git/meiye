@@ -52,7 +52,7 @@ final class StoreReconciliationReceiptReader
     public static function methodCode(string $code): string
     {
         $ids = ['unionpay' => 1, 'dianping_voucher' => 2, 'douyin_voucher' => 3,
-            'wechat' => 4, 'partner_collection' => 6, 'cash' => 7, 'other_collection' => 8];
+            'wechat' => 4, 'bank_transfer' => 5, 'partner_collection' => 6, 'cash' => 7, 'other_collection' => 8];
         return isset($ids[$code]) ? 'legacy_' . $ids[$code] : 'v3_' . $code;
     }
 

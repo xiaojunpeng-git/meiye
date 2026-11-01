@@ -33,7 +33,7 @@ final class CashierV3RechargeDebtRepaymentServices
     public const ACTION = 'submit-recharge-debt-repayment';
     // 充值欠款补交复用记账收款白名单，避免补交路径与充值完成路径产生口径漂移。
     // Recharge debt is cleared only by an actual receipt, never a non-cash offset.
-    private const PAYMENT_METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection'];
+    private const PAYMENT_METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','bank_transfer', 'other_income', 'partner_collection'];
 
     public function submitInTx(array $scope): array
     {
@@ -106,6 +106,13 @@ final class CashierV3RechargeDebtRepaymentServices
                 throw self::failure('recharge_repayment_idempotency_conflict');
             }
             return $this->replayedResult((array)$existing);
+        }
+        // 已成功命令先重放；仅新银行转账需锁定本站启用配置，不能凭客户端代码开通。
+        foreach ($input['paymentLines'] as $paymentLine) {
+            if (in_array($paymentLine['paymentMethod'], ['bank_transfer', 'other_income'], true)) {
+                (new \app\services\cashier\v3\config\CashierV3BusinessConfigServices())
+                    ->resolveAccountingMethodSnapshot($paymentLine['paymentMethod'], true);
+            }
         }
         // Successful historical retries above remain untouched. New repayment
         // uses its own confirmed policy choice, never the original recharge.

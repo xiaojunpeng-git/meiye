@@ -31,6 +31,9 @@ final class CashierV3CheckoutSettlementKernel
     public const PAYMENT_ALIPAY = 'alipay';
     public const PAYMENT_DIANPING_VOUCHER = 'dianping_voucher';
     public const PAYMENT_DOUYIN_VOUCHER = 'douyin_voucher';
+    // 转账凭证由操作员确认到账，沿用整数金额、最终快照及事务校验。
+    public const PAYMENT_BANK_TRANSFER = 'bank_transfer';
+    public const PAYMENT_OTHER_INCOME = 'other_income';
     public const PAYMENT_PARTNER_COLLECTION = 'partner_collection';
     public const PAYMENT_OTHER_COLLECTION = 'other_collection';
     public const PAYMENT_OLD_CARD_ENTRY = 'old_card_entry';
@@ -42,6 +45,8 @@ final class CashierV3CheckoutSettlementKernel
         self::PAYMENT_ALIPAY,
         self::PAYMENT_DIANPING_VOUCHER,
         self::PAYMENT_DOUYIN_VOUCHER,
+        self::PAYMENT_BANK_TRANSFER,
+        self::PAYMENT_OTHER_INCOME,
         self::PAYMENT_PARTNER_COLLECTION,
         self::PAYMENT_OTHER_COLLECTION,
     ];
