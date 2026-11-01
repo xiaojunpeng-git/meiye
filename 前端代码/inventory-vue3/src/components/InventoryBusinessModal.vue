@@ -10,6 +10,7 @@ import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes,
 import { validateInboundDates } from '../inboundDateValidation'
 import { formatBatchNumber } from '../batchNumberDisplay.js'
 import { requestReopenDraft } from '../requestReopenDraft.js'
+import { documentCopyLines } from '../documentCopyDraft.js'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -123,7 +124,8 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
-const isRequestReopen = computed(() => props.modalKind === 'request-reopen')
+const isRequestReopen = computed(() => props.modalKind === 'request-copy')
+const isCopy = computed(() => props.modalKind.endsWith('-copy'))
 const isTransferEdit = computed(() => props.modalKind === 'transfer-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
@@ -208,7 +210,7 @@ const title = computed(() => {
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
   if (isRequestEdit.value) return '编辑请货单'
-  if (isRequestReopen.value) return '重开请货单'
+  if (isCopy.value) return `复制${pageLabel.value}`
   if (isTransferEdit.value) return '编辑调拨草稿'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
@@ -447,7 +449,7 @@ async function hydrateRequestEditor(detail) {
   await loadSupplyParties()
 }
 
-/** 作废单只提供新建表单的业务初值；日期、请货人、单号和幂等键均重新生成。 */
+/** 正常与作废单只提供新建表单初值；日期、请货人、单号和幂等键均重新生成。 */
 function seedReopenedRequest() {
   if (!isRequestReopen.value) return
   try {
@@ -462,7 +464,7 @@ function seedReopenedRequest() {
   } catch (error) {
     supplyPartySelection.value = ''
     selectedRows.value = []
-    catalogError.value = error instanceof Error ? error.message : '重开请货单失败。'
+    catalogError.value = error instanceof Error ? error.message : '复制请货单失败。'
   }
 }
 
@@ -543,7 +545,75 @@ function onUsageWarehouseChanged() {
 
 watch(() => props.pageKey, (pageKey) => {
   if (pageKey === 'usage') loadUsageProjects()
-  if (pageKey === 'transfer') loadTransferContext()
+  if (pageKey === 'transfer' && !isCopy.value) loadTransferContext()
+}, { immediate: true })
+
+/** 复制从授权详情形成全新表单；仓库须仍可选，日期、操作人、事实与幂等键全部使用新建流程。 */
+watch(() => props.detail, async (detail) => {
+  if (!isCopy.value || isRequestReopen.value || !detail) return
+  try {
+    const document = detail.document || detail
+    const kind = props.pageKey
+    if (kind === 'count') {
+      // 旧盘点的账面数和实盘数已过时；只复制 SKU 选择，重新获取当前仓的账面库存。
+      const catalog = await allCountCatalog(false, true)
+      const bySku = new Map(catalog.map((item) => [Number(item.sku_id), item]))
+      const copiedBySku = new Map()
+      for (const line of detail.lines) {
+        const current = bySku.get(Number(line.sku_id))
+        if (!current || Number(current.product_id) !== Number(line.product_id) || String(current.sku_unique) !== String(line.sku_unique)) throw new Error('原盘点含当前不可用的商品规格，请手工新建。')
+        // 已确认单不保存原盘点模式；同一规格可能分批出现，新单只带规格并重新盘点。
+        copiedBySku.set(Number(line.sku_id), { ...countDraftRow(current), count_mode: 'SKU', counted_quantity: '' })
+      }
+      countRemark.value = String(document.remark || '')
+      replaceCountRows([...copiedBySku.values()])
+      countProgress.value = '已带入商品规格；请按当前库存重新填写实盘数，原批次需重新选择。'
+      return
+    }
+    const copied = documentCopyLines(kind, detail)
+    if (kind === 'inbound' || kind === 'outbound') {
+      if (isPlatformHeadquarters.value) {
+        const key = `HQ:${Number(detail.document?.location_id || props.hqLocationId)}`
+        if (!documentWarehouseOptions.value.some((item) => item.key === key)) throw new Error('原单仓库当前不可新建，请选择其他仓库后手工新建。')
+        documentWarehouseSelection.value = key
+      }
+      if (kind === 'inbound') {
+        inboundRemark.value = String(document.remark || '')
+        // 历史入库未保存具体类型，保留新建默认值供用户确认。
+      } else {
+        outboundRemark.value = String(document.remark || '')
+        outboundRecipient.value = String(document.outbound_recipient || '')
+        if (outboundTypes.includes(String(document.order_type_name))) outboundType.value = String(document.order_type_name)
+      }
+    } else if (kind === 'transfer') {
+      transferRemark.value = String(detail.remark || '')
+      transferSourceSelection.value = warehouseSelection(String(detail.from_party_type), detail.from_party_id, detail.from_location_id)
+      transferTargetSelection.value = warehouseSelection(String(detail.to_party_type), detail.to_party_id, detail.to_location_id)
+      requestDocumentId.value = 0
+      await loadTransferContext()
+      if (catalogError.value) throw new Error(catalogError.value)
+      if (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)) throw new Error('原调出方当前不可选，请手工新建。')
+      if (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value)) throw new Error('原调入方当前不可选，请手工新建。')
+    } else if (kind === 'usage') {
+      if (document.operation_type !== 'ISSUE') throw new Error('退回单不能复制为领用单。')
+      usageRemark.value = String(document.remark || '')
+      usageProjectId.value = document.project_id > 0 ? String(document.project_id) : ''
+      usageProjectName.value = String(document.project_name_snapshot || '')
+      usageProjectKeyword.value = usageProjectId.value ? usageProjectName.value : ''
+      if (isPlatformHeadquarters.value) {
+        const key = Number(document.store_id) > 0 ? `STORE:${Number(document.store_id)}` : `HQ:${Number(document.location_id)}`
+        if (!usageWarehouseOptions.value.some((item) => item.key === key)) throw new Error('原领用仓库当前不可选，请手工新建。')
+        usageWarehouseSelection.value = key
+      }
+      await loadUsageProjects()
+      if (usageProjectId.value && !usageProjects.value.some((item) => Number(item.id) === Number(usageProjectId.value))) throw new Error('原核销项目当前不可选，请手工新建。')
+    }
+    selectedRows.value = copied
+    catalogError.value = ''
+  } catch (error) {
+    selectedRows.value = []
+    catalogError.value = error instanceof Error ? error.message : '复制单据失败，请手工新建。'
+  }
 }, { immediate: true })
 
 async function submitImport() {

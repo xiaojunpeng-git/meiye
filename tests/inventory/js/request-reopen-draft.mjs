@@ -30,10 +30,10 @@ test('作废单只复制业务初值，新单不继承原单身份、日期、�
   assert.equal(original.lines[0].quantity, '2.5')
 })
 
-test('原单状态或商品身份不合法时拒绝复制', () => {
+test('正常单也可复制，商品身份不合法时拒绝复制', () => {
   const normal = source()
   normal.document.document_status = 'APPLIED'
-  assert.throws(() => requestReopenDraft(normal), /作废单/)
+  assert.equal(requestReopenDraft(normal).lines[0].quantity, '2.5')
   const invalid = source()
   invalid.lines[0].sku_id = 0
   assert.throws(() => requestReopenDraft(invalid), /商品明细/)
@@ -49,10 +49,10 @@ test('总部请货和门店供货沿用原主体，不继承旧履约字段', ()
   assert.equal('fulfilled_transfer_id' in draft.lines[0], false)
 })
 
-test('门店只可重开本店请货仓作废单，供货给他店的单据不能重开', () => {
+test('门店只可复制本店请货仓单据，供货给他店的单据不能复制', () => {
   const locations = [{ id: 301, is_default: 1 }]
-  assert.equal(canReopenRequestForScope({ status_name: '已作废', location_id: 301 }, 'store', locations), true)
-  assert.equal(canReopenRequestForScope({ status_name: '已作废', location_id: 302 }, 'store', locations), false)
-  assert.equal(canReopenRequestForScope({ status_name: '申请中', location_id: 301 }, 'store', locations), false)
-  assert.equal(canReopenRequestForScope({ status_name: '已作废', location_id: 302 }, 'platform', locations), true)
+  assert.equal(canReopenRequestForScope({ id: 1, status_name: '已作废', location_id: 301 }, 'store', locations), true)
+  assert.equal(canReopenRequestForScope({ id: 2, status_name: '已作废', location_id: 302 }, 'store', locations), false)
+  assert.equal(canReopenRequestForScope({ id: 3, status_name: '申请中', location_id: 301 }, 'store', locations), true)
+  assert.equal(canReopenRequestForScope({ id: 4, status_name: '已作废', location_id: 302 }, 'platform', locations), true)
 })

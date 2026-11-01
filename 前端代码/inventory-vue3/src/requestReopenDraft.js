@@ -1,15 +1,15 @@
-/** 门店列表可看见本店供货的他店单据；重开只能针对本店请货仓，平台仍由详情与新建接口校验权限。 */
+/** 门店列表可看见本店供货的他店单据；复制只能针对本店请货仓，平台仍由详情与新建接口校验权限。 */
 export function canReopenRequestForScope(row, mode, storeLocations) {
-  if (row?.status_name !== '已作废') return false
+  if (!row || Number(row.id) <= 0) return false
   return mode === 'platform' || (mode === 'store' && Array.isArray(storeLocations) && storeLocations.some((location) => Number(location.id) === Number(row.location_id)))
 }
 
-/** 已作废请货单仅作为新建表单的可编辑初值；不继承原单身份、日期、人员或履约事实。 */
+/** 正常或作废请货单仅作为新建表单的可编辑初值；不继承原单身份、日期、人员或履约事实。 */
 export function requestReopenDraft(detail) {
   const document = detail?.document
   const sourceLines = detail?.lines
-  if (document?.document_status !== 'VOIDED' || !Array.isArray(sourceLines) || !sourceLines.length) {
-    throw new Error('原请货单已不是可重开的作废单，请返回列表刷新。')
+  if (!document || !Array.isArray(sourceLines) || !sourceLines.length) {
+    throw new Error('原请货单明细不可用，请返回列表刷新。')
   }
   const lines = sourceLines.map((line) => ({
     product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),

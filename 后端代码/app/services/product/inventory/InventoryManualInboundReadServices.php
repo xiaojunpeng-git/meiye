@@ -20,6 +20,7 @@ final class InventoryManualInboundReadServices
         $facts = Db::name('inventory_batch_movement_fact')->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')
             ->join('inventory_stock s', 's.id=f.stock_id')
+            ->leftJoin('store_product p', 'p.id=s.consumable_product_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', (string)$location['tenant_id'])
             ->where('f.store_id', $storeId)
@@ -28,7 +29,8 @@ final class InventoryManualInboundReadServices
             ->where('f.source_id', $sourceId)
             ->where('f.fact_status', 'SETTLED')
             // Stable fact ID lets the separate note editor address a line without altering the settled fact.
-            ->fieldRaw("f.id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.occurred_at, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            // 当前库存身份只供复制成新单；批次与成本事实仍保持原单只读。
+            ->fieldRaw("f.id, s.consumable_product_id AS product_id, s.sku_id, s.product_unique AS sku_unique, COALESCE(p.no_expiry_management, 0) AS no_expiry_management, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.occurred_at, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')
             ->select()
             ->toArray();
