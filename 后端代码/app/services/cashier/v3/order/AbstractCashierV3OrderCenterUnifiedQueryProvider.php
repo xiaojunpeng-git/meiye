@@ -204,7 +204,9 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         $allowed = static function (string $type) use ($source, $labels): bool {
             return !isset($source['_allOrderTypes']) || in_array($labels[$type], $source['_allOrderTypes'], true);
         };
-        if ($allowed('sales')) foreach ($this->salesQueries->scanIndexKeys($source, $operator, $scope) as $key) {
+        // 混合入口传入all，消费子查询必须使用sales领域类型，保留原门店范围校验。
+        $salesSource = array_replace($source, ['recordType'=>'sales']);
+        if ($allowed('sales')) foreach ($this->salesQueries->scanIndexKeys($salesSource, $operator, $scope) as $key) {
             $index->append(['type'=>'sales','time'=>(int)$key['settled_at'],'record_id'=>'sales:'.$key['order_id'],'key'=>$key]);
         }
         if ($mixed) foreach (['recharge','supplement','refund'] as $type) {
@@ -226,7 +228,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             if (count($selected) >= $size) break;
             $selected[] = $key; if ($key['type'] === 'sales') $keys[] = $key['key'];
         }
-        $sales = $this->salesQueries->hydrateIndexKeys($keys, $source, $operator, $scope);
+        $sales = $this->salesQueries->hydrateIndexKeys($keys, $salesSource, $operator, $scope);
         $byId = []; foreach ($sales as $record) $byId['sales:'.$record['id']] = $record;
         if (!$mixed) {
             $records = []; foreach ($selected as $key) if (isset($byId[$key['record_id']])) $records[] = $byId[$key['record_id']];

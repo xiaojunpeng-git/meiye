@@ -8,8 +8,9 @@ Db::execute('SET TRANSACTION READ ONLY');Db::startTrans();
 try{foreach(['all','sales','recharge','refund','service','gift','card_operation','debt','supplement'] as $type){
  $code='order_center_'.$type;[$op,$scope,$ctx]=$read->exportScopes((int)$admin['id'],$code);
  $tenant=(string)$op->tenantId();$storeOp=new CashierV3OperatorScope(1,1,'',$tenant);$storeScope=new CashierV3DataScopeContext(1,1,1,$tenant,'',[1],'stores',[],false,'','test',['cashier.v3.order_center'],[]);
- $provider=UnifiedQueryRuntime::runtime()['providers']->resolve($code);$q=['page'=>1,'pageSize'=>20,'businessDateFrom'=>'2026-10-01','businessDateTo'=>'2026-10-31','storeIds'=>[1],'dataScope'=>'normal'];
+ $provider=UnifiedQueryRuntime::runtime()['providers']->resolve($code);$q=['recordType'=>$type,'page'=>1,'pageSize'=>20,'businessDateFrom'=>'2026-10-01','businessDateTo'=>'2026-10-31','storeIds'=>[1],'dataScope'=>'normal'];
  $a=$provider->queryPage($ctx,$q,$op,$scope);$b=$provider->queryPage($ctx,$q,$storeOp,$storeScope);
+ if($type==='all'){ $reference=$provider->query($ctx,$q); if($a['total']!==$reference['total']||array_column($a['records'],'record_id')!==array_column($reference['records'],'record_id'))throw new RuntimeException('explicit all payload lost sales records'); }
  if($a['total']!==$b['total']||$a['records']!==$b['records'])throw new RuntimeException('scope parity '.$type);
  echo json_encode(['type'=>$type,'status'=>'PASS','total'=>$a['total'],'page_rows'=>count($a['records'])])."\n";
 }}finally{Db::rollback();}
