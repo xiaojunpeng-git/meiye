@@ -11,6 +11,10 @@ assert git('merge-base',head,release_parent).strip() in [head,release_parent]
 base_files={
  '后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php':'f9a8b73c96d366fb5f65bcd1a43dcd5cc215560a',
  '后端代码/app/services/cashier/v3/order/CashierV3HistoricalRechargeDate.php':'f9a8b73c96d366fb5f65bcd1a43dcd5cc215560a'}
+# 保留其他任务已在瑞昊、008发布的组织选人正本，避免共享构建回退。
+accepted_staff='685c73b088398ef0ee78106d18fe5ca7bcafefc8'
+for file in git('diff-tree','--no-commit-id','--name-only','-r',accepted_staff).splitlines():
+ base_files[file]=accepted_staff
 files=[
  '前端代码/cashier-v3/src/views/OrderCenterView.vue',
  '前端代码/cashier-v3/src/services/cashierV3Bridge.js',

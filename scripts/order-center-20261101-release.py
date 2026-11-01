@@ -8,7 +8,8 @@ def ssh(body):return run(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking
 def sha(b):return hashlib.sha256(b).hexdigest()
 m=json.loads((out/'manifest.json').read_text());commit=json.loads((out/'commits.json').read_text())['round'];assert run(['git','rev-parse',commit+'^{tree}']).decode().strip()==m['candidateTree']
 payload=out/'payload';payload.mkdir(exist_ok=True)
-files=[x['path'] for x in m['files'] if x['path'].startswith('后端代码/')]+['后端代码/app/services/cashier/v3/order/CashierV3HistoricalRechargeDate.php']
+files=[x['path'] for x in m['files'] if x['path'].startswith('后端代码/')]+list(m['baselineFiles'])
+files=sorted(set(f for f in files if f.startswith('后端代码/')))
 for f in files:
  data=run(['git','show',commit+':'+f]);p=payload/f.removeprefix('后端代码/');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
 # Build outputs come from the same fixed tree; preserve old hashed assets on the server.

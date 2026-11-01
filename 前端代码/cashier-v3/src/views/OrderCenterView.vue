@@ -475,9 +475,10 @@ function orderSalesAttributionQuery(query) {
 const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)).map(item => {
   const presented = item?.key === 'craftsman' && !orderLaborFeeVisible.value
     ? { ...item, label: '手艺人（类型，业绩，项目数）' } : item
-  // 欠款列受实例开关控制，能力白名单可合法移除它；不能因一个
-  // 关闭字段把整个订单页的更多筛选能力一起关闭。
-  return presented?.key === 'debt_amount' ? { ...presented, permissionFiltered: true } : presented
+  // 实例开关可以合法移除来源、欠款及销售归属字段。首屏能力与业务策略
+  // 并行返回时，这些可选字段不能触发整页契约失败并隐藏更多筛选和导出。
+  return ['source', 'debt_amount', 'sales_manager', 'guide'].includes(presented?.key)
+    ? { ...presented, permissionFiltered: true } : presented
 })
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))

@@ -243,9 +243,14 @@ class UnifiedQueryExportTaskServices
             );
         }
         // 订单页面默认按完成时间倒序，冻结时必须保留这一默认顺序；平台和门店共用。
-        if (in_array($pageCode, \app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)
-            && empty($query['sorts'])) {
-            $query['sorts'] = \app\services\cashier\v3\order\AbstractCashierV3OrderCenterUnifiedQueryProvider::defaultOrderSorts($pageCode);
+        if (in_array($pageCode, \app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)) {
+            $defaultSorts = \app\services\cashier\v3\order\AbstractCashierV3OrderCenterUnifiedQueryProvider::defaultOrderSorts($pageCode);
+            $sorts = (array)($query['sorts'] ?? []);
+            if (!$sorts || (count($sorts) === 1
+                && (string)($sorts[0]['field'] ?? $sorts[0]['field_key'] ?? $sorts[0]['fieldKey'] ?? '') === $defaultSorts[0]['field']
+                && strtolower((string)($sorts[0]['direction'] ?? '')) === 'desc')) {
+                $query['sorts'] = $defaultSorts;
+            }
         }
         $this->assertNoExecutableText($query);
         $rawQueryJson = UnifiedQueryJson::encode($query);

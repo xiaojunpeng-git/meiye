@@ -63,7 +63,7 @@ try {
  $salesCap=$invoke('query-unified-query-capabilities',['pageCode'=>'order_center_sales']);
  foreach($salesCap['versions'] as $v)if($v['kind']==='query_preference')$salesVersion=$v['version'];
  $salesPayload=$payload; $salesPayload['pageCode']='order_center_sales';
- $salesPayload['query']['page']=2; $salesPayload['fields']=['sales_order_no','business_date'];
+ $salesPayload['query']['page']=2; $salesPayload['query']['sorts']=[['field'=>'payment_completed_at','direction'=>'desc']]; $salesPayload['fields']=['sales_order_no','business_date'];
  $salesPayload['command']['idempotencyKey']='CMD-9ec0ea15-9116-4e12-9a12-a8ea3b3c7f84';
  $salesPayload['command']['contexts']=[['kind'=>'query_preference','id'=>'order_center_sales','expectedVersion'=>$salesVersion]];
  $salesExport=$invoke('create-unified-query-export',$salesPayload);
