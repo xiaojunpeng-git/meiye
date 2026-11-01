@@ -17,13 +17,11 @@ const props = defineProps({
   // 不能把整个组织的门店范围当作一次选择结果。
   singleStoreOnly: { type: Boolean, default: false },
   // Personnel selection needs a real organization node even when it has no stores.
-  nodeSelection: { type: Boolean, default: false },
-  // Personnel popups opt in; ordinary scope pickers keep their existing closed state.
-  defaultOpen: { type: Boolean, default: false }
+  nodeSelection: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['update:modelValue', 'change', 'node-change'])
-const open = ref(props.defaultOpen)
+const open = ref(false)
 const triggerRef = ref(null)
 const panelRef = ref(null)
 const panelStyle = ref({})
@@ -66,21 +64,7 @@ watch(() => props.modelValue, (value) => {
   }
 }, { deep: true })
 
-let defaultTreeExpanded = false
 watch(() => props.tree, (tree) => {
-  // Async metadata may arrive after mount. Expand once without undoing the user's later collapse.
-  if (props.defaultOpen) {
-    if (defaultTreeExpanded || !Array.isArray(tree) || !tree.length) return
-    const keys = []
-    const walk = (nodes, parent = '') => nodes.forEach((node, index) => {
-      const key = `${parent}/${node?.node_type || 'org'}-${node?.id || node?.org_id || index}`
-      if (Array.isArray(node?.children) && node.children.length) { keys.push(key); walk(node.children, key) }
-    })
-    walk(tree)
-    expandedKeys.value = new Set(keys)
-    defaultTreeExpanded = true
-    return
-  }
   if (!props.embedded || expandedKeys.value.size || !Array.isArray(tree)) return
   const initial = tree
     .filter((node) => Array.isArray(node?.children) && node.children.length)
