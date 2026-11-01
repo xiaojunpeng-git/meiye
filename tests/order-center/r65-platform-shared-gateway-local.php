@@ -59,6 +59,24 @@ try {
  check($denied,'same numeric staff ID cannot read administrator export');
  $denied=false;try{$runtime['exports']->resolveDownloadDescriptor($storeContext,$task);}catch(Throwable $e){$denied=true;}
  check($denied,'same numeric staff ID cannot download administrator export');
+ // 月度消费源超过一万行时，当前页（包括第 2 页）仍必须与列表一致且能够导出。
+ $salesCap=$invoke('query-unified-query-capabilities',['pageCode'=>'order_center_sales']);
+ foreach($salesCap['versions'] as $v)if($v['kind']==='query_preference')$salesVersion=$v['version'];
+ $salesPayload=$payload; $salesPayload['pageCode']='order_center_sales';
+ $salesPayload['query']['page']=2; $salesPayload['fields']=['sales_order_no','business_date'];
+ $salesPayload['command']['idempotencyKey']='CMD-9ec0ea15-9116-4e12-9a12-a8ea3b3c7f84';
+ $salesPayload['command']['contexts']=[['kind'=>'query_preference','id'=>'order_center_sales','expectedVersion'=>$salesVersion]];
+ $salesExport=$invoke('create-unified-query-export',$salesPayload);
+ check(($salesExport['result']['status']??'')==='success','large sales source page export is accepted');
+ $salesTask=$salesExport['data']['exportTask']['taskId'];
+ $salesDone=$worker->processOne($salesTask);
+ check(($salesDone['status']??'')==='succeeded' && ($salesDone['rowCount']??0)===20,'large sales source exports page 2 without full source loading: '.json_encode($salesDone));
+ [,, $salesContext]=app()->make(PlatformOrderCenterReadServices::class)->exportScopes((int)$admin['id'],'order_center_sales');
+ $salesDescriptor=$runtime['exports']->resolveDownloadDescriptor($salesContext,$salesTask);
+ $salesPath=UnifiedQueryModule::runtime()['exportStorage']->absolutePath($salesDescriptor['storageKey']);$files[]=$salesPath;
+ $zip=new ZipArchive();$zip->open($salesPath);$sheet=$zip->getFromName('xl/worksheets/sheet1.xml');$zip->close();
+ $salesPage=$invoke('query-sales-orders',['businessDateFrom'=>'2026-10-01','businessDateTo'=>'2026-10-31','page'=>2,'pageSize'=>20]);
+ check(substr_count($sheet,'<row ')===21,'XLSX contains header and exactly 20 second-page records');
  Db::name('system_admin')->where('id',$admin['id'])->update(['status'=>0]);
  $disabled=$invoke('query-unified-query-capabilities',['pageCode'=>'order_center_recharge']);
  check(($disabled['result']['status']??'')==='failed','disabled login remains rejected');

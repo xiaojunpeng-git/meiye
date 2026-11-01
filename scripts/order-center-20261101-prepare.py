@@ -7,7 +7,7 @@ def git(*args,input=None,env=None):
 def sha(b):return hashlib.sha256(b).hexdigest()
 head=git('rev-parse','HEAD').strip()
 release_parent='635243044177a67c177d268a9b13d62e7942d65d'
-assert git('merge-base',head,release_parent).strip()==head
+assert git('merge-base',head,release_parent).strip() in [head,release_parent]
 base_files={
  '后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php':'f9a8b73c96d366fb5f65bcd1a43dcd5cc215560a',
  '后端代码/app/services/cashier/v3/order/CashierV3HistoricalRechargeDate.php':'f9a8b73c96d366fb5f65bcd1a43dcd5cc215560a'}

@@ -160,18 +160,22 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             }
         }
         $sorts = (array)($payload['sorts'] ?? []);
-        if (count($sorts) > 1) return false;
-        if ($sorts) {
-            $defaultFields = [
-                'all'=>'event_completed_at','sales'=>'payment_completed_at','recharge'=>'payment_completed_at',
-                'refund'=>'refund_completed_at','debt'=>'created_at','service'=>'service_completed_at',
-                'supplement'=>'payment_completed_at','gift'=>'created_at','card_operation'=>'completed_at',
-            ];
-            $field = (string)($sorts[0]['field'] ?? '');
-            $direction = strtolower((string)($sorts[0]['direction'] ?? ''));
-            if ($field !== $defaultFields[$type] || $direction !== 'desc') return false;
+        $expected = self::defaultOrderSorts($this->pageCode());
+        if (count($sorts) > count($expected)) return false;
+        foreach ($sorts as $i => $sort) {
+            $field = (string)($sort['field'] ?? $sort['field_key'] ?? $sort['fieldKey'] ?? '');
+            if ($field !== $expected[$i]['field'] || strtolower((string)($sort['direction'] ?? '')) !== 'desc') return false;
         }
         return true;
+    }
+
+    /** 冻结导出和列表采用相同时间倒序及稳定身份倒序，不让通用引擎改成 ID 升序。 */
+    public static function defaultOrderSorts(string $pageCode): array
+    {
+        $dates = ['all'=>'event_completed_at','sales'=>'payment_completed_at','recharge'=>'payment_completed_at','refund'=>'refund_completed_at',
+            'debt'=>'created_at','service'=>'service_completed_at','supplement'=>'payment_completed_at','gift'=>'created_at','card_operation'=>'completed_at'];
+        return [['field'=>$dates[CashierV3OrderCenterUnifiedQueryContract::typeForPage($pageCode)], 'direction'=>'desc'],
+            ['field'=>'record_id', 'direction'=>'desc']];
     }
 
     /**
@@ -331,7 +335,25 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             ],
         ];
         $request = clone $this;
-        return $request->run($context, $query, (array)($plan['custom_definitions'] ?? []));
+        $definitions = (array)($plan['custom_definitions'] ?? []);
+        // 当前页导出与列表使用同一个数据库分页 Reader；不能为了导出 20 行先加载
+        // 整月几万行。后台任务重新解析登录身份和数据范围，字段仍由统一执行器校验。
+        if ($exportScope === 'page') {
+            $pageQuery = $query;
+            unset($pageQuery['export']);
+            [$operatorScope, $dataScope] = $request->authoritativeScopes($context);
+            $direct = $request->directOrdinaryPage($pageQuery, $definitions, $operatorScope, $dataScope);
+            if ($direct !== null) {
+                // Reader 已选定目标页；执行器只投影导出字段，不能再对第 2 页重复偏移。
+                $query['page'] = 1;
+                $query['export']['scope'] = 'query';
+                return $request->execution->execute(
+                    $request->pageCode(), (array)$direct['records'], $definitions,
+                    $query, $context, static function (array $row, array $scope): bool { return true; }
+                );
+            }
+        }
+        return $request->run($context, $query, $definitions);
     }
 
     /** @return array<string,mixed> */
@@ -354,9 +376,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         $rows = $this->attachMemberInitials($rows, $memberInitials);
         $payload = $this->identityFilters($payload);
         if (empty($payload['sorts'])) {
-            $dates = ['all'=>'event_completed_at','sales'=>'payment_completed_at','recharge'=>'payment_completed_at','refund'=>'refund_completed_at',
-                'debt'=>'created_at','service'=>'service_completed_at','supplement'=>'payment_completed_at','gift'=>'created_at','card_operation'=>'completed_at'];
-            $payload['sorts'] = [['field'=>$dates[CashierV3OrderCenterUnifiedQueryContract::typeForPage($this->pageCode())], 'direction'=>'desc']];
+            $payload['sorts'] = self::defaultOrderSorts($this->pageCode());
         }
         return $this->execution->execute(
             $this->pageCode(),
