@@ -1,179 +1,106 @@
 <template>
   <div class="detail-page">
-    <Card :bordered="false" dis-hover class="ivu-mt">
-      <div class="head">
-        <Button type="text" icon="ios-arrow-back" @click="goBack">返回经营看板</Button>
-        <div class="title">经营明细 · {{ name || metricName }}</div>
-        <div class="meta">
-          <span>统计时间：{{ queryData || '-' }}</span>
-          <span class="ml total">合计：{{ formatMoney(total) }} 元</span>
-        </div>
-      </div>
-      <Alert type="info" show-icon class="ivu-mt">
-        本页为经营看板金额口径适配明细，合计必须与对应卡片一致；不是普通订单列表。
-        <span v-if="breakdownText">分项：{{ breakdownText }}</span>
-      </Alert>
-      <Table
-        class="ivu-mt"
-        :columns="columns"
-        :data="list"
-        :loading="loading"
-        no-data-text="暂无数据"
-      />
-      <div class="page-wrap">
-        <Page
-          :total="listCount"
-          :current="page"
-          :page-size="limit"
-          show-total
-          show-elevator
-          @on-change="onPage"
-        />
-      </div>
-    </Card>
+    <div class="head">
+      <Button type="text" icon="ios-arrow-back" @click="goBack">返回经营看板</Button>
+      <strong>经营明细 · {{ name }}</strong>
+      <Button :loading="exporting" :disabled="loading" @click="exportList">导出</Button>
+    </div>
+    <Alert type="info" show-icon>{{ sourceNotice }}</Alert>
+    <div class="meta">统计时间：{{ queryData }} · 合计：{{ formatMoney(total) }} 元</div>
+    <div ref="result" class="result">
+      <Table :height="tableHeight" :columns="columns" :data="displayRows" :loading="loading" no-data-text="暂无数据" />
+    </div>
+    <div class="page-wrap">
+      <span>共 {{ listCount }} 条 · 每页 {{ limit }} 条 · 第 {{ page }} / {{ pages }} 页</span>
+      <Button :disabled="loading || page <= 1" @click="onPage(page - 1)">上一页</Button>
+      <Button :disabled="loading || page >= pages" @click="onPage(page + 1)">下一页</Button>
+    </div>
   </div>
 </template>
-
 <script>
 import { businessDashboardMoneyDetail } from '@/api/store';
 import Setting from '@/setting';
+import formatBusinessMoney from '@/utils/formatBusinessMoney';
+import toExcel from '@/utils/Excel';
 
-const NAME_MAP = {
-  cash_performance: '现金业绩',
-  actual_performance: '实际业绩',
-  consume_amount: '消耗业绩',
-  refund_amount: '退款金额',
-  recharge_amount: '储值金额',
-  balance_deduction_amount: '余额扣款',
-};
-
+/** 服务端返回字段、合计及完整导出；界面只格式化整元，不修改事实或累计金额。 */
 export default {
   name: 'business_money_detail',
   data() {
-    return {
-      loading: false,
-      list: [],
-      total: 0,
-      listCount: 0,
-      page: 1,
-      limit: 20,
-      queryData: '',
-      orgId: 0,
-      storeId: 0,
-      metric: 'cash_performance',
-      name: '',
-      breakdown: {},
-      columns: [],
-    };
+    return { loading: false, exporting: false, list: [], total: '0.00', listCount: 0, page: 1, limit: 20,
+      queryData: '', orgId: 0, storeId: 0, metric: 'cash_performance', name: '', sourceNotice: '',
+      columnMetadata: [], tableHeight: 360, requestId: 0 };
   },
   computed: {
-    metricName() {
-      return NAME_MAP[this.metric] || this.metric;
-    },
-    breakdownText() {
-      const b = this.breakdown || {};
-      const parts = [];
-      if (b.valid_cash != null) parts.push(`有效现金 ${this.formatMoney(b.valid_cash)}`);
-      if (b.old_cash != null) parts.push(`旧店现金 ${this.formatMoney(b.old_cash)}`);
-      if (b.writeoff != null) parts.push(`核销消耗 ${this.formatMoney(b.writeoff)}`);
-      if (b.old_consume != null) parts.push(`旧店耗卡 ${this.formatMoney(b.old_consume)}`);
-      if (b.fencheng != null) parts.push(`分成 ${this.formatMoney(b.fencheng)}`);
-      if (b.actual != null) parts.push(`实际 ${this.formatMoney(b.actual)}`);
-      return parts.join('；');
+    pages() { return Math.max(1, Math.ceil(this.listCount / this.limit)); },
+    displayRows() { return this.columnMetadata.length ? [{ biz_time_text: '合计金额', amount: this.total }, ...this.list] : []; },
+    columns() {
+      return this.columnMetadata.map(column => ({ ...column,
+        render: (h, { row }) => h('span', column.value_type === 'money' ? this.formatMoney(row[column.key]) : (row[column.key] || '—')),
+      }));
     },
   },
-  created() {
-    this.applyQuery();
-    this.columns = this.buildColumns();
-    this.loadList();
-  },
+  created() { this.applyQuery(); this.loadList(); },
+  mounted() { this.resize(); window.addEventListener('resize', this.resize); },
+  beforeDestroy() { ++this.requestId; window.removeEventListener('resize', this.resize); },
+  watch: { '$route.query': function () { this.applyQuery(); this.page = 1; this.loadList(); } },
   methods: {
-    formatMoney(v) {
-      return Number(v || 0).toFixed(2);
-    },
+    formatMoney: formatBusinessMoney,
+    resize() { if (this.$refs.result) this.tableHeight = Math.max(140, this.$refs.result.clientHeight); },
     applyQuery() {
       const q = this.$route.query || {};
-      this.queryData = q.data || '';
-      this.orgId = Number(q.org_id || 0);
-      this.storeId = Number(q.store_id || 0);
-      this.metric = q.metric || 'cash_performance';
+      this.queryData = q.data || ''; this.orgId = Number(q.org_id || 0);
+      this.storeId = Number(q.store_id || 0); this.metric = q.metric || 'cash_performance';
     },
-    buildColumns() {
-      if (this.metric === 'actual_performance') {
-        return [
-          { title: '门店', key: 'store_name', minWidth: 140 },
-          { title: '现金', key: 'cash_amount', minWidth: 100 },
-          { title: '分成', key: 'fencheng_amount', minWidth: 100 },
-          { title: '实际业绩', key: 'amount', minWidth: 110 },
-          { title: '说明', key: 'remark', minWidth: 160 },
-        ];
-      }
-      return [
-        { title: '类型', key: 'line_type_text', width: 100 },
-        { title: '单号/关联', key: 'order_id', minWidth: 140 },
-        { title: '客户', key: 'real_name', minWidth: 100 },
-        { title: '手机号', key: 'phone', minWidth: 120 },
-        { title: '门店', key: 'store_name', minWidth: 120 },
-        { title: '金额', key: 'amount', width: 100 },
-        { title: '时间', key: 'biz_time_text', minWidth: 160 },
-      ];
-    },
-    params() {
-      const p = {
-        data: this.queryData,
-        org_id: this.orgId,
-        metric: this.metric,
-        page: this.page,
-        limit: this.limit,
-      };
-      if (this.storeId) p.store_id = this.storeId;
-      return p;
-    },
-    loadList() {
+    params() { return { data: this.queryData, org_id: this.orgId, store_id: this.storeId,
+      metric: this.metric, page: this.page, limit: this.limit }; },
+    async loadList() {
+      const request = ++this.requestId;
       this.loading = true;
-      businessDashboardMoneyDetail(this.params())
-        .then((res) => {
-          const d = res.data || {};
-          this.list = d.list || [];
-          this.total = Number(d.total || 0);
-          this.listCount = Number(d.list_count || 0);
-          this.name = d.name || '';
-          this.breakdown = d.breakdown || {};
-        })
-        .catch((err) => {
-          this.list = [];
-          this.total = 0;
-          this.listCount = 0;
-          this.$Message.error((err && err.msg) || '加载失败');
-        })
-        .finally(() => {
-          this.loading = false;
-        });
+      try {
+        const res = await businessDashboardMoneyDetail(this.params());
+        if (request !== this.requestId) return;
+        const d = res.data || {};
+        this.list = d.list || []; this.total = d.total; this.listCount = Number(d.list_count || 0);
+        this.name = d.name || ''; this.sourceNotice = d.source_notice || '';
+        this.columnMetadata = d.columns || [];
+        if (this.page > this.pages) { this.page = this.pages; this.loadList(); return; }
+        this.$nextTick(this.resize);
+      } catch (err) {
+        if (request !== this.requestId) return;
+        this.list = []; this.total = '0.00'; this.listCount = 0;
+        this.$Message.error((err && err.msg) || '加载失败');
+      } finally { if (request === this.requestId) this.loading = false; }
     },
-    onPage(p) {
-      this.page = p;
-      this.loadList();
+    async exportList() {
+      this.exporting = true;
+      // 冻结导出时的条件；不从当前页列表拼出不完整文件，也不受翻页影响。
+      const params = { ...this.params(), export: 1 };
+      try {
+        const res = await businessDashboardMoneyDetail(params); const d = res.data;
+        const columns = d.columns;
+        const rows = [{ biz_time_text: '合计金额', amount: d.total }, ...d.list];
+        toExcel({ th: columns.map(c => c.title), data: rows.map(row => columns.map(c => row[c.key] == null ? '' : row[c.key])),
+          fileName: `${d.name}_经营明细`, sheetName: '经营明细' });
+      } catch (err) { this.$Message.error((err && err.msg) || '导出失败'); }
+      finally { this.exporting = false; }
     },
+    onPage(page) { this.page = page; this.loadList(); },
     goBack() {
-      this.$router.push({
-        path: `${Setting.roterPre}/store/statistics`,
-        query: {
-          data: this.queryData,
-          org_id: this.orgId || undefined,
-          store_id: this.storeId || undefined,
-          metric: this.metric,
-        },
-      }).catch(() => {});
+      this.$router.push({ path: `${Setting.roterPre}/store/statistics`, query: {
+        data: this.queryData, org_id: this.orgId || undefined, store_id: this.storeId || undefined, metric: this.metric,
+      } }).catch(() => {});
     },
   },
 };
 </script>
-
 <style scoped lang="less">
-.head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.title { font-weight: 600; font-size: 16px; }
-.meta { color: #808695; margin-left: auto; }
-.ml { margin-left: 16px; }
-.total { color: #2d8cf0; font-weight: 600; }
-.page-wrap { margin-top: 16px; text-align: right; }
+.detail-page { height: ~"calc(100vh - 160px)"; min-height: 330px; display: flex; flex-direction: column; padding: 16px; background: white; }
+.head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.head > button:last-child { margin-left: auto; }
+.meta { padding: 8px 0 12px; color: #515a6e; }
+.result { flex: 1; min-height: 0; overflow: hidden; }
+/* 合计来自服务端，固定在表头下；滚动明细时始终可见。 */
+.result /deep/ .ivu-table-body tr:first-child td { position: sticky; top: 0; z-index: 1; background: #eaf2ff; font-weight: 600; }
+.page-wrap { flex-shrink: 0; border-top: 1px solid #e8eaec; padding: 12px 0 0; display: flex; justify-content: flex-end; align-items: center; gap: 12px; background: white; }
 </style>

@@ -62,6 +62,7 @@
       </Form>
     </Card>
 
+    <Alert v-if="sourceNotice" type="info" show-icon class="ivu-mt">{{ sourceNotice }}<span v-if="queriedAt"> 查询时间：{{ queriedAt }}</span></Alert>
     <div class="metric-grid ivu-mt">
       <div
         v-for="(card, index) in cards"
@@ -71,7 +72,7 @@
         @click="onSelectMetric(card)"
       >
         <div class="metric-head" @click.stop="onSelectMetric(card)">
-          <span class="metric-name">{{ card.name }}</span>
+          <span class="metric-name">{{ card.name }}</span><span class="metric-source">{{ card.source_label }}</span>
           <Tooltip transfer max-width="360" placement="bottom">
             <Icon type="ios-information-circle-outline" class="tip-icon" @click.stop.native />
             <div slot="content" class="tip-body">
@@ -174,6 +175,7 @@ import {
 } from '@/api/store';
 import echartsFrom from '@/components/echarts/index';
 import timeOptions from '@/utils/timeOptions';
+import formatBusinessMoney from '@/utils/formatBusinessMoney';
 
 const DETAIL_ROUTE = {
   business_money: `${Setting.roterPre}/store/statistics/money-detail`,
@@ -201,6 +203,8 @@ export default {
       orgOptions: [],
       storeList: [],
       cards: [],
+      sourceNotice: '',
+      queriedAt: '',
       selectedMetric: 'cash_performance',
       trendPreset: '30',
       trendTimeVal: [],
@@ -214,6 +218,7 @@ export default {
       rankList: [],
       rankLoading: false,
       scopeReady: false,
+      overviewRequest: 0, trendRequest: 0, rankRequest: 0,
     };
   },
   computed: {
@@ -317,8 +322,8 @@ export default {
       this.trendPreset = '30';
     },
     formatMoney(v) {
-      const n = Number(v || 0);
-      return n.toFixed(2);
+      // 统一整元展示，不用展示值回算接口或导出金额。
+      return formatBusinessMoney(v);
     },
     formatCardValue(card) {
       if (!card) return '0';
@@ -391,10 +396,15 @@ export default {
       this.loadRanking();
     },
     loadOverview() {
+      // 切换范围后的旧请求不得覆盖新范围结果。三个查询独立隔离响应顺序。
+      const request = ++this.overviewRequest;
       businessDashboardOverview(this.scopeParams())
         .then((res) => {
+          if (request !== this.overviewRequest) return;
           const cards = (res.data && res.data.cards) || [];
           this.cards = cards;
+          this.sourceNotice = res.data.source_notice || '';
+          this.queriedAt = res.data.queried_at || '';
           if (!cards.find((c) => c.metric_code === this.selectedMetric) && cards[0]) {
             this.selectedMetric = cards[0].metric_code;
           }
@@ -403,6 +413,7 @@ export default {
           }
         })
         .catch((err) => {
+          if (request !== this.overviewRequest) return;
           this.cards = [];
           this.$Message.error((err && err.msg) || '概览加载失败');
         });
@@ -437,6 +448,7 @@ export default {
     },
     loadTrend() {
       if (!this.selectedMetric) return;
+      const request = ++this.trendRequest;
       this.trendLoading = true;
       const params = {
         ...this.scopeParams(),
@@ -445,6 +457,7 @@ export default {
       };
       businessDashboardTrend(params)
         .then((res) => {
+          if (request !== this.trendRequest) return;
           const data = res.data || {};
           const xAxis = data.xAxis || [];
           const seriesData = data.series || [];
@@ -480,15 +493,17 @@ export default {
           ];
         })
         .catch((err) => {
+          if (request !== this.trendRequest) return;
           this.infoList = null;
           this.series = [];
           this.$Message.error((err && err.msg) || '趋势加载失败');
         })
         .finally(() => {
-          this.trendLoading = false;
+          if (request === this.trendRequest) this.trendLoading = false;
         });
     },
     loadRanking() {
+      const request = ++this.rankRequest;
       this.rankLoading = true;
       businessDashboardStoreRanking({
         ...this.scopeParams(),
@@ -496,14 +511,16 @@ export default {
         sort_order: this.rankSortOrder || 'desc',
       })
         .then((res) => {
+          if (request !== this.rankRequest) return;
           this.rankList = (res.data && res.data.list) || [];
         })
         .catch((err) => {
+          if (request !== this.rankRequest) return;
           this.rankList = [];
           this.$Message.error((err && err.msg) || '排行加载失败');
         })
         .finally(() => {
-          this.rankLoading = false;
+          if (request === this.rankRequest) this.rankLoading = false;
         });
     },
     goDetail(card) {
@@ -536,6 +553,7 @@ export default {
 </script>
 
 <style scoped lang="less">
+.metric-source { font-size: 11px; color: #808695; margin-left: 6px; }
 .input-add {
   width: 250px;
 }

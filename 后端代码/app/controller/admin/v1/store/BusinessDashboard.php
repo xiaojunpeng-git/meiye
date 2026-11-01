@@ -5,7 +5,7 @@ use app\controller\admin\AuthController;
 use app\model\store\SystemStore;
 use app\services\order\store\BranchOrderServices;
 use app\services\organization\OrganizationScopeService;
-use app\services\statistics\BusinessDashboardServices;
+use app\services\statistics\PlatformBusinessDashboardServices as BusinessDashboardServices;
 
 /**
  * 平台经营看板
@@ -168,11 +168,16 @@ class BusinessDashboard extends AuthController
         [$storeIds, $start, $end, $timeStr] = $this->resolveScope();
         $params = $this->request->getMore([
             ['metric', 'cash_performance'],
+            ['export', 0],
             ['page', 1],
             ['limit', 20],
         ]);
         if (!$storeIds) {
             return app('json')->fail('无权限或当前范围无门店');
+        }
+        // 导出复用同一强制组织范围与注册指标，不允许前端传金额或自行合计。
+        if ((int)($params['export'] ?? 0) === 1) {
+            return app('json')->success($services->exportMoneyDetail($storeIds, (string)$params['metric'], $start, $end));
         }
         return app('json')->success($services->moneyMetricDetail(
             $storeIds,
