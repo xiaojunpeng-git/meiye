@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { documentCopyLines } from '../../../前端代码/inventory-vue3/src/documentCopyDraft.js'
+import { copyHeadquartersLocationId, documentCopyLines } from '../../../前端代码/inventory-vue3/src/documentCopyDraft.js'
+
+test('平台复制门店请货单保留总部读取身份，其他总部单据按原仓读取', () => {
+  const hqLocations = [8, 9]
+  assert.equal(copyHeadquartersLocationId('request', { request_party_type: 'STORE', location_id: 111 }, 8, hqLocations), 8)
+  assert.equal(copyHeadquartersLocationId('request', { request_party_type: 'HQ', location_id: 9 }, 8, hqLocations), 9)
+  assert.equal(copyHeadquartersLocationId('transfer', { from_party_type: 'HQ', from_location_id: 9 }, 8, hqLocations), 9)
+  assert.equal(copyHeadquartersLocationId('transfer', { from_party_type: 'STORE', from_location_id: 111 }, 8, hqLocations), 8)
+})
 
 const line = (quantity = '2') => ({ id: 91, product_id: 11, sku_id: 21, sku_unique: 'sku-21', product_name: '商品', sku_name: '规格', quantity, detail_remark: '备注', batch_no: 'B1', unit_cost_cents: 1234, cost_amount_cents: 2468, stock_unit: '瓶', no_expiry_management: 0 })
 

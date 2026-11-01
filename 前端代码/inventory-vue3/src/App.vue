@@ -20,6 +20,7 @@ import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
 import { createDocumentDetailReader } from './documentDetailReader'
 import { canReopenRequestForScope } from './requestReopenDraft'
+import { copyHeadquartersLocationId } from './documentCopyDraft'
 import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'
 import { inventoryStatusLabel } from './statusLabels'
 import { platformTransferQueryScope } from './transferQueryScope'
@@ -168,6 +169,7 @@ const stockSummary = ref({ available_quantity: '0', inventory_amount_cents: null
 const stockTableLayout = ref({ fixed: false, summaryRow: false })
 const listLoading = ref(false)
 const listError = ref('')
+const copyError = ref('')
 const transferSavedNotice = ref('')
 const transferListRefreshFailed = ref(false)
 const transferRefreshAfterSave = ref(false)
@@ -1051,8 +1053,11 @@ function canCopyDocument(row) {
 /** 详情只用于新建表单初值；任何已完成、作废或履约单都不继承身份和库存事实。 */
 async function copyDocument(row) {
   if (!canCopyDocument(row)) return
+  copyError.value = ''
   try {
-    if (mode.value === 'platform' && Number(active.value === 'transfer' ? row.from_location_id : row.location_id) > 0) platformHqLocationId.value = Number(active.value === 'transfer' ? row.from_location_id : row.location_id)
+    if (mode.value === 'platform') platformHqLocationId.value = copyHeadquartersLocationId(
+      active.value, row, platformHqLocationId.value, platformHqLocations.value.map((location) => location.id)
+    )
     const detail = active.value === 'count'
       ? Number(row.draft_id || 0) > 0 ? await readCountDraft(row.draft_id)
         : mode.value === 'platform' ? await platformInventoryApi.hqCountDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) }) : await inventoryApi.countDetail(row.id)
@@ -1061,7 +1066,8 @@ async function copyDocument(row) {
     selectedDetail.value = detail
     editor.value = `${active.value}-copy`
   } catch (error) {
-    listError.value = error instanceof Error ? error.message : '复制单据失败。'
+    // 单张详情失败只提示本次复制，不能遮住已经成功加载的整页单据列表。
+    copyError.value = error instanceof Error ? error.message : '复制单据失败。'
   }
 }
 
@@ -1475,6 +1481,7 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
   const groupedRequest = groupedPage ? ++groupedListVersion : 0
   listLoading.value = true
   listError.value = ''
+  copyError.value = ''
   if (mode.value === 'platform' && active.value === 'usage' && !reusePlatformListQuery && !platformReadScopeMode.value && !platformListWarehouseOptions.value.some((item) => item.key === platformListWarehouseSelection.value)) {
     sourceRows.value = []
     remoteRows.value = []
@@ -2376,6 +2383,7 @@ onBeforeUnmount(() => {
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
             <div :inert="transferListRefreshFailed ? true : null" :class="{ 'inventory-list-result': inventoryListPage }">
+              <p v-if="copyError" class="inventory-load-error" role="alert">{{ copyError }}</p>
 <section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active), 'table-card--inventory-list-page': inventoryListPage }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else ref="storeListTableScroll" class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button v-if="canCopyDocument(sourceRows[index])" class="text-button" @click="copyDocument(sourceRows[index])">复制</button><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->

@@ -1,3 +1,13 @@
+/** 保留合法的总部读取范围；原单若属于门店仓，不让门店仓 ID 冒充总部仓 ID。 */
+export function copyHeadquartersLocationId(kind, row, currentId, headquartersIds) {
+  // 平台请货列表包含门店发起的单据；门店仓 ID 绝不能作为总部详情读取身份。
+  const sourceIsHq = kind === 'request' ? row?.request_party_type === 'HQ'
+    : kind === 'transfer' ? row?.from_party_type === 'HQ' : true
+  const candidate = Number(kind === 'transfer' ? row?.from_location_id : row?.location_id)
+  return sourceIsHq && headquartersIds.some((id) => Number(id) === candidate)
+    ? candidate : Number(currentId) || 0
+}
+
 /** 只复制新单可编辑的商品身份和数量；原单的事实、批次分配、状态、流水号不能进入新命令。 */
 export function documentCopyLines(kind, detail) {
   if (!Array.isArray(detail?.lines) || !detail.lines.length) throw new Error('原单据没有可复制的商品明细。')
