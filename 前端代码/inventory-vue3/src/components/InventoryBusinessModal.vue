@@ -9,7 +9,7 @@ import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorks
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 import { formatBatchNumber } from '../batchNumberDisplay.js'
-import { requestReopenDraft } from '../requestReopenDraft.js'
+import { availableRequestCopySelection, requestReopenDraft } from '../requestReopenDraft.js'
 import { documentCopyLines } from '../documentCopyDraft.js'
 
 const props = defineProps({
@@ -227,7 +227,7 @@ const primarySubmitDisabled = computed(() => {
   if (isPlatformHeadquarters.value && props.pageKey === 'usage' && !usageWarehouseOptions.value.some((item) => item.key === usageWarehouseSelection.value)) return true
   if (isPlatformHeadquarters.value && ['inbound', 'outbound'].includes(props.pageKey) && !documentWarehouseOptions.value.some((item) => item.key === documentWarehouseSelection.value)) return true
   // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
-  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0)) return true
+  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0 || (isPlatformHeadquarters.value && !requestPartyOptions.value.some((party) => party.key === requestPartySelection.value)))) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
@@ -454,13 +454,10 @@ function seedReopenedRequest() {
   if (!isRequestReopen.value) return
   try {
     const draft = requestReopenDraft(props.detail)
-    if (!supplyParties.value.some((party) => party.key === draft.supplyParty)) {
-      throw new Error('原供货方当前不可选，请核对授权和仓库状态后重新新建。')
-    }
-    supplyPartySelection.value = draft.supplyParty
+    // 原供货方若已不可选就留空；商品、数量和备注仍按各自有效性独立回填。
+    supplyPartySelection.value = availableRequestCopySelection(draft.supplyParty, supplyParties.value)
     requestRemark.value = draft.remark
     selectedRows.value = draft.lines
-    catalogError.value = ''
   } catch (error) {
     supplyPartySelection.value = ''
     selectedRows.value = []
@@ -964,8 +961,11 @@ async function loadRequestParties() {
     const response = await platformInventoryApi.hqRequestParties({ hq_location_id: Number(commandHqLocationId.value) })
     requestPartyOptions.value = Array.isArray(response?.list) ? response.list : []
     const sourceParty = isRequestReopen.value ? requestReopenDraft(props.detail).requestParty : ''
-    if (sourceParty && !requestPartyOptions.value.some((party) => party.key === sourceParty)) {
-      catalogError.value = '原请货方当前不可选，请核对授权后重新新建。'
+    if (sourceParty && !availableRequestCopySelection(sourceParty, requestPartyOptions.value)) {
+      // 不把原请货方静默换成首个可选门店；有效商品仍显示，用户可自行选择新主体。
+      requestPartySelection.value = ''
+      supplyPartySelection.value = ''
+      seedReopenedRequest()
       return
     }
     requestPartySelection.value = sourceParty || String(response?.default || requestPartyOptions.value[0]?.key || 'HQ:0')
@@ -1312,7 +1312,7 @@ function requestIdempotencyKey() {
 
 async function submitRequest() {
   const supplier = selectedSupplyParty()
-  if (props.pageKey !== 'request' || !selectedRows.value.length || !['HQ', 'STORE'].includes(supplier.type) || (supplier.type === 'STORE' && supplier.id <= 0)) return
+  if (props.pageKey !== 'request' || !selectedRows.value.length || !['HQ', 'STORE'].includes(supplier.type) || (supplier.type === 'STORE' && supplier.id <= 0) || (isPlatformHeadquarters.value && !requestPartyOptions.value.some((party) => party.key === requestPartySelection.value))) return
   // 请货单只记录需求，不预占也不变动库存；供货方零库存不阻止保存，真正发货时再由服务端校验可用批次。
   submitting.value = true
   submitError.value = ''
