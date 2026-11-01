@@ -102,6 +102,9 @@ final class CashierV3OrderQueryModule
     private static function pagePartition(array $page): array
     {
         return [
+            // 所有入口的字段开关由同一查询分区下发，平台不另造投影。
+            'businessTypes' => CashierV3OrderCenterRecordQueryServices::businessTypes(),
+            'uiPolicy' => (new \app\services\cashier\v3\projection\CashierV3DisplayPolicyServices())->snapshot(),
             'contractVersion' => $page['contractVersion'],
             'dataStatus' => $page['dataStatus'],
             'dataAsOf' => $page['dataAsOf'],

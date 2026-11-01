@@ -42,6 +42,16 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
+        // 平台操作同样在业务事务内锁定并重读账号和数据范围，复用后续领域事务。
+        if ((int)($operatorProfile['_trusted_platform_order_center_admin'] ?? 0) === $operatorId) {
+            [, $scope] = app()->make(\app\services\order\PlatformOrderCenterReadServices::class)
+                ->trustedScopes($operatorId, $operatorScope->storeId(), true);
+            if ($expectedPermissionVersion !== null && !hash_equals($expectedPermissionVersion, $scope->permissionVersion())) {
+                throw new CashierV3CommandException(CashierV3ResultCode::PERMISSION_DENIED, '数据范围已变化，请刷新后重试。');
+            }
+            return ['data_scope' => $scope, 'operator_profile' => $scope->operatorProfile()];
+        }
+
         $isVirtualStoreSession = !empty($operatorProfile['_cashier_v3_delegated'])
             || !empty($operatorProfile['_cashier_v3_organization']);
         // 常规会话锁 system_store_staff；数据权限选店会话以员工档案重建，

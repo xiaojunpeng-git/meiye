@@ -503,7 +503,8 @@ class UnifiedQueryExportTaskServices
                     []
                 );
             }
-            $this->assertTaskPage($contextPageCode, $task);
+            $this->assertTaskPrincipal($context, $task);
+        $this->assertTaskPage($contextPageCode, $task);
             $this->assertExecutionPartition($task, $partition);
             if (($task['source_type'] ?? '') === 'AI') {
                 $binding = UnifiedQueryJson::decode((string)$task['ai_binding']);
@@ -1107,6 +1108,16 @@ class UnifiedQueryExportTaskServices
         return $cellCount;
     }
 
+    /** 管理员与店员的数字ID可能相同；身份域来自可信权限快照，不接受客户端指定。 */
+    private function assertTaskPrincipal(array $context, array $task): void
+    {
+        $platform = strpos((string)($context['permission_version'] ?? ''), 'platform-order-center:') === 0;
+        $taskPlatform = strpos((string)($task['permission_version'] ?? ''), 'platform-order-center:') === 0;
+        if ($platform !== $taskPlatform) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_NOT_FOUND', '导出任务不存在或已不可见。', []);
+        }
+    }
+
     public function findForAccount(array $rawContext, string $taskNo): array
     {
         $context = $this->access->normalizeContext($rawContext);
@@ -1131,6 +1142,7 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
+        $this->assertTaskPrincipal($context, $task);
         $this->assertTaskPage($contextPageCode, $task);
         return $this->withAiFence($task, 'status', function () use ($task): array { return $this->present($task); });
     }
@@ -1236,6 +1248,7 @@ class UnifiedQueryExportTaskServices
                 []
             );
         }
+        $this->assertTaskPrincipal($context, $task);
         $this->assertTaskPage($contextPageCode, $task);
         if ((string)$task['status'] !== 'succeeded'
             || (int)$task['expires_at'] <= time()) {

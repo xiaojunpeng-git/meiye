@@ -5,12 +5,9 @@ namespace app\controller\admin\v1\store;
 use app\controller\admin\AuthController;
 use app\services\order\PlatformOrderCenterReadServices;
 use app\services\organization\OrganizationScopeService;
-use app\services\system\SystemRoleServices;
-use mohe\exceptions\AuthException;
-use mohe\utils\ApiErrorCode;
 use think\facade\App;
 
-/** 平台订单中心：仅管理员令牌 + 数据权限的只读查询入口。 */
+/** 平台订单中心：管理员身份与组织范围适配，共用查询及业务操作入口。 */
 class OrderCenter extends AuthController
 {
     public function __construct(App $app)
@@ -20,67 +17,44 @@ class OrderCenter extends AuthController
 
     public function metadata(PlatformOrderCenterReadServices $services)
     {
-        $this->ensureOrderCenterPermission();
         return $this->success($services->metadata((array)$this->adminInfo));
     }
 
     public function records(PlatformOrderCenterReadServices $services)
     {
-        $this->ensureOrderCenterPermission();
-        return $this->success($services->records((array)$this->adminInfo, (array)$this->request->get()));
+        $query = (array)$this->request->get();
+        return $this->success($services->records((array)$this->adminInfo, $query));
     }
 
     /** 平台订单中心的组织／门店范围，按当前订单数据权限裁剪。 */
     public function scope(PlatformOrderCenterReadServices $services, OrganizationScopeService $organizations)
     {
-        $this->ensureOrderCenterPermission();
         return $this->success($services->scope((array)$this->adminInfo, $organizations));
     }
 
-    /** POST /adminapi/store/order-center/actions: Vue3 订单中心标准只读 action envelope。 */
+    /** POST /adminapi/store/order-center/actions: Vue3 订单中心标准 action envelope。 */
     public function actions(PlatformOrderCenterReadServices $services)
     {
-        $this->ensureOrderCenterPermission();
+        $body = (array)$this->request->post();
+        // 总后台共用操作不另查门店岗位/页签功能权限；登录由 AuthController，
+        // 当前数据范围及领域约束由同一 gateway 在事务内验证。
         return $this->success('ok', $services->dispatchReadAction(
             (array)$this->adminInfo,
-            (array)$this->request->post()
+            $body
         ));
     }
 
-    /**
-     * These endpoints deliberately have no write API-menu entry.  The global
-     * middleware therefore follows its legacy “unregistered routes pass”
-     * compatibility branch, so the read boundary must be asserted here as
-     * well.  A direct API call cannot bypass the eight visible order-center
-     * capabilities.
-     */
-    private function ensureOrderCenterPermission(): void
+    /** 下载与创建任务使用同一管理员会话及当前数据范围，不接受门店令牌。 */
+    public function download(PlatformOrderCenterReadServices $services, string $taskNo)
     {
-        $admin = (array)$this->adminInfo;
-        $isRootAdmin = (int)($admin['level'] ?? 1) === 0 && (int)$this->request->adminType() !== 3;
-        if ($isRootAdmin) {
-            return;
-        }
-        /** @var SystemRoleServices $roles */
-        $roles = app()->make(SystemRoleServices::class);
-        $roleIds = $admin['roles'] ?? [];
-        $roleIds = is_string($roleIds) ? array_filter(explode(',', $roleIds)) : (array)$roleIds;
-        $granted = $roles->getRolesByAuth($roleIds, 2);
-        $allowed = [
-            'admin-store-order-center-sales',
-            'admin-store-order-center-recharge',
-            'admin-store-order-center-refund',
-            'admin-store-order-center-debt',
-            'admin-store-order-center-service',
-            'admin-store-order-center-supplement',
-            'admin-store-order-center-gift',
-            'admin-store-order-center-card-operation',
-        ];
-        foreach ((array)$granted as $item) {
-            if (in_array(trim((string)($item['unique_auth'] ?? '')), $allowed, true)) {
-                return;
-            }
-        }
-        throw new AuthException(ApiErrorCode::ERR_AUTH);
+        $pageCode = (string)$this->request->get('pageCode', '');
+        [, , $context] = $services->exportScopes((int)$this->adminInfo['id'], $pageCode);
+        $runtime = \app\services\cashier\v3\query\UnifiedQueryModule::runtime();
+        $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
+        $path = $runtime['exportStorage']->absolutePath((string)$descriptor['storageKey']);
+        if (!is_file($path) || !is_readable($path)) return app('json')->fail('导出文件不存在或已过期。');
+        return download($path, (string)$descriptor['fileName'])
+            ->mimeType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     }
+
 }

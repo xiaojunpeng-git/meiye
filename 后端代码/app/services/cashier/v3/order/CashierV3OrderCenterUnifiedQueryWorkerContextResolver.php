@@ -47,6 +47,17 @@ final class CashierV3OrderCenterUnifiedQueryWorkerContextResolver implements Uni
         if ($operatorId <= 0 || $storeId <= 0 || $tenantId === '') {
             throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '创建任务的账号已停用，导出任务已停止。', []);
         }
+        if (strpos($permissionVersion, 'platform-order-center:') === 0) {
+            $scopes = app()->make(\app\services\order\PlatformOrderCenterReadServices::class)
+                ->exportScopes($operatorId, $pageCode);
+            if (!hash_equals($tenantId, $scopes[0]->tenantId())
+                || !hash_equals($organizationId, $scopes[0]->organizationId())
+                || $storeId !== $scopes[0]->storeId()
+                || !hash_equals($permissionVersion, (string)$scopes[2]['permission_version'])) {
+                throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '平台导出范围已变化，请重新查询后导出。', []);
+            }
+            return $scopes;
+        }
         $dispatcher = CashierV3Bootstrap::dispatcher();
         $operatorScope = $dispatcher->scopeResolver()->operatorScope($storeId, $operatorId);
         if (!hash_equals($operatorScope->tenantId(), $tenantId)

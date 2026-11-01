@@ -37,7 +37,7 @@ import {
   businessReceiptRefreshQuery,
   refreshedBusinessReceiptRecord
 } from '@/services/orderCenterBusinessReceipt'
-import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
+import { orderCenterExportDownloadRequest } from '@/services/cashierV3HttpAdapter'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { guideRoundText, personnelEmptyText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
@@ -441,16 +441,23 @@ const FIELD_ALIASES = {
 }
 
 const state = useCashierV3State()
+const router = useRouter()
+const route = useRoute()
+// 平台只增加组织/门店范围上下文；页面、字段、页签和动作仍走同一份权限投影。
+const isPlatformContext = computed(() => route.meta.platformOrderContext === true)
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
 // Reuse the root projection of the existing instance switch; missing initial
 // projection is not an instruction to erase a saved route or historical facts.
-const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
+// 开关必须由权威根投影明确开启；页面直达或平台上下文尚未拿到投影时
+// 一律关闭，不能把“缺少配置”误判成“已启用”而泄漏欠款列和入口。
+const orderUiPolicy = computed(() => state.orderCenter?.uiPolicy || {})
+const debtPaymentEnabled = computed(() => orderUiPolicy.value.debtPaymentEnabled === true)
 // 归属入口关闭仅影响订单管理展示，既有订单事实和退款归属不清除。
-const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+const salesAttributionEnabled = computed(() => orderUiPolicy.value.salesAttributionEnabled === true)
 // 订单中心共用业务分配弹窗，售前关闭仅收起编辑入口，历史标记保持原值。
-const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled !== false)
+const preSaleEnabled = computed(() => orderUiPolicy.value.preSaleEnabled === true)
 // 本轮只调整全部订单、消费订单；服务记录及其他入口保留既有展示和业务事实。
-const orderLaborFeeVisible = computed(() => state.storeDisplayOptions?.laborFeeVisible !== false || !['all', 'sales'].includes(activeTabKey.value))
+const orderLaborFeeVisible = computed(() => orderUiPolicy.value.laborFeeVisible === true || !['all', 'sales'].includes(activeTabKey.value))
 const hiddenSalesAttributionKeys = new Set(['sales_manager', 'guide', 'refund_attribution', 'supplement_attribution'])
 // 只处理本页的列与旧查询参数；历史归属及用户保存的列偏好仍完整保留。
 const orderSalesAttributionFields = fields => fields.filter(field => salesAttributionEnabled.value || !hiddenSalesAttributionKeys.has(field?.key))
@@ -474,9 +481,6 @@ const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtF
 })
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
-const router = useRouter()
-const route = useRoute()
-const isPlatformReadOnly = computed(() => route.meta.platformReadOnly === true)
 const serviceReportDrilldown = computed(() => {
   if (String(route.query.tab || '') !== 'service') return null
   const employeeId = Number(route.query.report_employee_id)
@@ -515,7 +519,7 @@ const salesReportDateLabel = computed(() => reportDateLabel(salesReportDrilldown
 const serviceReportReturnLocation = computed(() => {
   const drill = serviceReportDrilldown.value
   if (!drill) return null
-  const reportRouteName = isPlatformReadOnly.value
+  const reportRouteName = isPlatformContext.value
     ? 'cashier-v3-platform-store-business-reports'
     : 'cashier-v3-store-business-reports'
   const returnTo = route.query.report_return_to
@@ -534,7 +538,7 @@ const serviceReportReturnLocation = computed(() => {
 const salesReportReturnLocation = computed(() => {
   const drill = salesReportDrilldown.value
   if (!drill) return null
-  const reportRouteName = isPlatformReadOnly.value
+  const reportRouteName = isPlatformContext.value
     ? 'cashier-v3-platform-store-business-reports'
     : 'cashier-v3-store-business-reports'
   const returnTo = route.query.report_return_to
@@ -553,11 +557,8 @@ const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [],
 const platformScopeStoreIds = ref([])
 const orderCenter = computed(() => state.orderCenter || {})
 const requestedPlatformTab = String(route.query.tab || route.query.recordType || '').trim()
-const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : (isPlatformReadOnly.value ? 'sales' : 'all'))
+const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : 'all')
 const availableTabs = computed(() => {
-  // 平台的首个查询响应只对应当前页签，不能在它尚未带全量 businessTypes
-  // 时把其他入口隐藏；全部订单由平台单独授权，服务端再执行四类订单的统一查询。
-  if (isPlatformReadOnly.value) return ORDER_TABS
   const advertised = Array.isArray(orderCenter.value.businessTypes) ? orderCenter.value.businessTypes : []
   if (!advertised.length) return serviceReportDrilldown.value ? ORDER_TABS : ORDER_TABS.filter((tab) => ['all', 'sales'].includes(tab.key))
   const readyKeys = new Set()
@@ -1257,24 +1258,10 @@ const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, u
   requestAction
 })]))
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
-const platformOrderCenterDefaultDateRanges = computed(() => {
-  if (!isPlatformReadOnly.value) return {}
-  const today = orderCenterToday()
-  // 平台与门店必须使用同一首屏口径：日期框显示今天时，真实请求也只能
-  // 查询今天，不能用隐藏的整月范围扩大结果集。
-  return { business_date: { min: today, max: today } }
-})
+// 平台和门店使用同一查询草稿与日期默认值；平台只多组织选择器。
+const platformOrderCenterDefaultDateRanges = computed(() => ({}))
 const activeQueryCapability = computed(() => {
-  const capability = activeUnifiedQuery.value?.capability?.value || {}
-  if (!isPlatformReadOnly.value) return capability
-  // 平台入口只提供列表查询；即使后端复用了门店的统一查询能力描述，也不
-  // 显示导出、字段管理或其他会写入个人配置的工具栏操作。
-  return {
-    ...capability,
-    commandContext: null,
-    exportCapability: { ...(capability.exportCapability || {}), enabled: false },
-    permissions: { ...(capability.permissions || {}), renameFields: false, createCustomField: false, editCustomField: false }
-  }
+  return activeUnifiedQuery.value?.capability?.value || {}
 })
 const activeQueryFields = computed(() => {
   const fields = orderPresentationFields(activeUnifiedQuery.value?.fields?.value || queryFields.value)
@@ -1354,15 +1341,10 @@ async function downloadActiveExport({ url, fileName, task } = {}) {
   const pageCode = String(task?.pageCode || activeTab.value?.pageCode || '').trim()
   if (!pageCode) throw new Error('导出任务页面信息缺失，请刷新后重试。')
   endpoint.searchParams.set('pageCode', pageCode)
-  const token = readStoreV3SessionToken()
-  const response = await fetch(endpoint.href, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: {
-      Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      ...(token ? { Authorization: `Bearer ${token}`, 'Authori-zation': `Bearer ${token}` } : {})
-    }
+  const download = orderCenterExportDownloadRequest(endpoint.href, {
+    mode: isPlatformContext.value ? 'platform-order-center' : 'store'
   })
+  const response = await fetch(download.url, download.init)
   const blob = await response.blob()
   const type = String(response.headers.get('content-type') || '').toLowerCase()
   if (!response.ok || type.includes('json')) {
@@ -1458,7 +1440,7 @@ function memberDetailPayload(record = {}) {
 }
 
 function canOpenMemberDetail(record) {
-  return !isPlatformReadOnly.value && memberDetailPayload(record) !== null
+  return memberDetailPayload(record) !== null && canUseCashierV3Feature('cashier.v3.member_list')
 }
 
 function openMemberDetail(record) {
@@ -1502,7 +1484,7 @@ function recordTypeLabel(record) {
 }
 function canEditRecordPersonnel(record) {
   const type = recordType(record)
-  return !isPlatformReadOnly.value && canUseCashierV3Operation('cashier.v3.order.staff_adjust')
+  return canUseCashierV3Operation('cashier.v3.order.staff_adjust')
     && (type === 'recharge' || (type === 'supplement' && record?.attributionEditable === true)
       || (type === 'refund' && editableRefundPersonnelSourceTypes.has(record?.refundSourceType)))
 }
@@ -1514,7 +1496,7 @@ function openRecordRoles(record) {
   return recordType(record) === 'supplement' ? openSupplementAttributionEditor(record) : openRefundAttributionEditor(record)
 }
 function recordVoidAction(record) {
-  if (isPlatformReadOnly.value || !canUseCashierV3Operation('cashier.v3.order.void')) return ''
+  if (!canUseCashierV3Operation('cashier.v3.order.void')) return ''
   const type = recordType(record)
   if (type === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常') return 'void'
   if (type === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') return 'supplement-void'
@@ -1600,14 +1582,12 @@ function salesItemCraftsmenText(item) {
 }
 
 function salesItemCraftsmanAdjustable(item = {}) {
-  return !isPlatformReadOnly.value
-    && serviceCraftsmanAdjustable(item)
+  return serviceCraftsmanAdjustable(item)
     && canUseCashierV3Operation('cashier.v3.order.service_detail')
 }
 
 function salesPurchaseCraftsmanAdjustable(record = {}, item = {}) {
-  return !isPlatformReadOnly.value
-    && !item?.serviceFactId
+  return !item?.serviceFactId
     && ['project', '项目'].includes(String(item?.itemType || ''))
     && salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')
 }
@@ -1623,7 +1603,6 @@ function openSalesItemCraftsmanEditor(record, item) {
 }
 
 function salesOrderActionAvailable(record, action, permission) {
-  if (isPlatformReadOnly.value) return false
   const actions = record?.availableActions
   const available = Array.isArray(actions) ? actions.includes(action) : actions?.[action] === true
   return available && (!permission || canUseCashierV3Operation(permission))
@@ -1650,7 +1629,7 @@ function canCorrectAttribution(record, field) {
   if (field === 'source' && !businessSourceEnabled.value) return false
   // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
   // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
-  if (isPlatformReadOnly.value || !canUseCashierV3Feature('cashier.v3.order_center')) return false
+  if (!canUseCashierV3Feature('cashier.v3.order_center')) return false
   const type = recordType(record)
   if (type === 'sales') {
     if (record?.entitlementOnly) {
@@ -2796,7 +2775,7 @@ function normalizeSalesOrderQuery(query = {}) {
 }
 
 function applyPlatformScope(query = {}) {
-  if (!isPlatformReadOnly.value) return query
+  if (!isPlatformContext.value) return query
   const { storeIds: ignoredStoreIds, store_ids: ignoredStoreIdsSnakeCase, ...rest } = query
   return platformScopeStoreIds.value.length
     ? { ...rest, storeIds: [...platformScopeStoreIds.value] }
@@ -2804,7 +2783,7 @@ function applyPlatformScope(query = {}) {
 }
 
 async function loadPlatformOrderScope() {
-  if (!isPlatformReadOnly.value || platformScopePicker.value.loading) return
+  if (!isPlatformContext.value || platformScopePicker.value.loading) return
   platformScopePicker.value = { ...platformScopePicker.value, loading: true }
   try {
     const response = await queryPlatformOrderCenterScope()
@@ -3159,7 +3138,6 @@ function closeGenericDetail() {
 }
 
 function openRecordDetail(record, initialAction = '') {
-  if (isPlatformReadOnly.value) return null
   if (recordType(record) === 'sales') {
     return openSalesOrderDetail({ orderId: record?.id || record?.orderId || record?.salesOrderId })
   }
@@ -3181,7 +3159,7 @@ function canVoidProjectReplacement(record) {
 }
 
 function openProjectReplacementVoid(record) {
-  if (!canVoidProjectReplacement(record) || isPlatformReadOnly.value) return
+  if (!canVoidProjectReplacement(record)) return
   openRecordDetail(record, 'replacement-void')
 }
 
@@ -3832,10 +3810,10 @@ onMounted(() => {
 })
 
 // Vue Router 在首帧可能尚未把嵌套路由 meta 写入 route；若只在 mounted
-// 判断，会漏掉平台页的首个查询，页面于是错误地显示 0 条。等只读路由身份
+// 判断，会漏掉平台页的首个查询，页面于是错误地显示 0 条。等平台路由身份
 // 已确认后执行一次当天查询，同时保留普通收银入口原有流程。
-watch(isPlatformReadOnly, (readOnly) => {
-  if (readOnly) {
+watch(isPlatformContext, (platformContext) => {
+  if (platformContext) {
     void loadPlatformOrderScope()
     queryRecords(initialOrderCenterQuery(), true)
   }
@@ -3843,8 +3821,7 @@ watch(isPlatformReadOnly, (readOnly) => {
 
 watch(activeTabKey, () => {
   // 平台页也必须读取当前页签的服务端字段白名单，否则“更多筛选”
-  // 会因缺少可验证的筛选字段而安全隐藏。平台写入和导出仍由
-  // activeQueryCapability 及平台 HTTP adapter 双重关闭。
+  // 会因缺少可验证的筛选字段而隐藏；查询、导出和操作复用同一能力。
   activeUnifiedQuery.value?.load({ silent: true })
 }, { immediate: true })
 
@@ -3854,7 +3831,7 @@ watch(
     const requestedTab = String(route.query.tab || route.query.recordType || '').trim()
     if (!ORDER_TABS.some((item) => item.key === requestedTab)) return
     // Closing the switch hides both navigation and stale/bookmarked debt tabs.
-    if (!isPlatformReadOnly.value && !orderRecordTypeVisible(requestedTab, debtPaymentEnabled.value)) {
+    if (!orderRecordTypeVisible(requestedTab, debtPaymentEnabled.value)) {
       activeTabKey.value = 'all'
       void router.replace({ query: { ...route.query, tab: 'all', recordType: undefined } })
       return
@@ -3873,7 +3850,7 @@ watch(
       closeSalesDetail()
       activeTabKey.value = requestedTab
     }
-    if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
+    if (isPlatformContext.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
   },
   { immediate: true }
 )
@@ -3898,7 +3875,7 @@ watch(
 watch(
   () => state.stateContextId,
   (stateContextId) => {
-    if (isPlatformReadOnly.value) return
+    if (isPlatformContext.value) return
     if (!stateContextId) return
     // 首屏的页面能力请求可能发生在工作台上下文建立之前。上下文就绪后重试当前
     // 页签，避免安全降级状态把“导出”一直隐藏到手工刷新为止。
@@ -3919,13 +3896,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="order-center-page" aria-label="订单中心">
-    <!-- 门店端不再显示打印设置栏；平台只读提示保留。 -->
-    <header v-if="isPlatformReadOnly" class="order-center-page__head">
-      <span class="order-center-page__readonly-note">平台只读查询；业务操作请前往门店端处理</span>
-    </header>
-
-    <p v-if="!isPlatformReadOnly && serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
-    <p v-if="!isPlatformReadOnly && servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
+    <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
+    <p v-if="servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
     <p v-if="activeTabKey === 'refund' && refundAttributionError && !refundAttributionEditorOpen && !refundAttributionPending" class="order-center-page__inline-error" role="alert">{{ refundAttributionError }}</p>
     <p v-if="activeTabKey === 'service' && serviceReportDrilldown" class="order-center-notice" role="status">
       正在查看 {{ serviceReportDateLabel }} 的手艺人消耗对应服务记录，仅显示当前仍有效、未作废的服务。
@@ -3963,7 +3935,7 @@ onBeforeUnmount(() => {
     >
       <template #primary-actions>
         <OrganizationStoreScopePicker
-          v-if="isPlatformReadOnly"
+          v-if="isPlatformContext"
           v-model="platformScopeStoreIds"
           :tree="platformScopePicker.tree"
           :allowed-store-ids="platformScopePicker.allowedStoreIds"
@@ -4003,7 +3975,7 @@ onBeforeUnmount(() => {
       :show-query-loading="activeTabKey === 'all'"
       :state-context-key="state.stateContextId"
       :query-capability="activeQueryCapability"
-      :show-settings-button="!isPlatformReadOnly"
+      :show-settings-button="true"
       @query="queryRecords"
       :on-save-settings="saveQuerySettings"
       :on-create-export="createActiveExport"
@@ -4018,7 +3990,7 @@ onBeforeUnmount(() => {
     >
       <template #leading-controls>
         <OrganizationStoreScopePicker
-          v-if="isPlatformReadOnly"
+          v-if="isPlatformContext"
           v-model="platformScopeStoreIds"
           :tree="platformScopePicker.tree"
           :allowed-store-ids="platformScopePicker.allowedStoreIds"
@@ -4060,7 +4032,7 @@ onBeforeUnmount(() => {
               <span v-if="businessSourceEnabled" class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
-              <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
+              <span class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">详情</button>
                 <button
                   v-if="recordType(record) === 'sales' && canUseCashierV3Operation('cashier.v3.order.receipt_print')"
@@ -4187,14 +4159,14 @@ onBeforeUnmount(() => {
         <thead>
           <tr>
             <th v-for="fieldItem in visibleFields" :key="fieldItem.key">{{ fieldItem.label }}</th>
-            <th v-if="!isPlatformReadOnly">操作</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(record, index) in records" :key="recordKey(record, index)">
             <td v-for="fieldItem in visibleFields" :key="fieldItem.key" :class="tableCellClass(record, fieldItem)">
               <button
-                v-if="!isPlatformReadOnly && fieldItem.key === activeTab.primaryField"
+                v-if="fieldItem.key === activeTab.primaryField"
                 type="button"
                 class="order-link"
                 @click="openRecordDetail(record)"
@@ -4211,7 +4183,7 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
-                v-else-if="!isPlatformReadOnly && fieldItem.key === 'salesperson' && ['recharge', 'supplement', 'refund'].includes(activeTabKey) && (activeTabKey !== 'refund' || editableRefundPersonnelSourceTypes.has(record.refundSourceType)) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                v-else-if="fieldItem.key === 'salesperson' && ['recharge', 'supplement', 'refund'].includes(activeTabKey) && (activeTabKey !== 'refund' || editableRefundPersonnelSourceTypes.has(record.refundSourceType)) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
                 title="修改销售人"
@@ -4220,14 +4192,14 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
-                v-else-if="!isPlatformReadOnly && fieldItem.key === 'supplement_attribution' && activeTabKey === 'supplement' && String(record?.id || '').startsWith('v3-') && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                v-else-if="fieldItem.key === 'supplement_attribution' && activeTabKey === 'supplement' && String(record?.id || '').startsWith('v3-') && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
                 title="修改补交导购/销售经理"
                 @click="openSupplementAttributionEditor(record)"
               >{{ displayRecordField(record, fieldItem.key) }}</button>
               <button
-                v-else-if="!isPlatformReadOnly && fieldItem.key === 'refund_attribution' && activeTabKey === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                v-else-if="fieldItem.key === 'refund_attribution' && activeTabKey === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
                 title="修改退款导购/销售经理"
@@ -4238,7 +4210,7 @@ onBeforeUnmount(() => {
                 type="button" class="order-link" @click="openAttributionEditor(record, fieldItem.key)"
               >{{ displayRecordField(record, fieldItem.key) }}</button>
               <button
-                v-else-if="!isPlatformReadOnly && fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
+                v-else-if="fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
                 class="order-link"
                 title="修改该服务记录的手艺人分配"
@@ -4253,7 +4225,7 @@ onBeforeUnmount(() => {
               </span>
               <span v-else>{{ displayRecordField(record, fieldItem.key) }}</span>
             </td>
-            <td v-if="!isPlatformReadOnly">
+            <td>
               <button
                 v-if="activeTabKey !== 'service' || canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
@@ -4304,7 +4276,7 @@ onBeforeUnmount(() => {
 
     <SalesOrderDetailOverlay
       @void-entitlement-order="(record) => { closeSalesDetail(); openServiceVoid(record) }"
-      v-if="!isPlatformReadOnly && isSalesDetailOpen"
+      v-if="isSalesDetailOpen"
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
@@ -4322,7 +4294,7 @@ onBeforeUnmount(() => {
 
     <PersonnelPerformanceOverlay
       :show-pre-sale="preSaleEnabled"
-      v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
+      v-if="salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
       :show-labor-fee="orderLaborFeeVisible"
       :initial-mode="salesPersonnelTarget.entitlementOnly ? 'simple' : 'full'"
@@ -4361,7 +4333,7 @@ onBeforeUnmount(() => {
 
     <PersonnelPerformanceOverlay
       :show-pre-sale="preSaleEnabled"
-      v-if="!isPlatformReadOnly && recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
+      v-if="recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
       initial-tab="salespeople"
       initial-mode="full"
       :show-craftsmen="false"
@@ -4384,7 +4356,7 @@ onBeforeUnmount(() => {
 
     <PersonnelPerformanceOverlay
       :show-pre-sale="preSaleEnabled"
-      v-if="!isPlatformReadOnly && supplementAttributionEditorOpen && supplementAttributionEntry"
+      v-if="supplementAttributionEditorOpen && supplementAttributionEntry"
       initial-tab="guides"
       :show-craftsmen="false"
       :show-salespeople="false"
@@ -4405,7 +4377,7 @@ onBeforeUnmount(() => {
 
     <PersonnelPerformanceOverlay
       :show-pre-sale="preSaleEnabled"
-      v-if="!isPlatformReadOnly && refundAttributionEditorOpen && refundAttributionEntry"
+      v-if="refundAttributionEditorOpen && refundAttributionEntry"
       initial-tab="guides"
       :show-craftsmen="false"
       :show-salespeople="false"
@@ -4426,7 +4398,7 @@ onBeforeUnmount(() => {
     />
 
     <BusinessRecordDetailOverlay
-      v-if="!isPlatformReadOnly && genericDetailRecord"
+      v-if="genericDetailRecord"
       :title="`${recordTab(genericDetailRecord).label}详情`"
       :record="genericDetailRecord"
       :fields="detailFields"
@@ -4675,13 +4647,13 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <p v-if="!isPlatformReadOnly && serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
+    <p v-if="serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
       {{ serviceCraftsmanError }}
     </p>
 
     <PersonnelPerformanceOverlay
       :show-pre-sale="preSaleEnabled"
-      v-if="!isPlatformReadOnly && serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
+      v-if="serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
       :show-labor-fee="orderLaborFeeVisible"
       initial-tab="craftsmen"
       :show-craftsmen="true"
@@ -4705,7 +4677,7 @@ onBeforeUnmount(() => {
 
 
 
-    <div v-if="!isPlatformReadOnly && serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
+    <div v-if="serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
       <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4723,7 +4695,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && serviceCraftsmanPendingAssignment" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-craftsman-reason-title">
+    <div v-if="serviceCraftsmanPendingAssignment" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-craftsman-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelServiceCraftsmanReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4741,7 +4713,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && salesPersonnelPendingAssignment && salesPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-personnel-reason-title">
+    <div v-if="salesPersonnelPendingAssignment && salesPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-personnel-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelSalesPersonnelReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4759,7 +4731,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && recordPersonnelPendingAssignment && recordPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="record-personnel-reason-title">
+    <div v-if="recordPersonnelPendingAssignment && recordPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="record-personnel-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelRecordPersonnelReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4777,7 +4749,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && supplementAttributionPending && supplementAttributionTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="supplement-attribution-reason-title">
+    <div v-if="supplementAttributionPending && supplementAttributionTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="supplement-attribution-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelSupplementAttributionReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4795,7 +4767,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && refundAttributionPending && refundAttributionTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="refund-attribution-reason-title">
+    <div v-if="refundAttributionPending && refundAttributionTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="refund-attribution-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelRefundAttributionReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -4813,7 +4785,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="!isPlatformReadOnly && salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
+    <div v-if="salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
       <div class="service-void-modal__backdrop" @click="closeSalesOrderNoteEditor"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">

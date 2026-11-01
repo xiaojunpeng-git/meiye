@@ -107,6 +107,65 @@ final class CashierV3SalesOrderQueryServices
     }
 
     /**
+     * 可信订单中心普通列表使用的数据库 offset 分页。
+     *
+     * 该入口只读取 V3 权威订单，并继续复用相同的租户、门店、日期、状态和关键词
+     * 条件；它不接受客户端构造的 SQL，也不替代带签名游标的业务 Reader。调用方
+     * 必须先确认当前查询不需要合并旧 store_order 副本，否则应回退统一查询路径。
+     * 这样普通第 N 页只组装该页订单快照，而不会为分页先读取整月订单。
+     */
+    public function queryAuthoritySalesOrdersOffsetPage(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        if ($this->reader !== null) {
+            throw new \LogicException('sales_order_offset_page_requires_authority_reader');
+        }
+        $criteria = $this->listCriteria($payload, $operatorScope, $dataScope, false);
+        if ($criteria['allowedStoreIds'] === [] || !$dataScope->hasFeature('cashier.v3.order_center')) {
+            return $this->emptyPage($criteria, 'permission_filtered');
+        }
+        if (!in_array((string)$criteria['status'], ['', 'normal', 'refunded', 'voided'], true)) {
+            return $this->authorityPagePayload($criteria, [], 0);
+        }
+
+        // offset 列表用同一请求的时间截点限制新增记录。这里不再为获得一个
+        // 合成 ID 上界，对“销售头 + 纯权益服务分组”的 UNION 全量执行 MAX；该 MAX
+        // 会先物化整月服务分组，比读取当前 20 条还慢。权威查询已使用
+        // settled_at <= queryCutoffTimestamp，因此 ID 仅作非限制性安全上界。
+        $criteria['queryCutoffTimestamp'] = (int)$criteria['nowTimestamp'];
+        $criteria['snapshotMaxOrderId'] = PHP_INT_MAX;
+        $criteria['keywordWindowStartTimestamp'] = $criteria['keyword'] === ''
+            ? null
+            : max(1, (int)$criteria['queryCutoffTimestamp'] - (self::KEYWORD_SEARCH_WINDOW_DAYS * 86400) + 1);
+        $criteria['afterPayTime'] = null;
+        $criteria['afterOrderId'] = null;
+        $base = $this->authorityOrderQuery($criteria);
+        $total = $this->authorityOrderTotal($criteria, $base);
+        $rows = (string)$criteria['status'] === 'normal'
+            && (string)$criteria['keyword'] === ''
+            && empty($criteria['salesPerformanceDrilldown'])
+            ? $this->authorityNormalOffsetRows($criteria)
+            : $base->field($this->authorityOrderFields())
+                ->order('o.settled_at', 'desc')
+                ->order('o.id', 'desc')
+                ->page((int)$criteria['page'], (int)$criteria['pageSize'])
+                ->select()
+                ->toArray();
+        $snapshots = $this->authoritySnapshots($rows);
+        $records = [];
+        foreach ($rows as $row) {
+            $orderId = (string)($row['order_id'] ?? '');
+            if ($orderId === '' || !isset($snapshots[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_snapshot_incomplete');
+            }
+            $records[] = $this->mapAuthorityOrder($snapshots[$orderId], false);
+        }
+        return $this->authorityOffsetPagePayload($criteria, $records, $total);
+    }
+
+    /**
      * 历史销售单独读取后交给统一列表合并、筛选、分页；不伪造 V3 收款事实。
      * 来源前缀隔离旧自增ID与新订单ID，详情同样重新执行当前权限校验。
      */
@@ -639,7 +698,7 @@ final class CashierV3SalesOrderQueryServices
         }
 
         $base = $this->authorityOrderQuery($criteria);
-        $total = (int)(clone $base)->count('o.id');
+        $total = $this->authorityOrderTotal($criteria, $base);
         $rows = $base->field($this->authorityOrderFields())
             ->order('o.settled_at', 'desc')
             ->order('o.id', 'desc')
@@ -801,7 +860,7 @@ final class CashierV3SalesOrderQueryServices
      * 按同一结账请求分组；已存在销售单的混合结账由原销售单承载，禁止重复。
      * 奇偶 ID 仅用于有签名的分页锚点，不作为任何写命令的资源 ID。
      */
-    private function salesAndServiceHeaders(array $criteria): string
+    private function authoritySourceDefinitions(array $criteria): array
     {
         $columns = explode(',', str_replace('o.', '', $this->authorityOrderFields()));
         $salesFields = [];
@@ -868,9 +927,95 @@ final class CashierV3SalesOrderQueryServices
             }
         }
         // 统一外层字段保留原来的状态、权限和游标过滤契约。
-        return '(' . $sales->field(implode(',', $salesFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")->buildSql(false)
-            . ' UNION ALL ' . $services->field(implode(',', $serviceFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
+        return compact('sales', 'services', 'salesFields', 'serviceFields');
+    }
+
+    private function salesAndServiceHeaders(array $criteria): string
+    {
+        $definitions = $this->authoritySourceDefinitions($criteria);
+        return '(' . $definitions['sales']->field(implode(',', $definitions['salesFields']))
+                ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")->buildSql(false)
+            . ' UNION ALL ' . $definitions['services']->field(implode(',', $definitions['serviceFields']))
+                ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
                 ->group('sf.tenant_id,sf.checkout_request_id')->buildSql(false) . ')';
+    }
+
+    /** 默认正常列表分别取两个权威来源的有界窗口，再在 PHP 合并当前页。 */
+    private function authorityNormalOffsetRows(array $criteria): array
+    {
+        $definitions = $this->authoritySourceDefinitions($criteria);
+        $window = (int)$criteria['page'] * (int)$criteria['pageSize'];
+
+        $sales = $definitions['sales']
+            ->where('s.settled_at', '<=', (int)$criteria['queryCutoffTimestamp'])
+            ->whereNotExists(function ($operation): void {
+                $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('row_olo')
+                    ->whereRaw('row_olo.source_order_id=s.order_id')
+                    ->whereRaw('row_olo.tenant_id=s.tenant_id')
+                    ->where('row_olo.source_type', 'sales')
+                    ->where('row_olo.status', 'succeeded')
+                    ->whereIn('row_olo.operation_type', ['refund', 'void']);
+            })
+            ->field(implode(',', $definitions['salesFields']))
+            ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
+            ->order('s.settled_at', 'desc')->order('s.id', 'desc')
+            ->limit($window)->select()->toArray();
+
+        // 先只用服务事实表和窄字段找出当前窗口的结账请求，再为这些请求读取
+        // 来源快照与完整表头。这样不会为整月数万条服务事实先做几十个 MIN、
+        // 来源表 JOIN 和宽行排序。
+        $serviceKeys = Db::name('cashier_v3_entitlement_service_fact')->alias('key_sf')
+            ->where('key_sf.tenant_id', (string)$criteria['tenantId'])
+            ->where('key_sf.service_status', 'completed')
+            ->where('key_sf.checkout_request_id', '<>', '')
+            ->whereNotExists(function ($existing): void {
+                $existing->name('cashier_v3_sales_order')->alias('key_sale')
+                    ->whereRaw('key_sale.tenant_id=key_sf.tenant_id')
+                    ->whereRaw('key_sale.checkout_request_id=key_sf.checkout_request_id')
+                    ->where('key_sale.order_status', 'settled')
+                    ->where('key_sale.order_direction', 'forward');
+            })
+            ->leftJoin('cashier_v3_service_record_void_operation key_vo',
+                "key_vo.tenant_id=key_sf.tenant_id AND key_vo.service_fact_id=key_sf.id AND key_vo.status='succeeded'");
+        if ($criteria['allowedStoreIds'] !== null) {
+            $serviceKeys->whereIn('key_sf.store_id', $criteria['allowedStoreIds']);
+        }
+        if ($criteria['memberId'] !== null) {
+            $serviceKeys->where('key_sf.member_id', (int)$criteria['memberId']);
+        }
+        if (($criteria['dateFrom'] ?? '') !== '') {
+            $serviceKeys->where('key_sf.business_date', '>=', (string)$criteria['dateFrom']);
+        }
+        if (($criteria['dateTo'] ?? '') !== '') {
+            $serviceKeys->where('key_sf.business_date', '<=', (string)$criteria['dateTo']);
+        }
+        $serviceRequestIds = array_column($serviceKeys
+            ->field('key_sf.checkout_request_id,MIN(key_sf.settled_at) AS group_settled_at,MIN(key_sf.id) AS group_id')
+            ->group('key_sf.checkout_request_id')
+            // 正常组只需至少一条服务未作废；表头时间、身份仍取完整原组。
+            ->having('SUM(CASE WHEN key_vo.id IS NULL THEN 1 ELSE 0 END)>0 AND MIN(key_sf.settled_at)>0 AND MIN(key_sf.settled_at)<=' . (int)$criteria['queryCutoffTimestamp'])
+            ->orderRaw('group_settled_at DESC,group_id DESC')
+            ->limit($window)->select()->toArray(), 'checkout_request_id');
+
+        $services = $serviceRequestIds === [] ? [] : $definitions['services']
+            ->whereIn('sf.checkout_request_id', $serviceRequestIds)
+            ->field(implode(',', $definitions['serviceFields']))
+            ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
+            ->group('sf.tenant_id,sf.checkout_request_id')
+            ->orderRaw('MIN(sf.settled_at) DESC,MIN(sf.id) DESC')
+            ->limit($window)->select()->toArray();
+
+        $rows = array_merge($sales, $services);
+        usort($rows, static function (array $left, array $right): int {
+            // 权威表头使用 settled_at；pay_time 只属于旧订单，不能混用。
+            return ((int)$right['settled_at'] <=> (int)$left['settled_at'])
+                ?: ((int)$right['id'] <=> (int)$left['id']);
+        });
+        return array_slice(
+            $rows,
+            ((int)$criteria['page'] - 1) * (int)$criteria['pageSize'],
+            (int)$criteria['pageSize']
+        );
     }
 
     private function authorityOrderQuery(array $criteria)
@@ -927,6 +1072,77 @@ final class CashierV3SalesOrderQueryServices
                 });
         }
         return $query;
+    }
+
+    /**
+     * 默认“正常”列表不再对“销售单 + 纯权益服务单”的 UNION 派生表执行
+     * 全量 COUNT。两个权威来源分别使用自己的索引精确计数，再相加得到同一
+     * 业务口径的总数；其他复杂状态和关键词查询继续沿用统一查询，避免为了
+     * 性能改变筛选语义。
+     */
+    private function authorityOrderTotal(array $criteria, $fallbackQuery): int
+    {
+        // 游标签名约束和部分作废组的聚合边界必须保持原查询语义；优化计数
+        // 目前仅用于无签名上界的 offset 列表。
+        if ((int)$criteria['snapshotMaxOrderId'] !== PHP_INT_MAX
+            || (string)$criteria['status'] !== 'normal'
+            || (string)$criteria['keyword'] !== ''
+            || !empty($criteria['salesPerformanceDrilldown'])) {
+            return (int)(clone $fallbackQuery)->count('o.id');
+        }
+
+        $sales = Db::name('cashier_v3_sales_order')->alias('s')
+            ->where('s.tenant_id', (string)$criteria['tenantId'])
+            ->where('s.order_status', 'settled')
+            ->where('s.order_direction', 'forward')
+            ->where('s.settled_at', '>', 0)
+            ->where('s.settled_at', '<=', (int)$criteria['queryCutoffTimestamp'])
+            ->whereNotExists(function ($operation): void {
+                $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('count_olo')
+                    ->whereRaw('count_olo.source_order_id=s.order_id')
+                    ->whereRaw('count_olo.tenant_id=s.tenant_id')
+                    ->where('count_olo.source_type', 'sales')
+                    ->where('count_olo.status', 'succeeded')
+                    ->whereIn('count_olo.operation_type', ['refund', 'void']);
+            });
+        $services = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', (string)$criteria['tenantId'])
+            ->where('sf.service_status', 'completed')
+            ->where('sf.checkout_request_id', '<>', '')
+            ->whereNotExists(function ($existing): void {
+                $existing->name('cashier_v3_sales_order')->alias('count_sale')
+                    ->whereRaw('count_sale.tenant_id=sf.tenant_id')
+                    ->whereRaw('count_sale.checkout_request_id=sf.checkout_request_id')
+                    ->where('count_sale.order_status', 'settled')
+                    ->where('count_sale.order_direction', 'forward');
+            })
+            ->leftJoin('cashier_v3_service_record_void_operation count_vo',
+                "count_vo.tenant_id=sf.tenant_id AND count_vo.service_fact_id=sf.id AND count_vo.status='succeeded'");
+
+        foreach ([[$sales, 's'], [$services, 'sf']] as [$query, $alias]) {
+            if ($criteria['allowedStoreIds'] !== null) {
+                $query->whereIn($alias . '.store_id', $criteria['allowedStoreIds']);
+            }
+            if ($criteria['memberId'] !== null) {
+                $query->where($alias . '.member_id', (int)$criteria['memberId']);
+            }
+            if (($criteria['dateFrom'] ?? '') !== '') {
+                $query->where($alias . '.business_date', '>=', (string)$criteria['dateFrom']);
+            }
+            if (($criteria['dateTo'] ?? '') !== '') {
+                $query->where($alias . '.business_date', '<=', (string)$criteria['dateTo']);
+            }
+        }
+
+        $salesTotal = (int)$sales->count('s.id');
+        // DISTINCT COUNT(x) 与 COUNT(DISTINCT x) 不等价。使用窄分组派生表，
+        // 同时保留原组最早时间和“至少一项有效”的生命周期口径。
+        $groups = $services->field('sf.checkout_request_id')
+            ->group('sf.checkout_request_id')
+            ->having('SUM(CASE WHEN count_vo.id IS NULL THEN 1 ELSE 0 END)>0 AND MIN(sf.settled_at)>0 AND MIN(sf.settled_at)<=' . (int)$criteria['queryCutoffTimestamp'])
+            ->buildSql(false);
+        $serviceTotal = (int)Db::table('(' . $groups . ') service_groups')->count();
+        return $salesTotal + $serviceTotal;
     }
 
     private function applyAuthorityStatusFilter($query, string $status): void
@@ -1033,6 +1249,15 @@ final class CashierV3SalesOrderQueryServices
                     ->whereRaw('IFNULL(primary_ci.cart_type, 0) IN (0,3)')
                     ->whereRaw('IFNULL(primary_ci.is_gift, 0) = 0');
             });
+        // 平台组织范围为“全部可见门店”时 allowedStoreIds 为 null，以 store_id
+        // 开头的门店索引无法用于月度日期范围。MySQL 5.7 否则会选择多个
+        // 低区分度单列索引做 index_merge，再对整月候选逐行执行子查询。
+        // R63 只对默认“正常”列表提供完整前导索引，这里仅在相同口径下强制使用。
+        if ($operation !== 'detail'
+            && $criteria['allowedStoreIds'] === null
+            && (string)$criteria['status'] === 'normal') {
+            $query->force('idx_order_center_global_normal_date');
+        }
         if ($criteria['allowedStoreIds'] !== null) {
             $query->whereIn('o.store_id', $criteria['allowedStoreIds']);
         }
@@ -1420,20 +1645,23 @@ final class CashierV3SalesOrderQueryServices
         $requestIds = array_values(array_unique(array_filter(array_map(function (array $header): string {
             return trim((string)($header['checkout_request_id'] ?? ''));
         }, $headers))));
-        $eventQuery = Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
-            ->where('tenant_id', $tenantIds[0] ?? '')
-            ->where(function ($nested) use ($orderIds, $requestIds): void {
-                if ($requestIds !== []) $nested->whereIn('source_id', $requestIds);
-                if ($orderIds !== []) {
-                    if ($requestIds !== []) $nested->whereOr(function ($aggregate) use ($orderIds): void {
-                        $aggregate->whereIn('aggregate_id', $orderIds);
-                    });
-                    else $nested->whereIn('aggregate_id', $orderIds);
-                }
-            })
-            ->field('aggregate_id,source_id,event_type')
-            ->select()
-            ->toArray();
+        // source_id 与 aggregate_id 各有独立索引。把 OR 拆成两次当前页小查询，
+        // 避免 MySQL 5.7 放弃两个高选择性索引后扫描整张业务事件表。
+        $eventQuery = [];
+        if ($requestIds !== []) {
+            $eventQuery = Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
+                ->where('tenant_id', $tenantIds[0] ?? '')
+                ->whereIn('source_id', $requestIds)
+                ->field('aggregate_id,source_id,event_type')
+                ->select()->toArray();
+        }
+        if ($orderIds !== []) {
+            $eventQuery = array_merge($eventQuery, Db::name(CashierV3BusinessEventRecorder::EVENT_TABLE)
+                ->where('tenant_id', $tenantIds[0] ?? '')
+                ->whereIn('aggregate_id', $orderIds)
+                ->field('aggregate_id,source_id,event_type')
+                ->select()->toArray());
+        }
         foreach ($eventQuery as $eventRow) {
             $eventType = trim((string)($eventRow['event_type'] ?? ''));
             $aggregateId = trim((string)($eventRow['aggregate_id'] ?? ''));
@@ -2367,6 +2595,20 @@ final class CashierV3SalesOrderQueryServices
     {
         $payload = $this->pagePayload($criteria, $records, $total, 'authority_v3');
         $payload['economicsDataStatus'] = 'ready';
+        return $payload;
+    }
+
+    /** 普通列表明确返回 offset 元数据；不向前端暴露或伪造游标签名。 */
+    private function authorityOffsetPagePayload(array $criteria, array $records, int $total): array
+    {
+        $payload = $this->authorityPagePayload($criteria, $records, $total);
+        $payload['paginationMode'] = 'offset';
+        $payload['paginationCursor'] = ['current' => '', 'next' => ''];
+        $payload['hasMore'] = (int)$criteria['page'] * (int)$criteria['pageSize'] < $total;
+        $payload['freshnessPolicy'] = [
+            'membership' => 'max_order_id_frozen_for_current_read',
+            'status' => 'current_at_page_read',
+        ];
         return $payload;
     }
 

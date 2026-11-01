@@ -9,15 +9,15 @@ use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryContract;
 use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices;
 use app\services\cashier\v3\order\CashierV3SalesOrderQueryServices;
 use app\services\cashier\v3\query\UnifiedQueryModule;
+use app\services\cashier\v3\projection\CashierV3DisplayPolicyServices;
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
 
 /**
- * 平台订单中心只读桥接。
+ * 平台订单中心身份与组织范围适配。
  *
- * 复用 cashier-v3 订单中心的八类权威读取器，但绝不接受 cashier_token、
- * 不暴露任何写命令。平台数据范围唯一由 EmployeeDataScopeServices 推导。
+ * 复用 cashier-v3 全部共用查询与业务操作；仅接受管理员令牌，数据范围由 EmployeeDataScopeServices 推导。
  */
 final class PlatformOrderCenterReadServices
 {
@@ -51,14 +51,14 @@ final class PlatformOrderCenterReadServices
         $context = $this->context($adminInfo);
         if ($context === null) {
             return [
-                'readOnly' => true,
+                'readOnly' => false,
                 'scope' => ['mode' => 'none'],
                 'businessTypes' => $this->businessTypes(),
             ];
         }
         [, , $scopeMeta] = $context;
         return [
-            'readOnly' => true,
+            'readOnly' => false,
             'scope' => $scopeMeta,
             'businessTypes' => $this->businessTypes(),
         ];
@@ -70,7 +70,7 @@ final class PlatformOrderCenterReadServices
         $context = $this->context($adminInfo);
         if ($context === null) {
             return [
-                'readOnly' => true,
+                'readOnly' => false,
                 'scope' => ['mode' => 'none'],
                 'page' => $this->emptyPage($payload),
             ];
@@ -90,7 +90,7 @@ final class PlatformOrderCenterReadServices
             $payload['recordType'] = $type;
             $page = $this->recordQueries->queryRecords($payload, $operator, $scope);
         }
-        return ['readOnly' => true, 'scope' => $scopeMeta, 'page' => $page];
+        return ['readOnly' => false, 'scope' => $scopeMeta, 'page' => $page];
     }
 
     /**
@@ -130,126 +130,48 @@ final class PlatformOrderCenterReadServices
     {
         $context = $this->context($adminInfo);
         if ($context === null) {
-            return ['readOnly' => true, 'scope' => ['mode' => 'none'], 'detail' => null];
+            return ['readOnly' => false, 'scope' => ['mode' => 'none'], 'detail' => null];
         }
         [$operator, $scope, $scopeMeta] = $context;
         return [
-            'readOnly' => true,
+            'readOnly' => false,
             'scope' => $scopeMeta,
             'detail' => $this->salesQueries->salesOrderDetail($payload, $operator, $scope),
         ];
     }
 
-    /**
-     * 与 cashier-v3 action gateway 对齐的只读 envelope。
-     * 平台端不注册任何 command，前端即便篡改 action 也只能得到拒绝响应。
-     */
+    /** 平台仅适配已登录管理员身份，全部查询、导出与订单业务动作进入同一 gateway。 */
     public function dispatchReadAction(array $adminInfo, array $body): array
     {
-        $action = trim((string)($body['action'] ?? ''));
-        $correlationId = trim((string)($body['correlationId'] ?? $body['correlation_id'] ?? ''));
-        if ($correlationId === '') {
-            $correlationId = 'CORR-' . str_replace('.', '', uniqid('', true));
-        }
-        $payload = $body;
-        unset($payload['action'], $payload['command'], $payload['correlationId'], $payload['correlation_id']);
-        if (!in_array($action, [
-            'query-sales-orders',
-            'query-order-center-records',
-            'open-sales-order-detail',
-            'query-unified-query-capabilities',
-        ], true)) {
-            return $this->failureEnvelope($action, $correlationId, 'PLATFORM_ORDER_CENTER_READ_ONLY', '平台订单中心仅支持只读查询。');
-        }
-
-        if ($action === 'query-sales-orders') {
-            $result = $this->records($adminInfo, array_merge($payload, ['recordType' => 'sales']));
-            $page = $result['page'];
-            $data = ['orderCenter' => $this->salesPartition($page, $result)];
-        } elseif ($action === 'query-order-center-records') {
-            $result = $this->records($adminInfo, $payload);
-            $data = ['orderCenter' => $this->recordPartition($result['page'], $result)];
-        } elseif ($action === 'open-sales-order-detail') {
-            $result = $this->salesOrderDetail($adminInfo, $payload);
-            if ($result['detail'] === null) {
-                return $this->failureEnvelope($action, $correlationId, 'RESOURCE_NOT_FOUND', '该销售订单不存在或当前账号无权查看。');
-            }
-            $data = ['orderCenter' => [
-                'contractVersion' => CashierV3SalesOrderQueryServices::CONTRACT_VERSION,
-                'salesOrderDetail' => $result['detail'],
-                'readOnly' => true,
-                'scope' => $result['scope'],
-            ]];
-        } else {
-            $data = ['unifiedQueryCapability' => $this->readOnlyQueryCapability($adminInfo, $payload)];
-        }
-        return [
-            'result' => ['status' => 'success', 'code' => '', 'message' => '查询完成。'],
-            'data' => $data,
-            'replay' => false,
-            'stateContextId' => '',
-            'contextChanged' => false,
-            'boundAction' => $action,
-            'boundCanonical' => $action,
-            'correlationId' => $correlationId,
-            'boundCorrelationId' => $correlationId,
-        ];
+        return app()->make(PlatformOrderCenterActionServices::class)->dispatch((int)($adminInfo['id'] ?? 0), $body);
     }
 
-    /**
-     * 平台端需要与门店端相同的字段白名单才能显示“更多筛选”，
-     * 但不下发 command context，也不开放偏好、导出或字段设置写入。
-     */
-    private function readOnlyQueryCapability(array $adminInfo, array $payload): array
+    /** 平台与门店共用功能不另设操作权限；真实管理员身份和当前数据范围仍须有效。 */
+    public function exportScopes(int $adminId, string $pageCode): array
     {
-        $context = $this->context($adminInfo);
-        $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
-        if ($context === null || !in_array($pageCode, CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)) {
-            return [
-                'enabled' => false,
-                'readOnly' => true,
-                'pageCode' => $pageCode,
-                'disabledReason' => '当前订单页面不可查询。',
-                'fields' => [],
-                'customFields' => [],
-                'permissions' => [],
-                'export' => ['enabled' => false],
-            ];
+        if (!in_array($pageCode, CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)) {
+            throw new \app\services\query\UnifiedQueryException('UNIFIED_QUERY_PAGE_CONFLICT', '订单页面无效。', []);
         }
+        [$operator, $scope] = $this->trustedScopes($adminId);
+        $context = UnifiedQueryModule::runtime()['contextFactory']->make($operator, $scope, ['pageCode' => $pageCode]);
+        return [$operator, $scope, $context];
+    }
 
-        [$operator, $scope] = $context;
-        $runtime = UnifiedQueryModule::runtime();
-        $payload['pageCode'] = $pageCode;
-        $queryContext = $runtime['contextFactory']->make($operator, $scope, $payload);
-        $settings = $runtime['preferences']->load($queryContext, $pageCode);
-        $capability = $runtime['capabilities']->build(
-            $queryContext,
-            $pageCode,
-            max(1, (int)($settings['settingsVersion'] ?? 1)),
-            time()
-        );
-        $capability['readOnly'] = true;
-        $capability['permissions'] = [
-            'createCustomField' => false,
-            'editCustomField' => false,
-            'shareCustomField' => false,
-            'changeCustomFieldStatus' => false,
-            'archiveCustomField' => false,
-            'renameFields' => false,
-            'export' => false,
-        ];
-        $capability['export'] = [
-            'enabled' => false,
-            'allowCurrentQuery' => false,
-            'allowCurrentPage' => false,
-            'allowSummary' => false,
-            'formats' => [],
-        ];
-        return $capability;
+    /** 只由已验证的 admin 会话、共用 gateway 和 worker 调用，不接收浏览器权限字段。 */
+    public function trustedScopes(int $adminId, int $storeId = 0, bool $lock = false): array
+    {
+        $query = Db::name('system_admin')->where('id', $adminId)->where('status', 1)->where('is_del', 0);
+        if ($lock) $query->lock(true);
+        $admin = $query->find();
+        $scopes = $admin ? $this->context($admin, $storeId) : null;
+        if ($scopes === null) {
+            throw new \app\services\query\UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '当前账号或数据范围已失效，请重新登录。', []);
+        }
+        return $scopes;
     }
 
     /** @return array{0:CashierV3OperatorScope,1:CashierV3DataScopeContext,2:array}|null */
-    private function context(array $adminInfo)
+    private function context(array $adminInfo, int $targetStoreId = 0)
     {
         $adminId = (int)($adminInfo['id'] ?? 0);
         if ($adminId <= 0) {
@@ -286,29 +208,34 @@ final class PlatformOrderCenterReadServices
             return null;
         }
 
+        if ($targetStoreId > 0) {
+            if ($visibleStoreIds !== null && !in_array($targetStoreId, $visibleStoreIds, true)) return null;
+            if (!Db::name('system_store')->where('id', $targetStoreId)->where('is_del', 0)->value('id')) return null;
+            $anchorStoreId = $targetStoreId;
+        }
         $scopeMeta['source'] = 'employee_data_scope';
-        $scopeMeta['read_only'] = true;
+        $scopeMeta['read_only'] = false;
         $permissionVersion = 'platform-order-center:' . hash('sha256', json_encode([
             'admin_id' => $adminId,
             'employee_id' => $employeeId,
             'scope' => $scopeMeta,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        $operator = new CashierV3OperatorScope($anchorStoreId, $adminId, '', CashierV3ScopeResolver::TENANT_SCOPE_ID);
+        $operator = (new CashierV3ScopeResolver())->operatorScope($anchorStoreId, $adminId);
         $scope = new CashierV3DataScopeContext(
             $adminId,
             $employeeId,
             $anchorStoreId,
             CashierV3ScopeResolver::TENANT_SCOPE_ID,
-            '',
+            $operator->organizationId(),
             $visibleStoreIds,
             $authorizationMode,
             $scopeMeta,
             $authorizationMode === CashierV3DataScopeContext::MODE_ALL,
             'EmployeeDataScopeServices::applyOrderListScope(admin)',
             $permissionVersion,
-            ['cashier.v3.order_center'],
-            ['id' => $adminId, 'name' => (string)($adminInfo['real_name'] ?? $adminInfo['account'] ?? '')],
-            true
+            \app\services\cashier\v3\permission\CashierV3FeatureResolver::FEATURE_CODES,
+            $adminInfo + ['_trusted_platform_order_center_admin' => $adminId, 'employee_id' => $employeeId, 'name' => (string)($adminInfo['real_name'] ?? $adminInfo['account'] ?? '')],
+            false
         );
         return [$operator, $scope, $scopeMeta];
     }
@@ -326,17 +253,7 @@ final class PlatformOrderCenterReadServices
 
     private function businessTypes(): array
     {
-        return [
-            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
-            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
-            ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
-            ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
-            ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
-            ['key' => 'service', 'label' => '服务记录', 'ready' => true],
-            ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
-            ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
-            ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
-        ];
+        return CashierV3OrderCenterRecordQueryServices::businessTypes();
     }
 
     private function emptyPage(array $payload): array
@@ -380,7 +297,9 @@ final class PlatformOrderCenterReadServices
             ]],
             'total' => (int)($page['total'] ?? 0), 'page' => (int)($page['page'] ?? 1),
             'pageSize' => (int)($page['pageSize'] ?? 20),
-            'readOnly' => true, 'scope' => $result['scope'],
+            'uiPolicy' => (new CashierV3DisplayPolicyServices())->snapshot(),
+            'businessTypes' => $this->businessTypes(),
+            'readOnly' => false, 'scope' => $result['scope'],
         ];
     }
 
@@ -401,7 +320,9 @@ final class PlatformOrderCenterReadServices
                 'hasMore' => ((int)($page['page'] ?? 1) * (int)($page['pageSize'] ?? 20)) < (int)($page['total'] ?? 0),
             ]],
             'statusOptionsByType' => $type === '' ? [] : [$type => $page['statusOptions'] ?? []],
-            'readOnly' => true, 'scope' => $result['scope'],
+            'uiPolicy' => (new CashierV3DisplayPolicyServices())->snapshot(),
+            'businessTypes' => $this->businessTypes(),
+            'readOnly' => false, 'scope' => $result['scope'],
         ];
     }
 

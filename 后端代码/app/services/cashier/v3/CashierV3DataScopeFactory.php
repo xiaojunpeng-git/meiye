@@ -36,6 +36,12 @@ class CashierV3DataScopeFactory
 
     public function build(int $forcedStoreId, int $operatorId, array $operatorProfile, string $tenantId = '0', string $organizationId = ''): CashierV3DataScopeContext
     {
+        // 平台共用页面使用真实管理员身份，不将相同数字ID当作门店员工。
+        // 此标记仅控制器从 admin 登录态生成，不从业务 payload 读取。
+        if ((int)($operatorProfile['_trusted_platform_order_center_admin'] ?? 0) === $operatorId && $operatorId > 0) {
+            return app()->make(\app\services\order\PlatformOrderCenterReadServices::class)
+                ->trustedScopes($operatorId, $forcedStoreId)[1];
+        }
         $employeeId = (int)($operatorProfile['employee_id'] ?? 0);
         $level = array_key_exists('level', $operatorProfile) ? (int)$operatorProfile['level'] : -1;
 

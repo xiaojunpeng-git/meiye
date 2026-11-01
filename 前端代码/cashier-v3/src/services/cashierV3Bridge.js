@@ -2601,11 +2601,14 @@ function hasInvalidWriteContexts(contexts = []) {
 }
 
 export function canUseCashierV3Feature(featureCode) {
-  return cashierV3State.featurePermissions?.[featureCode] === true
+  // 平台复用完整功能；范围与业务开关仍由同一后端校验。
+  return (typeof window !== 'undefined' && window.__CASHIER_V3_ADAPTER__?.platformOrderContext === true)
+    || cashierV3State.featurePermissions?.[featureCode] === true
 }
 
 export function canUseCashierV3Operation(featureCode) {
-  return cashierV3State.operationPermissions?.[featureCode] === true
+  return (typeof window !== 'undefined' && window.__CASHIER_V3_ADAPTER__?.platformOrderContext === true)
+    || cashierV3State.operationPermissions?.[featureCode] === true
 }
 
 const CARD_OPERATION_FEATURE_BY_TYPE = Object.freeze({
@@ -3674,22 +3677,10 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
 
   const canonicalAction = canonicalCashierV3Action(action)
-  // 平台订单中心只接收只读投影。前端先拒绝 command，后端仍会以平台菜单
-  // 权限和数据范围二次校验，避免未来误加按钮后把门店操作送进该入口。
-  const platformReadOnly = adapter?.platformReadOnly === true
-  if (platformReadOnly && !isCashierV3ProjectionAction(canonicalAction)) {
-    const denied = {
-      result: {
-        status: 'failed',
-        code: 'PLATFORM_ORDER_CENTER_READ_ONLY',
-        message: '平台订单中心仅支持查询，请前往门店端处理业务操作。'
-      }
-    }
-    if (!silent) emitCashierV3UiResult(denied)
-    return denied
-  }
+  // 平台总后台只改变组织范围，使用共用动作；不额外削减操作能力。
+  const platformOrderContext = adapter?.platformOrderContext === true
   const permissionCheck = cashierV3ActionPermission(canonicalAction, requestBody)
-  if (!platformReadOnly && !permissionCheck.allowed) {
+  if (!platformOrderContext && !permissionCheck.allowed) {
     const denied = {
       result: {
         status: 'failed',
@@ -3756,7 +3747,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     ...requestBody,
     action: canonicalAction,
     clientSessionId: getClientSessionId(),
-    ...(stateContextIdOf(cashierV3State) ? { stateContextId: stateContextIdOf(cashierV3State) } : {}),
+    ...(!platformOrderContext && stateContextIdOf(cashierV3State) ? { stateContextId: stateContextIdOf(cashierV3State) } : {}),
     ...(command ? { command } : {})
   }
   const correlationId = `CORR-${fallbackUuidV4()}`
@@ -3775,8 +3766,8 @@ export async function requestCashierV3Action(action, payload = {}) {
     requireIdempotencyBinding: !readOnly,
     correlationId,
     requireCorrelationBinding: true,
-    preserveRootState: preserveRootState === true || independentRechargeCheckoutAction,
-    stateContextId: stateContextIdOf(cashierV3State) || '',
+    preserveRootState: platformOrderContext || preserveRootState === true || independentRechargeCheckoutAction,
+    stateContextId: platformOrderContext ? '' : stateContextIdOf(cashierV3State) || '',
     requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction) && Boolean(originalResultKey),
     originalIdempotencyKey: originalResultKey
   }

@@ -17,6 +17,16 @@ use think\Response;
  * 后台管理路由配置
  */
 Route::group('adminapi', function () {
+    // 共用订单功能只验证后台登录，实际组织范围和领域校验由共用服务处理。
+    Route::group('store/order-center', function () {
+        Route::get('metadata', 'v1.store.OrderCenter/metadata')->option(['real_name' => '平台订单中心元数据']);
+        Route::get('scope', 'v1.store.OrderCenter/scope')->option(['real_name' => '平台订单中心组织范围']);
+        Route::get('records', 'v1.store.OrderCenter/records')->option(['real_name' => '平台订单中心记录查询']);
+        Route::get('exports/:taskNo/download', 'v1.store.OrderCenter/download')->option(['real_name' => '平台订单中心导出下载']);
+        Route::post('actions', 'v1.store.OrderCenter/actions')->option(['real_name' => '平台订单中心共用操作网关']);
+    })->middleware(\app\http\middleware\admin\AdminAuthTokenMiddleware::class)
+      ->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
+
 
     /**
      * 无需授权的接口
@@ -1351,10 +1361,6 @@ Route::group('adminapi', function () {
         //获取头部数据
         Route::get('order/header', 'v1.store.Order/header')->name('StoreOrderHeader')->option(['real_name' => '获取门店订单头部统计']);
         // 平台订单中心：仅查询。数据范围由当前 admin 的 employee_data_scope 服务端推导。
-        Route::get('order-center/metadata', 'v1.store.OrderCenter/metadata')->option(['real_name' => '平台订单中心元数据']);
-        Route::get('order-center/scope', 'v1.store.OrderCenter/scope')->option(['real_name' => '平台订单中心组织范围']);
-        Route::get('order-center/records', 'v1.store.OrderCenter/records')->option(['real_name' => '平台订单中心记录查询']);
-        Route::post('order-center/actions', 'v1.store.OrderCenter/actions')->option(['real_name' => '平台订单中心只读操作网关']);
         //订单列表
         Route::get('order/list', 'v1.store.Order/index')->name('StoreOrderList')->option(['real_name' => '订单列表']);
         //订单头部数据

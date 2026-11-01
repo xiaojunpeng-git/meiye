@@ -87,17 +87,8 @@ final class CashierV3OrderCenterRecordQueryServices
     ): array {
         // 导航只声明类型，不跨业务扫描数量；当前列表分页总数仍由各查询返回。
         $partition['contractVersion'] = self::CONTRACT_VERSION;
-        $partition['businessTypes'] = [
-            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
-            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
-            ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
-            ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
-            ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
-            ['key' => 'service', 'label' => '服务记录', 'ready' => true],
-            ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
-            ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
-            ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
-        ];
+        $partition['businessTypes'] = self::businessTypes();
+        $partition['uiPolicy'] = (new \app\services\cashier\v3\projection\CashierV3DisplayPolicyServices())->snapshot();
         $partition['recordsByType'] = array_merge([
             'all' => [],
             'sales' => [],
@@ -132,10 +123,33 @@ final class CashierV3OrderCenterRecordQueryServices
         return $partition;
     }
 
+    /**
+     * 订单中心页签只在这里维护一份；门店根投影和平台组织范围投影必须共用。
+     * 实例开关和岗位权限只能缩小这份登记，不得在平台服务再复制一份菜单。
+     *
+     * @return array<int,array{key:string,label:string,ready:bool}>
+     */
+    public static function businessTypes(): array
+    {
+        return [
+            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
+            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
+            ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
+            ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
+            ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
+            ['key' => 'service', 'label' => '服务记录', 'ready' => true],
+            ['key' => 'supplement', 'label' => '补交记录', 'ready' => true],
+            ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
+            ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
+        ];
+    }
+
     public function pagePartition(array $page): array
     {
         $type = (string)$page['recordType'];
         return [
+            'businessTypes' => self::businessTypes(),
+            'uiPolicy' => (new \app\services\cashier\v3\projection\CashierV3DisplayPolicyServices())->snapshot(),
             'contractVersion' => self::CONTRACT_VERSION,
             'dataStatus' => $page['dataStatus'],
             'dataAsOf' => $page['dataAsOf'],
@@ -1272,7 +1286,33 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($criteria['status'] !== '' && !in_array($criteria['status'], ['completed', 'voided', '已完成', '已作废'], true)) {
             return [[], 0];
         }
-        $total = (int)(clone $query)->count('sf.id');
+        // 普通服务列表的总数只由完成事实和作废标记决定。销售来源、核销
+        // 快照与业务来源只服务于当前页展示，不能让整月计数重复关联这些宽表。
+        // 有关键词、顶部筛选或报表下钻时仍保留原查询，确保筛选口径不变。
+        if ($performanceDrilldown === null
+            && $criteria['keyword'] === ''
+            && $criteria['topFilters'] === []
+            && ($criteria['dataScope'] ?? 'normal') !== 'all'
+            && $criteria['status'] === '') {
+            $countQuery = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+                ->leftJoin(
+                    'cashier_v3_service_record_void_operation vo',
+                    'vo.tenant_id = sf.tenant_id AND vo.service_fact_id = sf.id AND vo.status = \'succeeded\''
+                )
+                ->where('sf.tenant_id', $scope->tenantId())
+                ->where('sf.service_status', 'completed')
+                ->whereNull('vo.id');
+            // 全门店月查询没有单一 store_id；强制走本轮新增的租户日期
+            // 索引，避免优化器误选以 store_id 为第二列的旧索引扫描整租户。
+            if ($criteria['allowedStoreIds'] === null) {
+                $countQuery->force('idx_order_center_tenant_date');
+            }
+            $this->applyStoreScope($countQuery, 'sf.store_id', $criteria['allowedStoreIds']);
+            $this->applyBusinessDateRange($countQuery, 'sf.business_date', $criteria);
+            $total = (int)$countQuery->count('sf.id');
+        } else {
+            $total = (int)(clone $query)->count('sf.id');
+        }
 
         $rows = $this->pageServiceRows($query, $criteria, implode(',', [
             'sf.id', 'sf.service_fact_id', 'sf.service_record_no', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
@@ -2035,7 +2075,8 @@ final class CashierV3OrderCenterRecordQueryServices
     private function readV3RechargeGifts(array $criteria): array
     {
         $query = Db::name('cashier_v3_gift_fact')->alias('gf')
-            ->join('cashier_v3_recharge_gift_authority ga', 'ga.gift_id = gf.source_id')
+            // 身份由租户与赠送ID共同确定，同时命中权威表的唯一复合索引。
+            ->join('cashier_v3_recharge_gift_authority ga', 'ga.tenant_id = gf.tenant_id AND ga.gift_id = gf.source_id')
             ->leftJoin('user u', 'u.uid = gf.member_id')
             ->leftJoin('system_store s', 's.id = gf.store_id')
             ->leftJoin('system_store_staff st', 'st.id = gf.operator_id')
@@ -2094,7 +2135,8 @@ final class CashierV3OrderCenterRecordQueryServices
     private function readV3DirectGifts(array $criteria): array
     {
         $query = Db::name('cashier_v3_gift_fact')->alias('gf')
-            ->join('cashier_v3_direct_gift_authority ga', 'ga.gift_id = gf.source_id')
+            // 与充值赠送保持同一身份约束，避免每笔事实扫描整张赠送主表。
+            ->join('cashier_v3_direct_gift_authority ga', 'ga.tenant_id = gf.tenant_id AND ga.gift_id = gf.source_id')
             // Each direct-gift item has its own expiry. Read that immutable item
             // snapshot instead of inferring a line expiry from the parent gift.
             ->leftJoin('cashier_v3_direct_gift_item gi', 'gi.gift_id = gf.source_id AND gi.item_id = gf.source_detail_id')

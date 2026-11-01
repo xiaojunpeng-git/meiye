@@ -529,7 +529,8 @@ class CashierV3ActionDispatcher
 
         // 目录命令已返回局部投影；充值最终快照只返回正式回执。两者均无需
         // 额外重建收银根状态，避免以旧工作台状态覆盖当前选客。
-        $skipDefaultRootProjection = (in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
+        $skipDefaultRootProjection = !empty($session['operator_profile']['_trusted_platform_order_center_admin'])
+            || (in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
                 && !$wantCurrentState)
             // 整单服务作废已提交正式回执，订单页会独立重查列表。不要再加载无关
             // 收银根投影，否则其异常或超时会让已成功退权益被误报为结果未知。

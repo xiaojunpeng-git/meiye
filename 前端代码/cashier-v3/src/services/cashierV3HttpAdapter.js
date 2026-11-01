@@ -4,12 +4,6 @@ const DEFAULT_ACTION_ENDPOINT = '/cashierapi/v3/workbenches/actions'
 const PLATFORM_ORDER_CENTER_ACTION_ENDPOINT = '/adminapi/store/order-center/actions'
 const CASHIER_SOURCE = 'f76d38d0ee4f854f'
 const DEFAULT_TIMEOUT_MS = 30000
-const PLATFORM_ORDER_CENTER_READ_ACTIONS = new Set([
-  'query-sales-orders',
-  'query-order-center-records',
-  'open-sales-order-detail',
-  'query-unified-query-capabilities'
-])
 
 function readSameOriginCookie(name, browserWindow) {
   const cookie = String(browserWindow?.document?.cookie || '')
@@ -17,6 +11,43 @@ function readSameOriginCookie(name, browserWindow) {
   const part = cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))
   if (!part) return ''
   try { return decodeURIComponent(part.slice(prefix.length)) } catch (_) { return '' }
+}
+
+// 查询和下载必须消费同一入口的身份；平台 iframe 不得借用门店会话。
+export function readCashierV3TransportToken(options = {}) {
+  const browserWindow = options.windowRef || (typeof window !== 'undefined' ? window : null)
+  if (options.mode === 'platform-order-center') {
+    return readSameOriginCookie('admin-token', browserWindow)
+      || readSameOriginCookie('admin-agent_token', browserWindow)
+  }
+  return options.storage
+    ? String(options.storage.getItem?.('cashier-v3:session-token') || '').trim()
+    : readStoreV3SessionToken(browserWindow)
+}
+
+export function orderCenterExportDownloadRequest(url, options = {}) {
+  const browserWindow = options.windowRef || (typeof window !== 'undefined' ? window : null)
+  const origin = options.origin || browserWindow?.location?.origin || ''
+  const endpoint = new URL(String(url || ''), origin)
+  const platform = options.mode === 'platform-order-center'
+  const allowedPath = platform
+    ? /^\/adminapi\/store\/order-center\/exports\/uqe_[a-f0-9]{32}\/download$/
+    : /^\/cashierapi\/v3\/unified-query\/exports\/uqe_[a-f0-9]{32}\/download$/
+  if (endpoint.origin !== origin || endpoint.username || endpoint.password || !allowedPath.test(endpoint.pathname)) {
+    throw new Error('导出文件地址无效，请刷新后重试。')
+  }
+  const token = readCashierV3TransportToken(options)
+  if (!token) throw new Error('登录已失效，请重新登录后下载。')
+  return {
+    url: endpoint.href,
+    init: {
+      credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+      headers: {
+        Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        Authorization: `Bearer ${token}`, 'Authori-zation': `Bearer ${token}`
+      }
+    }
+  }
 }
 
 function resolveSameOriginEndpoint(endpoint, origin) {
@@ -79,14 +110,7 @@ export function createCashierV3HttpAdapter(options = {}) {
     : DEFAULT_TIMEOUT_MS
 
   async function post(payload) {
-    const token = platformOrderCenter
-      // 平台嵌入页必须沿用主账号或区域／代理账号的当前平台会话；
-      // 绝不能读取 cashier_token，否则平台查询会被错误地当成门店收银会话。
-      ? (readSameOriginCookie('admin-token', browserWindow)
-        || readSameOriginCookie('admin-agent_token', browserWindow))
-      : options.storage
-      ? String(options.storage.getItem?.('cashier-v3:session-token') || '').trim()
-      : readStoreV3SessionToken(browserWindow)
+    const token = readCashierV3TransportToken({ ...options, windowRef: browserWindow })
     const headers = {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -138,15 +162,12 @@ export function createCashierV3HttpAdapter(options = {}) {
   }
 
   return Object.freeze({
-    platformReadOnly: platformOrderCenter,
+    platformOrderContext: platformOrderCenter,
     async request(action, payload = {}) {
       const canonicalAction = String(action || '').trim()
       const payloadAction = String(payload?.action || '').trim()
       if (!canonicalAction || (payloadAction && payloadAction !== canonicalAction)) {
         throw new Error('收银操作与请求内容不一致，已拒绝发送。')
-      }
-      if (platformOrderCenter && !PLATFORM_ORDER_CENTER_READ_ACTIONS.has(canonicalAction)) {
-        throw new Error('平台订单中心仅支持查询，不允许执行门店操作。')
       }
       return post({ ...payload, action: canonicalAction })
     },

@@ -152,7 +152,7 @@ const routes = [
     path: '/platform/order-center',
     name: 'cashier-v3-platform-order-center',
     component: OrderCenterView,
-    meta: { platformReport: true, platformReadOnly: true, title: '门店订单' }
+    meta: { platformReport: true, platformOrderContext: true, title: '门店订单' }
   },
   {
     path: '/',

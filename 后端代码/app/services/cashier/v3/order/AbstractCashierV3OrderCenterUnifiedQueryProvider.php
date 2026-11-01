@@ -57,7 +57,12 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     {
         $this->liveScopes = [$operatorScope, $dataScope];
         try {
-            $result = $this->run($context, $payload, $this->definitionsForQuery($context, $payload));
+            $definitions = $this->definitionsForQuery($context, $payload);
+            $direct = $this->directOrdinaryPage($payload, $definitions, $operatorScope, $dataScope);
+            if ($direct !== null) {
+                return $direct;
+            }
+            $result = $this->run($context, $payload, $definitions);
             return array_replace($this->sourcePage, [
                 'records' => $this->publicRows($result['rows']),
                 'total' => (int)$result['pagination']['total'],
@@ -71,6 +76,210 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             $this->sourcePayload = [];
             $this->sourcePage = [];
         }
+    }
+
+    /**
+     * 普通日期/状态/门店列表直接使用领域 Reader 的数据库分页。
+     *
+     * 只有没有自定义字段、组合筛选、分组、汇总、关键词或导出的普通列表才可
+     * 进入本路径；任何高级查询都回退现有统一执行器，不能为提速改变筛选口径。
+     * 单类页只组装当前页，全部订单首批按每个权威来源读取同一有界窗口后合并。
+     */
+    private function directOrdinaryPage(
+        array $payload,
+        array $definitions,
+        $operatorScope,
+        $dataScope
+    ) {
+        if (!$this->isOrdinaryPageQuery($payload, $definitions)) {
+            return null;
+        }
+        $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+        if (($policy['enabled'] ?? true) === false) {
+            $payload = CashierV3OrderCenterQueryExecutionServices::withoutBusinessSource($payload);
+        }
+        $this->sourcePayload = $this->sourceQuery($payload);
+        $type = CashierV3OrderCenterUnifiedQueryContract::typeForPage($this->pageCode());
+        if ($type === 'all') {
+            return $this->directAllOrderPage($payload, $operatorScope, $dataScope);
+        }
+        $page = max(1, (int)($payload['page'] ?? 1));
+        $pageSize = min(UnifiedQueryExecutionServices::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20)));
+        $source = array_replace($this->sourcePayload, [
+            'recordType' => $type,
+            'page' => $page,
+            'pageSize' => $pageSize,
+        ]);
+        if ($type === 'sales') {
+            $source['status'] = ($source['dataScope'] ?? 'normal') === 'normal'
+                ? 'normal' : ($source['businessStatus'] ?? '');
+            $result = $this->directSalesSourcePage($source, $operatorScope, $dataScope);
+            if ($result === null) return null;
+            $records = $this->salesQueries->attachCurrentItemCategories((array)($result['records'] ?? []));
+        } else {
+            $result = $this->recordQueries->queryRecords($source, $operatorScope, $dataScope);
+            if ($result === null) return null;
+            $records = (array)($result['records'] ?? []);
+        }
+        $rows = (new CashierV3OrderCenterQueryIdentities())->attach(
+            $type,
+            $this->projectRows($type, $records),
+            (string)$operatorScope->tenantId()
+        );
+        return array_replace($result, [
+            'records' => $this->publicRows($rows),
+            'total' => (int)($result['total'] ?? 0),
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'paginationMode' => 'offset',
+            'paginationCursor' => ['current' => '', 'next' => ''],
+            'hasMore' => $page * $pageSize < (int)($result['total'] ?? 0),
+        ]);
+    }
+
+    /** 普通查询只允许已下推的日期、状态和门店条件；其他条件继续走统一执行器。 */
+    private function isOrdinaryPageQuery(array $payload, array $definitions): bool
+    {
+        if ($definitions || trim((string)($payload['keyword'] ?? '')) !== '') return false;
+        foreach (['filters','quickFilters','keywordFilters','groups','groupBy','summaries'] as $key) {
+            if (!empty($payload[$key])) return false;
+        }
+        if (isset($payload['export'])) return false;
+        if (!in_array((string)($payload['filterRelation'] ?? 'all'), ['', 'all'], true)) return false;
+        $type = CashierV3OrderCenterUnifiedQueryContract::typeForPage($this->pageCode());
+        $allowedTopFields = $type === 'all' ? ['business_date', 'business_type'] : ['business_date'];
+        foreach (['topFilters','topFilterConditions'] as $key) {
+            foreach ((array)($payload[$key] ?? []) as $filter) {
+                if (!is_array($filter)) return false;
+                $field = (string)($filter['field'] ?? $filter['field_key'] ?? $filter['fieldKey'] ?? '');
+                $operator = (string)($filter['operator'] ?? '');
+                if (!in_array($field, $allowedTopFields, true)
+                    || !in_array($operator, ['eq','equal','gte','greater_or_equal','lte','less_or_equal'], true)) {
+                    return false;
+                }
+            }
+        }
+        $sorts = (array)($payload['sorts'] ?? []);
+        if (count($sorts) > 1) return false;
+        if ($sorts) {
+            $defaultFields = [
+                'all'=>'event_completed_at','sales'=>'payment_completed_at','recharge'=>'payment_completed_at',
+                'refund'=>'refund_completed_at','debt'=>'created_at','service'=>'service_completed_at',
+                'supplement'=>'payment_completed_at','gift'=>'created_at','card_operation'=>'completed_at',
+            ];
+            $field = (string)($sorts[0]['field'] ?? '');
+            $direction = strtolower((string)($sorts[0]['direction'] ?? ''));
+            if ($field !== $defaultFields[$type] || $direction !== 'desc') return false;
+        }
+        return true;
+    }
+
+    /**
+     * V3 权威单与仍可见的旧 store_order 各自在数据库只读取当前页需要的窗口，
+     * 再做有界归并。不再因“存在一笔历史单”就回退到整月全量 PHP 内存读取。
+     * 深页超过安全窗口时仍交给原统一查询路径，不改变结果口径。
+     */
+    private function directSalesSourcePage(array $source, $operatorScope, $dataScope)
+    {
+        if (!empty($source['salesPerformanceDrilldown'])) return null;
+        $page = max(1, (int)($source['page'] ?? 1));
+        $pageSize = min(UnifiedQueryExecutionServices::MAX_PAGE_SIZE, max(1, (int)($source['pageSize'] ?? 20)));
+        $window = $page * $pageSize;
+        if ($window > 100) return null;
+        $windowSource = array_replace($source, ['recordType'=>'sales','page'=>1,'pageSize'=>$window]);
+        $authority = $this->salesQueries->queryAuthoritySalesOrdersOffsetPage($windowSource, $operatorScope, $dataScope);
+        $historical = $this->salesQueries->queryHistoricalSalesOrders($windowSource, $operatorScope, $dataScope);
+        $records = array_merge((array)($authority['records'] ?? []), (array)($historical['records'] ?? []));
+        usort($records, [self::class, 'compareBusinessRecords']);
+        return array_replace($authority, [
+            'records'=>array_slice($records, ($page - 1) * $pageSize, $pageSize),
+            'total'=>(int)($authority['total'] ?? 0) + (int)($historical['total'] ?? 0),
+            'page'=>$page,
+            'pageSize'=>$pageSize,
+        ]);
+    }
+
+    /** 两个业务源的时间字段各异；只按已投影的权威完成时间和稳定身份排序。 */
+    private static function compareBusinessRecords(array $left, array $right): int
+    {
+        $timeKeys = ['paymentCompletedAt','refundCompletedAt','completedAt','serviceCompletedAt','createdAt'];
+        $leftTime = ''; $rightTime = '';
+        foreach ($timeKeys as $key) {
+            if ($leftTime === '' && !empty($left[$key])) $leftTime = (string)$left[$key];
+            if ($rightTime === '' && !empty($right[$key])) $rightTime = (string)$right[$key];
+        }
+        $time = strcmp($rightTime, $leftTime);
+        if ($time !== 0) return $time;
+        $leftId = (string)($left['id'] ?? $left['orderId'] ?? '');
+        $rightId = (string)($right['id'] ?? $right['orderId'] ?? '');
+        return strcmp($rightId, $leftId);
+    }
+
+    /**
+     * 全部订单在前五页内按四类权威来源做有界归并；超过100条窗口时回退原路径。
+     * 这先消除首屏整月加载，后续高级 SQL 计划会继续覆盖深页和组合筛选。
+     */
+    private function directAllOrderPage(array $payload, $operatorScope, $dataScope)
+    {
+        $page = max(1, (int)($payload['page'] ?? 1));
+        $pageSize = min(UnifiedQueryExecutionServices::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20)));
+        $window = $page * $pageSize;
+        if ($window > 100) return null;
+        $identities = new CashierV3OrderCenterQueryIdentities();
+        $rows = [];
+        $total = 0;
+        $labels = ['sales'=>'消费','recharge'=>'充值','supplement'=>'补交','refund'=>'退款'];
+        foreach ($labels as $type => $label) {
+            if (isset($this->sourcePayload['_allOrderTypes'])
+                && !in_array($label, $this->sourcePayload['_allOrderTypes'], true)) continue;
+            $source = array_replace($this->sourcePayload, [
+                'recordType'=>$type,
+                'page'=>1,
+                'pageSize'=>$window,
+            ]);
+            if ($type === 'sales') {
+                $source['status'] = ($source['dataScope'] ?? 'normal') === 'normal'
+                    ? 'normal' : ($source['businessStatus'] ?? '');
+                $result = $this->directSalesSourcePage($source, $operatorScope, $dataScope);
+                if ($result === null) return null;
+                $records = $this->salesQueries->attachCurrentItemCategories((array)($result['records'] ?? []));
+            } else {
+                $result = $this->recordQueries->queryRecords($source, $operatorScope, $dataScope);
+                if ($result === null) return null;
+                $records = (array)($result['records'] ?? []);
+            }
+            $total += (int)($result['total'] ?? 0);
+            $projected = $identities->attach(
+                $type,
+                $this->projectRows($type, $records),
+                (string)$operatorScope->tenantId()
+            );
+            foreach ($projected as $row) {
+                $row['recordType'] = $type;
+                $row['business_type'] = $label;
+                $row['order_no'] = $row[$type === 'sales' ? 'sales_order_no' : $type . '_order_no'];
+                $row['event_completed_at'] = $row[$type === 'refund' ? 'refund_completed_at' : 'payment_completed_at'];
+                $rows[] = self::mixedDisplayFields($type, $row);
+            }
+        }
+        usort($rows, static function (array $left, array $right): int {
+            $time = strcmp((string)($right['event_completed_at'] ?? ''), (string)($left['event_completed_at'] ?? ''));
+            return $time !== 0 ? $time : strcmp((string)($right['record_id'] ?? ''), (string)($left['record_id'] ?? ''));
+        });
+        $records = array_slice($rows, ($page - 1) * $pageSize, $pageSize);
+        return [
+            'recordType'=>'all',
+            'dataStatus'=>'ready',
+            'dataAsOf'=>date('c'),
+            'statusOptions'=>[],
+            'records'=>$this->publicRows($records),
+            'total'=>$total,
+            'page'=>$page,
+            'pageSize'=>$pageSize,
+            'paginationMode'=>'offset',
+            'paginationCursor'=>['current'=>'','next'=>''],
+            'hasMore'=>$page * $pageSize < $total,
+        ];
     }
 
     public function query(array $context, array $payload): array
