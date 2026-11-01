@@ -92,17 +92,17 @@ $salesSource = (string)file_get_contents(
 );
 r61Assert(strpos($providerSource, '$direct = $this->directOrdinaryPage(') !== false
     && strpos($providerSource, '$result = $this->run(') > strpos($providerSource, '$direct = $this->directOrdinaryPage('),
-    'bounded page must be attempted before the in-memory unified execution');
+    'bounded page must be attempted before the streaming unified execution');
 r61Assert(strpos($salesSource, 'queryAuthoritySalesOrdersOffsetPage') !== false
     && strpos($salesSource, "->page((int)\$criteria['page'], (int)\$criteria['pageSize'])") !== false,
     'sales authority reader must apply database page and pageSize');
 r61Assert(strpos($salesSource, '$snapshots = $this->authoritySnapshots($rows);') !== false,
     'sales snapshots must be assembled only after page rows are selected');
-r61Assert(strpos($providerSource, 'if ($window > 100) return null;') !== false,
-    'mixed all-order fast path must stay bounded');
+r61Assert(strpos($providerSource, 'hydrateIndexKeys($keys') !== false,
+    'mixed all-order path must hydrate selected index keys only');
 r61Assert(strpos($providerSource, 'directSalesSourcePage') !== false
-    && strpos($providerSource, 'queryHistoricalSalesOrders($windowSource') !== false,
-    'deployed legacy sales source must be retained in the bounded merge window');
+    && strpos($salesSource, "readDatabase('index', \$criteria)") !== false,
+    'deployed legacy sales source must be retained in shared index paging');
 r61Assert(strpos($providerSource, 'hasHistoricalSalesRows') === false
     && strpos($providerSource, 'hasHistoricalRefundRows') === false,
     'ordinary pages must not fall back to full-memory reads merely because legacy rows exist');

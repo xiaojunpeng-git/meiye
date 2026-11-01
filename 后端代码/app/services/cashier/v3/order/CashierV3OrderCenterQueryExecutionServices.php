@@ -7,6 +7,8 @@ use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 /** 订单人员是一对多关系；隐藏身份列精确匹配 ID，不用姓名或 JSON 子串猜测。 */
 final class CashierV3OrderCenterQueryExecutionServices extends UnifiedQueryExecutionServices
 {
+    use \app\services\query\UnifiedQueryStreamingExecution;
+
     /** 查询与导出计划同时去除已隐藏来源条件；不改偏好记录、不改事实，更不扩大门店权限。 */
     public function normalizeUiQuery(string $pageCode, array $raw, array $permissions = []): array
     {

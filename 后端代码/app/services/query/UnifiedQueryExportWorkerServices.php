@@ -19,6 +19,10 @@ class UnifiedQueryExportWorkerServices
     public const LEASE_RENEW_INTERVAL_SECONDS = 30;
     public const MAX_TASK_RUNTIME_SECONDS = 240;
     public const MAX_AI_TASK_RUNTIME_SECONDS = 21600;
+    public const MAX_ORDER_TASK_RUNTIME_SECONDS = 1800;
+
+    /** 单次claim限定，不继承上一任务的时限；只有已注册订单页面采用分批导出时限。 */
+    private $taskRuntimeSeconds = self::MAX_TASK_RUNTIME_SECONDS;
     public const HEARTBEAT_ROW_INTERVAL = 50;
 
     /** @var UnifiedQueryExportTaskServices */
@@ -241,6 +245,11 @@ class UnifiedQueryExportWorkerServices
         try {
             $context = $this->currentContext($seed);
             $claim = $this->tasks->claim($context, $taskNo, $this->partition);
+            $pageCode = (string)($claim['page_code'] ?? '');
+            $this->taskRuntimeSeconds = $this->partition === 'AI_EXPORT' ? self::MAX_AI_TASK_RUNTIME_SECONDS
+                : (in_array($pageCode, ['order_center_all','order_center_sales','order_center_recharge','order_center_refund',
+                    'order_center_service','order_center_debt','order_center_gift','order_center_card_operation','order_center_supplement'], true)
+                    ? self::MAX_ORDER_TASK_RUNTIME_SECONDS : self::MAX_TASK_RUNTIME_SECONDS);
             $this->applyProcessTimeout();
             $heartbeat = $this->leaseHeartbeat($claim, $taskNo);
             // claim 后立即 CAS 续期；后续任何昂贵阶段开始前都已确认本 worker
@@ -304,6 +313,8 @@ class UnifiedQueryExportWorkerServices
             $fieldKeys = array_values(array_filter(array_map(function (array $field): string {
                 return (string)($field['key'] ?? '');
             }, $fieldSnapshot)));
+            // 只注入服务端闭包，供分批读取/归并排序续租；不写入冻结JSON或客户端上下文。
+            $context['_export_checkpoint'] = $heartbeat;
             $execution = $provider->executeFrozenPlan(
                 $context,
                 $plan,
@@ -312,6 +323,7 @@ class UnifiedQueryExportWorkerServices
             );
             $heartbeat(true);
             $includeSummary = !empty($claim['include_summary']);
+            $queryStream = ($execution['exportRows'] ?? null) instanceof UnifiedQueryExternalRows;
             $streamed=$this->partition==='AI_EXPORT' && isset($execution['streamingRows'],$execution['streamingTables']);
             if ($streamed) {
                 // Only a signed AI source may exceed the in-memory workbook
@@ -324,7 +336,7 @@ class UnifiedQueryExportWorkerServices
                 $presentationTables=$execution['streamingTables'];
                 $rowCount=$execution['total'];
             } else {
-                UnifiedQueryExportTaskServices::assertCellBudget(
+                if (!$queryStream) UnifiedQueryExportTaskServices::assertCellBudget(
                     count($fieldSnapshot),count((array)$execution['exportRows']),$includeSummary);
                 $presentationTables=$this->partition==='AI_EXPORT'
                     ? (array)($execution['presentationTables']??[]) : [];
@@ -335,14 +347,14 @@ class UnifiedQueryExportWorkerServices
                     if ($displayCells+count($fieldSnapshot)*(count((array)$execution['exportRows'])+1)
                         >UnifiedQueryExportTaskServices::MAX_EXPORT_CELLS) throw new \RuntimeException('AI_EXPORT_CELL_BUDGET_EXCEEDED');
                 }
-                $rowCount=count((array)$execution['exportRows']);
+                $rowCount=$queryStream ? count($execution['exportRows']) : count((array)$execution['exportRows']);
             }
             $inFileStage = true;
             $storageKey = $this->writeXlsx(
                 $taskNo,
                 (string)$claim['workerToken'],
                 $fieldSnapshot,
-                $streamed?$execution['streamingRows']:(array)$execution['exportRows'],
+                $streamed?$execution['streamingRows']:($queryStream ? $execution['exportRows'] : (array)$execution['exportRows']),
                 $includeSummary ? (array)$execution['summaries'] : [],
                 $includeSummary,
                 $heartbeat,
@@ -793,8 +805,7 @@ class UnifiedQueryExportWorkerServices
         if (function_exists('set_time_limit')) {
             // AI's file task is detached from the question. Large, frozen
             // result sets may need longer without extending the answer wait.
-            @set_time_limit(($this->partition === 'AI_EXPORT'
-                ? self::MAX_AI_TASK_RUNTIME_SECONDS : self::MAX_TASK_RUNTIME_SECONDS) + 15);
+            @set_time_limit($this->taskRuntimeSeconds + 15);
         }
     }
 
@@ -810,8 +821,7 @@ class UnifiedQueryExportWorkerServices
         }
         $startedAt = microtime(true);
         $lastRenewedAt = 0.0;
-        $runtimeLimit=$this->partition==='AI_EXPORT'
-            ?self::MAX_AI_TASK_RUNTIME_SECONDS:self::MAX_TASK_RUNTIME_SECONDS;
+        $runtimeLimit = $this->taskRuntimeSeconds;
         return function (bool $force = false) use (
             $tenantId,
             $taskNo,
@@ -863,10 +873,11 @@ class UnifiedQueryExportWorkerServices
             throw new \RuntimeException('导出 worker 租约标识不合法');
         }
         $includeSummary = $includeSummary === null ? !empty($summaries) : (bool)$includeSummary;
-        if ($expectedRowCount===null) {
+        $queryStream = $rows instanceof UnifiedQueryExternalRows;
+        if ($expectedRowCount===null && !$queryStream) {
             UnifiedQueryExportTaskServices::assertCellBudget(
                 count($fieldSnapshot),count($rows),$includeSummary);
-        } elseif ($expectedRowCount<1 || $presentationTables===[]) {
+        } elseif ($expectedRowCount !== null && ($expectedRowCount<1 || $presentationTables===[])) {
             throw new \RuntimeException('AI_EXPORT_STREAM_INVALID');
         }
         $this->heartbeat($heartbeat, true);
@@ -882,6 +893,16 @@ class UnifiedQueryExportWorkerServices
         }
         $path = $directory . DIRECTORY_SEPARATOR . $objectName;
         $temporary = $path . '.tmp-' . bin2hex(random_bytes(6));
+        if ($queryStream) {
+            // 已经过同一查询计划验证的外部行集；绕开只适用于内存工作簿的单元格预算。
+            // 按物理写入行数核对，原租约/CAS发布、下载归属与失败清理机制保持不变。
+            try {
+                $written = (new UnifiedQueryStreamingWorkbook())->write($temporary, $fieldSnapshot, $rows, $summaries, $heartbeat);
+                if ($written !== count($rows) || !is_file($temporary) || filesize($temporary) <= 0
+                    || !rename($temporary, $path)) throw new \RuntimeException('UNIFIED_QUERY_EXPORT_WRITE_FAILED');
+                chmod($path, 0600); return $storageKey;
+            } finally { if (is_file($temporary)) @unlink($temporary); }
+        }
         if ($presentationTables!==[]) {
             // AI tables may grow far beyond the in-memory spreadsheet cell
             // budget. Serialize the already verified answer incrementally;

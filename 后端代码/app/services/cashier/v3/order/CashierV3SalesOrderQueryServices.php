@@ -165,6 +165,119 @@ final class CashierV3SalesOrderQueryServices
         return $this->authorityOffsetPagePayload($criteria, $records, $total);
     }
 
+    /** 有界扫描与窄索引页复用原列表协议，不为取得元数据再读取一页业务明细。 */
+    public function indexPageMetadata(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        return $this->authorityOffsetPagePayload($this->indexCriteria($payload, $operator, $scope), [], 0);
+    }
+
+    /** 深分页只扫描身份和时间，不装配未选中的订单明细。该生成器必须消费完后再查详情。 */
+    public function scanIndexKeys(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): \Generator
+    {
+        $criteria = $this->indexCriteria($payload, $operator, $scope);
+        if ($criteria['allowedStoreIds'] === [] || !$scope->hasFeature('cashier.v3.order_center')) return;
+        if (in_array((string)$criteria['status'], ['', 'normal', 'refunded', 'voided'], true)) {
+            $query = $criteria['status'] === 'normal' && $criteria['keyword'] === '' && empty($criteria['salesPerformanceDrilldown'])
+                ? $this->authorityNormalKeyQuery($criteria)
+                : $this->authorityOrderQuery($criteria)->field('o.id,o.settled_at,o.checkout_request_id,o.order_id');
+            foreach ($query->cursor() as $row) yield $row + ['legacy'=>false];
+        }
+        if (!empty($criteria['salesPerformanceDrilldown'])) return;
+        $index = $this->readDatabase('index', $criteria);
+        foreach (Db::table($index['sql'].' legacy_index')->cursor() as $row) yield $row + ['legacy'=>true];
+    }
+
+    /** 只允许服务内部传入窄索引页；仍按当前门店/租户/状态重新约束详情，不接受SQL。 */
+    public function hydrateIndexKeys(array $keys, array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        if (count($keys) > 200) throw new \InvalidArgumentException('sales_index_page_too_large');
+        $criteria = $this->indexCriteria($payload, $operator, $scope);
+        if ($criteria['allowedStoreIds'] === [] || !$scope->hasFeature('cashier.v3.order_center')) return [];
+        $authority = []; $legacy = [];
+        foreach ($keys as $key) { if (!empty($key['legacy'])) $legacy[] = (int)$key['id']; else $authority[] = $key; }
+        $rows = [];
+        // 默认正常单用窄索引的选中身份装配，避免详情再聚合整月服务表头。
+        if ($authority && $criteria['status'] === 'normal' && $criteria['keyword'] === '' && empty($criteria['salesPerformanceDrilldown'])) {
+            $rows = $this->authorityHeadersForKeys($authority, $criteria);
+        } elseif ($authority) {
+            $rows = $this->authorityOrderQuery($criteria)->whereIn('o.id', array_column($authority, 'id'))->field($this->authorityOrderFields())->select()->toArray();
+        }
+        $records = $this->mapScanBatch($rows);
+        if ($legacy) {
+            $criteria['_selectedIds'] = $legacy; $criteria['_scanWithoutCount'] = true; $criteria['pageSize'] = 200;
+            $raw = $this->readDatabase('list', $criteria);
+            $lines = $this->groupLineRows($raw['lineRows'], array_column($raw['rows'], 'id'));
+            $this->assertPrimaryLinesPresent($raw['rows'], $lines);
+            foreach ($raw['rows'] as $row) $records[] = $this->historicalIdentity($this->mapOrder($row, $lines[(int)$row['id']] ?? [], false, $raw['v3ByOrder'][(int)$row['id']] ?? []));
+        }
+        return $records;
+    }
+
+    private function indexCriteria(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        $criteria = $this->listCriteria($payload, $operator, $scope, false);
+        $criteria['queryCutoffTimestamp'] = (int)$criteria['nowTimestamp']; $criteria['snapshotMaxOrderId'] = PHP_INT_MAX;
+        $criteria['afterPayTime'] = null; $criteria['afterOrderId'] = null;
+        $criteria['keywordWindowStartTimestamp'] = $criteria['keyword'] === '' ? null : max(1, $criteria['queryCutoffTimestamp'] - self::KEYWORD_SEARCH_WINDOW_DAYS * 86400 + 1);
+        return $criteria;
+    }
+
+    /**
+     * 高级查询/后台导出每批最多200笔，可信服务内部使用窄索引与键集锚点；不接受浏览器游标或SQL。
+     * 复用同一权限与快照映射，省去每批重复COUNT和全量窗口，保持旧单来源去重规则。
+     */
+    public function scanBatches(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): \Generator
+    {
+        $criteria = $this->listCriteria(array_replace($payload, ['page'=>1,'pageSize'=>100]), $operator, $scope, false);
+        $criteria['_orderNumberConditions'] = (array)($payload['_orderNumberConditions'] ?? []);
+        if ($criteria['allowedStoreIds'] === [] || !$scope->hasFeature('cashier.v3.order_center')) return;
+        $criteria['queryCutoffTimestamp'] = (int)$criteria['nowTimestamp'];
+        $criteria['snapshotMaxOrderId'] = PHP_INT_MAX;
+        $criteria['keywordWindowStartTimestamp'] = $criteria['keyword'] === '' ? null
+            : max(1, $criteria['queryCutoffTimestamp'] - self::KEYWORD_SEARCH_WINDOW_DAYS * 86400 + 1);
+        $criteria['afterPayTime'] = null; $criteria['afterOrderId'] = null;
+        if (in_array((string)$criteria['status'], ['', 'normal', 'refunded', 'voided'], true)) {
+            $normal = $criteria['status'] === 'normal' && $criteria['keyword'] === '' && empty($criteria['salesPerformanceDrilldown']);
+            $index = new \app\services\query\UnifiedQueryExternalRows();
+            $query = $normal ? $this->authorityNormalKeyQuery($criteria)
+                : $this->authorityOrderQuery($criteria)->field($this->authorityOrderFields());
+            if (!$normal) $this->applyOrderNumberConditions($query, 'o.order_no', $criteria);
+            // 查询执行一次，先落私有窄索引再批读详情。不能在同一连接的cursor中穿插SQL，
+            // 也不能每200笔重跑整月GROUP BY。索引生命周期只限本次读取。
+            foreach ($query->cursor() as $key) $index->append($key);
+            $batch = [];
+            foreach ($index as $key) {
+                $batch[] = $key;
+                if (count($batch) === 200) { yield $this->mapScanBatch($normal ? $this->authorityHeadersForKeys($batch, $criteria) : $batch); $batch = []; }
+            }
+            if ($batch) yield $this->mapScanBatch($normal ? $this->authorityHeadersForKeys($batch, $criteria) : $batch);
+            unset($index);
+        }
+        if (!empty($criteria['salesPerformanceDrilldown'])) return;
+        $criteria['afterPayTime'] = null; $criteria['afterOrderId'] = null; $criteria['_scanWithoutCount'] = true;
+        do {
+            $raw = $this->readDatabase('list', $criteria); $rows = $raw['rows'];
+            if (!$rows) break;
+            $this->assertRowsAuthorized($rows, $criteria, true);
+            $lines = $this->groupLineRows($raw['lineRows'], array_column($rows, 'id'));
+            $this->assertPrimaryLinesPresent($rows, $lines); $records = [];
+            foreach ($rows as $row) $records[] = $this->historicalIdentity($this->mapOrder($row, $lines[(int)$row['id']] ?? [], false, $raw['v3ByOrder'][(int)$row['id']] ?? []));
+            yield $records;
+            $last = end($rows); $criteria['afterPayTime'] = (int)$last['pay_time']; $criteria['afterOrderId'] = (int)$last['id'];
+        } while (!empty($raw['hasMore']));
+    }
+
+    /** 与列表完全相同的快照装配器，扫描只改变批量，不重新计算订单或业绩。 */
+    private function mapScanBatch(array $rows): array
+    {
+        $snapshots = $this->authoritySnapshots($rows); $records = [];
+        foreach ($rows as $row) {
+            if (!isset($snapshots[$row['order_id']])) throw new \RuntimeException('sales_order_authority_snapshot_incomplete');
+            $records[] = $this->mapAuthorityOrder($snapshots[$row['order_id']], false);
+        }
+        return $records;
+    }
+
     /**
      * 历史销售单独读取后交给统一列表合并、筛选、分页；不伪造 V3 收款事实。
      * 来源前缀隔离旧自增ID与新订单ID，详情同样重新执行当前权限校验。
@@ -940,26 +1053,31 @@ final class CashierV3SalesOrderQueryServices
                 ->group('sf.tenant_id,sf.checkout_request_id')->buildSql(false) . ')';
     }
 
-    /** 默认正常列表分别取两个权威来源的有界窗口，再在 PHP 合并当前页。 */
+    /** 窄索引在数据库排序分页，再只装配当前页的两类权威表头。 */
     private function authorityNormalOffsetRows(array $criteria): array
     {
-        $definitions = $this->authoritySourceDefinitions($criteria);
-        $window = (int)$criteria['page'] * (int)$criteria['pageSize'];
+        $keys = $this->authorityNormalKeyQuery($criteria)->order('settled_at', 'desc')->order('id', 'desc')
+            ->page((int)$criteria['page'], (int)$criteria['pageSize'])->select()->toArray();
+        return $this->authorityHeadersForKeys($keys, $criteria);
+    }
 
-        $sales = $definitions['sales']
+    /** 普通分页与全量扫描共用同一正常单据索引，避免各自维护状态和门店条件。 */
+    private function authorityNormalKeyQuery(array $criteria)
+    {
+        $definitions = $this->authoritySourceDefinitions($criteria);
+        $needsNumber = !empty($criteria['_orderNumberConditions']);
+        // 先合并窄索引并在数据库分页；深页不能按 page * pageSize 装配前缀快照。
+        $salesKeys = (clone $definitions['sales'])
+            ->where('s.settled_at', '>', 0)
             ->where('s.settled_at', '<=', (int)$criteria['queryCutoffTimestamp'])
             ->whereNotExists(function ($operation): void {
                 $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('row_olo')
                     ->whereRaw('row_olo.source_order_id=s.order_id')
                     ->whereRaw('row_olo.tenant_id=s.tenant_id')
-                    ->where('row_olo.source_type', 'sales')
-                    ->where('row_olo.status', 'succeeded')
+                    ->where('row_olo.source_type', 'sales')->where('row_olo.status', 'succeeded')
                     ->whereIn('row_olo.operation_type', ['refund', 'void']);
             })
-            ->field(implode(',', $definitions['salesFields']))
-            ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
-            ->order('s.settled_at', 'desc')->order('s.id', 'desc')
-            ->limit($window)->select()->toArray();
+            ->field("s.id * 2 AS id,s.settled_at,'' AS checkout_request_id,s.order_id," . ($needsNumber ? 's.order_no' : "'' AS order_no"));
 
         // 先只用服务事实表和窄字段找出当前窗口的结账请求，再为这些请求读取
         // 来源快照与完整表头。这样不会为整月数万条服务事实先做几十个 MIN、
@@ -989,33 +1107,81 @@ final class CashierV3SalesOrderQueryServices
         if (($criteria['dateTo'] ?? '') !== '') {
             $serviceKeys->where('key_sf.business_date', '<=', (string)$criteria['dateTo']);
         }
-        $serviceRequestIds = array_column($serviceKeys
-            ->field('key_sf.checkout_request_id,MIN(key_sf.settled_at) AS group_settled_at,MIN(key_sf.id) AS group_id')
+        // 已上线全局日期索引可覆盖无门店/会员条件的窄服务扫描，避免选择checkout索引后逐行回表。
+        // 未安装该既有索引的实例照常交给优化器，不新增DDL依赖。
+        if (!$needsNumber && $criteria['allowedStoreIds'] === null && $criteria['memberId'] === null
+            && !empty($criteria['dateFrom']) && !empty($criteria['dateTo'])
+            && $this->hasIndex('cashier_v3_entitlement_service_fact', 'idx_order_center_service_group')) {
+            $serviceKeys->force('idx_order_center_service_group');
+        }
+        $serviceKeys->field("MIN(key_sf.id) * 2 + 1 AS id,MIN(key_sf.settled_at) AS settled_at,key_sf.checkout_request_id,CONCAT('service:',key_sf.checkout_request_id) AS order_id,"
+            . ($needsNumber ? "MIN(COALESCE(NULLIF(key_sf.service_record_no,''),key_sf.service_fact_id)) AS order_no" : "'' AS order_no"))
             ->group('key_sf.checkout_request_id')
-            // 正常组只需至少一条服务未作废；表头时间、身份仍取完整原组。
-            ->having('SUM(CASE WHEN key_vo.id IS NULL THEN 1 ELSE 0 END)>0 AND MIN(key_sf.settled_at)>0 AND MIN(key_sf.settled_at)<=' . (int)$criteria['queryCutoffTimestamp'])
-            ->orderRaw('group_settled_at DESC,group_id DESC')
-            ->limit($window)->select()->toArray(), 'checkout_request_id');
+            // 保留部分作废组的原始表头时间；只需至少一条服务仍有效。
+            ->having('SUM(CASE WHEN key_vo.id IS NULL THEN 1 ELSE 0 END)>0 AND MIN(key_sf.settled_at)>0 AND MIN(key_sf.settled_at)<=' . (int)$criteria['queryCutoffTimestamp']);
+        $indexSql = '(' . $salesKeys->buildSql(false) . ' UNION ALL ' . $serviceKeys->buildSql(false) . ')';
+        $keyQuery = Db::table($indexSql . ' page_keys');
+        $this->applyOrderNumberConditions($keyQuery, 'page_keys.order_no', $criteria);
+        if (($criteria['afterPayTime'] ?? null) !== null) {
+            $keyQuery->where(function ($anchor) use ($criteria): void {
+                $anchor->where('settled_at', '<', (int)$criteria['afterPayTime'])
+                    ->whereOr(function ($same) use ($criteria): void {
+                        $same->where('settled_at', (int)$criteria['afterPayTime'])->where('id', '<', (int)$criteria['afterOrderId']);
+                    });
+            });
+        }
+        return $keyQuery;
+    }
 
-        $services = $serviceRequestIds === [] ? [] : $definitions['services']
-            ->whereIn('sf.checkout_request_id', $serviceRequestIds)
+    /** 请求内仅检查既有索引存在性；不修改数据库结构。 */
+    private function hasIndex(string $table, string $index): bool
+    {
+        static $known = [];
+        $name = Db::name($table)->getTable();
+        $key = (string)config('database.connections.mysql.database') . ':' . $name . ':' . $index;
+        if (!array_key_exists($key, $known)) $known[$key] = (bool)Db::query(
+            'SHOW INDEX FROM `' . str_replace('`', '``', $name) . '` WHERE Key_name = ?', [$index]);
+        return $known[$key];
+    }
+
+    /** 可信计划的订单号候选条件；占位参数绑定且转义LIKE通配符，最终语义仍由统一引擎校验。 */
+    private function applyOrderNumberConditions($query, string $column, array $criteria): void
+    {
+        foreach (($criteria['_orderNumberConditions'] ?? []) as $condition) {
+            $operator = $condition['operator'] ?? '';
+            $value = $condition['value'] ?? null;
+            if (!is_scalar($value) || !in_array($operator, ['equal','contains','starts_with'], true)) continue;
+            if ($operator === 'equal') {
+                $query->whereRaw('LOWER(CONVERT('.$column.' USING utf8mb4)) = LOWER(CONVERT(? USING utf8mb4))', [(string)$value]);
+            } else {
+                $like = ($operator === 'contains' ? '%' : '') . addcslashes((string)$value, "\\%_") . '%';
+                $this->whereUtf8Like($query, $column, $like);
+            }
+        }
+    }
+
+    private function authorityHeadersForKeys(array $keys, array $criteria): array
+    {
+        $definitions = $this->authoritySourceDefinitions($criteria);
+        if (!$keys) return [];
+        $salesIds = []; $serviceRequestIds = [];
+        foreach ($keys as $key) {
+            if ((int)$key['id'] % 2 === 0) $salesIds[] = intdiv((int)$key['id'], 2);
+            else $serviceRequestIds[] = (string)$key['checkout_request_id'];
+        }
+        $sales = !$salesIds ? [] : $definitions['sales']->whereIn('s.id', $salesIds)
+            ->field(implode(',', $definitions['salesFields']))
+            ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")->select()->toArray();
+        $services = !$serviceRequestIds ? [] : $definitions['services']->whereIn('sf.checkout_request_id', $serviceRequestIds)
             ->field(implode(',', $definitions['serviceFields']))
             ->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
-            ->group('sf.tenant_id,sf.checkout_request_id')
-            ->orderRaw('MIN(sf.settled_at) DESC,MIN(sf.id) DESC')
-            ->limit($window)->select()->toArray();
-
+            ->group('sf.tenant_id,sf.checkout_request_id')->select()->toArray();
         $rows = array_merge($sales, $services);
         usort($rows, static function (array $left, array $right): int {
-            // 权威表头使用 settled_at；pay_time 只属于旧订单，不能混用。
             return ((int)$right['settled_at'] <=> (int)$left['settled_at'])
                 ?: ((int)$right['id'] <=> (int)$left['id']);
         });
-        return array_slice(
-            $rows,
-            ((int)$criteria['page'] - 1) * (int)$criteria['pageSize'],
-            (int)$criteria['pageSize']
-        );
+        return $rows;
     }
 
     private function authorityOrderQuery(array $criteria)
@@ -1307,6 +1473,12 @@ final class CashierV3SalesOrderQueryServices
             $this->applyStatusFilter($query, (string)$criteria['status']);
         }
 
+        $this->applyOrderNumberConditions($query, 'o.order_id', $criteria);
+        if ($operation === 'index') {
+            return ['sql'=>$query->field("o.id,o.pay_time AS settled_at,'' AS checkout_request_id,CONCAT('legacy-sale-',o.id) AS order_id")->buildSql()];
+        }
+        if (!empty($criteria['_selectedIds'])) $query->whereIn('o.id', $criteria['_selectedIds']);
+
         $fields = implode(',', [
             'o.id', 'o.order_id', 'o.uid', 'o.real_name', 'o.user_phone',
             'o.store_id', 'o.order_type', 'o.is_debt_repay', 'o.paid',
@@ -1329,7 +1501,7 @@ final class CashierV3SalesOrderQueryServices
         }
 
         // total 在键集锚点之前计算，表示首页冻结插入集合中的当前筛选总数。
-        $total = (int)(clone $query)->count('o.id');
+        $total = !empty($criteria['_scanWithoutCount']) ? 0 : (int)(clone $query)->count('o.id');
         if ($criteria['afterPayTime'] !== null && $criteria['afterOrderId'] !== null) {
             $afterPayTime = (int)$criteria['afterPayTime'];
             $afterOrderId = (int)$criteria['afterOrderId'];

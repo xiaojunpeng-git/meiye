@@ -1334,8 +1334,11 @@ class UnifiedQueryExportTaskServices
         ];
     }
 
-    public function exportCapability(array $permissions): array
+    public function exportCapability(array $permissions, string $pageCode = ''): array
     {
+        // 仅订单中心已接入有界行集；其余页面继续原内存工作簿预算，不能声称全系统已支持大导出。
+        $streaming = in_array($pageCode, ['order_center_all','order_center_sales','order_center_recharge','order_center_refund',
+            'order_center_service','order_center_debt','order_center_gift','order_center_card_operation','order_center_supplement'], true);
         return [
             'enabled' => !empty($permissions['export']),
             'allowCurrentQuery' => true,
@@ -1345,8 +1348,9 @@ class UnifiedQueryExportTaskServices
             'formats' => ['xlsx'],
             'scopes' => ['query', 'page'],
             'maxFields' => self::MAX_EXPORT_FIELDS,
-            'maxRows' => self::MAX_EXPORT_ROWS,
-            'maxCells' => self::MAX_EXPORT_CELLS,
+            'maxRows' => $streaming ? null : self::MAX_EXPORT_ROWS,
+            'maxCells' => $streaming ? null : self::MAX_EXPORT_CELLS,
+            'streaming' => $streaming,
             'backgroundTask' => true,
         ];
     }

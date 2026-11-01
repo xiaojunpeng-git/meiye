@@ -71,7 +71,7 @@ class UnifiedQueryCapabilityServices
             'fieldAliasVersion' => $aliasVersion,
             'querySettings' => $this->preferences->load($context, $pageCode),
             'permissions' => $permissions,
-            'export' => $this->exports->exportCapability($permissions),
+            'export' => $this->exports->exportCapability($permissions, $pageCode),
             'queryCutoffDate' => (string)$context['query_cutoff_date'],
             'dataAsOf' => date('Y-m-d H:i:s', $dataAsOf),
             'schemaVersion' => $this->registry->schemaVersion(),
