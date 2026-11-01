@@ -71,10 +71,13 @@ try {
     ]);
 
     $selector = new CashierV3QueryEntitySelectorServices();
-    $query = new ReflectionMethod($selector, 'queryOrganizationCraftsmen');
-    $query->setAccessible(true);
+    // Exercise the shared public reader after removing the superseded private implementation.
+    $query = static function ($keyword, $operator) {
+        return (new \app\services\cashier\v3\member\CashierV3OtherCraftsmanQueryServices())->query(
+            ['selectorContext' => ['scope' => 'cashier_other_salespeople'], 'keyword' => $keyword, 'page' => 1, 'pageSize' => 20], $operator);
+    };
     $operator = new CashierV3OperatorScope($storeId, 1, (string)$organizationId, '0');
-    $page = $query->invoke($selector, 'R21集团独立销售', 1, 20, $operator, true);
+    $page = $query('R21集团独立销售', $operator);
     $candidate = $page['records'][0] ?? [];
     r21DirectPositionAssert(count($page['records']) === 1
         && (int)$candidate['employeeId'] === $employeeId
@@ -106,7 +109,7 @@ try {
         '退款重校验沿用直属独立核算组');
 
     Db::name('position')->where('id', $independentPositionId)->update(['status' => 0]);
-    $fallbackPage = $query->invoke($selector, 'R21集团独立销售', 1, 20, $operator, true);
+    $fallbackPage = $query('R21集团独立销售', $operator);
     $fallback = $fallbackPage['records'][0] ?? [];
     r21DirectPositionAssert((int)$fallback['positionId'] === $normalPositionId
         && $fallback['positionName'] === 'R21普通岗位'

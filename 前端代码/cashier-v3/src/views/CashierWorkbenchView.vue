@@ -192,11 +192,11 @@ const member = computed(() => cashier.value.member || null)
 // local checkout/hang/reservation snapshot remains the owner of its chosen source.
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 // 只隐藏新操作入口，草稿与历史归属、体验及服务对象标记仍由权威快照保留。
-const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled === true)
 // 仅控制两种业务分配模式里的售前操作展示，不删除草稿中的既有标记。
-const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled !== false)
-const experienceEnabled = computed(() => state.storeDisplayOptions?.experienceEnabled !== false)
-const craftsmanExcludeCountsEnabled = computed(() => state.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false)
+const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled === true)
+const experienceEnabled = computed(() => state.storeDisplayOptions?.experienceEnabled === true)
+const craftsmanExcludeCountsEnabled = computed(() => state.storeDisplayOptions?.craftsmanExcludeCountsEnabled === true)
 function initialBusinessSource(kind) {
   const currentId = Number(member.value?.memberId || member.value?.id || 0)
   const service = state.cashier?.serviceOrder
@@ -4185,10 +4185,36 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
   }
 }
 
-async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
+// Each node/page query owns its response: a slow old node must never replace a newer selection.
+const otherCraftsmanQueryEpoch = { cashier_other_craftsmen: 0, cashier_other_salespeople: 0 }
+async function searchPersonnelOverlay({ scope, keyword, target, organizationNode = null, organizationOptionsOnly = false, page = 1 } = {}) {
   const current = personnelOverlay.value
   if (!current?.line || !['group_attributions', 'cashier_other_craftsmen', 'cashier_other_salespeople'].includes(scope)) return
   const requestKey = current.requestKey
+  if (['cashier_other_craftsmen', 'cashier_other_salespeople'].includes(scope)) {
+    const prefix = scope === 'cashier_other_craftsmen' ? 'otherCraftsman' : 'otherSalesperson'
+    const epoch = ++otherCraftsmanQueryEpoch[scope]
+    personnelOverlay.value = { ...current, [`${prefix}Loading`]: true, [`${prefix}Error`]: '', [`${prefix}Candidates`]: [] }
+    try {
+      const response = await requestAction('query-query-entities', {
+        entityType: 'person', selectorEntry: 'cashier', preserveRootState: true, silent: true,
+        selectorContext: { scope, organizationNode, organizationOptionsOnly }, keyword, page, pageSize: 20
+      })
+      if (epoch !== otherCraftsmanQueryEpoch[scope] || personnelOverlay.value?.requestKey !== requestKey) return
+      const data = responseDataBlock(response)
+      if (!['success', 'succeeded'].includes(resultStatus(response)) || !Array.isArray(data.records)) {
+        throw new Error(response?.result?.message || '人员查询失败，请重试。')
+      }
+      personnelOverlay.value = { ...personnelOverlay.value, [`${prefix}Loading`]: false,
+        [`${prefix}Candidates`]: data.records, [`${prefix}OrganizationTree`]: data.organizationTree || [],
+        [`${prefix}AllowedStoreIds`]: data.allowedStoreIds || [], [`${prefix}Total`]: Number(data.total || 0), [`${prefix}Page`]: Number(data.page || 1) }
+    } catch (error) {
+      if (epoch !== otherCraftsmanQueryEpoch[scope] || personnelOverlay.value?.requestKey !== requestKey) return
+      personnelOverlay.value = { ...personnelOverlay.value, [`${prefix}Loading`]: false, [`${prefix}Candidates`]: [],
+        [`${prefix}Error`]: error instanceof Error ? error.message : '人员查询失败，请重试。' }
+    }
+    return
+  }
   try {
     const records = await queryPersonnelCandidates(scope, current.line, keyword)
     if (personnelOverlay.value?.requestKey !== requestKey) return
@@ -8672,6 +8698,20 @@ onBeforeUnmount(() => {
         :store-id="currentCashierStoreId"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
         :other-craftsman-candidates="personnelOverlay.otherCraftsmanCandidates"
+        other-craftsman-organization-enabled
+        :other-craftsman-organization-tree="personnelOverlay.otherCraftsmanOrganizationTree || []"
+        :other-craftsman-allowed-store-ids="personnelOverlay.otherCraftsmanAllowedStoreIds || []"
+        :other-craftsman-total="personnelOverlay.otherCraftsmanTotal || 0"
+        :other-craftsman-page="personnelOverlay.otherCraftsmanPage || 1"
+        :other-craftsman-loading="personnelOverlay.otherCraftsmanLoading || false"
+        :other-craftsman-error="personnelOverlay.otherCraftsmanError || ''"
+        other-salesperson-organization-enabled
+        :other-salesperson-organization-tree="personnelOverlay.otherSalespersonOrganizationTree || []"
+        :other-salesperson-allowed-store-ids="personnelOverlay.otherSalespersonAllowedStoreIds || []"
+        :other-salesperson-total="personnelOverlay.otherSalespersonTotal || 0"
+        :other-salesperson-page="personnelOverlay.otherSalespersonPage || 1"
+        :other-salesperson-loading="personnelOverlay.otherSalespersonLoading || false"
+        :other-salesperson-error="personnelOverlay.otherSalespersonError || ''"
         :other-salesperson-candidates="personnelOverlay.otherSalespersonCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"
         :guide-candidates="personnelOverlay.guideCandidates"

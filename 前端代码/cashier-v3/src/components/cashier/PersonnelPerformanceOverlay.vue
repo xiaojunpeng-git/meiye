@@ -1,6 +1,7 @@
 <script setup>
 import { automaticCraftsmanAmounts, defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
 import { computed, ref, watch } from 'vue'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 
 const props = defineProps({
   initialTab: { type: String, default: 'craftsmen' },
@@ -26,6 +27,20 @@ const props = defineProps({
   craftsmenCandidates: { type: Array, default: () => [] },
   allowOtherCraftsmen: { type: Boolean, default: false },
   otherCraftsmanCandidates: { type: Array, default: () => [] },
+  otherCraftsmanOrganizationEnabled: { type: Boolean, default: false },
+  otherCraftsmanOrganizationTree: { type: Array, default: () => [] },
+  otherCraftsmanAllowedStoreIds: { type: Array, default: () => [] },
+  otherCraftsmanTotal: { type: Number, default: 0 },
+  otherCraftsmanPage: { type: Number, default: 1 },
+  otherCraftsmanLoading: { type: Boolean, default: false },
+  otherCraftsmanError: { type: String, default: '' },
+  otherSalespersonOrganizationEnabled: { type: Boolean, default: false },
+  otherSalespersonOrganizationTree: { type: Array, default: () => [] },
+  otherSalespersonAllowedStoreIds: { type: Array, default: () => [] },
+  otherSalespersonTotal: { type: Number, default: 0 },
+  otherSalespersonPage: { type: Number, default: 1 },
+  otherSalespersonLoading: { type: Boolean, default: false },
+  otherSalespersonError: { type: String, default: '' },
   allowOtherSalespeople: { type: Boolean, default: false },
   otherSalespersonCandidates: { type: Array, default: () => [] },
   storeId: { type: [Number, String], default: 0 },
@@ -93,6 +108,22 @@ const attributionSearchOpen = ref(false)
 const attributionSearchRole = ref('guide')
 const otherCraftsmanSearchOpen = ref(false)
 const otherCraftsmanKeyword = ref('')
+const otherCraftsmanNode = ref(null)
+const otherCraftsmanNodeLabel = ref('组织范围')
+// Selection is a query filter only; chosen attribution records are not reset by node/page changes.
+function selectOtherCraftsmanNode(node) {
+  otherCraftsmanNode.value = node ? { type: node.type, id: node.id } : null
+  otherCraftsmanNodeLabel.value = node?.label || '组织范围'
+  searchOtherCraftsmen(1)
+}
+const otherSalespersonNode = ref(null)
+const otherSalespersonNodeLabel = ref('组织范围')
+// Selection is a query filter only; chosen attribution records are not reset by node/page changes.
+function selectOtherSalespersonNode(node) {
+  otherSalespersonNode.value = node ? { type: node.type, id: node.id } : null
+  otherSalespersonNodeLabel.value = node?.label || '组织范围'
+  searchOtherSalespeople(1)
+}
 const otherSalespersonSearchOpen = ref(false)
 const otherSalespersonKeyword = ref('')
 const validationMessage = ref('')
@@ -592,13 +623,18 @@ function matchesGroupKeyword(item) {
 }
 
 const filteredCraftsmen = computed(() => craftsmen.value.filter(matchesKeyword))
-const filteredOtherCraftsmen = computed(() => otherCraftsmanCandidates.value.filter((item) => {
-  const value = otherCraftsmanKeyword.value.trim().toLowerCase()
-  if (!value) return true
-  return [item.name, item.position, item.level, item.staffNo]
-    .some((field) => String(field || '').toLowerCase().includes(value))
-}))
-const filteredOtherSalespeople = computed(() => props.otherSalespersonCandidates.filter((item) => {
+// Node-enabled searches are already filtered/paged by the server, including staff-account aliases.
+const filteredOtherCraftsmen = computed(() => props.otherCraftsmanOrganizationEnabled
+  ? otherCraftsmanCandidates.value
+  : otherCraftsmanCandidates.value.filter((item) => {
+    const value = otherCraftsmanKeyword.value.trim().toLowerCase()
+    return !value || [item.name, item.position, item.level, item.staffNo]
+      .some((field) => String(field || '').toLowerCase().includes(value))
+  }))
+
+const filteredOtherSalespeople = computed(() => props.otherSalespersonOrganizationEnabled
+  ? props.otherSalespersonCandidates
+  : props.otherSalespersonCandidates.filter((item) => {
   const value = otherSalespersonKeyword.value.trim().toLowerCase()
   return !value || [item.name, item.position, item.level, item.staffNo]
     .some((field) => String(field || '').toLowerCase().includes(value))
@@ -770,25 +806,36 @@ function openAttributionSearch(role = 'guide') {
 
 function openOtherCraftsmanSearch() {
   otherCraftsmanKeyword.value = ''
+  otherCraftsmanNode.value = null
+  otherCraftsmanNodeLabel.value = '组织范围'
   validationMessage.value = ''
   otherCraftsmanSearchOpen.value = true
 }
 
 function openOtherSalespersonSearch() {
   otherSalespersonKeyword.value = ''
+  otherSalespersonNode.value = null
+  otherSalespersonNodeLabel.value = '组织范围'
   validationMessage.value = ''
   otherSalespersonSearchOpen.value = true
 }
 
-function searchOtherSalespeople() {
+function searchOtherSalespeople(page = 1, optionsOnly = false) {
   const keywordValue = otherSalespersonKeyword.value.trim()
-  if (keywordValue.length < 2) {
-    validationMessage.value = '请输入至少 2 个字符后搜索其他销售人。'
+  if (!optionsOnly && !otherSalespersonNode.value && keywordValue.length < 2) {
+    if (!props.otherSalespersonOrganizationEnabled) validationMessage.value = '请输入至少 2 个字符后搜索其他销售人。'
     return
   }
   validationMessage.value = ''
-  emit('search-personnel', { scope: 'cashier_other_salespeople', keyword: keywordValue, target: 'otherSalespeople' })
+  emit('search-personnel', {
+    scope: 'cashier_other_salespeople', keyword: keywordValue, target: 'otherSalespeople',
+    organizationNode: otherSalespersonNode.value, organizationOptionsOnly: optionsOnly,
+    page: Number.isInteger(page) ? page : 1
+  })
 }
+watch(otherSalespersonSearchOpen, (open) => {
+  if (open && props.otherSalespersonOrganizationEnabled) searchOtherSalespeople(1, true)
+})
 
 function otherSalespersonSelected(item) {
   return salespeople.value.some((record) => record.selected && Number(record.employeeId || record.employee_id) === Number(item.employeeId || item.employee_id))
@@ -809,27 +856,40 @@ function addOtherSalesperson(item) {
   validationMessage.value = ''
 }
 
-function searchOtherCraftsmen() {
+function searchOtherCraftsmen(page = 1, optionsOnly = false) {
   const keywordValue = otherCraftsmanKeyword.value.trim()
-  if (keywordValue.length < 2) {
-    validationMessage.value = '请输入至少 2 个字符后搜索其他手艺人。'
+  if (!optionsOnly && !otherCraftsmanNode.value && keywordValue.length < 2) {
+    if (!props.otherCraftsmanOrganizationEnabled) validationMessage.value = '请输入至少 2 个字符后搜索其他手艺人。'
     return
   }
   validationMessage.value = ''
   emit('search-personnel', {
-    scope: 'cashier_other_craftsmen',
-    keyword: keywordValue,
-    target: 'otherCraftsmen'
+    scope: 'cashier_other_craftsmen', keyword: keywordValue, target: 'otherCraftsmen',
+    organizationNode: otherCraftsmanNode.value, organizationOptionsOnly: optionsOnly,
+    page: Number.isInteger(page) ? page : 1
   })
+}
+watch(otherCraftsmanSearchOpen, (open) => {
+  if (open && props.otherCraftsmanOrganizationEnabled) searchOtherCraftsmen(1, true)
+})
+
+// A person may have both a store staff ID and a virtual group ID; never allocate twice to that employee.
+function otherCraftsmanSelected(item) {
+  const employeeId = Number(item.employeeId || item.employee_id || 0)
+  return craftsmen.value.some((record) => record.selected && (record.id === item.id
+    || (employeeId > 0 && Number(record.employeeId || record.employee_id || 0) === employeeId)))
 }
 
 function addOtherCraftsman(item) {
+  if (otherCraftsmanSelected(item)) return
   const candidate = mergeCandidates([item], [], 'craftsmen')[0]
   if (!candidate) {
     otherCraftsmanSearchOpen.value = false
     return
   }
-  const existing = craftsmen.value.find((record) => record.id === candidate.id)
+  const employeeId = Number(candidate.employeeId || candidate.employee_id || 0)
+  const existing = craftsmen.value.find((record) => record.id === candidate.id
+    || (employeeId > 0 && Number(record.employeeId || record.employee_id || 0) === employeeId))
   // A previously removed person remains in the local candidate list. Re-select
   // that row instead of treating its mere presence as an active assignment.
   if (existing) existing.selected = true
@@ -1230,40 +1290,54 @@ function searchGroupPersonnel(scope) {
       </div>
 
       <div v-if="otherCraftsmanSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="添加其他手艺人">
-        <section class="personnel-attribution-search-panel">
+        <section class="personnel-attribution-search-panel" :class="{ 'personnel-attribution-search-panel--organization': otherCraftsmanOrganizationEnabled }">
           <header><strong>添加其他手艺人</strong><button type="button" aria-label="关闭添加其他手艺人" @click="otherCraftsmanSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
             <input v-model="otherCraftsmanKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchOtherCraftsmen">
             <button type="button" class="button button--primary" @click="searchOtherCraftsmen">搜索</button>
+            <OrganizationStoreScopePicker v-if="otherCraftsmanOrganizationEnabled" node-selection :tree="otherCraftsmanOrganizationTree" :allowed-store-ids="otherCraftsmanAllowedStoreIds" :label="otherCraftsmanNodeLabel" @node-change="selectOtherCraftsmanNode" />
           </div>
-          <p v-if="otherCraftsmanKeyword.trim().length < 2" class="personnel-empty">请输入至少 2 个字符后搜索其他手艺人</p>
+          <p v-if="otherCraftsmanLoading" class="personnel-empty" role="status">正在读取人员…</p>
+          <p v-else-if="otherCraftsmanError" class="personnel-empty" role="alert">{{ otherCraftsmanError }}</p>
+          <p v-else-if="!otherCraftsmanNode && otherCraftsmanKeyword.trim().length < 2" class="personnel-empty">{{ otherCraftsmanOrganizationEnabled ? '请选择组织或输入至少 2 个字符搜索' : '请输入至少 2 个字符后搜索其他手艺人' }}</p>
           <div v-else class="personnel-attribution-search-results">
             <article v-for="item in filteredOtherCraftsmen" :key="`other-craftsman-${item.id}`">
               <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '当前门店人员' }}</small></div>
-              <div><button type="button" class="button button--primary" :disabled="craftsmen.some((record) => record.id === item.id && record.selected)" @click="addOtherCraftsman(item)">{{ craftsmen.some((record) => record.id === item.id && record.selected) ? '已添加' : '添加' }}</button></div>
+              <div><button type="button" class="button button--primary" :disabled="otherCraftsmanSelected(item)" @click="addOtherCraftsman(item)">{{ otherCraftsmanSelected(item) ? '已添加' : '添加' }}</button></div>
             </article>
             <p v-if="!filteredOtherCraftsmen.length" class="personnel-empty">未找到匹配的在职人员</p>
           </div>
+          <footer v-if="otherCraftsmanOrganizationEnabled && (otherCraftsmanNode || otherCraftsmanKeyword.trim().length >= 2)" class="personnel-craftsman-pagination">
+            <span>共 {{ otherCraftsmanTotal }} 条 · 每页 20 条 · 第 {{ otherCraftsmanPage }} / {{ Math.max(1, Math.ceil(otherCraftsmanTotal / 20)) }} 页</span>
+            <button type="button" class="button button--secondary" :disabled="otherCraftsmanLoading || otherCraftsmanPage <= 1" @click="searchOtherCraftsmen(otherCraftsmanPage - 1)">上一页</button>
+            <button type="button" class="button button--secondary" :disabled="otherCraftsmanLoading || otherCraftsmanPage * 20 >= otherCraftsmanTotal" @click="searchOtherCraftsmen(otherCraftsmanPage + 1)">下一页</button>
+          </footer>
         </section>
       </div>
 
       <div v-if="otherSalespersonSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="添加其他销售人">
-        <section class="personnel-attribution-search-panel">
+        <section class="personnel-attribution-search-panel" :class="{ 'personnel-attribution-search-panel--organization': otherSalespersonOrganizationEnabled }">
           <header><strong>添加其他销售人</strong><button type="button" aria-label="关闭添加其他销售人" @click="otherSalespersonSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
-            <input v-model="otherSalespersonKeyword" type="search" placeholder="输入姓名后搜索" @keyup.enter="searchOtherSalespeople">
-            <button type="button" class="button button--primary" :disabled="attributionSearchLoading" @click="searchOtherSalespeople">搜索</button>
+            <input v-model="otherSalespersonKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchOtherSalespeople">
+            <button type="button" class="button button--primary" @click="searchOtherSalespeople">搜索</button>
+            <OrganizationStoreScopePicker v-if="otherSalespersonOrganizationEnabled" node-selection :tree="otherSalespersonOrganizationTree" :allowed-store-ids="otherSalespersonAllowedStoreIds" :label="otherSalespersonNodeLabel" @node-change="selectOtherSalespersonNode" />
           </div>
-          <p v-if="otherSalespersonKeyword.trim().length < 2" class="personnel-empty">请输入至少 2 个字符后搜索其他销售人</p>
-          <p v-else-if="attributionSearchLoading" class="personnel-empty">正在搜索集团人员…</p>
-          <p v-else-if="attributionSearchError" class="personnel-empty" role="alert">{{ attributionSearchError }}</p>
+          <p v-if="otherSalespersonLoading" class="personnel-empty" role="status">正在读取人员…</p>
+          <p v-else-if="otherSalespersonError" class="personnel-empty" role="alert">{{ otherSalespersonError }}</p>
+          <p v-else-if="!otherSalespersonNode && otherSalespersonKeyword.trim().length < 2" class="personnel-empty">{{ otherSalespersonOrganizationEnabled ? '请选择组织或输入至少 2 个字符搜索' : '请输入至少 2 个字符后搜索其他销售人' }}</p>
           <div v-else class="personnel-attribution-search-results">
             <article v-for="item in filteredOtherSalespeople" :key="`other-salesperson-${item.id}`">
-              <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '集团人员' }}</small></div>
+              <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '当前门店人员' }}</small></div>
               <div><button type="button" class="button button--primary" :disabled="otherSalespersonSelected(item)" @click="addOtherSalesperson(item)">{{ otherSalespersonSelected(item) ? '已添加' : '添加' }}</button></div>
             </article>
             <p v-if="!filteredOtherSalespeople.length" class="personnel-empty">未找到匹配的在职人员</p>
           </div>
+          <footer v-if="otherSalespersonOrganizationEnabled && (otherSalespersonNode || otherSalespersonKeyword.trim().length >= 2)" class="personnel-craftsman-pagination">
+            <span>共 {{ otherSalespersonTotal }} 条 · 每页 20 条 · 第 {{ otherSalespersonPage }} / {{ Math.max(1, Math.ceil(otherSalespersonTotal / 20)) }} 页</span>
+            <button type="button" class="button button--secondary" :disabled="otherSalespersonLoading || otherSalespersonPage <= 1" @click="searchOtherSalespeople(otherSalespersonPage - 1)">上一页</button>
+            <button type="button" class="button button--secondary" :disabled="otherSalespersonLoading || otherSalespersonPage * 20 >= otherSalespersonTotal" @click="searchOtherSalespeople(otherSalespersonPage + 1)">下一页</button>
+          </footer>
         </section>
       </div>
 
@@ -1299,3 +1373,9 @@ function searchGroupPersonnel(scope) {
     </section>
   </div>
 </template>
+
+<style scoped>
+.personnel-attribution-search-panel--organization { display:flex; flex-direction:column; max-height:calc(100vh - 48px); }
+.personnel-attribution-search-panel--organization .personnel-attribution-search-results { min-height:0; overflow:auto; }
+.personnel-craftsman-pagination { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; padding:10px 0 0; border-top:1px solid #edf0f5; background:#fff; font-size:12px; }
+</style>

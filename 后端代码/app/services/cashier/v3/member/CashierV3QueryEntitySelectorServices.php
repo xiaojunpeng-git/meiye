@@ -16,7 +16,7 @@ use think\facade\Db;
 
 /**
  * Shared entity-selector read model. The current operator scope is the only
- * source of the store boundary; selector payloads may only narrow by keyword.
+ * source of scope boundaries; keywords and checked personnel nodes may only narrow them.
  */
 final class CashierV3QueryEntitySelectorServices
 {
@@ -24,8 +24,8 @@ final class CashierV3QueryEntitySelectorServices
         'query_filter' => false,
         'sales_performance_assignees' => true,
         'service_actual_craftsmen' => false,
-        // 可被收银临时加入手艺人分配的当前门店在职人员；不要求
-        // cashier_craftsman_enabled，结账仍由统一事实链路记录其分配。
+        // 临时添加的同集团在职人员不要求本店任职或 cashier_craftsman_enabled；
+        // 组织节点只缩小查询，正式保存重新锁定真实任职和人员类型。
         'cashier_other_craftsmen' => false,
         // 集团其他销售人沿用组织员工身份，不放宽当前门店订单的操作权限。
         'cashier_other_salespeople' => false,
@@ -112,13 +112,9 @@ final class CashierV3QueryEntitySelectorServices
         if ($selectorScope === 'group_attributions') {
             return $this->queryGroupAttributions($keyword, $page, $pageSize, $operatorScope);
         }
+        // Both manual-add roles use actual group employment and a narrowing organization/store node.
         if (in_array($selectorScope, ['cashier_other_craftsmen', 'cashier_other_salespeople'], true)) {
-            if (mb_strlen($keyword) < 2) {
-                return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize,
-                    'isLoading' => false, 'requiresKeyword' => true];
-            }
-            return $this->queryOrganizationCraftsmen($keyword, $page, $pageSize, $operatorScope,
-                $selectorScope === 'cashier_other_salespeople');
+            return (new CashierV3OtherCraftsmanQueryServices())->query($payload, $operatorScope);
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $projectId = (int)($selectorContext['projectId'] ?? $selectorContext['project_id'] ?? 0);
@@ -248,11 +244,8 @@ final class CashierV3QueryEntitySelectorServices
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
                 'personnelSource' => $selectorScope === 'cashier_other_craftsmen' ? 'other' : 'store',
-                // The service-performance type is configured on the store
-                // tenure row.  Returning it with the candidate lets the UI
-                // zero the inapplicable fields before submit; the write side
-                // still re-reads this value under lock.
-                'craftsmanPerformanceType' => (string)($row['craftsman_performance_type'] ?? 'commission_labor'),
+                // 员工档案旧类型只供历史追溯；当前可选手艺人均允许两项业绩。
+                'craftsmanPerformanceType' => 'commission_labor',
                 'laborDefaultFeeCents' => $selectorScope === 'service_actual_craftsmen' ? $laborDefaultFeeCents : 0,
                 'craftsmanDefaultUnitAmountCents' => $selectorScope === 'service_actual_craftsmen'
                     ? $craftsmanDefaultUnitAmountCents : null,
@@ -386,105 +379,6 @@ final class CashierV3QueryEntitySelectorServices
         return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
     }
 
-    private function queryOrganizationCraftsmen(string $keyword, int $page, int $pageSize, CashierV3OperatorScope $operatorScope, bool $salesperson = false): array
-    {
-        $organizationId = (int)$operatorScope->organizationId();
-        if ($organizationId <= 0) {
-            return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
-        }
-        /** @var OrganizationScopeService $organizationScope */
-        $organizationScope = app()->make(OrganizationScopeService::class);
-        $organizationIds = $organizationScope->getOrgIds($organizationId, true);
-        // 门店账号的组织锚点通常是“直属”等门店分支；其他手艺人属于同一集团的
-        // 其他组织时，也必须在集团根组织的后端数据权限范围内可检索，不能只看当前
-        // 门店分支。集团根由当前组织向上解析，绝不接受客户端传入组织参数。
-        $rootOrganizationId = $organizationId;
-        for ($i = 0; $i < 64 && $rootOrganizationId > 0; $i++) {
-            $parentId = (int)Db::name('organization')->where('id', $rootOrganizationId)->value('pid');
-            if ($parentId <= 0 || $parentId === $rootOrganizationId) break;
-            $rootOrganizationId = $parentId;
-        }
-        if ($rootOrganizationId > 0 && $rootOrganizationId !== $organizationId) {
-            $organizationIds = $organizationScope->getOrgIds($rootOrganizationId, true);
-        }
-        if ($organizationIds === []) {
-            return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
-        }
-        $query = Db::name('organization_employee')->alias('oe')
-            ->join('employee e', 'e.id = oe.employee_id')
-            ->leftJoin('organization o', 'o.id = oe.org_id')
-            ->whereIn('oe.org_id', $organizationIds)
-            ->where('oe.status', 1)
-            ->where('oe.is_del', 0)
-            ->where('e.status', 1)
-            ->where('e.is_del', 0)
-            ->where('e.id', '>', 0)
-            // 与结账锁内员工档案校验一致，未建立类型版本的组织员工不能先进入可选列表。
-            ->where('e.employment_type_version', '>', 0)
-            ->where(function ($subQuery) use ($salesperson) {
-                $subQuery->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes());
-                // 手艺人沿用历史空类型兼容；销售人写入业绩事实时必须有有效类型。
-                if (!$salesperson) $subQuery->whereNull('e.employment_type_code', 'OR');
-            });
-        if ($keyword !== '') {
-            $like = '%' . addcslashes($keyword, '%_') . '%';
-            $query->where(function ($subQuery) use ($like) {
-                $subQuery->whereLike('e.name', $like)
-                    ->whereLike('oe.job_title', $like, 'OR')
-                    ->whereLike('o.name', $like, 'OR');
-            });
-        }
-        $total = (int)(clone $query)->count('DISTINCT e.id');
-        $rows = $query
-            ->field('e.id as employee_id,e.name as employee_name,e.employment_type_code,e.employment_type_version,MAX(o.name) as organization_name')
-            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version')
-            ->order('e.id asc')
-            ->page($page, $pageSize)
-            ->select()
-            ->toArray();
-        $directPositions = $salesperson
-            ? $this->organizationDirectPositionMap(array_column($rows, 'employee_id'))
-            : [];
-        $records = [];
-        foreach ($rows as $row) {
-            $employeeId = (int)($row['employee_id'] ?? 0);
-            $name = trim((string)($row['employee_name'] ?? ''));
-            if ($employeeId <= 0 || $name === '') continue;
-            $position = $directPositions[$employeeId] ?? [];
-            $positionId = (int)($position['position_id'] ?? 0);
-            $positionName = trim((string)($position['position_name'] ?? ''));
-            $performanceIndependent = (int)($position['performance_independent'] ?? 0) === 1;
-            $records[] = [
-                'id' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
-                'staffId' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
-                'employeeId' => $employeeId,
-                'storeId' => $operatorScope->storeId(),
-                'name' => $name,
-                'staffName' => $name,
-                'staffNo' => '',
-                'storeName' => '组织：' . trim((string)($row['organization_name'] ?? '')),
-                'positionId' => $positionId,
-                'positionName' => $positionName !== '' ? $positionName : '在职员工',
-                'performanceIndependent' => $performanceIndependent,
-                'allocationGroupKey' => $performanceIndependent
-                    ? 'independent:' . $positionId
-                    : 'normal',
-                'employeeTypeCode' => (string)($row['employment_type_code'] ?? 'internal'),
-                'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
-                'partnerDefaultRatio' => 0,
-                'salespersonEligible' => $salesperson,
-                'craftsmanEligible' => !$salesperson,
-                'personnelSource' => 'other',
-                'craftsmanPerformanceType' => 'commission_labor',
-                'laborDefaultFeeCents' => 0,
-                'selectable' => true,
-                'groupScoped' => true,
-                'attributionRole' => '',
-            ];
-        }
-        return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
-    }
-
     /**
      * 集团直属员工的岗位以 staff_job_position.staff_id=0 为权威来源。
      * 收银一个销售人只能落入一个核算组；存在多条有效直属岗位时优先独立核算岗位，
@@ -539,19 +433,10 @@ final class CashierV3QueryEntitySelectorServices
         $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
         $organizationId = (int)$operatorScope->organizationId();
         if ($employeeId <= 0 || $organizationId <= 0) return [];
-        $rootId = $organizationId;
-        for ($i = 0; $i < 64; $i++) {
-            $parentId = (int)Db::name('organization')->where('id', $rootId)->value('pid');
-            if ($parentId <= 0 || $parentId === $rootId) break;
-            $rootId = $parentId;
-        }
-        $organizationIds = app()->make(OrganizationScopeService::class)->getOrgIds($rootId, true);
-        if ($organizationIds === []) return [];
-        $row = Db::name('organization_employee')->alias('oe')
-            ->join('employee e', 'e.id=oe.employee_id')
-            ->where('oe.employee_id', $employeeId)->whereIn('oe.org_id', $organizationIds)
-            ->where('oe.status', 1)->where('oe.is_del', 0)
-            ->where('e.status', 1)->where('e.is_del', 0)
+        // A picker node is not authority: lock current real group employment again at final save.
+        (new CashierV3OtherCraftsmanQueryServices())->lockedMembership($employeeId, $operatorScope->storeId());
+        $row = Db::name('employee')->alias('e')
+            ->where('e.id', $employeeId)->where('e.status', 1)->where('e.is_del', 0)
             ->where('e.employment_type_version', '>', 0)
             ->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes())
             ->field('e.id as employee_id,e.name as employee_name,e.employment_type_code,e.employment_type_version')

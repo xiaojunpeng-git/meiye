@@ -27,10 +27,13 @@ try {
     }
 
     $selector = new CashierV3QueryEntitySelectorServices();
-    $query = new ReflectionMethod($selector, 'queryOrganizationCraftsmen');
-    $query->setAccessible(true);
+    // Exercise the shared public reader after removing the superseded private implementation.
+    $query = static function ($keyword, $operator) {
+        return (new \app\services\cashier\v3\member\CashierV3OtherCraftsmanQueryServices())->query(
+            ['selectorContext' => ['scope' => 'cashier_other_craftsmen'], 'keyword' => $keyword, 'page' => 1, 'pageSize' => 20], $operator);
+    };
     $scope = new CashierV3OperatorScope(39, 1, '165', '0');
-    $includedAfterCorrection = $query->invoke($selector, '范玲丽', 1, 20, $scope);
+    $includedAfterCorrection = $query('范玲丽', $scope);
     $correctedMatches = array_values(array_filter($includedAfterCorrection['records'], static function (array $row): bool {
         return (int)$row['employeeId'] === 1803;
     }));
@@ -41,7 +44,7 @@ try {
     }
     echo "PASS corrected organization employee is selectable with real authority fields\n";
 
-    $included = $query->invoke($selector, '范玲玲', 1, 20, $scope);
+    $included = $query('范玲玲', $scope);
     $matching = array_values(array_filter($included['records'], static function (array $row): bool {
         return (int)$row['employeeId'] === 445;
     }));

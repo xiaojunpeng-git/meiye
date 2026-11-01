@@ -271,6 +271,10 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
             throw self::failure('organization_staff_type_unclassified');
         }
         $storeId = $dataScope->forcedStoreId();
+        // Other-store craftsmen keep their real employee identity; a locked membership check
+        // prevents forged IDs, offboarding or group transfers from reusing a stale candidate.
+        (new \app\services\cashier\v3\member\CashierV3OtherCraftsmanQueryServices())
+            ->lockedMembership($employeeId, $storeId);
         $staffName = trim((string)($employee['name'] ?? ''));
         if ($staffName === '' || mb_strlen($staffName) > 128) throw self::failure('organization_staff_profile_name_invalid');
         $fingerprint = hash('sha256', json_encode([

@@ -15,10 +15,12 @@ const props = defineProps({
   showScopeFooter: { type: Boolean, default: true },
   // 登录等一次只能进入一间门店的场景，组织节点仅用于展开下级门店，
   // 不能把整个组织的门店范围当作一次选择结果。
-  singleStoreOnly: { type: Boolean, default: false }
+  singleStoreOnly: { type: Boolean, default: false },
+  // Personnel selection needs a real organization node even when it has no stores.
+  nodeSelection: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits(['update:modelValue', 'change', 'node-change'])
 const open = ref(false)
 const triggerRef = ref(null)
 const panelRef = ref(null)
@@ -167,6 +169,12 @@ function nodeStores(node) {
 }
 
 function selectNode(option) {
+  if (props.nodeSelection) {
+    selectedOrganizationKey.value = option.key
+    emit('node-change', { type: option.storeId > 0 ? 'store' : 'org', id: option.storeId || Number(option.node.id || option.node.org_id), label: option.name })
+    open.value = false
+    return
+  }
   if (option.storeId > 0) {
     selectStore({ id: option.storeId, name: option.name })
     return
@@ -187,6 +195,7 @@ function selectStore(store) {
 }
 
 function chooseAll() {
+  if (props.nodeSelection) emit('node-change', null)
   selectedOrganizationKey.value = ''
   selectedOrganizationName.value = ''
   selectedStores.value = []
@@ -218,7 +227,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="organization-store-scope-picker" :class="{ 'organization-store-scope-picker--embedded': embedded }">
+  <div class="organization-store-scope-picker" :class="{ 'organization-store-scope-picker--embedded': embedded, 'organization-store-scope-picker--nodes': nodeSelection }">
     <button v-if="!embedded" ref="triggerRef" type="button" class="organization-store-scope-picker__trigger" :disabled="loading" @click="open = !open">
       <Network :size="16" aria-hidden="true" />
       <span>{{ loading ? '读取权限范围' : label }}</span>
@@ -240,7 +249,7 @@ onBeforeUnmount(() => {
             <button type="button" class="organization-store-scope-picker__option" :class="{ 'organization-store-scope-picker__option--selected': selectedOrganizationKey === node.key, 'organization-store-scope-picker__option--store': node.storeId > 0 }" @click="selectNode(node)">{{ node.name }}</button>
           </div>
         </div>
-        <div class="organization-store-scope-picker__stores" aria-label="可选门店">
+        <div v-if="!nodeSelection" class="organization-store-scope-picker__stores" aria-label="可选门店">
           <p class="organization-store-scope-picker__stores-title">{{ selectedOrganizationName || '选择组织后查看组织及下级门店' }}</p>
           <div v-if="selectedStores.length" class="organization-store-scope-picker__store-list">
             <button v-for="store in selectedStores" :key="store.id" type="button" :class="{ 'is-active': selectedStoreIds.length === 1 && selectedStoreIds[0] === store.id }" @click="selectStore(store)">{{ store.name }}</button>
@@ -251,13 +260,14 @@ onBeforeUnmount(() => {
       <footer v-if="showScopeFooter">
         <button v-if="!singleStoreOnly" type="button" @click="chooseAll">当前权限范围</button>
         <span v-else class="organization-store-scope-picker__scope-label">当前权限范围</span>
-        <span>{{ singleStoreOnly ? '选择组织查看其下级门店；请选择一间门店登录。' : '选择组织查询其全部下级门店；选择门店仅查询该门店。' }}</span>
+        <span>{{ nodeSelection ? '选择组织加载该组织及下级人员；选择门店加载该店人员。' : singleStoreOnly ? '选择组织查看其下级门店；请选择一间门店登录。' : '选择组织查询其全部下级门店；选择门店仅查询该门店。' }}</span>
       </footer>
     </section>
   </div>
 </template>
 
 <style scoped>
+.organization-store-scope-picker--nodes .organization-store-scope-picker__body { grid-template-columns: 1fr; }
 .organization-store-scope-picker { position: relative; display: inline-block; }
 .organization-store-scope-picker--embedded { display: block; width: 100%; }
 .organization-store-scope-picker__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 1px solid #dcdee2; border-radius: 4px; padding: 5px 10px; background: #fff; color: #515a6e; font: inherit; font-size: 13px; cursor: pointer; }
