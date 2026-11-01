@@ -69,8 +69,18 @@ final class CashierV3OtherCraftsmanQueryServices
         $params = [];
         if ($keyword !== '') {
             $like = '%' . addcslashes($keyword, '%_') . '%';
-            $where .= " AND (e.name LIKE ? OR EXISTS (SELECT 1 FROM eb_system_store_staff ss WHERE ss.employee_id=e.id AND ss.store_id IN ($storeList) AND ss.status=1 AND ss.is_del=0 AND (ss.staff_name LIKE ? OR ss.account LIKE ?)) OR EXISTS (SELECT 1 FROM eb_organization_employee oe WHERE oe.employee_id=e.id AND oe.org_id IN ($orgList) AND oe.status=1 AND oe.is_del=0 AND oe.job_title LIKE ?))";
+            $matches = ["e.name LIKE ?",
+                "EXISTS (SELECT 1 FROM eb_system_store_staff ss WHERE ss.employee_id=e.id AND ss.store_id IN ($storeList) AND ss.status=1 AND ss.is_del=0 AND (ss.staff_name LIKE ? OR ss.account LIKE ?))",
+                "EXISTS (SELECT 1 FROM eb_organization_employee oe WHERE oe.employee_id=e.id AND oe.org_id IN ($orgList) AND oe.status=1 AND oe.is_del=0 AND oe.job_title LIKE ?)"];
             $params = [$like, $like, $like, $like];
+            // Match any continuous 4–11 phone digits without returning phone numbers.
+            // Parentheses keep these alternatives inside the same active employment and group scope.
+            if (preg_match('/^[0-9]{4,11}$/D', $keyword)) {
+                $matches[] = "e.phone LIKE ?";
+                $matches[] = "EXISTS (SELECT 1 FROM eb_system_store_staff ss WHERE ss.employee_id=e.id AND ss.store_id IN ($storeList) AND ss.status=1 AND ss.is_del=0 AND ss.phone LIKE ?)";
+                $params[] = $like; $params[] = $like;
+            }
+            $where .= ' AND (' . implode(' OR ', $matches) . ')';
         }
         $total = (int)Db::query("SELECT COUNT(*) n FROM eb_employee e WHERE $where", $params)[0]['n'];
         $page = min($page, max(1, (int)ceil($total / $size))); $offset = ($page - 1) * $size;

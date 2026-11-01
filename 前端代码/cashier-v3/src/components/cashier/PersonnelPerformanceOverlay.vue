@@ -1293,9 +1293,9 @@ function searchGroupPersonnel(scope) {
         <section class="personnel-attribution-search-panel" :class="{ 'personnel-attribution-search-panel--organization': otherCraftsmanOrganizationEnabled }">
           <header><strong>添加其他手艺人</strong><button type="button" aria-label="关闭添加其他手艺人" @click="otherCraftsmanSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
-            <input v-model="otherCraftsmanKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchOtherCraftsmen">
+            <input v-model="otherCraftsmanKeyword" type="search" placeholder="姓名、工号或至少4位手机号" @keyup.enter="searchOtherCraftsmen">
             <button type="button" class="button button--primary" @click="searchOtherCraftsmen">搜索</button>
-            <OrganizationStoreScopePicker v-if="otherCraftsmanOrganizationEnabled" node-selection :tree="otherCraftsmanOrganizationTree" :allowed-store-ids="otherCraftsmanAllowedStoreIds" :label="otherCraftsmanNodeLabel" @node-change="selectOtherCraftsmanNode" />
+            <OrganizationStoreScopePicker v-if="otherCraftsmanOrganizationEnabled" node-selection default-open :tree="otherCraftsmanOrganizationTree" :allowed-store-ids="otherCraftsmanAllowedStoreIds" :label="otherCraftsmanNodeLabel" @node-change="selectOtherCraftsmanNode" />
           </div>
           <p v-if="otherCraftsmanLoading" class="personnel-empty" role="status">正在读取人员…</p>
           <p v-else-if="otherCraftsmanError" class="personnel-empty" role="alert">{{ otherCraftsmanError }}</p>
@@ -1319,9 +1319,9 @@ function searchGroupPersonnel(scope) {
         <section class="personnel-attribution-search-panel" :class="{ 'personnel-attribution-search-panel--organization': otherSalespersonOrganizationEnabled }">
           <header><strong>添加其他销售人</strong><button type="button" aria-label="关闭添加其他销售人" @click="otherSalespersonSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
-            <input v-model="otherSalespersonKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchOtherSalespeople">
+            <input v-model="otherSalespersonKeyword" type="search" placeholder="姓名、工号或至少4位手机号" @keyup.enter="searchOtherSalespeople">
             <button type="button" class="button button--primary" @click="searchOtherSalespeople">搜索</button>
-            <OrganizationStoreScopePicker v-if="otherSalespersonOrganizationEnabled" node-selection :tree="otherSalespersonOrganizationTree" :allowed-store-ids="otherSalespersonAllowedStoreIds" :label="otherSalespersonNodeLabel" @node-change="selectOtherSalespersonNode" />
+            <OrganizationStoreScopePicker v-if="otherSalespersonOrganizationEnabled" node-selection default-open :tree="otherSalespersonOrganizationTree" :allowed-store-ids="otherSalespersonAllowedStoreIds" :label="otherSalespersonNodeLabel" @node-change="selectOtherSalespersonNode" />
           </div>
           <p v-if="otherSalespersonLoading" class="personnel-empty" role="status">正在读取人员…</p>
           <p v-else-if="otherSalespersonError" class="personnel-empty" role="alert">{{ otherSalespersonError }}</p>

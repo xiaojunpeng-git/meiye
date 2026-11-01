@@ -37,6 +37,18 @@ try {
     r9Assert(!array_filter($nodes,fn($x)=>($x['node_type']??'')!=='store'&&(int)$x['id']===$outside),'other group nodes excluded');
     $found=$query(null,'小霞');r9Assert($found['total']===1&&(int)$found['records'][0]['employeeId']===$xia,'nickname finds cross-store employee without direct membership');
     r9Assert($query(null,'R9-'.$xia)['total']===1,'staff-account alias search retained');
+    // Deterministic phone fragments prove middle matching and scope, not only a suffix match.
+    Db::name('employee')->where('id',$xia)->update(['phone'=>'19923456789']);
+    Db::name('system_store_staff')->where('id',$xiaStaff)->update(['phone'=>'19976543210']);
+    Db::name('employee')->where('id',$foreignEmployee)->update(['phone'=>'18823456789']);
+    $phone=$query(null,'2345');
+    r9Assert($phone['total']===1&&$phone['records'][0]['employeeId']===$xia,'four phone digits match the middle without admitting foreign group');
+    r9Assert($query(null,'7654')['total']===1,'scoped staff phone also matches four digits');
+    r9Assert($query(null,'234')['total']===0,'three digits do not search phone numbers');
+    r9Assert($query(['type'=>'org','id'=>$empty],'2345')['total']===0,'phone match cannot escape the selected organization');
+    $phoneSale=$service->query(['selectorContext'=>['scope'=>'cashier_other_salespeople'],'keyword'=>'2345'],$op);
+    r9Assert($phoneSale['total']===1&&$phoneSale['records'][0]['employeeId']===$xia,'salespeople share the same four-digit phone search');
+    r9Assert(!isset($phone['records'][0]['phone']),'phone matching does not disclose phone field');
     $first=$query(['type'=>'store','id'=>$other]);$second=$query(['type'=>'store','id'=>$other],'',2);
     r9Assert($first['total']===22&&count($first['records'])===20&&count($second['records'])===2,'server pagination 20 plus remainder and exact total');
     r9Assert(!array_intersect(array_column($first['records'],'employeeId'),array_column($second['records'],'employeeId')),'stable pages do not overlap');
