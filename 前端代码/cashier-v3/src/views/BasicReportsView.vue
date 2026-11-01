@@ -182,7 +182,8 @@ function edit(row) {
 }
 async function save() {
   if (saving.value) return
-  if (!/^\d{1,9}$/.test(editor.value.amount)) { saveError.value = '登记金额必须为非负整数元'; return }
+  // 人工刷单登记只补充报表记录，输入精度与服务端的分精度校验一致。
+  if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(editor.value.amount)) { saveError.value = '登记金额须为非负数，最多保留两位小数'; return }
   saving.value = true; saveError.value = ''
   try {
     await saveBasicRegistration(platform.value, { ...editor.value })
@@ -351,7 +352,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
             <label>平台<select v-model="editor.platform"><option>抖音</option><option>大众</option></select></label>
             <label>核销日期<input v-model="editor.registered_date" type="date"></label>
             <label>券码<input v-model="editor.coupon_code" maxlength="128"></label>
-            <label>金额<input v-model="editor.amount" inputmode="numeric" maxlength="10"></label>
+            <label>金额<input v-model="editor.amount" inputmode="decimal" maxlength="12"></label>
             <label>类型<select v-model="editor.registration_type"><option>门店</option><option>探店</option></select></label>
           </div><footer><button type="button" class="button button--secondary" :disabled="saving" @click="editor = null">取消</button><button class="button button--primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
         </form>

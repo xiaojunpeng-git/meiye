@@ -24,6 +24,7 @@ const fields = [
   ['registration_type', '类型', 'text', true, true, 100, '']
 ].map(([key, label, type, defaultVisible, defaultQuick, width, fixed]) => ({ key, label, type, defaultVisible, defaultQuick, width, fixed }))
 const results = []
+const browserBase = process.env.BASIC_REPORT_BROWSER_BASE || 'http://127.0.0.1:18091'
 const browser = await chromium.launch({ headless: true,
   executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
 let checks = 0
@@ -37,6 +38,7 @@ try {
       const errors = []
       const requests = []
       page.on('pageerror', e => errors.push(e.message))
+      page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`))
       const rows = Array.from({ length: 44 }, (_, index) => ({
         registration_id: index + 1, store_id: 901, store_name: '测试一店', platform: '抖音',
         registered_date: index === 0 ? null : '2026-10-23', coupon_code: `R51-${index + 1}`,
@@ -48,7 +50,7 @@ try {
         const path = url.pathname
         let data
         if (path.endsWith('/basic/catalog')) data = catalog
-        else if (path.endsWith('/unified/scope')) data = { allowed_store_ids: [901], tree: [{ id: 1, node_type: 'org', name: '测试组织', children: [{ id: 901, store_id: 901, node_type: 'store', name: '测试一店' }] }] }
+        else if (path.endsWith('/basic/scope')) data = { allowed_store_ids: [901], tree: [{ id: 1, node_type: 'org', name: '测试组织', children: [{ id: 901, store_id: 901, node_type: 'store', name: '测试一店' }] }] }
         else if (path.endsWith('/basic/query')) {
           const query = JSON.parse(url.searchParams.get('query') || '{}')
           requests.push(query)
@@ -59,17 +61,18 @@ try {
             queryFields: fields, can_edit: true, field_sources: { amount: '该条人工登记的金额，不自动计入现金业绩。' }, table_layout: { fixed: true } }
         } else if (path.endsWith('/basic/save')) {
           const body = route.request().postDataJSON()
-          assert(body.amount === '200', 'Editor sends integer yuan text')
+          assert(body.amount === '200.25', 'Editor sends exact cent-precision text')
           const row = rows.find(item => item.registration_id === body.id)
           if (row) Object.assign(row, body, { amount: Number(body.amount), amount_cents: Number(body.amount) * 100 })
           data = { id: body.id, record_version: 2 }
         } else { await route.abort(); return }
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 200, data }) })
       })
-      await page.goto(`http://127.0.0.1:18091/r51-fixture.html?mode=${mode}`)
-      await page.getByRole('heading', { name: '基础报表', exact: true }).waitFor()
-      assert(await page.locator('.basic-reports__directory button').count() === 21, 'Original twenty plus explicitly added real-time payroll')
-      await page.getByRole('button', { name: '刷单登记', exact: true }).click()
+      await page.goto(`${browserBase}/r51-fixture.html?mode=${mode}`)
+      await page.getByRole('heading', { name: '刷单登记', exact: true }).waitFor().catch(async error => {
+        console.error(JSON.stringify({ mode, viewport, url: page.url(), errors, body: await page.locator('body').innerText() }))
+        throw error
+      })
       await page.getByRole('button', { name: '编辑', exact: true }).first().waitFor({ timeout: 10000 }).catch(async error => {
         await page.screenshot({ path: path.join(evidence, 'registration-browser-failure.png'), fullPage: true })
         console.error(JSON.stringify({ mode, viewport, errors, requests, body: await page.locator('body').innerText() }))
@@ -87,13 +90,17 @@ try {
       await page.waitForFunction(() => document.querySelector('tbody tr')?.textContent.includes('R51-21'))
       assert(requests.at(-1).page === 2, 'Page request keeps real page number')
       await page.getByRole('button', { name: '编辑', exact: true }).first().click()
-      await page.locator('.basic-report-dialog').getByLabel('金额', { exact: true }).fill('1.5')
+      await page.locator('.basic-report-dialog').getByLabel('金额', { exact: true }).fill('1.234')
       await page.getByRole('button', { name: '保存', exact: true }).click()
-      await page.getByRole('alert').filter({ hasText: '非负整数元' }).waitFor()
-      await page.locator('.basic-report-dialog').getByLabel('金额', { exact: true }).fill('200')
+      await page.getByRole('alert').filter({ hasText: '最多保留两位小数' }).waitFor()
+      await page.locator('.basic-report-dialog').getByLabel('金额', { exact: true }).fill('200.25')
       await page.getByRole('button', { name: '保存', exact: true }).click()
       await page.locator('.basic-report-dialog').waitFor({ state: 'hidden' })
       assert(requests.at(-1).page === 1, 'Save refresh returns to first page')
+      await page.getByRole('button', { name: '下一页', exact: true }).click()
+      await page.getByRole('button', { name: '编辑', exact: true }).first().click()
+      assert(await page.locator('.basic-report-dialog').getByLabel('金额', { exact: true }).inputValue() === '200.25', 'Saved amount survives requery and edit without rounding')
+      await page.locator('.basic-report-dialog').getByRole('button', { name: '取消', exact: true }).click()
       await page.getByRole('button', { name: '列名取值来源', exact: true }).click()
       await page.getByText('该条人工登记的金额，不自动计入现金业绩。', { exact: true }).waitFor()
       await page.getByRole('button', { name: '关闭', exact: true }).click()

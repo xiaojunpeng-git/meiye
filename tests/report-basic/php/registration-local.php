@@ -69,17 +69,21 @@ try {
     $row = $first['rows'][0];
     $payload = ['id' => $row['registration_id'], 'store_id' => 901, 'expected_version' => $row['record_version'],
         'expected_source_hash' => $row['source_hash'], 'idempotency_key' => 'r51-edit-0000000000000001',
-        'platform' => '大众', 'registered_date' => '2026-10-23', 'coupon_code' => 'changed', 'amount' => '200', 'registration_type' => '探店'];
+        'platform' => '大众', 'registered_date' => '2026-10-23', 'coupon_code' => 'changed', 'amount' => '200.25', 'registration_type' => '探店'];
     $writer = new Writer(); $saved = $writer->save($context, $payload);
     check($saved['record_version'] === 2, 'First legacy edit establishes monotonic audit sequence');
     $readback = Host::query($context, ['filters' => [['field' => 'registration_id', 'operator' => 'eq', 'value' => $row['registration_id']]]]);
-    check($readback['rows'][0]['amount_cents'] === 20000 && $readback['rows'][0]['platform'] === '大众', 'Saved values restored by fresh query');
+    check($readback['rows'][0]['amount_cents'] === 20025 && $readback['rows'][0]['platform'] === '大众', 'Decimal amount restored exactly by fresh query');
+    check((float)$readback['rows'][0]['amount'] === 200.25, 'Page projection retains cent precision before display formatting');
+    $decimalExport = Host::query($context, ['filters' => [['field' => 'registration_id', 'operator' => 'eq', 'value' => $row['registration_id']]], 'export' => ['scope' => 'query', 'fields' => ['registration_id', 'amount']]]);
+    check((float)$decimalExport['exportRows'][0]['amount'] === 200.25 && (float)$decimalExport['summaries']['amount:sum'] === 200.25, 'Export and complete-query total use same decimal amount');
     $info = json_decode(Db::name('salary_store')->where('id', $row['registration_id'])->value('salary_info'), true);
     check($info['legacy_note'] === '保留证据', 'Preserve non-edited legacy evidence');
     check($writer->save($context, $payload)['replayed'] === true, 'Idempotent replay');
     rejects(static function () use ($writer, $context, $payload) { $writer->save($context, array_merge($payload, ['amount' => '201'])); }, 'Same request cannot change payload');
     rejects(static function () use ($writer, $context, $payload) { $writer->save($context, array_merge($payload, ['idempotency_key' => 'r51-stale-0000000000001'])); }, 'Stale edit fails');
-    foreach (['1.5', '-1', '1e2', '100.00'] as $bad) rejects(static function () use ($payload, $bad) { Writer::values(array_merge($payload, ['amount' => $bad])); }, 'Whole-yuan write: ' . $bad);
+    foreach (['0', '1.5', '100.00', '999999999.99'] as $good) check(Writer::values(array_merge($payload, ['amount' => $good]))['amount'] === $good, 'Cent-precision input accepted: ' . $good);
+    foreach (['1.234', '-1', '1e2', '100.', '.5', '1000000000.00'] as $bad) rejects(static function () use ($payload, $bad) { Writer::values(array_merge($payload, ['amount' => $bad])); }, 'Invalid decimal input rejected: ' . $bad);
     rejects(static function () use ($payload) { Writer::values(array_merge($payload, ['registered_date' => '2026-02-30'])); }, 'Invalid calendar date');
     $readonly = $context; $readonly['basic_registration_write'] = false;
     rejects(static function () use ($writer, $readonly, $payload) { $writer->save($readonly, $payload); }, 'Read-only context cannot write');

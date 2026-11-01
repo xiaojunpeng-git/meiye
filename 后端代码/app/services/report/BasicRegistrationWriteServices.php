@@ -93,18 +93,18 @@ final class BasicRegistrationWriteServices
         return (int)$value;
     }
 
-    /** 新金额整元、日期严格校验；历史小数不自动取整，修改金额时才按当前写入口径保存。 */
+    /** 人工登记不是收银落账；金额允许两位小数并按原十进制文本保存，日期仍严格校验。 */
     public static function values(array $payload): array
     {
         $values = [];
-        foreach (['platform' => 40, 'coupon_code' => 128, 'registration_type' => 40, 'registered_date' => 10, 'amount' => 10] as $key => $limit) {
+        foreach (['platform' => 40, 'coupon_code' => 128, 'registration_type' => 40, 'registered_date' => 10, 'amount' => 12] as $key => $limit) {
             if (!is_string($payload[$key] ?? null) && !is_int($payload[$key] ?? null)) throw new \InvalidArgumentException('登记字段格式不正确');
             $values[$key] = trim((string)$payload[$key]);
             if (mb_strlen($values[$key]) > $limit) throw new \InvalidArgumentException('登记字段过长');
         }
         if (!in_array($values['platform'], ['抖音', '大众'], true)) throw new \InvalidArgumentException('请选择有效平台');
         if (!in_array($values['registration_type'], ['门店', '探店'], true)) throw new \InvalidArgumentException('请选择有效登记类型');
-        if (!preg_match('/^[0-9]{1,9}$/D', $values['amount'])) throw new \InvalidArgumentException('登记金额必须为非负整数元');
+        if (!preg_match('/^[0-9]{1,9}(?:\.[0-9]{1,2})?$/D', $values['amount'])) throw new \InvalidArgumentException('登记金额须为非负数，最多保留两位小数');
         $date = $values['registered_date'];
         $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date, new \DateTimeZone('Asia/Shanghai'));
         if ($date !== '' && (!$parsed || $parsed->format('Y-m-d') !== $date)) throw new \InvalidArgumentException('核销日期不正确');
