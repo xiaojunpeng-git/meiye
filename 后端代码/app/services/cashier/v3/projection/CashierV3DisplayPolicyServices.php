@@ -12,7 +12,9 @@ final class CashierV3DisplayPolicyServices
 {
     public function snapshot(): array
     {
+        $sourcePolicy = (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())->read();
         return [
+            'businessSourceEnabled' => ($sourcePolicy['enabled'] ?? true) === true,
             'debtPaymentEnabled' => (int)sys_config('cashier_debt_pay_switch', 0) === 1,
             'preSaleEnabled' => (int)sys_config('cashier_presale_switch', 1) === 1,
             'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,

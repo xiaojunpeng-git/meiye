@@ -48,3 +48,8 @@ foreach (['debtPaymentEnabled', 'preSaleEnabled', 'salesAttributionEnabled', 'la
 }
 
 echo "R62_PLATFORM_STORE_PARITY=PASS\n";
+
+r62Assert(strpos($view, 'orderUiPolicy.value.businessSourceEnabled === true') !== false
+    && strpos($view, 'state.businessSourcePolicy?.enabled') === false
+    && strpos($policy, 'CashierV3BusinessSourcePolicyServices') !== false,
+    '来源开关必须随同一订单投影返回，不能依赖门店根分区');

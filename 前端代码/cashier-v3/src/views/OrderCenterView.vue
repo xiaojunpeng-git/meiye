@@ -480,7 +480,8 @@ const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtF
   return ['source', 'debt_amount', 'sales_manager', 'guide'].includes(presented?.key)
     ? { ...presented, permissionFiltered: true } : presented
 })
-const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+// 平台入口没有门店根分区；两端均读取订单查询返回的同一来源开关。
+const businessSourceEnabled = computed(() => orderUiPolicy.value.businessSourceEnabled === true)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const serviceReportDrilldown = computed(() => {
   if (String(route.query.tab || '') !== 'service') return null
@@ -3911,7 +3912,7 @@ onBeforeUnmount(() => {
       <button type="button" class="button button--text" @click="leaveSalesReportDrilldown">退出报表筛选</button>
     </p>
 
-    <!-- 门店与平台订单页复用同一最新版动态筛选；平台仍由后端强制权限且保持只读。 -->
+    <!-- 门店与平台复用同一动态筛选和操作；平台只增加组织范围选择。 -->
     <OrderCenterReportQueryToolbar
       v-if="!serviceReportDrilldown && !salesReportDrilldown"
       :key="`${state.stateContextId}:${activeTabKey}`"
