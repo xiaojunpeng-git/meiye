@@ -229,6 +229,8 @@ const primarySubmitDisabled = computed(() => {
   // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
   if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0 || (isPlatformHeadquarters.value && !requestPartyOptions.value.some((party) => party.key === requestPartySelection.value)))) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
+  // 复制单据的旧调拨方可能已退出当前授权范围；留空等待重选，禁止借旧快照提交。
+  if (isCopy.value && props.pageKey === 'transfer' && (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value) || (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
 const primarySubmitLabel = computed(() => {
@@ -523,9 +525,10 @@ function selectUsageProject() {
   usageProjectName.value = selected ? String(selected.name || '') : ''
 }
 
-/** 仓库变动会改变可用库存与项目资格；旧仓的已选行不能进入新仓命令。 */
+/** 普通新建切仓重选商品；复制表单保留商品身份供新仓提交校验，不沿用原单库存事实。 */
 function onDocumentWarehouseChanged() {
-  selectedRows.value = []
+  // 复制单据切仓仍展示已识别的商品；最终可用性由新仓的提交接口校验。
+  if (!isCopy.value) selectedRows.value = []
   selectedLineIndexes.value = []
   productSelectorVisible.value = false
   scannerVisible.value = false
@@ -556,23 +559,22 @@ watch(() => props.detail, async (detail) => {
       const catalog = await allCountCatalog(false, true)
       const bySku = new Map(catalog.map((item) => [Number(item.sku_id), item]))
       const copiedBySku = new Map()
-      for (const line of detail.lines) {
+      for (const line of Array.isArray(detail.lines) ? detail.lines : []) {
         const current = bySku.get(Number(line.sku_id))
-        if (!current || Number(current.product_id) !== Number(line.product_id) || String(current.sku_unique) !== String(line.sku_unique)) throw new Error('原盘点含当前不可用的商品规格，请手工新建。')
+        if (!current || Number(current.product_id) !== Number(line.product_id) || String(current.sku_unique) !== String(line.sku_unique)) continue
         // 已确认单不保存原盘点模式；同一规格可能分批出现，新单只带规格并重新盘点。
         copiedBySku.set(Number(line.sku_id), { ...countDraftRow(current), count_mode: 'SKU', counted_quantity: '' })
       }
       countRemark.value = String(document.remark || '')
       replaceCountRows([...copiedBySku.values()])
-      countProgress.value = '已带入商品规格；请按当前库存重新填写实盘数，原批次需重新选择。'
+      countProgress.value = copiedBySku.size ? '已带入商品规格；请按当前库存重新填写实盘数，原批次需重新选择。' : ''
       return
     }
     const copied = documentCopyLines(kind, detail)
     if (kind === 'inbound' || kind === 'outbound') {
       if (isPlatformHeadquarters.value) {
         const key = `HQ:${Number(detail.document?.location_id || props.hqLocationId)}`
-        if (!documentWarehouseOptions.value.some((item) => item.key === key)) throw new Error('原单仓库当前不可新建，请选择其他仓库后手工新建。')
-        documentWarehouseSelection.value = key
+        documentWarehouseSelection.value = documentWarehouseOptions.value.some((item) => item.key === key) ? key : ''
       }
       if (kind === 'inbound') {
         inboundRemark.value = String(document.remark || '')
@@ -584,13 +586,14 @@ watch(() => props.detail, async (detail) => {
       }
     } else if (kind === 'transfer') {
       transferRemark.value = String(detail.remark || '')
-      transferSourceSelection.value = warehouseSelection(String(detail.from_party_type), detail.from_party_id, detail.from_location_id)
-      transferTargetSelection.value = warehouseSelection(String(detail.to_party_type), detail.to_party_id, detail.to_location_id)
+      const originalSource = warehouseSelection(String(detail.from_party_type), detail.from_party_id, detail.from_location_id)
+      const originalTarget = warehouseSelection(String(detail.to_party_type), detail.to_party_id, detail.to_location_id)
+      transferSourceSelection.value = !isPlatformHeadquarters.value || transferSourceOptions.value.some((item) => item.key === originalSource) ? originalSource : ''
+      transferTargetSelection.value = ''
       requestDocumentId.value = 0
-      await loadTransferContext()
-      if (catalogError.value) throw new Error(catalogError.value)
-      if (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)) throw new Error('原调出方当前不可选，请手工新建。')
-      if (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value)) throw new Error('原调入方当前不可选，请手工新建。')
+      if (transferSourceSelection.value) await loadTransferContext()
+      transferTargetSelection.value = transferTargetOptions.value.some((item) => item.key === originalTarget) ? originalTarget : ''
+      if (transferTargetSelection.value) await loadTransferStaffs()
     } else if (kind === 'usage') {
       if (document.operation_type !== 'ISSUE') throw new Error('退回单不能复制为领用单。')
       usageRemark.value = String(document.remark || '')
@@ -599,11 +602,15 @@ watch(() => props.detail, async (detail) => {
       usageProjectKeyword.value = usageProjectId.value ? usageProjectName.value : ''
       if (isPlatformHeadquarters.value) {
         const key = Number(document.store_id) > 0 ? `STORE:${Number(document.store_id)}` : `HQ:${Number(document.location_id)}`
-        if (!usageWarehouseOptions.value.some((item) => item.key === key)) throw new Error('原领用仓库当前不可选，请手工新建。')
-        usageWarehouseSelection.value = key
+        usageWarehouseSelection.value = usageWarehouseOptions.value.some((item) => item.key === key) ? key : ''
       }
-      await loadUsageProjects()
-      if (usageProjectId.value && !usageProjects.value.some((item) => Number(item.id) === Number(usageProjectId.value))) throw new Error('原核销项目当前不可选，请手工新建。')
+      if (!isPlatformHeadquarters.value || usageWarehouseSelection.value) await loadUsageProjects()
+      else usageProjects.value = []
+      if (usageProjectId.value && !usageProjects.value.some((item) => Number(item.id) === Number(usageProjectId.value))) {
+        usageProjectId.value = ''
+        usageProjectName.value = ''
+        usageProjectKeyword.value = ''
+      }
     }
     selectedRows.value = copied
     catalogError.value = ''
@@ -979,15 +986,15 @@ async function onRequestPartyChanged(value) {
   supplyPartySelection.value = ''
   requesterSelection.value = ''
   requesterOptions.value = []
-  selectedRows.value = []
+  if (!isCopy.value) selectedRows.value = []
   await loadSupplyParties()
   await loadRequester()
 }
 
 function onSupplyPartyChanged(value) {
   supplyPartySelection.value = String(value || '')
-  // 已选商品的库存属于原供货方；切换后要求从新供货方库存重新选择。
-  selectedRows.value = []
+  // 普通新建切换供货方需重新选品；复制单据保留需求明细，提交时由后端重查新供货方。
+  if (!isCopy.value) selectedRows.value = []
 }
 
 async function loadTransferContext() {
@@ -1019,7 +1026,7 @@ async function loadTransferContext() {
       incomingRequests.value = []
       catalogError.value = error instanceof Error ? `关联请货单读取失败：${error.message}` : '关联请货单读取失败。'
     }
-    if (isPlatformHeadquarters.value && !transferSourceSelection.value) transferSourceSelection.value = 'HQ:0'
+    if (isPlatformHeadquarters.value && !transferSourceSelection.value && !isCopy.value) transferSourceSelection.value = 'HQ:0'
     await loadTransferStaffs()
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '跨门店调拨对象读取失败。' }
 }
@@ -1044,13 +1051,13 @@ async function loadTransferStaffs() {
 }
 
 function onTransferSourceChanged(value) {
-  transferSourceSelection.value = String(value || 'HQ:0')
+  transferSourceSelection.value = String(value || (isCopy.value ? '' : 'HQ:0'))
   requestDocumentId.value = 0
   transferTargetSelection.value = ''
   transferStaffOptions.value = []
   transferStaffId.value = 0
-  selectedRows.value = []
-  if (props.pageKey === 'transfer') loadTransferContext()
+  if (!isCopy.value) selectedRows.value = []
+  if (props.pageKey === 'transfer' && transferSourceSelection.value) loadTransferContext()
 }
 
 function onTransferTargetChanged(value) {
@@ -1343,6 +1350,7 @@ function transferIdempotencyKey() { return typeof crypto !== 'undefined' && type
 async function submitTransfer() {
   const target = selectedTransferTarget()
   if (submitting.value || props.pageKey !== 'transfer' || !selectedRows.value.length || !['STORE', 'HQ'].includes(target.type) || (target.type === 'STORE' && target.id <= 0)) return
+  if (isCopy.value && (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value) || (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)))) return
   submitting.value = true; submitError.value = ''
   try {
     // A failed shortcut lookup must never submit an unrelated manual transfer.

@@ -37,7 +37,15 @@ test('调拨复制原申请量，不带请货关联与批次分配', () => {
   assert.equal('allocations' in rows[0], false)
 })
 
-test('无商品身份或明细时阻止新单复制', () => {
+test('无明细时阻止复制，单行无效时只略过该行且入库成本仍对应原行', () => {
   assert.throws(() => documentCopyLines('outbound', { lines: [] }), /商品明细/)
-  assert.throws(() => documentCopyLines('outbound', { lines: [{ ...line(), sku_id: 0 }] }), /无法复制/)
+  assert.deepEqual(documentCopyLines('outbound', { lines: [{ ...line(), sku_id: 0 }] }), [])
+  const rows = documentCopyLines('inbound', { lines: [{ ...line(), sku_id: 0 }, { ...line(), sku_id: 22, sku_unique: 'sku-22', unit_cost_cents: 4500, batch_no: 'B2' }] })
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].sku_id, rows[0].unit_cost, rows[0].batch_no], [22, '45', 'B2'])
+  for (const kind of ['outbound', 'usage', 'transfer']) {
+    const valid = kind === 'transfer' ? { ...line(), from_product_id: 11, from_sku_id: 21, from_sku_unique: 'sku-21', requested_quantity_units: 2 } : line()
+    const invalid = kind === 'transfer' ? { ...valid, from_sku_id: 0 } : { ...valid, sku_id: 0 }
+    assert.equal(documentCopyLines(kind, { lines: [invalid, valid] }).length, 1, `${kind}须保留有效明细`)
+  }
 })
