@@ -9,6 +9,7 @@ import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorks
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 import { formatBatchNumber } from '../batchNumberDisplay.js'
+import { requestReopenDraft } from '../requestReopenDraft.js'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -122,6 +123,7 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
+const isRequestReopen = computed(() => props.modalKind === 'request-reopen')
 const isTransferEdit = computed(() => props.modalKind === 'transfer-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
@@ -206,6 +208,7 @@ const title = computed(() => {
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
   if (isRequestEdit.value) return '编辑请货单'
+  if (isRequestReopen.value) return '重开请货单'
   if (isTransferEdit.value) return '编辑调拨草稿'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
@@ -442,6 +445,25 @@ async function hydrateRequestEditor(detail) {
   }))
   requestEditIdempotencyKey.value = newRequestIdempotencyKey()
   await loadSupplyParties()
+}
+
+/** 作废单只提供新建表单的业务初值；日期、请货人、单号和幂等键均重新生成。 */
+function seedReopenedRequest() {
+  if (!isRequestReopen.value) return
+  try {
+    const draft = requestReopenDraft(props.detail)
+    if (!supplyParties.value.some((party) => party.key === draft.supplyParty)) {
+      throw new Error('原供货方当前不可选，请核对授权和仓库状态后重新新建。')
+    }
+    supplyPartySelection.value = draft.supplyParty
+    requestRemark.value = draft.remark
+    selectedRows.value = draft.lines
+    catalogError.value = ''
+  } catch (error) {
+    supplyPartySelection.value = ''
+    selectedRows.value = []
+    catalogError.value = error instanceof Error ? error.message : '重开请货单失败。'
+  }
 }
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
@@ -858,15 +880,27 @@ async function loadRequester() {
   }
 }
 
-watch(() => [props.pageKey, props.mode, props.hqLocationId], () => { if (isPlatformHeadquarters.value) loadRequestParties(); else { loadSupplyParties(); loadRequester() } }, { immediate: true })
+watch(() => [props.pageKey, props.mode, props.hqLocationId], async () => {
+  if (isPlatformHeadquarters.value) await loadRequestParties()
+  else {
+    await Promise.all([loadSupplyParties(), loadRequester()])
+    seedReopenedRequest()
+  }
+}, { immediate: true })
 
 async function loadRequestParties() {
   if (props.pageKey !== 'request' || !isPlatformHeadquarters.value || Number(commandHqLocationId.value) <= 0) return
   try {
     const response = await platformInventoryApi.hqRequestParties({ hq_location_id: Number(commandHqLocationId.value) })
     requestPartyOptions.value = Array.isArray(response?.list) ? response.list : []
-    requestPartySelection.value = String(response?.default || requestPartyOptions.value[0]?.key || 'HQ:0')
+    const sourceParty = isRequestReopen.value ? requestReopenDraft(props.detail).requestParty : ''
+    if (sourceParty && !requestPartyOptions.value.some((party) => party.key === sourceParty)) {
+      catalogError.value = '原请货方当前不可选，请核对授权后重新新建。'
+      return
+    }
+    requestPartySelection.value = sourceParty || String(response?.default || requestPartyOptions.value[0]?.key || 'HQ:0')
     await onRequestPartyChanged(requestPartySelection.value)
+    seedReopenedRequest()
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '请货方目录读取失败。' }
 }
 

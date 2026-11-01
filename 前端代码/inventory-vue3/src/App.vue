@@ -19,6 +19,7 @@ import { formatBatchNumber } from './batchNumberDisplay'
 import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
 import { createDocumentDetailReader } from './documentDetailReader'
+import { canReopenRequestForScope } from './requestReopenDraft'
 import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'
 import { inventoryStatusLabel } from './statusLabels'
 import { platformTransferQueryScope } from './transferQueryScope'
@@ -1030,6 +1031,26 @@ async function openRequestDetail(row) {
     editor.value = 'request-detail'
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '请货详情读取失败。'
+  }
+}
+
+/** 门店读列表同时含本店请货与本店供货；只有请货仓属于当前门店时才能复制为本店新单。 */
+function canReopenRequest(row) {
+  return active.value === 'request' && canReopenRequestForScope(row, mode.value, storeLocations.value)
+}
+
+/** 重开只取当前授权范围内的作废原单作为表单初值；新单仍由新建命令生成，原单不变。 */
+async function reopenRequest(row) {
+  if (!canReopenRequest(row)) return
+  try {
+    const detail = await currentDocumentDetailReader()('request', row)
+    if (detail?.document?.document_status !== 'VOIDED' || !Array.isArray(detail.lines) || !detail.lines.length) {
+      throw new Error('原请货单状态或商品明细已变化，请刷新列表后重试。')
+    }
+    selectedDetail.value = detail
+    editor.value = 'request-reopen'
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : '重开请货单失败。'
   }
 }
 
@@ -2357,6 +2378,7 @@ onBeforeUnmount(() => {
                     <label v-if="active === 'transfer' && (sourceRows[index].can_delete || sourceRows[index].can_dispatch || sourceRows[index].can_withdraw)" class="inventory-group-select"><input type="checkbox" :checked="selectedTransferIds.includes(Number(sourceRows[index].id))" :disabled="transferBatchPreparing || transferActionSubmitting" :aria-label="`选择调拨单 ${sourceRows[index].order_sn || sourceRows[index].id}`" @change="toggleTransferSelection(sourceRows[index])" /></label>
                     <span v-for="(cell, cellIndex) in row" :key="cellIndex"><strong>{{ currentPage.columns[cellIndex] }}：</strong><b>{{ cell }}</b></span>
                     <span class="inventory-group-line__actions">
+                      <button v-if="canReopenRequest(sourceRows[index])" class="text-button" @click="reopenRequest(sourceRows[index])">重开</button>
                       <button class="text-button" @click="openGroupedRowDetail(active, sourceRows[index])">查看</button>
                       <button v-if="!platformReadScopeMode && groupedDetails[groupedDetailKey(sourceRows[index])]?.detail?.remark_editable" class="text-button" @click="openRemarkEditor(active, sourceRows[index])">编辑备注</button>
                       <button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button>
