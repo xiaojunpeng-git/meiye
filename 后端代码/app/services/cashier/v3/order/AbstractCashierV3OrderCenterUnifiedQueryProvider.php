@@ -334,6 +334,11 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 'fields' => array_values(array_unique(array_map('strval', $fieldKeys))),
             ],
         ];
+        // Worker context 已取创建时组织范围与当前权限的交集；将它传给同一个
+        // 领域 Reader，使分页和全量导出均不扩大到管理员的其他门店。
+        if (array_key_exists('visible_store_ids', $context) && $context['visible_store_ids'] !== null) {
+            $query['storeIds'] = $context['visible_store_ids'];
+        }
         $request = clone $this;
         $definitions = (array)($plan['custom_definitions'] ?? []);
         // 当前页导出与列表使用同一个数据库分页 Reader；不能为了导出 20 行先加载
@@ -345,6 +350,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             $direct = $request->directOrdinaryPage($pageQuery, $definitions, $operatorScope, $dataScope);
             if ($direct !== null) {
                 // Reader 已选定目标页；执行器只投影导出字段，不能再对第 2 页重复偏移。
+                unset($query['storeIds']);
                 $query['page'] = 1;
                 $query['export']['scope'] = 'query';
                 return $request->execution->execute(

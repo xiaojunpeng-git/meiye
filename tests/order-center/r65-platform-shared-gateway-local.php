@@ -77,6 +77,30 @@ try {
  $zip=new ZipArchive();$zip->open($salesPath);$sheet=$zip->getFromName('xl/worksheets/sheet1.xml');$zip->close();
  $salesPage=$invoke('query-sales-orders',['businessDateFrom'=>'2026-10-01','businessDateTo'=>'2026-10-31','page'=>2,'pageSize'=>20]);
  check(substr_count($sheet,'<row ')===21,'XLSX contains header and exactly 20 second-page records');
+ // 平台实际组织筛选必须冻结到任务，文件不可混入其他门店。
+ $selectedStore=(int)Db::name('user_recharge')->where('id',(int)($list['data']['orderCenter']['recordsByType']['recharge'][0]['rechargeId'] ?? 0))->value('store_id');
+ check($selectedStore>0,'select October recharge store from actual query');
+ $scopedCap=$invoke('query-unified-query-capabilities',['pageCode'=>'order_center_recharge']);
+ foreach($scopedCap['versions'] as $v)if($v['kind']==='query_preference')$scopedVersion=$v['version'];
+ $scoped=$payload;$scoped['query']['storeIds']=[$selectedStore];
+ $scoped['fields']=['recharge_order_no','store'];
+ $scoped['command']['idempotencyKey']='CMD-9ec0ea15-9116-4e12-9a12-a8ea3b3c7f85';
+ $scoped['command']['contexts'][0]['expectedVersion']=$scopedVersion;
+ $scopeExport=$invoke('create-unified-query-export',$scoped);
+ check(($scopeExport['result']['status']??'')==='success','organization-filtered export command accepted');
+ $scopeTask=$scopeExport['data']['exportTask']['taskId'];
+ $saved=Db::name('unified_query_export_task')->where('task_no',$scopeTask)->find();
+ $frozen=json_decode($saved['frozen_scope'],true);
+ check(!$frozen['all_stores'] && $frozen['visible_store_ids']===[$selectedStore],'selected organization stores frozen exactly');
+ $scopeDone=$worker->processOne($scopeTask);
+ check(($scopeDone['status']??'')==='succeeded' && ($scopeDone['rowCount']??0)>0,'organization-filtered export worker succeeds: '.json_encode($scopeDone,JSON_UNESCAPED_UNICODE));
+ $sd=$runtime['exports']->resolveDownloadDescriptor($context,$scopeTask);
+ $sp=UnifiedQueryModule::runtime()['exportStorage']->absolutePath($sd['storageKey']);$files[]=$sp;
+ $zip=new ZipArchive();$zip->open($sp);$sx=$zip->getFromName('xl/worksheets/sheet1.xml').$zip->getFromName('xl/sharedStrings.xml');$zip->close();
+ check(strpos($sx,(string)Db::name('system_store')->where('id',$selectedStore)->value('name'))!==false,'XLSX contains selected store');
+ foreach(Db::name('system_store')->where('id','<>',$selectedStore)->column('name') as $otherName){
+  if($otherName && $otherName!==Db::name('system_store')->where('id',$selectedStore)->value('name'))check(strpos($sx,'>'.$otherName.'<')===false,'XLSX excludes other store '.$otherName);
+ }
  Db::name('system_admin')->where('id',$admin['id'])->update(['status'=>0]);
  $disabled=$invoke('query-unified-query-capabilities',['pageCode'=>'order_center_recharge']);
  check(($disabled['result']['status']??'')==='failed','disabled login remains rejected');

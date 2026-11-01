@@ -193,6 +193,25 @@ class UnifiedQueryExportTaskServices
                 ]
             );
         }
+        // 组织选择器是订单查询的范围条件。冻结与列表相同的门店交集，
+        // 不把客户端筛选值当作授权，也不能丢弃它后导出全部组织。
+        if (in_array($pageCode, \app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE, true)
+            && array_key_exists('storeIds', (array)($payload['query'] ?? []))) {
+            $requested = $payload['query']['storeIds'];
+            unset($payload['query']['storeIds']);
+            if ($requested !== null) {
+                if (!is_array($requested) || !$this->isList($requested) || count($requested) > UnifiedQueryContextFactory::MAX_SCOPE_IDS) {
+                    throw new UnifiedQueryException('UNIFIED_QUERY_REQUEST_INVALID', '组织筛选范围无效，请重新选择。', []);
+                }
+                foreach ($requested as $id) {
+                    if (!is_int($id) || $id <= 0) throw new UnifiedQueryException('UNIFIED_QUERY_REQUEST_INVALID', '组织筛选范围无效，请重新选择。', []);
+                }
+                $requested = array_values(array_unique($requested));
+                $context['visible_store_ids'] = !empty($context['all_stores']) ? $requested
+                    : array_values(array_intersect($requested, (array)$context['visible_store_ids']));
+                $context['all_stores'] = false;
+            }
+        }
         $scopeDimensions = $this->registry->normalizeScopeDimensions(
             $pageCode,
             $context['scope_dimensions'] ?? []

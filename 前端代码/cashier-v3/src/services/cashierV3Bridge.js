@@ -2854,7 +2854,9 @@ function resolveCommandContexts(action, payload) {
   const suppliedContexts = Array.isArray(payload.commandContexts) ? payload.commandContexts : []
 
   if (suppliedContexts.length) {
-    const currentContextId = stateContextIdOf(cashierV3State)
+    // 平台订单页保留自身页面状态，使用已绑定响应签发的上下文版本仓。
+    const currentContextId = window.__CASHIER_V3_ADAPTER__?.platformOrderContext === true
+      ? currentPublicVersionContextId() : stateContextIdOf(cashierV3State)
     if (!currentContextId) {
       return { invalid: true, contexts: [] }
     }
@@ -3304,7 +3306,10 @@ function applyCashierV3EnvelopeState(rawResult, requestMeta = {}, options = {}) 
     // 时仍整包拒绝 versions，绝不把跨工作台版本合并进当前会话。
     if (Array.isArray(response?.versions)) {
       const responseContextId = String(response.stateContextId || stateContextIdOf(response.state) || '')
-      const requestContextId = String(requestMeta?.stateContextId || stateContextIdOf(cashierV3State) || '')
+      // 平台没有收银根状态；action/correlation/幂等绑定已在上方验证，
+      // 可接纳同一后台会话由服务端签发的版本，不接受调用方自填版本。
+      const requestContextId = requestMeta.platformOrderContext === true
+        ? responseContextId : String(requestMeta?.stateContextId || stateContextIdOf(cashierV3State) || '')
       if (responseContextId && requestContextId && responseContextId === requestContextId) {
         mergeCashierV3PublicVersions(response.versions, responseContextId, {
           requestStateContextId: requestContextId
@@ -3766,6 +3771,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     requireIdempotencyBinding: !readOnly,
     correlationId,
     requireCorrelationBinding: true,
+    platformOrderContext,
     preserveRootState: platformOrderContext || preserveRootState === true || independentRechargeCheckoutAction,
     stateContextId: platformOrderContext ? '' : stateContextIdOf(cashierV3State) || '',
     requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction) && Boolean(originalResultKey),
