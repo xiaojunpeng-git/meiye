@@ -17,7 +17,7 @@ admin=out/'release-admin';shutil.copytree(admin/'view_admin',payload/'public/vie
 shutil.copy2(admin/'system.html',payload/'public/system.html')
 for f in ('public/system.html','public/view_cashier_v3/index.html'):
  (payload/(f+'.gz')).write_bytes(gzip.compress((payload/f).read_bytes(),mtime=0))
-expected=json.loads((out/(site+'-before.json')).read_text()); new={str(p.relative_to(payload)):sha(p.read_bytes()) for p in payload.rglob('*') if p.is_file()}
+expected=json.loads((out/(site+'-before.json')).read_text()); new={str(p.relative_to(payload)):sha(p.read_bytes()) for p in payload.rglob('*') if p.is_file() and p.name != 'release-manifest.json'}
 manifest={'commit':commit,'tree':m['candidateTree'],'files':new};(payload/'release-manifest.json').write_text(json.dumps(manifest,indent=2))
 archive=out/'payload.tar.gz'
 with tarfile.open(archive,'w:gz') as t:
@@ -43,7 +43,7 @@ stage=backup+'/stage';db={'rh':'ruihao','008':'mohe_008','010':'mohe_010_app'}[s
 checks='\n'.join('test "$(sha256sum '+q(stage+'/'+f)+" | cut -d' ' -f1)\" = "+q(h) for f,h in new.items())
 backend=[f for f in new if not f.startswith('public/')]
 newpaths=[f for f in backend+['public/system.html.gz','public/view_cashier_v3/index.html.gz'] if expected.get(f) is None]
-rollback='rollback(){ set +e; tar -xzf '+q(backup+'/before.tar.gz')+' -C '+q(root)+'; '+'; '.join('rm -f '+q(root+'/'+f) for f in newpaths)+'; '+restart+'; }; trap rollback ERR\n'
+rollback='rollback(){ set +e; '+ '; '.join(['tar -xzf '+q(backup+'/before.tar.gz')+' -C '+q(root)]+['rm -f '+q(root+'/'+f) for f in newpaths]+[restart])+'; }; trap rollback ERR\n'
 commands='set -euo pipefail\n'+check+'\ntest "$(sha256sum '+q(backup+'/payload.tar.gz')+" | cut -d' ' -f1)\" = "+q(sha(archive.read_bytes()))+'\ntar -xzf '+q(backup+'/payload.tar.gz')+' -C '+q(stage)+'\n'+checks+'\n'
 commands+='\n'.join('/www/server/php/74/bin/php -l '+q(stage+'/'+f)+' >/dev/null' for f in backend if f.endswith('.php'))+'\n'
 commands+='/www/server/php/74/bin/php '+q(backup+'/indexes.php')+' '+q(root)+' '+q(stage+'/database/upgrades/20261101_r63_order_center_global_date_index.sql')+' '+q(db)+'\n'+rollback
@@ -52,6 +52,7 @@ ordered=sorted(new,key=lambda f:2 if f in ('public/system.html','public/system.h
 for f in ordered:
  commands+='mkdir -p '+q(str(pathlib.PurePosixPath(root+'/'+f).parent))+'\ninstall -m 0644 '+q(stage+'/'+f)+' '+q(root+'/'+f+'.r66-new')+'\nchown www:www '+q(root+'/'+f+'.r66-new')+'\nmv -f '+q(root+'/'+f+'.r66-new')+' '+q(root+'/'+f)+'\n'
 commands+=restart+'\n'+health+'\ntrap - ERR\necho SWITCH_OK\n'
+subprocess.run(['bash','-n'],input=commands.encode(),check=True)
 result=ssh(commands)
 (out/(site+'-deploy.json')).write_text(json.dumps({'site':site,'commit':commit,'backup':backup,'files':len(new),'result':result},ensure_ascii=False,indent=2))
 print(json.dumps({'site':site,'commit':commit,'backup':backup,'result':result[-500:]},ensure_ascii=False))
