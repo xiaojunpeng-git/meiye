@@ -22,8 +22,8 @@
 						<view v-if="details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
 						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
-							<!-- Contact and service labels are supplied from the authorized server detail, never inferred from the rendered order number. -->
-							<view class="employee-performance__detail-member"><text>会员：{{ item.isGuest ? '游客' : (item.memberName || '—') }}{{ item.serviceObject ? ' [' + item.serviceObject + ']' : '' }}</text><text>手机：{{ item.memberPhone || '—' }}</text></view>
+							<!-- Older guest facts may omit isGuest; an empty saved member name still reads as 游客, never as a member placeholder. -->
+							<view class="employee-performance__detail-member"><text>会员：{{ item.isGuest || !item.memberName || item.memberName === '—' ? '游客' : item.memberName }}{{ item.serviceObject ? ' [' + item.serviceObject + ']' : '' }}</text><text>手机：{{ item.memberPhone || '—' }}</text></view>
 							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">{{ item.isRecharge ? '充值' : '商品名称：' + (item.itemName || '—') }}</text><text class="employee-performance__detail-amount">{{ item.isRecharge ? '充值金额：' + (item.displayRechargeAmount || '—') : detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
 							<view v-if="detailMode === 'labor' && (item.serviceQuantity || item.displayProjectCount)" class="employee-performance__detail-member"><text>核销数量：{{ item.serviceQuantity || '—' }}</text><text>项目数：{{ item.displayProjectCount || '—' }}</text></view>
 							<view v-if="detailMode === 'labor' && item.participants" class="employee-performance__detail-service"><text>参与：{{ item.participants }}</text></view>
