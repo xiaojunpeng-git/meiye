@@ -1,8 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
+import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
+import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
+import { guideRequiredField, REQUIRED_FIELD_GUIDANCE_EVENT, REQUIRED_FIELD_GUIDANCE_DURATION_MS } from '@/services/requiredFieldGuidance'
+import { memberDetailActionAllowed } from '@/services/memberDetailActionPolicy'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import { orderRecordTypeLabel, orderRecordTypeVisible } from '@/constants/orderRecordTypes'
@@ -62,6 +66,13 @@ const serviceCraftsmanReason = ref('')
 const serviceCraftsmanError = ref('')
 const serviceCraftsmanSubmitting = ref(false)
 const serviceCraftsmanCommandIds = ref({})
+// 平台入口不挂载门店壳层；同一会员详情组件由本页承接，读取仍走共用权限接口。
+const platformMemberDetail = ref(null)
+const platformMemberDetailId = ref('')
+const platformMemberDetailOpen = ref(false)
+const platformMemberDetailLoading = ref(false)
+const platformMemberDetailError = ref('')
+let platformMemberDetailSequence = 0
 const salesPersonnelEntry = ref(null)
 const salesPersonnelTarget = ref(null)
 const salesPersonnelEditorOpen = ref(false)
@@ -114,6 +125,17 @@ const salesOrderNoteValue = ref('')
 const salesOrderNoteError = ref('')
 const salesOrderNoteSubmitting = ref(false)
 const salesOrderNoteCommandIds = ref({})
+// 正式收款更正只提交方式代码和原因；金额始终由服务端原收款事实提供。
+const paymentMethodEditor = ref(null)
+const paymentMethodEntry = ref(null)
+const paymentMethodSelection = ref('')
+const paymentMethodReason = ref('')
+const paymentMethodError = ref('')
+const paymentMethodLoading = ref(false)
+const paymentMethodSubmitting = ref(false)
+const paymentMethodCommandIds = ref({})
+const paymentMethodGuidance = ref({ target: '', message: '' })
+let paymentMethodGuidanceTimer = 0
 const salesDetailFocus = ref({ lifecycleAction: '', personnelRole: '', personnelLineId: '' })
 const salesDetailActionOnly = ref(false)
 // 归属更正仅更新业务日／来源，实际发生与收款时间保持只读；后端再次校验门店、权限和旧值。
@@ -1448,9 +1470,95 @@ function canOpenMemberDetail(record) {
 function openMemberDetail(record) {
   const payload = memberDetailPayload(record)
   if (!payload) return
+  if (isPlatformContext.value) {
+    openPlatformMemberDetail(payload)
+    return
+  }
   // Member detail remains owned by the shell so every entry loads the same
   // authorization-scoped detail projection and tab contract.
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', { detail: payload }))
+}
+
+async function loadPlatformMemberDetail(query = {}) {
+  const memberId = String(query.memberId || platformMemberDetailId.value || '')
+  if (!platformMemberDetailOpen.value || memberId !== platformMemberDetailId.value) return
+  const sequence = ++platformMemberDetailSequence
+  platformMemberDetailLoading.value = true
+  platformMemberDetailError.value = ''
+  try {
+    const result = await requestAction('load-member-detail-tab', {
+      memberId: Number(memberId),
+      tab: String(query.tab || 'profile'),
+      keyword: String(query.keyword || ''),
+      status: String(query.status || ''),
+      dateFrom: String(query.dateFrom || ''),
+      dateTo: String(query.dateTo || '')
+    })
+    if (sequence !== platformMemberDetailSequence || !platformMemberDetailOpen.value) return
+    const detail = actionData(result).detail
+    const returnedId = firstValue(detail?.member || detail || {}, ['memberId', 'id', 'uid'])
+    if (!['success', 'succeeded'].includes(String(actionStatus(result))) || !detail || String(returnedId || '') !== memberId) {
+      platformMemberDetailError.value = result?.result?.message || result?.data?.result?.message || '会员详情读取失败，请重试。'
+      return
+    }
+    platformMemberDetail.value = detail
+  } catch (error) {
+    if (sequence === platformMemberDetailSequence) platformMemberDetailError.value = error?.message || '会员详情读取失败，请重试。'
+  } finally {
+    if (sequence === platformMemberDetailSequence) platformMemberDetailLoading.value = false
+  }
+}
+
+function openPlatformMemberDetail(payload) {
+  // 仅凭订单行的会员 ID 打开当前会员；资料与页签以服务端最新权限投影为准。
+  platformMemberDetailId.value = String(payload.memberId)
+  platformMemberDetail.value = { member: payload.member }
+  platformMemberDetailOpen.value = true
+  void loadPlatformMemberDetail({ memberId: payload.memberId, tab: 'profile' })
+}
+
+function closePlatformMemberDetail() {
+  platformMemberDetailSequence++
+  platformMemberDetailOpen.value = false
+  platformMemberDetail.value = null
+  platformMemberDetailId.value = ''
+  platformMemberDetailLoading.value = false
+  platformMemberDetailError.value = ''
+}
+
+async function handlePlatformMemberDetailAction(payload = {}) {
+  const action = payload.action?.code || payload.action?.action || payload.actionCode
+  const scope = String(payload.scope || '')
+  const memberId = platformMemberDetailId.value
+  if (!memberDetailActionAllowed(scope, action)) {
+    return { result: { status: 'failed', code: 'MEMBER_DETAIL_ACTION_NOT_ALLOWED', message: '该会员操作未进入前端允许清单。' } }
+  }
+  if (!platformMemberDetailOpen.value || !memberId || (payload.memberId && String(payload.memberId) !== memberId)) {
+    return { result: { status: 'failed', code: 'MEMBER_DETAIL_CONTEXT_MISMATCH', message: '会员详情已经变化，请重新打开后操作。' } }
+  }
+  if (scope === 'card' && action === 'query-member-card-history') {
+    return requestAction(action, { memberId: Number(memberId), holderId: Number(payload.record?.id || 0), page: Number(payload.page || 1) })
+  }
+  if (action === 'open-sales-order-detail') {
+    const orderId = payload.record?.orderId || payload.record?.salesOrderId || payload.record?.id
+    if (!orderId) return { result: { status: 'failed', code: 'SALES_ORDER_ID_MISSING', message: '销售订单标识尚未加载，请刷新会员详情后重试。' } }
+    const result = await openSalesOrderDetail({ orderId })
+    if (!['success', 'succeeded'].includes(String(actionStatus(result))) || salesDetailLoadError.value) {
+      const message = salesDetailLoadError.value || result?.result?.message || result?.data?.result?.message || '销售订单详情读取失败。'
+      closeSalesDetail()
+      return { result: { status: 'failed', code: 'SALES_ORDER_DETAIL_READ_FAILED', message } }
+    }
+    closePlatformMemberDetail()
+    return result
+  }
+  // 两个入口使用同一动作和后端对象权限；详情壳只传当前会员与当前记录身份。
+  return requestAction(action, {
+    memberId: Number(memberId),
+    detailScope: scope,
+    detailTab: payload.activeTab,
+    relatedRecordId: payload.record?.id || payload.record?.recordId || null,
+    relatedContentId: payload.content?.id || payload.content?.recordId || null
+  })
 }
 
 function statusClass(value) {
@@ -2633,6 +2741,111 @@ function orderPaymentDetails(record) {
     : []
 }
 
+function canCorrectSalesPaymentMethod(record, payment) {
+  return recordType(record) === 'sales' && !record?.entitlementOnly
+    && payment?.id && canUseCashierV3Feature('cashier.v3.order_center')
+    && salesOrderActionAvailable(record, 'correct-sales-payment-method')
+    && !['other_collection', 'old_card_entry', 'member_balance'].includes(String(payment.paymentMethodCode || ''))
+}
+
+async function openSalesPaymentMethodEditor(record, payment) {
+  if (!canCorrectSalesPaymentMethod(record, payment)) return
+  const orderId = salesOrderLifecycleId(record)
+  if (!orderId) return
+  paymentMethodEditor.value = { orderId, collectionId: String(payment.id), orderNo: String(record.orderNo || record.order_no || '') }
+  paymentMethodEntry.value = null
+  paymentMethodSelection.value = String(payment.paymentMethodCode || '')
+  paymentMethodReason.value = ''
+  paymentMethodError.value = ''
+  paymentMethodLoading.value = true
+  try {
+    const result = await requestAction('open-sales-payment-method-correction', { orderId, collectionId: String(payment.id) })
+    const entry = actionData(result).paymentMethodCorrection
+    if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
+      paymentMethodError.value = result?.result?.message || result?.data?.result?.message || '记账收款读取失败，请刷新后重试。'
+      return
+    }
+    const current = (entry.payments || []).find((item) => String(item.id) === String(payment.id))
+    if (!current?.editable) {
+      paymentMethodError.value = '该笔收款已不可更正，请刷新列表。'
+      return
+    }
+    paymentMethodEntry.value = { ...entry, current }
+    paymentMethodSelection.value = String(current.paymentMethodCode)
+  } catch (error) {
+    paymentMethodError.value = error?.message || '记账收款读取失败，请重试。'
+  } finally {
+    paymentMethodLoading.value = false
+  }
+}
+
+function closeSalesPaymentMethodEditor() {
+  if (paymentMethodSubmitting.value) return
+  clearPaymentMethodGuidance()
+  paymentMethodEditor.value = null
+  paymentMethodEntry.value = null
+  paymentMethodError.value = ''
+}
+
+function clearPaymentMethodGuidance() {
+  if (paymentMethodGuidanceTimer) window.clearTimeout(paymentMethodGuidanceTimer)
+  paymentMethodGuidanceTimer = 0
+  paymentMethodGuidance.value = { target: '', message: '' }
+}
+
+async function focusPaymentMethodRequiredField(event) {
+  const target = String(event?.detail?.target || '')
+  if (!paymentMethodEditor.value || !['payment-method-correction-select', 'payment-method-correction-reason'].includes(target)) return
+  clearPaymentMethodGuidance()
+  paymentMethodGuidance.value = { target, message: String(event.detail.message || '请完成此必填项') }
+  await nextTick()
+  const control = document.getElementById(target)
+  control?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  control?.focus({ preventScroll: true })
+  paymentMethodGuidanceTimer = window.setTimeout(clearPaymentMethodGuidance, REQUIRED_FIELD_GUIDANCE_DURATION_MS)
+}
+
+async function submitSalesPaymentMethod() {
+  const editor = paymentMethodEditor.value
+  const current = paymentMethodEntry.value?.current
+  if (!editor || !current || paymentMethodSubmitting.value) return
+  const next = String(paymentMethodSelection.value || '')
+  const reason = String(paymentMethodReason.value || '').trim()
+  if (!next || next === current.paymentMethodCode || !paymentMethodEntry.value.methods?.some((method) => method.code === next)) {
+    guideRequiredField({ target: 'payment-method-correction-select', message: '请在这里选择新的收款方式' })
+    return
+  }
+  if (!reason) {
+    guideRequiredField({ target: 'payment-method-correction-reason', message: '请在这里填写更正原因' })
+    return
+  }
+  if (reason.length > 255) { paymentMethodError.value = '更正原因不能超过255字。'; return }
+  const key = `${editor.orderId}:${editor.collectionId}:${current.paymentMethodCode}:${next}:${reason}`
+  const idempotencyKey = paymentMethodCommandIds.value[key] || createCashierV3CommandId()
+  paymentMethodCommandIds.value = { ...paymentMethodCommandIds.value, [key]: idempotencyKey }
+  paymentMethodSubmitting.value = true
+  paymentMethodError.value = ''
+  try {
+    const result = await requestAction('correct-sales-payment-method', {
+      orderId: editor.orderId, collectionId: editor.collectionId,
+      expectedMethod: current.paymentMethodCode, paymentMethod: next, reason, idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) paymentMethodCommandIds.value = { ...paymentMethodCommandIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      paymentMethodSubmitting.value = false
+      closeSalesPaymentMethodEditor()
+      await queryRecords({}, true)
+      return
+    }
+    paymentMethodError.value = result?.result?.message || result?.data?.result?.message || '收款方式更正失败，请重试。'
+  } catch (error) {
+    paymentMethodError.value = error?.message || '收款方式更正失败，请重试。'
+  } finally {
+    paymentMethodSubmitting.value = false
+  }
+}
+
 function applyQuerySettings(settings = {}) {
   querySettings.value = settings && typeof settings === 'object' ? { ...settings } : {}
 }
@@ -2806,6 +3019,8 @@ async function loadPlatformOrderScope() {
 }
 
 function changePlatformOrderScope({ storeIds = [], label = '当前权限范围' } = {}) {
+  // 组织范围改变后撤销旧会员详情及在途请求，避免保留上一范围的资料。
+  closePlatformMemberDetail()
   const allowed = new Set(platformScopePicker.value.allowedStoreIds.map(Number).filter(Boolean))
   platformScopeStoreIds.value = [...new Set(storeIds.map(Number).filter((id) => allowed.has(id)))]
   platformScopePicker.value = {
@@ -3262,7 +3477,11 @@ async function openServiceCraftsmanAdjustment(record) {
       return
     }
     const recordVersion = Number(entry.recordVersion)
-    const stateContextId = String(state.stateContextId || '')
+    // 平台订单页保留独立页面状态；其版本上下文来自已校验的动作响应，
+    // 门店订单页仍使用当前收银工作台上下文，不能跨两种入口混用。
+    const stateContextId = String(isPlatformContext.value
+      ? result?.stateContextId || result?.data?.stateContextId || ''
+      : state.stateContextId || '')
     if (!Number.isSafeInteger(recordVersion) || recordVersion <= 0 || !stateContextId) {
       serviceCraftsmanError.value = '服务记录版本读取失败，请刷新后重新打开。'
       return
@@ -3766,6 +3985,7 @@ async function handleSalesOrderDetailAction(payload = {}) {
 }
 
 function resetLocalContext() {
+  closePlatformMemberDetail()
   salesQuerySequence++
   salesDetailSequence++
   recordQuerySequence++
@@ -3798,12 +4018,22 @@ function resetLocalContext() {
   salesOrderNoteError.value = ''
   salesOrderNoteSubmitting.value = false
   salesOrderNoteCommandIds.value = {}
+  paymentMethodEditor.value = null
+  paymentMethodEntry.value = null
+  paymentMethodSelection.value = ''
+  paymentMethodReason.value = ''
+  paymentMethodError.value = ''
+  paymentMethodLoading.value = false
+  paymentMethodSubmitting.value = false
+  paymentMethodCommandIds.value = {}
+  clearPaymentMethodGuidance()
   salesOrderActionIds.value = {}
   rechargeOrderActionIds.value = {}
   closeImportedCardRefund()
 }
 
 onMounted(() => {
+  window.addEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusPaymentMethodRequiredField)
   window.addEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.addEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.addEventListener('cashier-v3:state-context-changed', resetLocalContext)
@@ -3889,6 +4119,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearPaymentMethodGuidance()
+  closePlatformMemberDetail()
+  window.removeEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, focusPaymentMethodRequiredField)
   window.removeEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.removeEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.removeEventListener('cashier-v3:state-context-changed', resetLocalContext)
@@ -4141,7 +4374,9 @@ onBeforeUnmount(() => {
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell sales-order-query-payment-cell">
               <template v-if="orderPaymentDetails(record).length">
                 <span v-for="payment in orderPaymentDetails(record)" :key="payment.id" class="sales-order-query-payment-cell__line">
-                  {{ payment.methodName }} {{ itemMoney(payment.amount) }}
+                  <!-- 单笔正式收款才显示编辑入口；金额只读，平台与门店复用同一动作。 -->
+                  <button v-if="canCorrectSalesPaymentMethod(record, payment)" type="button" class="order-link" title="更正收款方式" @click="openSalesPaymentMethodEditor(record, payment)">{{ payment.methodName }} {{ itemMoney(payment.amount) }}</button>
+                  <span v-else>{{ payment.methodName }} {{ itemMoney(payment.amount) }}</span>
                 </span>
               </template>
               <span v-else>—</span>
@@ -4787,6 +5022,44 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <div v-if="paymentMethodEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="payment-method-correction-title">
+      <div class="service-void-modal__backdrop" @click="closeSalesPaymentMethodEditor"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="payment-method-correction-title">更正记账收款方式</h2>
+          <button type="button" class="service-void-modal__close" :disabled="paymentMethodSubmitting" @click="closeSalesPaymentMethodEditor">×</button>
+        </header>
+        <p class="service-void-modal__record">{{ paymentMethodEntry?.orderNo || paymentMethodEditor.orderNo }}</p>
+        <p v-if="paymentMethodLoading" role="status">正在读取正式收款…</p>
+        <template v-if="paymentMethodEntry?.current">
+          <p class="service-void-modal__record">原方式：{{ paymentMethodEntry.current.methodName }} · 金额：{{ itemMoney(paymentMethodEntry.current.amountCents / 100) }}（金额不可修改）</p>
+          <label class="service-void-modal__label" for="payment-method-correction-select">更正为</label>
+          <div class="payment-method-required-field">
+            <select id="payment-method-correction-select" v-model="paymentMethodSelection" class="service-void-modal__textarea" :class="{ 'is-required-guided': paymentMethodGuidance.target === 'payment-method-correction-select' }" :disabled="paymentMethodSubmitting" @change="clearPaymentMethodGuidance">
+              <option v-for="method in paymentMethodEntry.methods" :key="method.code" :value="method.code">{{ method.name }}</option>
+            </select>
+            <RequiredFieldGuidance v-if="paymentMethodGuidance.target === 'payment-method-correction-select'" :message="paymentMethodGuidance.message" />
+          </div>
+          <label class="service-void-modal__label" for="payment-method-correction-reason">更正原因</label>
+          <div class="payment-method-required-field">
+            <textarea id="payment-method-correction-reason" v-model="paymentMethodReason" class="service-void-modal__textarea" :class="{ 'is-required-guided': paymentMethodGuidance.target === 'payment-method-correction-reason' }" maxlength="255" rows="3" placeholder="请说明实际到账方式为何需要更正" @input="clearPaymentMethodGuidance"></textarea>
+            <RequiredFieldGuidance v-if="paymentMethodGuidance.target === 'payment-method-correction-reason'" :message="paymentMethodGuidance.message" />
+          </div>
+          <div v-if="paymentMethodEntry.history?.length" class="service-void-modal__record">
+            <strong>更正记录</strong>
+            <p v-for="change in paymentMethodEntry.history.filter((row) => row.collectionId === paymentMethodEditor.collectionId)" :key="`${change.occurredAt}:${change.beforeName}:${change.afterName}`">
+              {{ change.beforeName }} → {{ change.afterName }} · {{ change.operatorName }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN') }}<br>{{ change.reason }}
+            </p>
+          </div>
+        </template>
+        <p v-if="paymentMethodError" class="service-void-modal__error" role="alert">{{ paymentMethodError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="paymentMethodSubmitting" @click="closeSalesPaymentMethodEditor">取消</button>
+          <button type="button" class="button button--primary" :disabled="paymentMethodLoading || paymentMethodSubmitting || !paymentMethodEntry?.current" @click="submitSalesPaymentMethod">{{ paymentMethodSubmitting ? '保存中…' : '确认更正' }}</button>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
       <div class="service-void-modal__backdrop" @click="closeSalesOrderNoteEditor"></div>
       <section class="service-void-modal__panel">
@@ -4804,10 +5077,22 @@ onBeforeUnmount(() => {
         </footer>
       </section>
     </div>
+    <MemberDetailOverlay
+      v-if="isPlatformContext && platformMemberDetailOpen"
+      :detail="platformMemberDetail || {}"
+      :is-loading="platformMemberDetailLoading"
+      :load-error="platformMemberDetailError"
+      :on-action="handlePlatformMemberDetailAction"
+      @tab-change="loadPlatformMemberDetail"
+      @close="closePlatformMemberDetail"
+    />
   </section>
 </template>
 
 <style scoped>
+/* 必填引导紧贴可聚焦控件，按共享服务的 3.2 秒时限清理。 */
+.payment-method-required-field { position: relative; }
+.payment-method-required-field .is-required-guided { outline: 2px solid #d97706; outline-offset: 2px; }
 /* 查询未完成时遮住旧结果及其操作，避免把旧列表误当成新条件结果。 */
 .order-center-list-wrap--loading { position: relative; }
 .order-center-list-wrap--loading > table { visibility: hidden; }

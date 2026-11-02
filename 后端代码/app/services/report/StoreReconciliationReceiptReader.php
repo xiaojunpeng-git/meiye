@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use app\services\order\ValidCashOrderServices;
+use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
 use app\services\report\query\BasicRegistrationQueryProvider;
 use think\facade\Db;
 
@@ -115,6 +116,8 @@ final class StoreReconciliationReceiptReader
             ->whereIn('p.fact_type', ['payment_collected', 'payment_received'])
             ->where('p.source_document_type', '<>', 'legacy_store_order')
             ->where('p.payment_method', '<>', 'old_card_entry');
+        CashierV3EffectivePaymentMethodSql::join($query, 'p', 'receipt_method_current', 'receipt_method_reversal');
+        $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('p', 'receipt_method_current', 'receipt_method_reversal');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         $normal->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
@@ -134,13 +137,13 @@ final class StoreReconciliationReceiptReader
                 'original_sale.tenant_id=p.tenant_id AND original_sale.order_id=p.order_id AND original_sale.store_id=p.store_id')
             ->where('original_sale.order_status', 'settled')->where('original_sale.order_direction', 'forward')
             ->whereBetween('original_sale.business_date', [$range['start_date'], $range['end_date']])
-            ->field('p.fact_id,p.store_id,original_sale.business_date,p.payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
+            ->fieldRaw('p.fact_id,p.store_id,original_sale.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
             ->limit(self::LIMIT + 1)->select()->toArray();
         $independent = (clone $query)->whereBetween('p.business_date', [$range['start_date'], $range['end_date']])
             ->whereNotExists(static function ($sale): void {
                 $sale->name('cashier_v3_sales_order')->alias('reconciliation_original_sale')
                     ->whereRaw('reconciliation_original_sale.tenant_id=p.tenant_id')->whereRaw('reconciliation_original_sale.order_id=p.order_id');
-            })->field('p.fact_id,p.store_id,p.business_date,p.payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
+            })->fieldRaw('p.fact_id,p.store_id,p.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
             ->limit(self::LIMIT + 1)->select()->toArray();
         $this->bounded($originals); $this->bounded($independent);
         foreach (array_merge($originals, $independent) as $row) {

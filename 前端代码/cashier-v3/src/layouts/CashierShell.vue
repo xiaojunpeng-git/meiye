@@ -15,6 +15,7 @@ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePic
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import MemberSummaryCard from '@/components/common/MemberSummaryCard.vue'
 import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
+import { memberDetailActionAllowed } from '@/services/memberDetailActionPolicy'
 import MemberDebtOverlay from '@/components/member/MemberDebtOverlay.vue'
 import MemberDebtReminderOverlay from '@/components/member/MemberDebtReminderOverlay.vue'
 import DirectGiftOverlay from '@/components/member/DirectGiftOverlay.vue'
@@ -444,23 +445,6 @@ const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservati
 const memberSelectorActions = {
   writeoff: 'select-writeoff-member',
   reservation: 'select-reservation-member'
-}
-const memberDetailActionsByScope = {
-  member: new Set(['open-member-more-actions', 'open-member-editor', 'open-recharge', 'open-gift']),
-  'appointment-highlight': new Set(['open-reservation-detail']),
-  card: new Set(['open-card-batch', 'open-card-benefits', 'query-member-card-history']),
-  'balance-change': new Set(['open-operation-logs']),
-  coupon: new Set(['open-operation-logs']),
-  'point-change': new Set(['open-operation-logs']),
-  'writeoff-record': new Set(['open-writeoff-records']),
-  'sales-order': new Set(['open-sales-order-detail']),
-  'exclusive-service-staff-change': new Set(['open-operation-logs']),
-  'care-task': new Set(['open-operation-logs']),
-  'care-record': new Set(['open-operation-logs']),
-  'debt-record': new Set(['open-debt-settlements']),
-  'gift-source': new Set(['open-sales-order-detail']),
-  'gift-record': new Set(['open-gift-records', 'open-sales-order-detail']),
-  'gift-coupon': new Set(['open-gift-records'])
 }
 const allowedServiceCompletionActions = new Set([
   'open-service-line-completion',
@@ -1660,7 +1644,7 @@ function mergeMemberDetail(current = {}, incoming = {}) {
 async function handleMemberDetailAction(payload = {}) {
   const action = payload.action?.code || payload.action?.action || payload.actionCode
   const scope = String(payload.scope || '')
-  if (!memberDetailActionsByScope[scope]?.has(action)) {
+  if (!memberDetailActionAllowed(scope, action)) {
     return { result: { status: 'failed', code: 'MEMBER_DETAIL_ACTION_NOT_ALLOWED', message: '该会员操作未进入前端允许清单。' } }
   }
   const currentMemberId = activeMemberDetailId.value || memberDetailId(memberDetail.value)

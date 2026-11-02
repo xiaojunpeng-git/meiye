@@ -4,6 +4,7 @@ namespace app\services\report;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
 use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\metric\MetricDictionaryServices;
@@ -11,7 +12,8 @@ use app\services\product\product\SystemBalanceProjectServices;
 use think\facade\Db;
 
 /**
- * 门店统一报表 V1：只读 V3 不可变事实，门店范围由控制器强制注入。
+ * 门店统一报表 V1：金额读取 V3 不可变事实，收款方式读取可追溯的有效投影；
+ * 门店范围由控制器强制注入。
  * 不读取旧订单、staff_yeji 或页面传入的组织/门店范围。
  */
 class StoreUnifiedReportServices extends BaseServices
@@ -1545,18 +1547,20 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function storeItemAnalysis($storeId, array $range, array $input): array
     {
+        // 本报表按查询结束日选定单日；旧日期区间链接也收敛到同一天，
+        // 保证分类列、当日列、下钻和导出不会各用不同的日期范围。
         $today = ['start' => $range['end'], 'end' => $range['end']];
-        $cumulative = ['start' => self::COVERAGE_START, 'end' => $range['end']];
+        $range = $today;
+        $cumulative = ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']];
         // Header categories come from every existing platform category,
         // never from whichever facts happened to occur in the selected period.
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         $dimensions = $this->organizationDimensions();
-        // Period, day and cumulative values must use one current organization
-        // assignment snapshot; a later request starts fresh after this read.
+        // 当日与月累计共用同一次组织归属快照；当日只读一次事实，避免重复扫描。
         $dimensions->beginCurrentDimensionSnapshot();
         try {
             $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
-            $daily = $this->itemAnalysisMetricRows($storeId, $today, $input, $definitions);
+            $daily = $period;
             $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
         } finally {
             $dimensions->endCurrentDimensionSnapshot();
@@ -1642,12 +1646,12 @@ class StoreUnifiedReportServices extends BaseServices
         ] as $summary) {
             [$metric, $label, $logic, $tone] = $summary;
             $keys = [];
-            foreach ([['today', '当日'], ['cumulative', '累计']] as $periodLabel) {
+            foreach ([['today', '当日'], ['cumulative', (int)substr($range['end'], 5, 2) . '月累计']] as $periodLabel) {
                 $key = 'item_analysis_' . $metric . '_' . $periodLabel[0];
                 $keys[] = $key;
                 $timeLogic = $periodLabel[0] === 'today'
                     ? '只看查询结束日当天。'
-                    : '从 2026-08-10 累计到查询结束日。';
+                    : '从所选日期所在月的月初累计到所选日期；统一事实覆盖起点为 2026-08-10。';
                 $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic,
                     'drilldown' => ['report' => 'store_item_analysis_detail']];
             }
@@ -1875,6 +1879,8 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function storeItemAnalysisDetail($storeId, array $range, array $input): array
     {
+        // 明细与汇总共用所选日和月初边界；不能让旧区间链接扩大分类明细范围。
+        $range = ['start' => $range['end'], 'end' => $range['end']];
         $metricKey = trim((string)($input['metric_code'] ?? ''));
         $summaryMetric = preg_match('/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/', $metricKey, $matches) === 1;
         $categoryMetric = !$summaryMetric && preg_match('/^item_analysis_category_(\d+)_(cash|after_split|consume)$/', $metricKey, $matches) === 1;
@@ -1883,7 +1889,7 @@ class StoreUnifiedReportServices extends BaseServices
         $categoryId = $categoryMetric ? (string)(int)$matches[1] : null;
         $detailRange = $summaryMetric
             ? ($matches[2] === 'today' ? ['start' => $range['end'], 'end' => $range['end']]
-                : ['start' => self::COVERAGE_START, 'end' => $range['end']])
+                : ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']])
             : $range;
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         if ($categoryMetric && !isset($definitions[$categoryId])) throw new \InvalidArgumentException('无效的品项分类');
@@ -2527,17 +2533,30 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $dataset = ($input['dataset'] ?? 'sale') === 'payment' ? 'payment' : 'sale';
         $table = $dataset === 'payment' ? 'cashier_v3_payment_fact' : 'cashier_v3_sale_fact';
-        $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
+        $alias = $dataset === 'payment' ? 'payment_detail' : '';
+        $query = $dataset === 'payment' ? Db::name($table)->alias($alias) : Db::name($table);
+        $column = $alias !== '' ? $alias . '.' : '';
+        if (is_array($storeId)) $query->whereIn($column . 'store_id', array_values(array_unique(array_map('intval', $storeId))));
+        else $query->where($column . 'store_id', (int)$storeId);
+        $query->whereBetween($column . 'business_date', [$range['start'], $range['end']])->where($column . 'status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
         if ($dataset === 'payment') {
             // Payment facts also contain recharge and standalone repayment receipts.
-            $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, 'tenant_id', 'order_id');
-            $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, 'tenant_id', 'store_id', 'order_id');
+            $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
+            $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, $column . 'tenant_id', $column . 'store_id', $column . 'order_id');
+            CashierV3EffectivePaymentMethodSql::join($query, $alias, 'sales_method_current', 'sales_method_reversal');
+            $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression($alias, 'sales_method_current', 'sales_method_reversal');
+            if (!empty($input['payment_method'])) $query->whereRaw($effectiveMethod . ' = ?', [(string)$input['payment_method']]);
+            $query->fieldRaw($alias . '.*,' . $effectiveMethod . ' effective_payment_method');
+            unset($input['payment_method']);
         }
         $this->commonFilters($query, $input, $dataset);
         $total = (int)(clone $query)->count();
-        $records = (clone $query)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
-        foreach ($records as &$row) $row['amount'] = $this->money((int)($row[$dataset === 'payment' ? 'amount_cents' : 'sale_amount_cents'] ?? 0));
+        $records = (clone $query)->order($column . 'business_date', 'desc')->order($column . 'id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
+        foreach ($records as &$row) {
+            if ($dataset === 'payment') $row['payment_method'] = (string)$row['effective_payment_method'];
+            $row['amount'] = $this->money((int)($row[$dataset === 'payment' ? 'amount_cents' : 'sale_amount_cents'] ?? 0));
+        }
         unset($row);
         return ['title' => $dataset === 'payment' ? '收款明细' : '销售明细', 'dataset' => $dataset, 'columns' => $dataset === 'payment' ? $this->paymentColumns() : $this->saleColumns(), 'records' => $records, 'total' => $total, 'page' => $this->page($input), 'page_size' => $this->limit($input)];
     }
@@ -3072,9 +3091,11 @@ class StoreUnifiedReportServices extends BaseServices
                 ->where('allocation.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 ->whereIn('allocation.sale_fact_id', $saleFactIds)->where('allocation.status', 'effective')
                 // 补交收款单列在补交业务日，原销售行只保留成交当次收款，避免跨日重复计入。
-                ->where('original_payment.source_document_type', '<>', 'debt_repayment')
-                ->fieldRaw('allocation.sale_fact_id,allocation.payment_method,SUM(allocation.amount_cents) amount_cents')
-                ->group('allocation.sale_fact_id,allocation.payment_method');
+                ->where('original_payment.source_document_type', '<>', 'debt_repayment');
+            CashierV3EffectivePaymentMethodSql::join($payments, 'original_payment', 'consumption_method_current', 'consumption_method_reversal');
+            $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('original_payment', 'consumption_method_current', 'consumption_method_reversal');
+            $payments->fieldRaw('allocation.sale_fact_id,' . $effectiveMethod . ' payment_method,SUM(allocation.amount_cents) amount_cents')
+                ->group('allocation.sale_fact_id,' . $effectiveMethod);
             if (is_array($storeId)) $payments->whereIn('allocation.store_id', array_values(array_unique(array_map('intval', $storeId))));
             else $payments->where('allocation.store_id', (int)$storeId);
             $this->normalDataScope()->excludeVoidedSupplementAllocations($payments, 'allocation');
@@ -3167,8 +3188,11 @@ class StoreUnifiedReportServices extends BaseServices
             ->join('cashier_v3_payment_sale_allocation_fact pa', "pa.sale_fact_id=s.fact_id AND pa.status='effective'")
             ->join('cashier_v3_payment_fact original_payment',
                 'original_payment.tenant_id=pa.tenant_id AND original_payment.fact_id=pa.payment_fact_id')
-            ->where('original_payment.source_document_type', '<>', 'debt_repayment')
-            ->fieldRaw('pa.payment_method,SUM(pa.amount_cents) amount_cents')->group('pa.payment_method')->select()->toArray();
+            ->where('original_payment.source_document_type', '<>', 'debt_repayment');
+        CashierV3EffectivePaymentMethodSql::join($paymentRows, 'original_payment', 'summary_method_current', 'summary_method_reversal');
+        $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('original_payment', 'summary_method_current', 'summary_method_reversal');
+        $paymentRows = $paymentRows->fieldRaw($effectiveMethod . ' payment_method,SUM(pa.amount_cents) amount_cents')
+            ->group($effectiveMethod)->select()->toArray();
         $payments = [];
         foreach ($paymentRows as $payment) $payments[(string)$payment['payment_method']] = (int)$payment['amount_cents'];
         // 全量补交汇总与补交行共用同一事实查询和权限范围，分页不会改变合计。

@@ -13,6 +13,22 @@ final class CashierV3OrderLifecycleModule
 {
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3CashierWorkspaceServices $workspace): void
     {
+        $paymentMethodCorrection = new CashierV3PaymentMethodCorrectionServices();
+        // 更正不继承收银购物车；正式订单、收款及统一事实由服务端同一事务锁定。
+        $dispatcher->handlers()->registerProjection('open-sales-payment-method-correction', static function (array $scope) use ($paymentMethodCorrection): array {
+            return ['data' => ['paymentMethodCorrection' => $paymentMethodCorrection->entry(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '记账收款已读取。'];
+        });
+        $dispatcher->handlers()->registerCommand('correct-sales-payment-method', static function (array $scope) use ($paymentMethodCorrection): array {
+            $result = $paymentMethodCorrection->executeInTx($scope);
+            return ['data' => ['paymentMethodCorrection' => $result], 'business_no' => (string)$result['operationId'],
+                'touched' => ['order_center'], 'message' => '收款方式已更正。'];
+        });
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('correct-sales-payment-method', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
         $attribution = new CashierV3OrderAttributionCorrectionServices();
         foreach (['correct-sales-order-attribution', 'correct-service-order-date', 'correct-service-order-attribution',
             'correct-recharge-order-attribution', 'correct-debt-repayment-date',

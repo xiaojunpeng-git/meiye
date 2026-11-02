@@ -21,11 +21,15 @@ const opened = ref(false), trigger = ref(null), panel = ref(null)
 const draft = ref({ min: '', max: '' }), selectingEnd = ref(false), hoverDay = ref('')
 const leftMonth = ref(new Date()), position = ref({})
 const months = computed(() => [0, 1].map(offset => new Date(leftMonth.value.getFullYear(), leftMonth.value.getMonth() + offset, 1, 12)))
-const caption = computed(() => props.modelValue.min && props.modelValue.max ? `${props.modelValue.min} 至 ${props.modelValue.max}` : '自定义时间')
+const caption = computed(() => props.modelValue.min && props.modelValue.max
+  ? props.mode === 'day' ? props.modelValue.max : `${props.modelValue.min} 至 ${props.modelValue.max}`
+  : '自定义时间')
 const valid = computed(() => parseDateKey(draft.value.min) && parseDateKey(draft.value.max)
   && draft.value.min <= draft.value.max && (!props.minDate || draft.value.min >= props.minDate)
   && (!props.maxDate || draft.value.max <= props.maxDate))
-const shortcuts = computed(() => props.mode === 'month'
+const shortcuts = computed(() => props.mode === 'day'
+  ? []
+  : props.mode === 'month'
   ? periodOptions.filter(([key]) => ['lastMonth', 'month'].includes(key))
   : props.mode === 'year'
     ? periodOptions.filter(([key]) => key === 'year')
@@ -77,6 +81,12 @@ function unavailableRange(key) {
 function preset(key) { draft.value = shortcutRange(key); leftMonth.value = parseDateKey(draft.value.min); selectingEnd.value = false; hoverDay.value = '' }
 function select(day) {
   if ((props.minDate && day < props.minDate) || (props.maxDate && day > props.maxDate)) return
+  // 单日报表只发布同一天作为起止日期，后端下钻与导出因此复用同一查询日。
+  if (props.mode === 'day') {
+    draft.value = { min: day, max: day }
+    selectingEnd.value = false
+    return
+  }
   // 月报和年报仍按完整自然周期查询，不能把任意日范围显示成另一套统计结果。
   if (props.mode === 'month' || props.mode === 'year') {
     const year = Number(day.slice(0, 4))
@@ -119,7 +129,7 @@ onBeforeUnmount(() => close(false))
   </button>
   <Teleport to="body">
     <section v-if="opened" ref="panel" class="uq-period-panel" :style="position" role="dialog" aria-modal="true" :aria-label="`${label}选择`" tabindex="-1" @keydown="keyboard">
-      <aside class="uq-period-shortcuts" aria-label="快捷周期"><button v-for="[key, text] in shortcuts" :key="key" type="button" :disabled="Boolean(unavailableRange(key))" @click="preset(key)">{{ text }}</button></aside>
+      <aside v-if="shortcuts.length" class="uq-period-shortcuts" aria-label="快捷周期"><button v-for="[key, text] in shortcuts" :key="key" type="button" :disabled="Boolean(unavailableRange(key))" @click="preset(key)">{{ text }}</button></aside>
       <div class="uq-period-main">
         <div class="uq-period-calendars">
           <section v-for="(month, index) in months" :key="dateKey(month)" class="uq-period-month">

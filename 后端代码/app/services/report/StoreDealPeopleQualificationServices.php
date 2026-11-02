@@ -6,7 +6,7 @@ use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
 
 /**
- * 从原销售单的有效现金收款生成成交资格；退款和其他销售单不参与凑门槛。
+ * 新消费按会员当天跨单累计；补交只追溯尚未参与成交的原单累计。
  * 输入须先核实原单身份、门店和来源，并排除不具备人数资格的历史补交。
  */
 final class StoreDealPeopleQualificationServices
@@ -17,7 +17,7 @@ final class StoreDealPeopleQualificationServices
 
     /**
      * 先在当前独立实例全部门店完成会员日去重，再裁剪获授权门店。
-     * 候选只取查询期内发生收款的原单，累计时仍回看这些原单的全部历史收款。
+     * 从查询期收款定位会员，再回放其全部原单历史，才能识别此前跨单达标的原单。
      * 不读取退款负事实，也不让补交门店替代原销售门店。
      *
      * @return array<string,array<string,mixed>>
@@ -30,7 +30,8 @@ final class StoreDealPeopleQualificationServices
         if ($candidateIds === []) return [];
         $orders = $this->salesOrders($candidateIds);
         if ($orders === []) return [];
-        $receipts = $this->receiptRows($orders);
+        $orders = $this->memberHistoryOrders($orders, (string)$range['end']);
+        $receipts = $this->receiptRows($orders, (string)$range['end']);
         $selected = array_fill_keys($stores, true);
         $winners = $this->qualify($receipts);
         $participantFacts = null;
@@ -62,7 +63,7 @@ final class StoreDealPeopleQualificationServices
             if ($participantFacts !== null && !isset($participantFacts[(string)$day['fact_id']])) continue;
             $days[$this->storeDaySourceMemberKey($day)] = $day;
         }
-        return $this->attachCategory($days);
+        return $this->attachCategory($days, $orders);
     }
 
     /** 原销售 ID 而非补交单 ID 是成交资格的唯一单据键。 */
@@ -101,10 +102,32 @@ final class StoreDealPeopleQualificationServices
     }
 
     /**
+     * 只回看候选会员、截至查询结束日的有效原单；不能只回看本期出现的原单，
+     * 否则历史900+300已计人的900元单会在后续补交时被错误当成未达标。
+     * 全门店回放后才裁剪输出权限，保持同会员同日全实例最多一次。
+     */
+    private function memberHistoryOrders(array $candidates, string $end): array
+    {
+        $orders = [];
+        $members = array_values(array_unique(array_map('intval', array_column($candidates, 'member_id'))));
+        foreach (array_chunk($members, 500) as $chunk) {
+            $query = Db::name('cashier_v3_sales_order')->alias('s')
+                ->where('s.tenant_id', self::TENANT_ID)->whereIn('s.member_id', $chunk)
+                ->where('s.business_date', '<=', $end)
+                ->where('s.order_status', 'settled')->where('s.order_direction', 'forward');
+            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
+            foreach ($query->field('s.order_id,s.order_no,s.store_id,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.organization_id,s.organization_path_snapshot,s.checkout_request_id,s.settled_at,s.business_source_primary_id,s.business_source_primary_name_snapshot')->select()->toArray() as $order) {
+                $orders[(string)$order['order_id']] = $order;
+            }
+        }
+        return $orders;
+    }
+
+    /**
      * 仅人数资格排除旧卡录入原单的补交；原销售真现金和全部财务金额仍保持原事实。
      * 历史导入补交按自然键排除，不能从补交显示名称猜测。
      */
-    private function receiptRows(array $orders): array
+    private function receiptRows(array $orders, string $end): array
     {
         $oldCardCheckouts = [];
         $checkoutIds = array_values(array_unique(array_filter(array_column($orders, 'checkout_request_id'))));
@@ -118,13 +141,20 @@ final class StoreDealPeopleQualificationServices
         $receipts = [];
         foreach (array_chunk(array_keys($orders), 500) as $chunk) {
             $salePayments = $this->baseReceiptQuery()
-                ->whereIn('p.source_document_type', self::SALE_PAYMENT_SOURCE_TYPES)->whereIn('p.order_id', $chunk)
-                ->field('p.fact_id,p.order_id,p.business_date,p.settled_at,p.amount_cents,p.payment_method,p.natural_key')
-                ->select()->toArray();
+                ->where('p.business_date', '<=', $end)
+                ->whereIn('p.source_document_type', self::SALE_PAYMENT_SOURCE_TYPES)->whereIn('p.order_id', $chunk);
+            \app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql::join(
+                $salePayments, 'p', 'deal_method_current', 'deal_method_reversal');
+            $effectiveMethod = \app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql::expression(
+                'p', 'deal_method_current', 'deal_method_reversal');
+            $salePayments = $salePayments
+                ->fieldRaw('p.fact_id,p.order_id,p.business_date,p.settled_at,p.amount_cents,'
+                    . $effectiveMethod . ' payment_method,p.natural_key')->select()->toArray();
             foreach ($salePayments as $payment) {
                 $this->appendReceipt($receipts, $payment, (string)$payment['order_id'], $orders, $policies);
             }
             $repaymentQuery = $this->baseReceiptQuery()
+                ->where('p.business_date', '<=', $end)
                 ->join('cashier_v3_debt_repayment r',
                     "r.tenant_id=p.tenant_id AND r.repayment_id=p.order_id AND r.store_id=p.store_id AND r.member_id=p.member_id AND r.status='succeeded'")
                 ->where('p.source_document_type', 'debt_repayment')->whereIn('r.sales_order_id', $chunk);
@@ -209,7 +239,7 @@ final class StoreDealPeopleQualificationServices
      * 人数分类只看首度达标时已发生的现金分摊，不借以后补交或退款改写归属。
      * 没有可核实商品链的资格仍计入全局人数，但不猜测其商品分类。
      */
-    private function attachCategory(array $days): array
+    private function attachCategory(array $days, array $orders): array
     {
         if ($days === []) return [];
         $factToDay = [];
@@ -231,7 +261,9 @@ final class StoreDealPeopleQualificationServices
                 ->select()->toArray();
             foreach ($rows as $row) {
                 $key = $factToDay[(string)$row['payment_fact_id']] ?? null;
-                if ($key === null || (string)$row['order_id'] !== (string)$days[$key]['sales_order_id']) continue;
+                // 跨单日累计的每张原单均提供分摊依据，不得只保留最后触发达标的原单。
+                if ($key === null || !in_array((string)$row['order_id'],
+                    $days[$key]['qualifying_sales_order_ids'] ?? [(string)$days[$key]['sales_order_id']], true)) continue;
                 $allocations[$key][] = $row;
                 $saleFactIds[(string)$row['sale_fact_id']] = true;
             }
@@ -263,6 +295,7 @@ final class StoreDealPeopleQualificationServices
                     $itemId = (int)($directItems[$saleFactId]['item_id'] ?? 0);
                     $sequence = sprintf('%020d:%020d', $baseSequence, 0);
                     $shares[$key][] = ['store_id' => (int)$row['store_id'], 'item_id' => $itemId,
+                        'sales_order_id' => (string)$row['order_id'],
                         'item_name' => (string)($directItems[$saleFactId]['item_name_snapshot'] ?? ''),
                         'amount_cents' => (int)$row['amount_cents'], 'sequence' => $sequence];
                     $links[$key . '|' . (count($shares[$key]) - 1)] = ['store_id' => (int)$row['store_id'], 'product_id' => $itemId];
@@ -282,6 +315,7 @@ final class StoreDealPeopleQualificationServices
                 foreach ($items as $item) {
                     $itemId = (int)$item['component_product_id'];
                     $shares[$key][] = ['store_id' => (int)$row['store_id'], 'item_id' => $itemId,
+                        'sales_order_id' => (string)$row['order_id'],
                         'item_name' => (string)$item['item_name_snapshot'],
                         'amount_cents' => (int)($split[(string)$item['allocation_fact_id']] ?? 0),
                         'sequence' => sprintf('%020d:%020d', $baseSequence, (int)$item['id'])];
@@ -304,12 +338,14 @@ final class StoreDealPeopleQualificationServices
                 $days[$key]['item_name'] = (string)$winner['item_name'];
                 $days[$key]['product_type'] = (int)$winner['product_type'];
                 $days[$key]['platform_product_id'] = (int)$winner['platform_product_id'];
+                $days[$key]['category_sales_order_id'] = (string)($winner['category_sales_order_id'] ?? $days[$key]['sales_order_id']);
+                $days[$key]['category_order_no_snapshot'] = (string)($orders[$days[$key]['category_sales_order_id']]['order_no'] ?? $days[$key]['order_no_snapshot']);
             }
         }
         return $days;
     }
 
-    /** 同一原单先归现金分摊最大的完整分类，平手按明细顺序；大类报表再向上投影。 */
+    /** 同一达标组先归现金分摊最大的完整分类，平手按明细顺序；大类报表再向上投影。 */
     public static function largestCategory(array $shares): array
     {
         $categories = [];
@@ -338,6 +374,8 @@ final class StoreDealPeopleQualificationServices
                 $items[$itemId]['sequence'] = (string)$row['sequence'];
                 $items[$itemId]['category'] = $row['category'];
                 $items[$itemId]['item_name'] = (string)($row['item_name'] ?? '');
+                // 分类主品项可能来自跨单组的较早原单，合作方投影必须关联这张真实原单。
+                $items[$itemId]['sales_order_id'] = (string)($row['sales_order_id'] ?? '');
             }
         }
         uasort($items, static fn(array $a, array $b): int => $b['amount'] <=> $a['amount']
@@ -346,15 +384,18 @@ final class StoreDealPeopleQualificationServices
         return $items[$itemId]['category'] + [
             'item_id' => $itemId,
             'item_name' => (string)($items[$itemId]['item_name'] ?? ''),
+            'category_sales_order_id' => (string)($items[$itemId]['sales_order_id'] ?? ''),
         ];
     }
 
     /**
-     * 每张原单仅在累计首度达标时产生资格，再按会员业务日全局选最早一笔。
-     * 返回的门店是原销售门店；调用方只能在去重后按权限裁剪门店。
+     * 两条资格路径共用一次历史回放：新消费按同会员、原店、来源和门槛的当天收款累计；
+     * 补交只累计自己的原单。任一原单独立或参与跨单达标后，后续收款不再提供资格。
+     * 同会员同日先选最早资格，其他已达标组仍标记已参与，不能因去重而让补交再次计人。
+     * 仅计算人数，不修改或抵扣任何财务事实；退款负事实不参与资格。
      *
-     * @param array<int,array<string,mixed>> $receipts
-     * @return array<string,array<string,mixed>> 以业务日和会员 ID 为键的资格
+     * @param array<int,array<string,mixed>> $receipts 已排除作废、非现金及受限历史补交
+     * @return array<string,array<string,mixed>> 以业务日和会员ID为键的资格
      */
     public function qualify(array $receipts): array
     {
@@ -365,26 +406,59 @@ final class StoreDealPeopleQualificationServices
         });
         $orderTotals = [];
         $orderReceiptIds = [];
-        $qualifiedOrders = [];
+        $countedOrders = [];
+        $dailySales = [];
         $memberDays = [];
+        $seenFacts = [];
+        // 参与跨单达标的每张原单均被消费掉人数资格，不只标记触发达标的最后一单。
+        $register = static function (array $receipt, array $factIds, array $orderIds, string $kind)
+            use (&$countedOrders, &$memberDays): void {
+            foreach ($orderIds as $id) $countedOrders[$id] = true;
+            $key = (string)$receipt['business_date'] . '|' . (int)$receipt['member_id'];
+            if (isset($memberDays[$key])) return;
+            $receipt['qualifying_payment_fact_ids'] = array_values(array_unique($factIds));
+            $receipt['qualifying_sales_order_ids'] = array_values(array_unique($orderIds));
+            $receipt['qualification_kind'] = $kind;
+            $memberDays[$key] = $receipt;
+        };
         foreach ($receipts as $receipt) {
             $orderId = (string)($receipt['sales_order_id'] ?? '');
             $memberId = (int)($receipt['member_id'] ?? 0);
             $amount = (int)($receipt['amount_cents'] ?? 0);
             $threshold = (int)($receipt['threshold_cents'] ?? 0);
             $date = (string)($receipt['business_date'] ?? '');
-            if ($orderId === '' || $memberId <= 0 || $amount <= 0 || $threshold <= 0 || $date === '') continue;
-            if (isset($qualifiedOrders[$orderId])) continue;
+            $factId = (string)($receipt['fact_id'] ?? '');
+            if ($orderId === '' || $memberId <= 0 || $amount <= 0 || $threshold <= 0 || $date === ''
+                || $factId === '' || isset($seenFacts[$factId])) continue;
+            $seenFacts[$factId] = true;
+            if (isset($countedOrders[$orderId])) continue;
             $orderTotals[$orderId] = ($orderTotals[$orderId] ?? 0) + $amount;
-            $orderReceiptIds[$orderId][] = (string)($receipt['fact_id'] ?? '');
-            if ($orderTotals[$orderId] < $threshold) continue;
-            $qualifiedOrders[$orderId] = true;
-            $key = $date . '|' . $memberId;
-            // 全实例先选最早达标的原单，跨店报表之后不能各自重复认领同一人日。
-            if (!isset($memberDays[$key])) {
-                $receipt['qualifying_payment_fact_ids'] = $orderReceiptIds[$orderId];
-                $memberDays[$key] = $receipt;
+            $orderReceiptIds[$orderId][] = $factId;
+            if ((string)($receipt['payment_source_document_type'] ?? 'sales_order') === 'debt_repayment') {
+                // 补交不与当天新消费混池；未计过的原单保留跨日累计达标的原业务关系。
+                if ($orderTotals[$orderId] >= $threshold) {
+                    $register($receipt, $orderReceiptIds[$orderId], [$orderId], 'original_repayment');
+                }
+                continue;
             }
+            // 来源和原店的归属边界不变；配置门槛不同的原单不能通过混池改写历史门槛。
+            $poolKey = $date . '|' . $memberId . '|' . (int)($receipt['store_id'] ?? 0)
+                . '|' . (int)($receipt['business_source_primary_id'] ?? 0) . '|' . $threshold;
+            if (!isset($dailySales[$poolKey])) {
+                $dailySales[$poolKey] = ['amount' => 0, 'facts' => [], 'orders' => [], 'qualified' => false];
+            }
+            $pool =& $dailySales[$poolKey];
+            $pool['amount'] += $amount;
+            $pool['facts'][] = $factId;
+            $pool['orders'][$orderId] = true;
+            if ($pool['qualified']) {
+                // 同一已达标日组的后续新消费也已覆盖在当日唯一人次中，其补交不能另计。
+                $countedOrders[$orderId] = true;
+            } elseif ($pool['amount'] >= $threshold) {
+                $pool['qualified'] = true;
+                $register($receipt, $pool['facts'], array_keys($pool['orders']), 'daily_new_sales');
+            }
+            unset($pool);
         }
         return $memberDays;
     }

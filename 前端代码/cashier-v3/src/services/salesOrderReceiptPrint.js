@@ -113,6 +113,16 @@ function entitlementRemainingTimes(item) {
   ])
 }
 
+// Each entitlement line owns its completed service staff snapshot. Keep names
+// on that line; never infer a beautician from another item or current roster.
+function entitlementBeauticians(item) {
+  const people = firstNonEmptyList(item, ['craftsmen', 'craftsmenListAllocations'])
+  const names = people
+    .map((person) => pickValue(person, ['name', 'employeeName', 'staffName', 'staff_name_snapshot']))
+    .filter((name) => hasValue(name))
+  return names.length ? names.join('、') : '—'
+}
+
 // Browser and persisted checkout line IDs differ; source identity remains stable.
 function entitlementReceiptSourceKey(line) {
   const type = line.entitlementInstanceType || 'card_holder'
@@ -274,8 +284,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     ? salesItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
   const entitlementRows = entitlementItems.length
-    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td></tr>`).join('')
-    : '<tr><td colspan="3" class="empty">暂无权益明细</td></tr>'
+    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td><td class="beautician">${escapeHtml(entitlementBeauticians(item))}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">暂无权益明细</td></tr>'
   const serviceRows = services.length
     ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无服务明细</td></tr>'
@@ -320,9 +330,14 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 53%; }
   .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 16%; }
   .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 31%; }
-  .entitlements-table th:nth-child(1), .entitlements-table td:nth-child(1) { width: 54%; }
-  .entitlements-table th:nth-child(2), .entitlements-table td:nth-child(2) { width: 22%; }
-  .entitlements-table th:nth-child(3), .entitlements-table td:nth-child(3) { width: 24%; }
+  .entitlements-table th:nth-child(1), .entitlements-table td:nth-child(1) { width: 40%; }
+  .entitlements-table th:nth-child(2), .entitlements-table td:nth-child(2) { width: 16%; }
+  .entitlements-table th:nth-child(3), .entitlements-table td:nth-child(3) { width: 16%; }
+  .entitlements-table th:nth-child(4), .entitlements-table td:nth-child(4) { width: 28%; }
+  /* Keep all four labels and values readable on narrow receipt paper. */
+  .entitlements-table { font-size: .86em; }
+  .entitlements-table .right { padding-right: 3px; }
+  .entitlements-table .beautician { padding-left: 6px; line-height: 1.35; overflow-wrap: anywhere; }
   .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 45%; }
   .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 20%; }
   .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 35%; }
@@ -375,7 +390,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   ${hasSalesSection ? `<h2>${escapeHtml(businessReceipt?.detailHeading || '销售明细')}</h2>
   <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
   ${hasEntitlementSection ? `<h2>权益明细</h2>
-  <table class="entitlements-table"><thead><tr><th>名称</th><th class="right">次数</th><th class="right">余次</th></tr></thead><tbody>${entitlementRows}</tbody></table>` : ''}
+  <table class="entitlements-table"><thead><tr><th>名称</th><th class="right">次数</th><th class="right">余次</th><th class="beautician">美容师</th></tr></thead><tbody>${entitlementRows}</tbody></table>` : ''}
   ${hasServiceSection ? `<h2>服务明细</h2>
   <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
   ${businessReceipt?.showPaymentSection === false ? '' : payments.length || hasSalesReceipt ? `<h2>${escapeHtml(businessReceipt?.paymentHeading || '收款明细')}</h2>
@@ -638,9 +653,13 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 53%; }
       ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 16%; }
       ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 31%; }
-      ${root} .entitlements-table th:nth-child(1), ${root} .entitlements-table td:nth-child(1) { width: 54%; }
-      ${root} .entitlements-table th:nth-child(2), ${root} .entitlements-table td:nth-child(2) { width: 22%; }
-      ${root} .entitlements-table th:nth-child(3), ${root} .entitlements-table td:nth-child(3) { width: 24%; }
+      ${root} .entitlements-table th:nth-child(1), ${root} .entitlements-table td:nth-child(1) { width: 40%; }
+      ${root} .entitlements-table th:nth-child(2), ${root} .entitlements-table td:nth-child(2) { width: 16%; }
+      ${root} .entitlements-table th:nth-child(3), ${root} .entitlements-table td:nth-child(3) { width: 16%; }
+      ${root} .entitlements-table th:nth-child(4), ${root} .entitlements-table td:nth-child(4) { width: 28%; }
+      ${root} .entitlements-table { font-size: .86em; }
+      ${root} .entitlements-table .right { padding-right: 3px; }
+      ${root} .entitlements-table .beautician { padding-left: 6px; line-height: 1.35; overflow-wrap: anywhere; }
       ${root} .payments-table th:nth-child(1), ${root} .payments-table td:nth-child(1) { width: 68%; }
       ${root} .payments-table th:nth-child(2), ${root} .payments-table td:nth-child(2) { width: 32%; }
       ${root} .empty { color: #6b7280; text-align: center; }
