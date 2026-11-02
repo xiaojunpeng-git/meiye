@@ -110,6 +110,15 @@ class UnifiedReport extends AuthController
         } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
+    /** 平台删除与编辑共用逐表菜单、写权限及组织范围，不另设平台专属门槛。 */
+    public function basicDelete(Request $request)
+    {
+        if (!$this->canReadBasicReport('basic_brush_registration') || !$this->hasMenuPermission('admin-report-basic-write')) return app('json')->fail('当前账号没有刷单登记删除权限');
+        try {
+            return app('json')->success((new \app\services\report\BasicRegistrationWriteServices())->delete($this->basicContext([]), $request->post()));
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
     private function basicContext(array $input): array
     {
         $scope = $this->reportAuthorization();

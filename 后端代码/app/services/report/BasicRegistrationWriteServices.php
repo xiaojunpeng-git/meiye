@@ -5,11 +5,74 @@ use app\services\report\query\BasicRegistrationQueryProvider;
 use think\facade\Db;
 
 /**
- * 仅新增/修改人工刷单登记，不写收银命令、资金、核销、业绩或订单事实。
+ * 仅新增、修改或真删除人工刷单登记，不写收银命令、资金、核销、业绩或订单事实。
  * record_version 仅用于人工记录编辑并发，绝不是结账版本或另一份收银快照。
  */
 final class BasicRegistrationWriteServices
 {
+    /** 真删除源行；身份、门店、版本和原内容均在事务内复核，删除前快照留在独立审计表。 */
+    public function delete(array $context, array $payload): array
+    {
+        $stores = BasicRegistrationQueryProvider::stores($context);
+        if (empty($context['basic_registration_write'])) throw new \InvalidArgumentException('当前账号只能查看刷单登记');
+        if (array_diff(array_keys($payload), ['id', 'store_id', 'expected_version', 'expected_source_hash', 'idempotency_key'])) {
+            throw new \InvalidArgumentException('删除请求包含不允许的字段');
+        }
+        $id = self::integer($payload['id'] ?? 0);
+        $store = self::integer($payload['store_id'] ?? 0);
+        $expected = self::integer($payload['expected_version'] ?? 0);
+        $sourceHash = (string)($payload['expected_source_hash'] ?? '');
+        $key = (string)($payload['idempotency_key'] ?? '');
+        if ($id <= 0 || $expected <= 0 || !in_array($store, $stores, true)) throw new \InvalidArgumentException('登记不存在或无权删除');
+        if (!preg_match('/^[a-f0-9]{64}$/D', $sourceHash)) throw new \InvalidArgumentException('缺少原登记内容证明，请重新查询');
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/D', $key)) throw new \InvalidArgumentException('删除请求标识不正确');
+        $actor = (string)($context['basic_actor_key'] ?? '');
+        if (!preg_match('/^(platform|store):[1-9][0-9]*$/D', $actor)) throw new \InvalidArgumentException('登记操作员身份无效');
+        $fingerprint = hash('sha256', json_encode(['delete', $id, $store, $expected, $sourceHash], JSON_THROW_ON_ERROR));
+        $receiptQuery = static function () use ($actor, $key) {
+            return Db::name('basic_report_registration_audit')->where('actor_key', $actor)->where('idempotency_key', $key);
+        };
+        $replay = static function (array $receipt) use ($fingerprint, $stores): array {
+            if (!hash_equals((string)$receipt['request_fingerprint'], $fingerprint)
+                || !in_array((int)$receipt['store_id'], $stores, true)) throw new \InvalidArgumentException('重复请求与原删除内容不一致');
+            return ['id' => (int)$receipt['registration_id'], 'record_version' => (int)$receipt['record_version'], 'replayed' => true];
+        };
+        $prior = $receiptQuery()->find();
+        if ($prior) return $replay($prior);
+        try {
+            return Db::transaction(function () use ($id, $store, $expected, $sourceHash, $stores, $actor, $key, $fingerprint, $receiptQuery, $replay): array {
+                $table = BasicRegistrationQueryProvider::legacyTableId();
+                $before = Db::name('salary_store')->where('id', $id)->whereFindInSet('table_ids', $table)->lock(true)->find();
+                $prior = $receiptQuery()->find();
+                if ($prior) return $replay($prior);
+                if (!$before || (int)$before['store_id'] !== $store || !in_array((int)$before['store_id'], $stores, true)) {
+                    throw new \InvalidArgumentException('登记不存在或无权删除');
+                }
+                // 旧表允许一行挂多张人工表；有其他表引用时不能物理删掉它们的共用源行。
+                if (array_values(array_filter(array_map('trim', explode(',', (string)$before['table_ids'])))) !== [(string)$table]) {
+                    throw new \InvalidArgumentException('该登记同时关联其他人工表，需先解除关联后再删除');
+                }
+                $version = max(1, (int)Db::name('basic_report_registration_audit')->where('registration_id', $id)->max('record_version'));
+                if ($expected !== $version || !hash_equals(BasicRegistrationQueryProvider::sourceHash($before), $sourceHash)) {
+                    throw new \InvalidArgumentException('此登记已变化，请重新查询后再删除');
+                }
+                // 源行在事务中物理移除；审计保留完整原行，不能用软删后的行继续参与查询与合计。
+                Db::name('salary_store')->where('id', $id)->delete();
+                Db::name('basic_report_registration_audit')->insert([
+                    'registration_id' => $id, 'store_id' => $store, 'record_version' => $version + 1,
+                    'actor_key' => $actor, 'idempotency_key' => $key, 'request_fingerprint' => $fingerprint,
+                    'before_json' => json_encode($before, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                    'after_json' => 'null', 'recorded_at' => time(),
+                ]);
+                return ['id' => $id, 'record_version' => $version + 1, 'replayed' => false];
+            });
+        } catch (\Throwable $exception) {
+            $prior = $receiptQuery()->find();
+            if ($prior) return $replay($prior);
+            throw $exception;
+        }
+    }
+
     /** 行锁、编辑版本及审计在一个事务内；同一请求键只返回第一次已提交结果。 */
     public function save(array $context, array $payload): array
     {

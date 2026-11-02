@@ -5,12 +5,14 @@ import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
 import QueryEntitySelectorOverlay from '@/components/query/QueryEntitySelectorOverlay.vue'
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
+import MemberBalanceAdjustmentOverlay from '@/components/member/MemberBalanceAdjustmentOverlay.vue'
 
 const ready = ref(false), error = ref(''), boot = ref(null), selectedStores = ref([]), scopeLabel = ref('当前权限范围'), targetStore = ref('')
 const state = reactive({ stateContextId: '', memberCenter: {}, storeName: '' })
 const permissions = reactive({ create: false, edit: false, deactivate: false })
 const revisions = new Map()
 const detail = ref(null), detailLoading = ref(false), detailError = ref('')
+const balanceAdjustment = ref(null), balanceOpening = ref(false), memberList = ref(null)
 const person = ref(null), personPage = reactive({ records: [], total: 0, page: 1, pageSize: 20, error: '', loading: false })
 const referrer = ref(null), referrerPage = reactive({ records: [], total: 0, page: 1, pageSize: 20, loading: false })
 let editingStore = 0, preferenceVersion = 0
@@ -26,7 +28,7 @@ async function request(action, input = {}) {
   const payload = { ...input, pageCode: 'platform_member_list', selectedStoreIds: [...selectedStores.value] }
   if (action === 'create-member') payload.targetStoreId = Number(targetStore.value)
   if (action === 'query-query-entities') payload.targetStoreId = editingStore || Number(targetStore.value)
-  if (input.memberId && revisions.has(Number(input.memberId))) payload.memberRevision = revisions.get(Number(input.memberId))
+  if (!action.includes('member-balance') && input.memberId && revisions.has(Number(input.memberId))) payload.memberRevision = revisions.get(Number(input.memberId))
   // 查询设置使用独立平台页面版本；幂等键转成固定格式，重试仍映射同一键。
   if (Array.isArray(payload.commandContexts)) payload.commandContexts = payload.commandContexts.map(context => context.kind === 'query_preference' ? { ...context, expectedVersion: preferenceVersion } : context)
   if (!action.startsWith('query-') && !action.startsWith('open-') && action !== 'load-member-detail-tab') {
@@ -50,7 +52,8 @@ async function init() {
     ready.value = true
   } catch (e) { error.value = e.message }
 }
-function changeScope(ids, label) {
+// 组织选择器 change 统一返回对象；范围与列表查询上下文须同时更新，不能只更新按钮内部选择。
+function changeScope({ storeIds: ids, label }) {
   selectedStores.value = [...ids]; scopeLabel.value = label || '当前权限范围'
   state.stateContextId = `${boot.value.stateContextId}:${ids.join(',')}`
   if (ids.length === 1) targetStore.value = String(ids[0])
@@ -79,6 +82,19 @@ function transfer(record) {
   if (window.parent === window || !parentOrigin) { error.value = '请从平台用户列表打开调店功能'; return }
   window.parent.postMessage({ type: 'platform-member:transfer', member: { uid: Number(record.memberId || record.id), nickname: record.name, belong_store_id: Number(record.storeId || 0), belong_store_name: record.storeName || '' } }, parentOrigin)
 }
+// 仅平台适配器提供余额入口；使用旧版字段，不增设功能授权或门店操作。
+async function adjustBalance(record) {
+  if (balanceOpening.value) return
+  balanceOpening.value = true; error.value = ''
+  try { const r = await request('open-member-balance-adjustment', { memberId: Number(record.memberId || record.id) }); balanceAdjustment.value = r.data.balanceAdjustment }
+  catch (e) { error.value = e.message }
+  finally { balanceOpening.value = false }
+}
+async function saveBalance(payload) {
+  await request('adjust-member-balance', payload)
+  // 重新查询服务端账户余额，并保留当前筛选和页码；不在客户端加减列表金额。
+  await memberList.value?.refresh()
+}
 function selectPeople(selected) {
   return new Promise(resolve => { person.value = { selected, resolve }; queryPeople({ page: 1 }).catch(() => {}) })
 }
@@ -102,7 +118,7 @@ async function queryReferrers(query = {}) {
 }
 function chooseReferrer(record) { referrer.value.resolve(record); referrer.value = null; return { success: true } }
 function closeReferrer() { referrer.value?.resolve(null); referrer.value = null }
-const adapter = reactive({ state, permissions, creatorSchema: {}, request, token, openDetail, transfer, selectPeople, selectReferrer })
+const adapter = reactive({ state, permissions, creatorSchema: {}, request, token, openDetail, transfer, adjustBalance, selectPeople, selectReferrer })
 onMounted(init)
 let refreshSequence = 0
 function refreshFromParent(event) {
@@ -121,10 +137,11 @@ onBeforeUnmount(() => { window.removeEventListener('message', refreshFromParent)
         <OrganizationStoreScopePicker v-model="selectedStores" :tree="boot.tree" :allowed-store-ids="boot.stores.map(s => Number(s.id))" :label="scopeLabel" @change="changeScope" />
         <label v-if="permissions.create">新增归属门店 <select v-model="targetStore" @change="state.storeName = boot.stores.find(s => Number(s.id) === Number(targetStore))?.name || ''"><option value="">请选择门店</option><option v-for="store in boot.stores" :key="store.id" :value="String(store.id)">{{ store.name }}</option></select></label>
       </div>
-      <MemberListView :platform-adapter="adapter" />
+      <MemberListView ref="memberList" :platform-adapter="adapter" />
     </template>
     <p v-else-if="!error" role="status">正在读取平台会员管理…</p>
     <MemberDetailOverlay v-if="detail" :detail="detail" :is-loading="detailLoading" :load-error="detailError" @tab-change="loadDetailTab" @close="detail = null" />
+    <MemberBalanceAdjustmentOverlay v-if="balanceAdjustment" :snapshot="balanceAdjustment" :on-submit="saveBalance" @close="balanceAdjustment = null" @saved="balanceAdjustment = null" />
     <QueryEntitySelectorOverlay v-if="person" entity-type="person" title="选择专属服务人" multiple :selected-records="person.selected" :records="personPage.records" :total="personPage.total" :page="personPage.page" :page-size="personPage.pageSize" :load-error="personPage.error" :is-loading="personPage.loading" :on-query="queryPeople" :on-select="choosePeople" @close="closePeople" />
     <MemberSelectorOverlay v-if="referrer" title="选择推荐人" :records="referrerPage.records" :total="referrerPage.total" :page="referrerPage.page" :page-size="referrerPage.pageSize" :is-loading="referrerPage.loading" :on-query="queryReferrers" :on-select="chooseReferrer" @close="closeReferrer" />
   </section>

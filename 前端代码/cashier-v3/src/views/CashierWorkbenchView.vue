@@ -5708,6 +5708,13 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false, catalog
   return filterConfiguredAccountingMethods(methods, catalog)
 }
 
+/** 收银员取本次认证根投影；仅补小票展示上下文，不加入最终结账请求。 */
+function checkoutReceiptFromPreview(preview, submission) {
+  return salesOrderReceiptFromCheckout(preview, submission, {
+    cashierName: String(state.operator?.name || '').trim()
+  })
+}
+
 function localCheckoutPreviewSnapshot() {
   // 行服务设置和人员分配分别保存在浏览器编辑态。只在“立即结账”这
   // 一个入口把它们合并进本次结账草稿；选择按钮本身不能触发服务端写入。
@@ -6193,7 +6200,7 @@ async function openCheckout() {
   // Keep the exact page rows before any checkout-step mutation can replace or
   // clear the workbench projection. The result-page receipt is a pure render
   // of this browser snapshot; it must never depend on a follow-up order query.
-  checkoutReceiptSnapshot.value = clonePlain(salesOrderReceiptFromCheckout(preview))
+  checkoutReceiptSnapshot.value = clonePlain(checkoutReceiptFromPreview(preview))
   localCheckoutPaymentOperations.value = []
   checkoutLocalOutcome.value = {}
   checkoutRecoveryActiveStep.value = null
@@ -6493,7 +6500,7 @@ async function finalizeLocalCheckoutPreview(event = {}) {
     // This also covers successful responses whose envelope does not expose a
     // printable line list; the lines are already the values shown in step 2.
     checkoutReceiptSnapshot.value = clonePlain(
-      salesOrderReceiptFromCheckout({
+      checkoutReceiptFromPreview({
         ...checkoutSnapshot,
         lines: Array.isArray(preview?.lines) ? preview.lines : checkoutSnapshot.lines,
         payment: preview?.payment || checkoutSnapshot.payment
@@ -6549,7 +6556,7 @@ async function finalizeLocalCheckoutPreview(event = {}) {
       }
       checkoutReceiptSnapshot.value = clonePlain({
         ...checkoutSnapshot,
-        ...salesOrderReceiptFromCheckout(receiptPreview,
+        ...checkoutReceiptFromPreview(receiptPreview,
           responseDataBlock(submitted).checkoutSubmission || responseDataBlock(submitted).checkoutResult || null)
       })
     }
@@ -6675,7 +6682,7 @@ async function enqueueCheckoutAction(event = {}) {
       // the original command key; never send its cart snapshot as a new write.
       const queried = await requestCheckoutAction({ action, payload })
       if (['success', 'succeeded'].includes(resultStatus(queried))) {
-        checkoutReceiptSnapshot.value = clonePlain(salesOrderReceiptFromCheckout(
+        checkoutReceiptSnapshot.value = clonePlain(checkoutReceiptFromPreview(
           preview, responseDataBlock(queried).checkoutSubmission || responseDataBlock(queried).checkoutResult || null
         ))
       }

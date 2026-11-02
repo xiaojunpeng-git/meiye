@@ -68,6 +68,18 @@ class Report extends AuthController
         } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
+    /** 删除沿用保存入口的逐表授权与认证门店边界，具体源行校验由共享事务服务执行。 */
+    public function basicDelete(Request $request)
+    {
+        try {
+            $payload = $request->post();
+            $this->assertBasicReportFeature(\app\services\report\query\BasicRegistrationQueryProvider::PAGE_CODE);
+            if (isset($payload['store_id']) && (int)$payload['store_id'] !== (int)$this->storeId) throw new \InvalidArgumentException('不能删除其他门店登记');
+            $payload['store_id'] = (int)$this->storeId;
+            return $this->success('ok', (new \app\services\report\BasicRegistrationWriteServices())->delete($this->basicContext(true), $payload));
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
     /** 当前岗位/受委托会话每次从服务端重新解析，浏览器不能指定可查询报表。 */
     private function basicReportFeatures(): array
     {

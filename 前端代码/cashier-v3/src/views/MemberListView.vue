@@ -226,6 +226,9 @@ async function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
 }
 
+// 平台余额保存后回读同一查询页，不重置筛选，也不由客户端重算账户金额。
+defineExpose({ refresh: () => queryMembers({}, false) })
+
 function openMemberCreator() {
   if (!canCreateMember.value) return
   memberSaveFeedback.value = null
@@ -512,7 +515,7 @@ function editableMemberDraft(member) {
   }
 }
 
-// 打开编辑窗是服务端授权读取；失败要在按钮附近可见，不能让用户误以为点击无效。
+// 保留已上线的读取失败提示，避免点击编辑后无反馈。
 async function openMemberEditor(record) {
   memberEditOpenError.value = ''
   const memberId = memberRecordId(record)
@@ -750,6 +753,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
               <div class="member-row-actions">
                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
                 <button v-if="platformAdapter" type="button" class="button button--text" @click="platformAdapter.transfer(record)">调店</button>
+                <button v-if="platformAdapter && record.status !== '已注销'" type="button" class="button button--text" @click="platformAdapter.adjustBalance(record)">修改余额</button>
                 <button v-if="canEditMember && record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
                 <template v-if="!platformAdapter || platformAdapter.permissions.deactivate">
                   <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>

@@ -1770,6 +1770,7 @@ Route::group('adminapi', function () {
         Route::get('basic/scope', 'v1.report.UnifiedReport/basicScope')->option(['real_name' => '基础报表门店范围']);
         Route::get('basic/query', 'v1.report.UnifiedReport/basicQuery')->option(['real_name' => '基础报表统一查询']);
         Route::post('basic/save', 'v1.report.UnifiedReport/basicSave')->option(['real_name' => '保存刷单登记']);
+        Route::post('basic/delete', 'v1.report.UnifiedReport/basicDelete')->option(['real_name' => '删除刷单登记']);
         Route::post('basic/salary/save', 'v1.report.UnifiedReport/basicSalarySave')->option(['real_name' => '保存工资人工项']);
         Route::post('basic/salary/freeze', 'v1.report.UnifiedReport/basicSalaryFreeze')->option(['real_name' => '冻结或取消冻结工资人工项']);
         Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);

@@ -113,14 +113,14 @@ function entitlementRemainingTimes(item) {
   ])
 }
 
-// Each entitlement line owns its completed service staff snapshot. Keep names
+// Each sale or entitlement line owns its service staff snapshot. Keep names
 // on that line; never infer a beautician from another item or current roster.
-function entitlementBeauticians(item) {
+function receiptLineBeauticians(item) {
   const people = firstNonEmptyList(item, ['craftsmen', 'craftsmenListAllocations'])
   const names = people
     .map((person) => pickValue(person, ['name', 'employeeName', 'staffName', 'staff_name_snapshot']))
     .filter((name) => hasValue(name))
-  return names.length ? names.join('、') : '—'
+  return names.join('、')
 }
 
 // Browser and persisted checkout line IDs differ; source identity remains stable.
@@ -254,6 +254,8 @@ export function buildSalesOrderReceiptTestOrder(options = {}) {
 }
 
 /**
+ * 收银成功页、全部订单列表和订单详情统一使用本模板；纸宽、人员位置、
+ * 明细及签字区只能在这里调整，入口适配器只负责提供各自的订单数据。
  * Amounts and items project an already-settled order snapshot; storeAddress is
  * current contact information supplied by the authorized order-detail response.
  * It never queries or changes an order, payment, inventory, or accounting record.
@@ -281,10 +283,15 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   // 地址只取后端订单详情，不回退到当前会话门店；缺失资料不虚构地址。
   const storeAddress = pickValue(source, ['storeAddress'])
   const itemRows = salesItems.length
-    ? salesItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
+    ? salesItems.map((item) => {
+      // 人员独占横跨三列的下一行，用满纸宽后才自然换行；不能受名称列宽限制。
+      const beauticians = receiptLineBeauticians(item)
+      const personnel = beauticians ? `<tr class="sales-item-personnel"><td colspan="3"><small class="sales-line-beautician">美容师：${escapeHtml(beauticians)}</small></td></tr>` : ''
+      return `<tr${beauticians ? ' class="sales-item-has-personnel"' : ''}><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>${personnel}`
+    }).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
   const entitlementRows = entitlementItems.length
-    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td><td class="beautician">${escapeHtml(entitlementBeauticians(item))}</td></tr>`).join('')
+    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td><td class="beautician">${escapeHtml(displayText(receiptLineBeauticians(item)))}</td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">暂无权益明细</td></tr>'
   const serviceRows = services.length
     ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td></tr>`).join('')
@@ -330,6 +337,10 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 53%; }
   .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 16%; }
   .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 31%; }
+  .items-table .sales-item-has-personnel { break-after: avoid; page-break-after: avoid; }
+  .items-table .sales-item-has-personnel td { border-bottom: 0; padding-bottom: 0; }
+  .items-table .sales-item-personnel td { width: auto; padding-top: 0; }
+  .sales-line-beautician { display: block; margin-top: 2px; font-size: .82em; line-height: 1.35; overflow-wrap: anywhere; }
   .entitlements-table th:nth-child(1), .entitlements-table td:nth-child(1) { width: 40%; }
   .entitlements-table th:nth-child(2), .entitlements-table td:nth-child(2) { width: 16%; }
   .entitlements-table th:nth-child(3), .entitlements-table td:nth-child(3) { width: 16%; }
@@ -431,7 +442,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
 </html>`
 }
 
-export function salesOrderReceiptFromCheckout(checkout = {}, submission) {
+export function salesOrderReceiptFromCheckout(checkout = {}, submission, receiptContext = {}) {
   const source = checkout && typeof checkout === 'object' ? checkout : {}
   const snapshot = source.orderSnapshot && typeof source.orderSnapshot === 'object'
     ? source.orderSnapshot
@@ -483,7 +494,9 @@ export function salesOrderReceiptFromCheckout(checkout = {}, submission) {
     memberName: pickValue(source, ['memberName']) || pickValue(snapshot, ['memberName']),
     isGuest: source.isGuest === true || snapshot.isGuest === true || !source.member,
     businessDate: pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt']) || pickValue(snapshot, ['businessDate', 'settledAt', 'paymentCompletedAt']),
-    cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']),
+    // 成功页的浏览器快照没有收银员字段时，搬运同一登录会话的权威展示名。
+    // 该上下文只用于打印投影，不写入结账业务快照，也不覆盖订单已有收银员。
+    cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']) || pickValue(receiptContext, ['cashierName']),
     orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
     items: [
       ...salesLines,
@@ -653,6 +666,10 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 53%; }
       ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 16%; }
       ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 31%; }
+      ${root} .items-table .sales-item-has-personnel { break-after: avoid; page-break-after: avoid; }
+      ${root} .items-table .sales-item-has-personnel td { border-bottom: 0; padding-bottom: 0; }
+      ${root} .items-table .sales-item-personnel td { width: auto; padding-top: 0; }
+      ${root} .sales-line-beautician { display: block; margin-top: 2px; font-size: .82em; line-height: 1.35; overflow-wrap: anywhere; }
       ${root} .entitlements-table th:nth-child(1), ${root} .entitlements-table td:nth-child(1) { width: 40%; }
       ${root} .entitlements-table th:nth-child(2), ${root} .entitlements-table td:nth-child(2) { width: 16%; }
       ${root} .entitlements-table th:nth-child(3), ${root} .entitlements-table td:nth-child(3) { width: 16%; }
