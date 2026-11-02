@@ -5,6 +5,7 @@ use app\services\query\metric\StoreCustomerVisitEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
 use app\services\cashier\v3\order\CashierV3RefundAttributionServices;
 use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\product\product\SystemBalanceProjectServices;
@@ -13,7 +14,8 @@ use think\facade\Db;
 /**
  * 第二阶段门店运营报表。
  *
- * 查询只读取 V3 不可变事实和受控报表补充记录。调用者必须传入已由
+ * 金额读取 V3 不可变事实，收款方式按更正投影取当前有效值，另读取受控
+ * 报表补充记录。调用者必须传入已由
  * 控制器和组织权限服务裁剪后的门店 ID；本服务从不接受组织范围扩权。
  */
 final class StoreUnifiedReportPhaseTwoServices extends BaseServices
@@ -160,9 +162,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         $refundReversal = $this->marketCashRefundCondition('market_payment');
         $cash = $this->cashFacts($stores, 'market_payment')
-            ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective')
-            ->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,CASE WHEN " . $refundReversal . " THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
-            ->group('market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,is_refund_reversal')->select()->toArray();
+            ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective');
+        CashierV3EffectivePaymentMethodSql::join($cash, 'market_payment', 'market_method_current', 'market_method_reversal');
+        $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('market_payment', 'market_method_current', 'market_method_reversal');
+        $cash = $cash->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,{$effectiveMethod} payment_method,CASE WHEN " . $refundReversal . " THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
+            ->group('market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,' . $effectiveMethod . ',is_refund_reversal')->select()->toArray();
         foreach ($cash as $fact) {
             $storeId = (int)$fact['store_id'];
             if (!isset($rows[$storeId])) continue;
@@ -364,6 +368,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $refundReversal = $this->marketCashRefundCondition('p');
         $query = $this->cashFacts($stores, 'p')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
+        CashierV3EffectivePaymentMethodSql::join($query, 'p', 'detail_method_current', 'detail_method_reversal');
+        $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('p', 'detail_method_current', 'detail_method_reversal');
         $dimension = trim((string)($input['dimension_code'] ?? ''));
         $metricCode = trim((string)($input['metric_code'] ?? ''));
         if ($dimension !== '') {
@@ -374,7 +380,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $query->where('p.business_source_primary_id', $sourceId)->whereRaw('NOT (' . $refundReversal . ')');
             }
         }
-        if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') $query->where('p.payment_method', $method);
+        if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') {
+            $query->whereRaw($effectiveMethod . ' = ?', [$method]);
+        }
         $rows = $query->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
             ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,CASE WHEN ' . $refundReversal . ' THEN 1 ELSE 0 END is_refund_reversal,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
             ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date,is_refund_reversal')

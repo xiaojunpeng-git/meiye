@@ -1720,6 +1720,9 @@ final class CashierV3SalesOrderQueryServices
             ->order('payment_line_no', 'asc')
             ->select()
             ->toArray();
+        // 原收款行保持冻结；列表、详情和导出都叠加同一份有效方式投影。
+        $collections = (new CashierV3PaymentMethodCorrectionServices())
+            ->effectiveCollections($collections, $snapshotTenantId);
         $collectionsByOrder = [];
         foreach ($collections as $collection) {
             $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
@@ -1930,12 +1933,16 @@ final class CashierV3SalesOrderQueryServices
             $batchesByOrder[$orderId] = $batch;
         }
         $collectionsByOrder = [];
-        foreach (Db::name('cashier_v3_payment_collection')
+        $effectiveCollections = (new CashierV3PaymentMethodCorrectionServices())->effectiveCollections(
+            Db::name('cashier_v3_payment_collection')
             ->whereIn('sales_order_id', $orderIds)
             ->where('collection_status', 'settled')
             ->where('collection_direction', 'forward')
             ->field('collection_id,sales_order_id,checkout_payment_draft_id,payment_line_no,payment_method,payment_method_name_snapshot,amount_cents,external_transaction_no_snapshot,remark_snapshot,occurred_at')
-            ->order('sales_order_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray() as $collection) {
+            ->order('sales_order_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray(),
+            (string)$tenantIds[0]
+        );
+        foreach ($effectiveCollections as $collection) {
             $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
         }
         $requestsById = [];
@@ -2355,6 +2362,11 @@ final class CashierV3SalesOrderQueryServices
             'contractVersion' => self::CONTRACT_VERSION,
             'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order', 'correct-sales-order-attribution'] : array_values(array_filter([
                 'correct-sales-order-attribution',
+                // 只有正式实际收款可更正方式，非现金“其他收款”和余额不取得写入口。
+                count(array_filter($snapshot['collections'], static function (array $collection): bool {
+                    return (int)$collection['amount_cents'] > 0
+                        && !in_array((string)$collection['payment_method'], ['other_collection', 'old_card_entry'], true);
+                })) > 0 ? 'correct-sales-payment-method' : null,
                 'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
                 'update-sales-order-note',
                 'reopen-sales-order',

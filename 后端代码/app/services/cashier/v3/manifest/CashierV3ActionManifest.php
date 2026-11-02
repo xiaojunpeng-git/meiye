@@ -770,6 +770,16 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.note_updated' => []],
             ],
             'correct-sales-order-attribution' => self::attributionCorrectionEventContract('correct-sales-order-attribution'),
+            'correct-sales-payment-method' => [
+                'required_event_types' => ['payment_collection.method_corrected'],
+                'allowed_event_types' => ['payment_collection.method_corrected'],
+                'event_rules' => ['payment_collection.method_corrected' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'payment_method_correction', 'source_type' => 'correct-sales-payment-method',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['payment_collection.method_corrected' => []],
+            ],
             'correct-service-order-date' => self::attributionCorrectionEventContract('correct-service-order-date'),
             'correct-service-order-attribution' => self::attributionCorrectionEventContract('correct-service-order-attribution'),
             'correct-service-order-guide' => [

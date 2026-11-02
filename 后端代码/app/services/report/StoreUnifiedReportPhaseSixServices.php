@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
 use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
 use app\services\query\metric\MetricDefinitionRegistry;
@@ -1631,8 +1632,11 @@ final class StoreUnifiedReportPhaseSixServices
         $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=a.tenant_id AND d.sale_fact_id=a.sale_fact_id')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=a.tenant_id AND s.fact_id=a.sale_fact_id')
-            ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])->where('a.status','effective')
-            ->field("a.id allocation_row_id,a.allocation_fact_id allocation_id,a.payment_fact_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_id,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.fact_id sale_fact_id,s.source_type,s.order_no_snapshot order_no,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
+            ->leftJoin('cashier_v3_payment_fact allocation_payment','allocation_payment.tenant_id=a.tenant_id AND allocation_payment.fact_id=a.payment_fact_id')
+            ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])->where('a.status','effective');
+        CashierV3EffectivePaymentMethodSql::join($query, 'allocation_payment', 'garden_method_current', 'garden_method_reversal');
+        $effectiveMethod = CashierV3EffectivePaymentMethodSql::expression('allocation_payment', 'garden_method_current', 'garden_method_reversal');
+        $query->fieldRaw("a.id allocation_row_id,a.allocation_fact_id allocation_id,a.payment_fact_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,{$effectiveMethod} payment_method,d.item_id,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.fact_id sale_fact_id,s.source_type,s.order_no_snapshot order_no,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'a.tenant_id', 'a.order_id');
         $normal->excludeVoidedSupplementAllocations($query, 'a');

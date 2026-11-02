@@ -276,6 +276,7 @@ const C5_ACTIONS = {
     'adjust-imported-refund-personnel': FEATURE_ORDER_STAFF_ADJUST,
     'update-sales-order-note': FEATURE_ORDER_CENTER,
     'correct-sales-order-attribution': FEATURE_ORDER_CENTER,
+    'correct-sales-payment-method': FEATURE_ORDER_CENTER,
     'correct-service-order-date': FEATURE_ORDER_CENTER,
     // 纯权益服务来源按整次完成事件更正，与日期命令共用订单中心权限但保持独立审计动作。
     'correct-service-order-attribution': FEATURE_ORDER_CENTER,
@@ -334,6 +335,7 @@ const C5_ACTIONS = {
     'query-order-center-records': FEATURE_ORDER_CENTER,
     'query-order-attribution-sources': FEATURE_ORDER_CENTER,
     'query-order-attribution-changes': FEATURE_ORDER_CENTER,
+    'open-sales-payment-method-correction': FEATURE_ORDER_CENTER,
     'query-order-center-debt-changes': FEATURE_ORDER_CENTER,
     'open-recharge-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,
     'open-supplement-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,

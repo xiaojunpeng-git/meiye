@@ -83,6 +83,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'query-order-center-records' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-sources' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-changes' => self::FEATURE_ORDER_CENTER,
+            // 门店与平台共用正式收款更正入口；平台仅额外选择组织范围。
+            'open-sales-payment-method-correction' => self::FEATURE_ORDER_CENTER,
             'query-order-center-debt-changes' => self::FEATURE_ORDER_CENTER,
             'open-sales-order-detail' => self::FEATURE_ORDER_CENTER,
             'view-sales-order' => self::FEATURE_ORDER_CENTER,
@@ -125,6 +127,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['adjust-imported-refund-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['update-sales-order-note'] = self::FEATURE_ORDER_CENTER;
         $command['correct-sales-order-attribution'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-sales-payment-method'] = self::FEATURE_ORDER_CENTER;
         // 纯权益消费按结账请求或预约完成事件整组更正，日期和来源都不能落到单条展示行。
         $command['correct-service-order-date'] = self::FEATURE_ORDER_CENTER;
         $command['correct-service-order-attribution'] = self::FEATURE_ORDER_CENTER;

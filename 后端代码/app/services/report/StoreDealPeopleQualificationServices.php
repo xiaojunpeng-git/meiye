@@ -142,9 +142,14 @@ final class StoreDealPeopleQualificationServices
         foreach (array_chunk(array_keys($orders), 500) as $chunk) {
             $salePayments = $this->baseReceiptQuery()
                 ->where('p.business_date', '<=', $end)
-                ->whereIn('p.source_document_type', self::SALE_PAYMENT_SOURCE_TYPES)->whereIn('p.order_id', $chunk)
-                ->field('p.fact_id,p.order_id,p.business_date,p.settled_at,p.amount_cents,p.payment_method,p.natural_key')
-                ->select()->toArray();
+                ->whereIn('p.source_document_type', self::SALE_PAYMENT_SOURCE_TYPES)->whereIn('p.order_id', $chunk);
+            \app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql::join(
+                $salePayments, 'p', 'deal_method_current', 'deal_method_reversal');
+            $effectiveMethod = \app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql::expression(
+                'p', 'deal_method_current', 'deal_method_reversal');
+            $salePayments = $salePayments
+                ->fieldRaw('p.fact_id,p.order_id,p.business_date,p.settled_at,p.amount_cents,'
+                    . $effectiveMethod . ' payment_method,p.natural_key')->select()->toArray();
             foreach ($salePayments as $payment) {
                 $this->appendReceipt($receipts, $payment, (string)$payment['order_id'], $orders, $policies);
             }

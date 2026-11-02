@@ -2822,7 +2822,7 @@ function resolveCommandContexts(action, payload) {
   }
   // 归属更正只以原单权威行和提交时旧值做并发约束；即使调用方误传展示版本，
   // 也不得让浏览器版本仓决定这笔历史更正能否进入后端事务。
-  if (['correct-sales-order-attribution', 'correct-service-order-date', 'correct-service-order-attribution', 'correct-service-order-guide', 'correct-recharge-order-attribution', 'correct-debt-repayment-date', 'correct-debt-repayment-source', 'correct-refund-date'].includes(action)) {
+  if (['correct-sales-order-attribution', 'correct-sales-payment-method', 'correct-service-order-date', 'correct-service-order-attribution', 'correct-service-order-guide', 'correct-recharge-order-attribution', 'correct-debt-repayment-date', 'correct-debt-repayment-source', 'correct-refund-date'].includes(action)) {
     return { invalid: false, contexts: [] }
   }
   // 结账后批量结束预约时，作用集合必须由服务端从已结算订单反推，
@@ -3816,6 +3816,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     'void-service-record',
     'complete-checkout-reservations',
     'correct-sales-order-attribution',
+    'correct-sales-payment-method',
     'correct-service-order-date',
     'correct-service-order-attribution',
     'correct-service-order-guide',
