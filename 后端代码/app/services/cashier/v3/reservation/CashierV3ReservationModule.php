@@ -18,6 +18,7 @@ use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\hang\CashierV3LegacyRoomReadProvider;
 use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
@@ -35,6 +36,71 @@ final class CashierV3ReservationModule
     private const STATUS_COMPLETED = 'COMPLETED';
     private const STATUS_CANCELLED = 'CANCELLED';
     private const STATUS_REJECTED = 'REJECTED';
+    /** 常驻扫描在失败旧单后继续向前，避免前 100 张异常单挡住后续到期服务。 */
+    private static $autoEndScanCursor = 0;
+
+    /**
+     * 定时任务只处理启用自动结束之后开始的 V3 服务，避免发布时把历史超时单批量核销。
+     * 每单重新加锁核对状态与时长，再复用人工结束的事件、权益扣减和状态事务。
+     */
+    public static function autoEndDue(int $limit = 100): array
+    {
+        // 保护线在升级时落库；常驻任务不能依赖可能仍持有旧值的配置缓存。
+        $activatedAt = (int)Db::name('system_config')->where('menu_name', 'reservation_auto_end_activated_at')
+            ->where('is_store', 0)->value('value');
+        if ($activatedAt <= 0) return ['ended' => 0, 'failed' => 0, 'disabled' => true];
+        $now = time();
+        $fetchDue = static function (int $afterId) use ($activatedAt, $now, $limit): array {
+            return Db::name('cashier_v3_reservation')->where('status', self::STATUS_IN_SERVICE)
+                ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+                ->where('actual_service_started_at', '>=', $activatedAt)
+                ->where('actual_service_started_at', '<=', $now - 60)
+                ->whereRaw('actual_service_started_at + service_countdown_duration_minutes * 60 <= ' . $now)
+                ->where('service_countdown_duration_minutes', '>', 0)
+                ->where('id', '>', $afterId)
+                ->order('id asc')->limit(max(1, min($limit, 500)))->column('id');
+        };
+        $ids = $fetchDue(self::$autoEndScanCursor);
+        if (!$ids && self::$autoEndScanCursor > 0) $ids = $fetchDue(0);
+        if ($ids) self::$autoEndScanCursor = (int)end($ids);
+        $ended = 0; $failed = 0;
+        foreach ($ids as $id) {
+            try {
+                $completed = Db::transaction(static function () use ($id, $activatedAt): bool {
+                    $header = Db::name('cashier_v3_reservation')->where('id', (int)$id)->lock(true)->find();
+                    if (!$header || (string)$header['status'] !== self::STATUS_IN_SERVICE
+                        || (int)$header['actual_service_started_at'] < $activatedAt
+                        || (int)$header['actual_service_started_at'] + self::serviceDurationMinutes($header) * 60 > time()) return false;
+                    $storeId = (int)$header['store_id']; $tenantId = (string)$header['tenant_id'];
+                    $orgId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
+                    if ($orgId <= 0) throw new \RuntimeException('reservation_auto_end_organization_missing');
+                    $operator = CashierV3OperatorScope::forSystemAutomation($storeId, (string)$orgId, $tenantId);
+                    $profile = ['name' => '系统自动结束服务'];
+                    $dataScope = new CashierV3DataScopeContext(0, 0, $storeId, $tenantId, (string)$orgId,
+                        [$storeId], CashierV3DataScopeContext::MODE_STORES, [], false, '', '', [], $profile);
+                    $recorder = new CashierV3BusinessEventRecorder();
+                    $action = 'end-reservation-service';
+                    $key = 'RESERVATION-AUTO-END-' . (int)$id;
+                    $scope = [
+                        'action' => $action, 'payload' => ['reservationId' => (int)$id],
+                        'operator_scope' => $operator, 'data_scope' => $dataScope,
+                        'idempotency_key' => $key, 'automated' => true,
+                        'event_recorder' => $recorder,
+                        'event_execution' => $recorder->newExecution($action, $key, $operator, $dataScope, 'reservation-auto-end'),
+                        'event_contract' => CashierV3ActionManifest::eventContractFor($action),
+                    ];
+                    self::end($scope);
+                    return true;
+                });
+                if ($completed) $ended++;
+            } catch (\Throwable $exception) {
+                $failed++;
+                // 单张异常不能阻断其他到期服务；保留服务中状态供下一轮重试和人工排查。
+                \think\facade\Log::error('reservation_auto_end_failed id=' . (int)$id . ' reason=' . $exception->getMessage());
+            }
+        }
+        return ['ended' => $ended, 'failed' => $failed, 'disabled' => false];
+    }
 
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3RootDomainAssembler $assembler): void
     {
@@ -578,17 +644,19 @@ final class CashierV3ReservationModule
         $header = self::reservationHeader($scope); $dataScope = $scope['data_scope']; $now = time();
         if ((string)$header['status'] !== self::STATUS_IN_SERVICE) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '当前预约不能结束服务。');
         $nextVersion = (int)$header['version'] + 1;
-        $event = self::record($scope, 'reservation.completed', 'reservation', (string)$header['id'], $nextVersion, $header, $now, date('Y-m-d', $now), ['reservationNo' => (string)$header['reservation_no'], 'actualEndAt' => $now, 'endedEarly' => $now < (int)$header['actual_service_started_at'] + self::serviceDurationMinutes($header) * 60, 'source' => self::sourceFromHeader($header)]);
+        $event = self::record($scope, 'reservation.completed', 'reservation', (string)$header['id'], $nextVersion, $header, $now, date('Y-m-d', $now), ['reservationNo' => (string)$header['reservation_no'], 'actualEndAt' => $now, 'endedEarly' => $now < (int)$header['actual_service_started_at'] + self::serviceDurationMinutes($header) * 60, 'source' => self::sourceFromHeader($header), 'completionTrigger' => !empty($scope['automated']) ? 'timer' : 'manual']);
         $operatorProfile = $dataScope->operatorProfile();
         $facts = (new CashierV3ReservationLifecycleServices())->consumeInTx($header, $now, [
             'eventNo' => (string)$event['event_no'],
             'commandIdempotencyKey' => (string)($scope['idempotency_key'] ?? ''),
             'operatorId' => $scope['operator_scope']->operatorId(),
             'operatorName' => (string)($operatorProfile['staff_name'] ?? $operatorProfile['name'] ?? $operatorProfile['account'] ?? ''),
+            // 仅定时任务可使用系统操作者 0；不借用真实员工身份写核销事实。
+            'systemAutomation' => !empty($scope['automated']) && $scope['operator_scope']->operatorId() === 0,
         ]);
         self::advanceHeader($header, $dataScope, $nextVersion, ['status' => self::STATUS_COMPLETED, 'actual_service_ended_at' => $now, 'updated_at' => $now]);
         $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'], 'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion, 'actualEndAt' => $now, 'facts' => $facts, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
-        self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''), 'END_SERVICE', (int)$header['version'], $nextVersion, $result, $now);
+        self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''), !empty($scope['automated']) ? 'END_SERVICE_AUTO' : 'END_SERVICE', (int)$header['version'], $nextVersion, $result, $now);
         return $result;
     }
 

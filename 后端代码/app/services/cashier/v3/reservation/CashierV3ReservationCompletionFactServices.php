@@ -26,7 +26,9 @@ final class CashierV3ReservationCompletionFactServices
         $commandKey = trim((string)($execution['commandIdempotencyKey'] ?? ''));
         $operatorId = (int)($execution['operatorId'] ?? 0);
         $operatorName = trim((string)($execution['operatorName'] ?? ''));
-        if ($eventNo === '' || $commandKey === '' || $operatorId <= 0) {
+        // 交互操作必须是已登录员工；预约定时结束单独标识为系统 0，避免伪装员工。
+        $systemAutomation = ($execution['systemAutomation'] ?? false) === true;
+        if ($eventNo === '' || $commandKey === '' || ($operatorId <= 0 && !($operatorId === 0 && $systemAutomation))) {
             throw new \LogicException('reservation_completion_execution_invalid');
         }
         if (!$lines) throw new \LogicException('reservation_completion_lines_empty');

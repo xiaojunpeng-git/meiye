@@ -28,6 +28,7 @@ return [
         'reset:password' => \app\command\ResetAdminPwd::class,
 		'get:version' => \app\command\GetVersion::class,
         'reservationJindu' => \app\command\ReservationJindu::class,
+        'reservation:auto-end' => \app\command\ReservationAutoEnd::class,
         'migrate' => \app\command\Migrate::class,
         'unified-query:export-worker' => \app\command\UnifiedQueryExportWorker::class,
         'mohe-ai:supervise' => \app\command\MoheAiSupervisor::class,

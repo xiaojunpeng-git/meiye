@@ -111,6 +111,9 @@ final class CashierV3ReservationDetailQueryServices
         $startAt = (int)($reservation['appointment_start_at'] ?? 0);
         $endAt = (int)($reservation['appointment_end_at'] ?? 0);
         $actualStartAt = (int)($reservation['actual_service_started_at'] ?? $serviceOrder['service_started_at'] ?? 0);
+        // 与常驻自动结束任务直接读取同一保护线，避免配置缓存让两端误判旧预约。
+        $autoEndActivatedAt = (int)Db::name('system_config')->where('menu_name', 'reservation_auto_end_activated_at')
+            ->where('is_store', 0)->value('value');
         $actualEndAt = (int)($reservation['actual_service_ended_at'] ?? $serviceOrder['completed_at'] ?? 0);
         // 旧行可从预约时段兜底；已保存的独立时长才是服务计时权威值。
         $durationMinutes = (int)($reservation['service_countdown_duration_minutes'] ?? 0);
@@ -193,6 +196,11 @@ final class CashierV3ReservationDetailQueryServices
             'actualStartTimestamp' => $actualStartAt,
             'actualEndTimestamp' => $actualEndAt,
             'serviceDurationMinutes' => $durationMinutes,
+            // 两端只消费同一服务端配置；缺定义时沿用默认手机端，不允许客户端扩大播报范围。
+            'serviceVoiceMode' => in_array((int)sys_config('reservation_service_voice_mode', 1), [1, 2, 3], true)
+                ? (int)sys_config('reservation_service_voice_mode', 1) : 1,
+            // 部署保护线以前已开始的服务不由页面或定时任务补发自动结束。
+            'autoEndEnabled' => $autoEndActivatedAt > 0 && $actualStartAt >= $autoEndActivatedAt,
             'serviceCountdownEndsAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
             'expectedEndAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
             'totalDurationSeconds' => $plannedDurationSeconds,

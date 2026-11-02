@@ -291,6 +291,16 @@ class SystemConfig extends AuthController
     public function save_basics(Request $request)
     {
         $post = $this->request->post();
+        // 新开关缺少配置定义时拒绝整张表单，避免界面显示保存成功但语音范围未落库。
+        if (array_key_exists('reservation_service_voice_mode', $post)) {
+            if (!in_array((string)$post['reservation_service_voice_mode'], ['1', '2', '3'], true)) {
+                return $this->fail('服务语音播报选项无效');
+            }
+            if (!$this->services->getOne(['menu_name' => 'reservation_service_voice_mode', 'is_store' => 0])) {
+                return $this->fail('服务语音播报配置缺失，请先完成配置升级');
+            }
+        }
+
         foreach ($post as $k => $v) {
             if (is_array($v)) {
                 $res = $this->services->getUploadTypeList($k);

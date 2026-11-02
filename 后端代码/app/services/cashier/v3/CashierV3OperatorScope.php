@@ -41,6 +41,14 @@ final class CashierV3OperatorScope
         $this->tenantId = trim($tenantId);
     }
 
+    /** 仅供服务端定时任务使用；0 明确代表系统，不能借用门店员工身份。 */
+    public static function forSystemAutomation(int $storeId, string $organizationId, string $tenantId): self
+    {
+        $scope = new self($storeId, 1, $organizationId, $tenantId);
+        $scope->operatorId = 0;
+        return $scope;
+    }
+
     public function storeId(): int
     {
         return $this->storeId;

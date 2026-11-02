@@ -71,6 +71,12 @@ const rejectReasonError = ref('')
 const clockNow = ref(Date.now())
 const detailDialogRef = ref(null)
 let clockTimer = null
+let countdownKey = ''
+let previousCountdownSeconds = null
+let autoEndAttemptKey = ''
+let playedFiveMinuteKey = ''
+let playedFiveSecondKey = ''
+let countdownAudio = null
 
 const reservation = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
 const summary = computed(() => (props.summary && typeof props.summary === 'object' ? props.summary : {}))
@@ -311,6 +317,40 @@ const serviceClock = computed(() => {
     label: overtime ? `已超时 ${formatClockDuration(remainingSeconds)}` : `剩余 ${formatClockDuration(remainingSeconds)}`
   }
 })
+
+// 服务端详情控制播报终端；同一开始/截止时间各阈值最多播报一次，不影响人工结束。
+function playCountdownVoice(path) {
+  try {
+    if (countdownAudio) { countdownAudio.pause(); countdownAudio.currentTime = 0 }
+    countdownAudio = new Audio(path)
+    countdownAudio.play().catch(() => {})
+  } catch { /* 浏览器禁播音频时，服务结束仍由后端保障。 */ }
+}
+
+// 当前页面即时执行，服务端定时任务覆盖关闭页面的情况；详情命令沿用现有事务和行锁。
+async function tickServiceCountdown() {
+  if (!isDetailReady.value || reservationPhase.value.phase !== 'serving' || serviceExpectedEndTimestamp.value === null) return
+  const reservationId = firstValue(reservation.value, ['id', 'reservationId', 'appointmentId'])
+  const key = `${reservationId}:${serviceExpectedEndTimestamp.value}`
+  if (key !== countdownKey) { countdownKey = key; previousCountdownSeconds = null }
+  const remaining = Math.floor((serviceExpectedEndTimestamp.value - clockNow.value) / 1000)
+  const voiceMode = Number(reservation.value.serviceVoiceMode || 1)
+  if (voiceMode === 2 || voiceMode === 3) {
+    if (remaining <= 300 && remaining > 5 && playedFiveMinuteKey !== key && (previousCountdownSeconds === null ? remaining === 300 : previousCountdownSeconds > 300)) {
+      playedFiveMinuteKey = key; playCountdownVoice('/audio/reservation-five-minutes.mp3')
+    }
+    if (remaining <= 5 && remaining > 0 && playedFiveSecondKey !== key && (previousCountdownSeconds === null ? remaining === 5 : previousCountdownSeconds > 5)) {
+      playedFiveSecondKey = key; playCountdownVoice('/audio/reservation-time-up.mp3')
+    }
+  }
+  previousCountdownSeconds = remaining
+  if (remaining > 0 || reservation.value.autoEndEnabled !== true || autoEndAttemptKey === key || activeActionKey.value) return
+  const action = availableActions.value.find((item) => item.key === 'end-reservation-service')
+  if (!action || action.disabled) return
+  autoEndAttemptKey = key
+  const result = await executeAction(action)
+  if (isActionResultError(result)) await requestReload()
+}
 
 function firstValue(source, keys) {
   if (!source || typeof source !== 'object') return ''
@@ -724,12 +764,14 @@ function requestClose() {
 onMounted(() => {
   clockTimer = window.setInterval(() => {
     clockNow.value = Date.now()
+    tickServiceCountdown()
   }, 1000)
 })
 
 onBeforeUnmount(() => {
   if (clockTimer !== null) window.clearInterval(clockTimer)
   clockTimer = null
+  if (countdownAudio) { countdownAudio.pause(); countdownAudio = null }
 })
 
 useModalFocusTrap({
@@ -853,7 +895,7 @@ useModalFocusTrap({
               >
                 <span>{{ serviceClock.overtime ? '服务超时' : '服务倒计时' }}</span>
                 <strong>{{ serviceClock.label }}</strong>
-                <small>归零后只显示超时，不会自动结束服务。</small>
+                <small>倒计时归零后自动结束服务。</small>
               </div>
             </div>
             <div>
