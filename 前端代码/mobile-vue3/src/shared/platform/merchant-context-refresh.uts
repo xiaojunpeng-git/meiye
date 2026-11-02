@@ -1,0 +1,25 @@
+import { evaluateMerchantRootUpdate } from '../../app/state/root-state.uts'
+
+// UTS运行时只镜像根响应校验字段，测试与JSON契约比对；刷新不能隐式登录、切店或接受旧响应。
+const refreshContract : any = {
+	contractVersion: 'mobile-merchant-v1',
+	merchantRoot: {
+		required: ['contractVersion', 'merchantToken', 'expiresAt', 'employee', 'authVersion', 'activeContextId', 'activeContext', 'contexts', 'capabilities', 'dataScope', 'availableActions', 'reasonCode', 'stateContextId', 'stateRevision'],
+		employeeRequired: ['id', 'name', 'avatar', 'status'],
+		employeeStatusAllowedForMerchantReady: ['ACTIVE']
+	},
+	contextSummary: { required: ['contextId', 'label'], forbidden: ['capabilities', 'dataScope', 'availableActions'] }
+}
+
+/** 请求期间换账号/切店/退出时丢弃响应；同一会话只安装更高投影序号的完整根。 */
+export function merchantContextRefreshDecision(requested : any, latest : any, incoming : any) : string {
+	if (requested == null || latest == null || incoming == null) return 'SESSION_CHANGED'
+	for (let key of ['merchantToken', 'authVersion', 'activeContextId', 'stateContextId']) {
+		if (requested[key] !== latest[key] || latest[key] !== incoming[key]) return 'SESSION_CHANGED'
+	}
+	if (requested.employee == null || latest.employee == null || incoming.employee == null ||
+		requested.employee.id !== latest.employee.id || latest.employee.id !== incoming.employee.id ||
+		incoming.reasonCode !== 'BOOTSTRAPPED') return 'SESSION_CHANGED'
+	return evaluateMerchantRootUpdate({ contextRules: { newStateContextInitialRevision: '1' } }, refreshContract,
+		latest, incoming, false, false, '', 1, 1)
+}

@@ -449,6 +449,7 @@ const ALLOWED_RESERVATION_RECORD_ACTIONS = new Set([
   'open-reservation-detail',
   'edit-reservation',
   'change-reservation-service-duration',
+  'change-reservation-service-projects',
   'confirm-reservation',
   'reject-reservation',
   'start-reservation-service',
@@ -1013,10 +1014,13 @@ async function handleReservationDetailAction(payload = {}) {
   if (action === 'change-reservation-service-duration') {
     approved.payload.serviceDurationMinutes = payload.serviceDurationMinutes
   }
+  if (action === 'change-reservation-service-projects') {
+    approved.payload.projects = payload.projects
+  }
   const result = await requestReservationRecordAction(action, approved.payload)
   if (
     resultSucceeded(result)
-    && ['confirm-reservation', 'start-reservation-service', 'end-reservation-service', 'change-reservation-service-duration'].includes(action)
+    && ['confirm-reservation', 'start-reservation-service', 'end-reservation-service', 'change-reservation-service-duration', 'change-reservation-service-projects'].includes(action)
     && String(activeDetailReservationId.value) === String(payload.reservationId)
   ) {
     // 服务状态已变更后重新读取该预约的完整详情，保留详情窗并切换可用操作。
@@ -1840,6 +1844,7 @@ onBeforeUnmount(() => {
       :load-error-code="reservationDetailLoadErrorCode"
       :on-reload="reloadReservationDetail"
       :on-action="handleReservationDetailAction"
+      :on-project-catalog="refreshReservationProjectCatalog"
       @close="closeReservationDetail"
     />
   </section>

@@ -1,5 +1,7 @@
 <template>
 	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }">
+		<!-- 小程序胶囊占位独立于组织按钮；权限隐藏按钮时仍保留系统顶部安全区。 -->
+		<view v-if="platformUsesNativeCanvas && !customerOrganizationEntryVisible" class="customer-page__native-top-inset" :style="{ height: nativeTopInset + 'px' }"></view>
 		<view v-if="customerOrganizationEntryVisible" class="customer-page__header">
 			<view class="customer-page__title-row">
 				<view class="customer-page__org-filter" @tap="openCustomerStorePicker"><text>{{ customerActiveStoreLabel }}›</text></view>
@@ -128,7 +130,19 @@
 		<view v-if="activeTab === 'groups'" class="customer-page__floating-action" role="button" aria-label="新建客群" @tap="openGroupEntry"><text>＋</text></view>
 		<view v-else-if="activeTab === 'list'" class="customer-page__floating-action" role="button" aria-label="新建客户" @tap="openCustomerEntry"><text>＋</text></view>
 
-		<view v-if="customerStorePickerVisible" class="customer-page__store-picker-mask" @tap="closeCustomerStorePicker"><view class="customer-page__store-picker" @tap.stop><view class="customer-page__store-picker-head"><text class="customer-page__store-picker-back" @tap="closeCustomerStorePicker">‹</text><view class="customer-page__store-picker-title"><text>选择组织/门店</text><text>仅显示当前数据权限范围内的门店</text></view><text class="customer-page__store-picker-close" @tap="closeCustomerStorePicker">×</text></view><view class="customer-page__store-search-wrap"><input class="customer-page__store-search" type="text" :value="customerStoreKeyword" placeholder="搜索门店" @input="updateCustomerStoreKeyword" /></view><scroll-view scroll-y="true" class="customer-page__store-tree"><view v-for="context in visibleCustomerStoreContexts()" :key="context.contextId" class="customer-page__store-option" :class="{ 'customer-page__store-option--selected': isPendingCustomerStoreContext(context) }" @tap="selectPendingCustomerStoreContext(context)"><view class="customer-page__store-option-type"><text>店</text></view><view class="customer-page__store-option-copy"><text>{{ context.label }}</text><text>门店 · 当前授权范围</text></view><text class="customer-page__store-option-selected">{{ isPendingCustomerStoreContext(context) ? '已选' : '' }}</text></view><view v-if="visibleCustomerStoreContexts().length === 0" class="customer-page__store-empty"><text>没有匹配的门店</text></view></scroll-view><view class="customer-page__store-picker-footer"><text>已选：{{ pendingCustomerStoreLabel() }}</text><view class="customer-page__store-picker-cancel" @tap="closeCustomerStorePicker"><text>取消</text></view><view class="customer-page__store-picker-confirm" @tap="confirmCustomerStoreContext"><text>确定</text></view></view></view></view>
+		<view v-if="customerStorePickerVisible" class="customer-page__store-picker-mask" @tap="closeCustomerStorePicker">
+			<view class="customer-page__store-picker" @tap.stop>
+				<view class="customer-page__store-picker-head"><text class="customer-page__store-picker-back" @tap="closeCustomerStorePicker">‹</text><view class="customer-page__store-picker-title"><text>选择门店</text><text>仅显示组织权限范围内的门店</text></view><text class="customer-page__store-picker-close" @tap="closeCustomerStorePicker">×</text></view>
+				<view class="customer-page__store-search-wrap"><input class="customer-page__store-search" type="text" :value="customerStoreKeyword" placeholder="搜索门店" @input="updateCustomerStoreKeyword" /></view>
+				<scroll-view scroll-y="true" class="customer-page__store-tree">
+					<view v-if="customerStorePickerLoading" class="customer-page__store-empty" role="status"><text>正在加载授权门店…</text></view>
+					<view v-else-if="customerStorePickerMessage.length > 0" class="customer-page__store-empty" role="alert"><text>{{ customerStorePickerMessage }}</text><button @tap="openCustomerStorePicker">重新加载</button></view>
+					<view v-for="context in visibleCustomerStoreContexts()" :key="context.contextId" class="customer-page__store-option" :class="{ 'customer-page__store-option--selected': isPendingCustomerStoreContext(context) }" @tap="selectPendingCustomerStoreContext(context)"><view class="customer-page__store-option-type"><text>店</text></view><view class="customer-page__store-option-copy"><text>{{ context.label }}</text><text>门店 · 当前授权范围</text></view><text class="customer-page__store-option-selected">{{ isPendingCustomerStoreContext(context) ? '已选' : '' }}</text></view>
+					<view v-if="!customerStorePickerLoading && customerStorePickerMessage.length === 0 && visibleCustomerStoreContexts().length === 0" class="customer-page__store-empty"><text>{{ customerStoreKeyword.length > 0 ? '没有匹配的门店' : '暂无可用门店' }}</text></view>
+				</scroll-view>
+				<view class="customer-page__store-picker-footer"><text>已选：{{ pendingCustomerStoreLabel() }}</text><view class="customer-page__store-picker-cancel" @tap="closeCustomerStorePicker"><text>取消</text></view><button class="customer-page__store-picker-confirm" :disabled="customerStorePickerLoading || customerStorePickerMessage.length > 0 || pendingCustomerStoreContext == null" @tap="confirmCustomerStoreContext">确定</button></view>
+			</view>
+		</view>
 
 		<view v-if="filterVisible" class="customer-filter">
 			<view class="customer-filter__header">
@@ -191,13 +205,14 @@
 
 <script setup lang="uts">
 	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
+	import { merchantMiniTopInset } from '../../../shared/platform/merchant-mini-top-inset.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { ensureMerchantTabAccess } from '../../../shared/platform/merchant-route-guard.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { merchantOrganizationEntryVisible } from '../../../shared/platform/merchant-tab-permissions.uts'
 	import { clearMerchantRoot, currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
-	import { switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
+	import { refreshMobileMerchantContexts, switchMobileMerchantContext } from '../../../shared/api/mobile-merchant-session-client.uts'
 	import { openMerchantBootstrapForCustomers, openMerchantCustomerDetail, openMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
 	const tabs = [
 		{ key: 'exclusive', label: '专属客户' },
@@ -232,6 +247,7 @@
 	const dateShortcutOptions = [{ value: 'custom', label: '自定义日期' }, { value: 'today', label: '今天' }, { value: 'yesterday', label: '昨天' }, { value: 'this_week', label: '本周' }, { value: 'last_week', label: '上周' }, { value: 'this_month', label: '本月' }, { value: 'last_month', label: '上月' }, { value: 'this_year', label: '本年' }]
 	const birthdayShortcutOptions = [{ value: 'today', label: '今天生日' }, { value: 'this_week', label: '本周生日' }, { value: 'this_month', label: '本月生日' }, { value: 'custom', label: '指定生日' }]
 	const defaultVisibleFieldKeys = ['member_name', 'phone', 'birthday', 'member_level', 'store']
+	const nativeTopInset = ref(0)
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 
 	const activeTab = ref('groups')
@@ -257,6 +273,7 @@
 	const recordsTotal = ref(0)
 	const recordsLoadingMore = ref(false)
 	let audienceMemberRequestVersion = 0
+	let customerQueryRequest = 0
 	const loading = ref(false)
 	const refreshing = ref(false)
 	const creatingGroup = ref(false)
@@ -282,15 +299,19 @@
 	const customerStorePickerVisible = ref(false)
 	const pendingCustomerStoreContext = ref<any>(null)
 	const customerStoreKeyword = ref('')
+	const customerStorePickerLoading = ref(false)
+	const customerStorePickerMessage = ref('')
+	let customerStorePickerRequest = 0
 	const systemAudienceOrder = ['system-birthday-this-month', 'system-sleeping-90d', 'system-followup-7d', 'system-invite-30d', 'system-benefit-low-balance', 'birthday_month', 'birthday_today', 'new_month', 'debt', 'sleep']
 
-	onShow(() => { if (ensureMerchantTabAccess('customers')) { loadCustomerStoreContext(); loadActiveTab() } })
+	onShow(() => { if (ensureMerchantTabAccess('customers')) { nativeTopInset.value = merchantMiniTopInset(); loadCustomerStoreContext(); loadActiveTab() } })
 
 	function loadCustomerStoreContext() : void {
 		let root = currentMerchantRoot()
 		customerOrganizationEntryVisible.value = merchantOrganizationEntryVisible(root)
 		if (!customerOrganizationEntryVisible.value) customerStorePickerVisible.value = false
-		let contexts = root != null && Array.isArray(root.contexts) ? root.contexts : []
+		// 新后端单独投影可切换门店，避免将成长专用组织上下文混进客户查询。
+		let contexts = root != null && Array.isArray(root.storeContexts) ? root.storeContexts : (root != null && Array.isArray(root.contexts) ? root.contexts : [])
 		let activeId = root != null && root.activeContext != null ? String(root.activeContext.contextId || '') : ''
 		customerStoreContexts.value = contexts
 		let index = 0
@@ -300,14 +321,26 @@
 	}
 
 	function openCustomerStorePicker() : void {
-		if (!merchantOrganizationEntryVisible() || customerSwitchingStore.value || customerStoreContexts.value.length <= 1) return
+		if (!merchantOrganizationEntryVisible() || customerSwitchingStore.value) return
+		// 单门店也打开面板；先显示加载反馈，再取后端最新授权，不能静默使用过期登录选项。
+		let request = ++customerStorePickerRequest
 		customerStoreKeyword.value = ''
-		pendingCustomerStoreContext.value = customerStoreContexts.value[customerActiveStoreIndex.value] || null
+		pendingCustomerStoreContext.value = null
+		customerStorePickerMessage.value = ''
+		customerStorePickerLoading.value = true
 		customerStorePickerVisible.value = true
+		refreshMobileMerchantContexts((result : any) => {
+			if (request !== customerStorePickerRequest || !customerStorePickerVisible.value) return
+			customerStorePickerLoading.value = false
+			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; customerStorePickerMessage.value = String(result.message || '门店加载失败，请重试。'); return }
+			loadCustomerStoreContext()
+			pendingCustomerStoreContext.value = customerStoreContexts.value[customerActiveStoreIndex.value] || null
+		})
 	}
-	function closeCustomerStorePicker() : void { if (!customerSwitchingStore.value) customerStorePickerVisible.value = false }
+	function closeCustomerStorePicker() : void { if (!customerSwitchingStore.value) { customerStorePickerRequest++; customerStorePickerVisible.value = false } }
 	function updateCustomerStoreKeyword(event : any) : void { customerStoreKeyword.value = String(event.detail != null ? event.detail.value || '' : '') }
 	function visibleCustomerStoreContexts() : Array<any> {
+		if (customerStorePickerLoading.value || customerStorePickerMessage.value.length > 0) return []
 		let keyword = customerStoreKeyword.value.trim()
 		if (keyword.length === 0) return customerStoreContexts.value
 		let result = new Array<any>()
@@ -318,7 +351,7 @@
 	function selectPendingCustomerStoreContext(context : any) : void { pendingCustomerStoreContext.value = context }
 	function pendingCustomerStoreLabel() : string { return pendingCustomerStoreContext.value == null ? '请选择门店' : String(pendingCustomerStoreContext.value.label || '未命名门店') }
 	function confirmCustomerStoreContext() : void {
-		if (pendingCustomerStoreContext.value == null) return
+		if (customerStorePickerLoading.value || customerStorePickerMessage.value.length > 0 || pendingCustomerStoreContext.value == null) return
 		customerStorePickerVisible.value = false
 		switchCustomerStoreContext(pendingCustomerStoreContext.value)
 	}
@@ -332,6 +365,14 @@
 			customerSwitchingStore.value = false
 			customerStorePickerVisible.value = false
 			if (!result.ok) { customerStoreSwitchMessage.value = String(result.message || '门店切换失败。'); return }
+			// 门店切换后清空旧店展示和组织下钻选择，旧请求不得覆盖新店结果。
+			records.value = []
+			audiences.value = []
+			audienceOverviewNode.value = null
+			audienceOverviewCurrentNode.value = null
+			audienceOverviewBreadcrumbs.value = []
+			recordsTotal.value = 0
+			recordsPage.value = 1
 			loadCustomerStoreContext()
 			loadActiveTab()
 		})
@@ -517,6 +558,8 @@
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; loadActiveTab(); setTimeout(() => { refreshing.value = false }, 900) }
 
 	function loadActiveTab() {
+		let request = ++customerQueryRequest
+		audienceMemberRequestVersion++
 		loading.value = true
 		loadMessage.value = ''
 		if (activeTab.value == 'groups') {
@@ -525,6 +568,7 @@
 				return
 			}
 			listMobileCustomerAudiences((result : any) => {
+				if (request !== customerQueryRequest) return
 				loading.value = false
 				if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群加载失败。'); return }
 				audiences.value = normalizeAudiences(result.body != null && Array.isArray(result.body.audiences) ? result.body.audiences : [])
@@ -538,6 +582,7 @@
 			filters: selectedFilters(),
 			filterRelation: 'all'
 		}, (result : any) => {
+			if (request !== customerQueryRequest) return
 			loading.value = false
 			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客户加载失败。'); return }
 			records.value = Array.isArray(result.body.records) ? result.body.records : []
@@ -594,6 +639,7 @@
 	}
 
 	function loadAudienceOverview(audience : any = null) {
+		let request = ++customerQueryRequest
 		loading.value = true
 		loadMessage.value = ''
 		let payload : any = {}
@@ -604,6 +650,7 @@
 		let selectedAudience = audience != null ? audience : activeAudience.value
 		if (selectedAudience != null) payload.audienceId = String(selectedAudience.audienceId || selectedAudience.audienceKey || selectedAudience.audienceCode || '')
 		queryMobileCustomerAudienceOverview(payload, (result : any) => {
+			if (request !== customerQueryRequest) return
 			loading.value = false
 			if (!result.ok) { if (handleExpiredMerchantSession(result)) return; loadMessage.value = String(result.message || '客群概况加载失败。'); return }
 			let overview = result.body != null ? result.body.audienceOverview || {} : {}
@@ -1593,6 +1640,7 @@
 	.customer-page__audience-empty-bars { display: flex; min-height: 44px; flex-direction: row; align-items: center; margin-top: 12px; padding: 0 11px; border-radius: 5px; background-color: #f6f9fc; font-size: 12px; color: #8493a5; }
 	.customer-page__page-status { display: flex; min-height: 38px; flex-direction: row; align-items: center; justify-content: center; padding: 0 8px 8px 8px; font-size: 11px; line-height: 17px; color: #8493a5; }
 	.customer-page__empty { margin: 12px 18px 0 18px; padding: 18px; border-left-width: 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
+	.customer-page__native-top-inset { flex-shrink: 0; width: 100%; }
 	.customer-page--native-mini .customer-page__header { padding-top: 84px; }
 	.customer-page__store-picker-mask { position: fixed; z-index: 110; top: 0; right: 0; bottom: 0; left: 0; display: flex; background-color: rgba(19, 37, 60, 0.42); }
 	.customer-page__store-picker { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 18px 16px 24px 16px; background-color: #ffffff; }
@@ -1617,6 +1665,7 @@
 	.customer-page__store-picker-cancel, .customer-page__store-picker-confirm { display: flex; height: 38px; flex-shrink: 0; flex-direction: row; align-items: center; justify-content: center; margin-left: 8px; padding: 0 14px; border-radius: 10px; font-size: 13px; font-weight: 700; }
 	.customer-page__store-picker-cancel { background-color: #f3f6fa; color: #5f7185; }
 	.customer-page__store-picker-confirm { background-color: #1677cc; color: #ffffff; }
+	.customer-page__store-picker-confirm[disabled] { background-color: #dce6ef; color: #8493a5; }
 
 	/* System audience cards: server-defined rules stay read-only while members
 	 * remain a live, permission-scoped query opened by tapping the card. */

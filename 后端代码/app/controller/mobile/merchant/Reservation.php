@@ -96,6 +96,22 @@ class Reservation extends BaseController
         });
     }
 
+    /** 修改计时不增设角色权限，沿用预约操作的商家会话与门店归属校验。 */
+    public function changeServiceDuration(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->changeServiceDuration($merchant, $reservationId, $this->payload());
+        });
+    }
+
+    /** 与服务时长操作共用商家预约权限；服务中状态由 V3 命令复核。 */
+    public function changeServiceProjects(int $reservationId)
+    {
+        return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {
+            return $this->reservations->changeServiceProjects($merchant, $reservationId, $this->payload());
+        });
+    }
+
     public function confirm(int $reservationId)
     {
         return $this->read('RESERVATION_MANAGE', function (array $merchant) use ($reservationId): array {

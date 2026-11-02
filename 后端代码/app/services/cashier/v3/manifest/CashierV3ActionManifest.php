@@ -604,6 +604,16 @@ class CashierV3ActionManifest
             ],
             // 计时修正有预约操作审计，但不产生服务、核销或经营事实。
             'change-reservation-service-duration' => $eventless('仅修改预约服务计时时长；预约操作表保留前后值。'),
+            // 项目调整需要预约事件留痕，核销与经营事实仍只在结束服务时产生。
+            'change-reservation-service-projects' => [
+                'required_event_types' => ['reservation.service_projects_changed'],
+                'allowed_event_types' => ['reservation.service_projects_changed'],
+                'event_rules' => [
+                    'reservation.service_projects_changed' => ['min_count'=>1,'max_count'=>1,'aggregate_type'=>'reservation','source_type'=>'change-reservation-service-projects','aggregate_version'=>null],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.service_projects_changed' => []],
+            ],
             'select-reservation-member' => $eventless($selection),
             // 仅改变预约视觉标记；审计由 reservation_operation 保存，不生成服务或经营事实。
             'mark-reservation-color' => $eventless('仅保存当前预约的日历颜色标记，不改变预约状态、会员资料或服务事实。'),

@@ -31,6 +31,7 @@ reservationDetailOk('详情返回完整只读契约、预约业务版本与生�
     strpos($query, "'detailReady' => true") !== false
     && strpos($query, "'relatedRecords' => [") !== false
     && strpos($query, "'actions' => self::actions(\$status)") !== false
+    && strpos($query, "'change-reservation-service-duration'") !== false
     && strpos($query, "'edit-reservation'") !== false
     && strpos($query, "'cancel-reservation'") !== false
     && strpos($query, "'start-reservation-service'") !== false

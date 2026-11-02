@@ -314,6 +314,8 @@ final class MobileWarehouseServices
         $total = (int)$detailPage['total'];
         $detailRows = $detailPage['rows'];
         $detailContext = $this->detailBusinessContext($detailRows, $storeIds, $employeeId);
+        $contactPhones = $this->detailContactPhones($detailRows);
+        $rechargeAmounts = $this->detailRechargeAmounts($detailRows);
         $calculated=\app\services\payroll\PayrollAlgorithmPolicy::calculated();
         $commission=$calculated ? (new \app\services\payroll\ProjectLaborCommissionReadServices($metricReader))->read($storeIds,$metricRange,[$employeeId]) : null;
         $commissionAmount=0;$commissionComplete=true;
@@ -331,6 +333,7 @@ final class MobileWarehouseServices
             if (self::isMissingDocumentNo($saleNumber)) $saleNumber = (string)($context['sale_order_no'] ?? '');
             $hasSale = (int)($context['sale_fact_count'] ?? 0) > 0;
             $hasService = (int)($context['service_fact_count'] ?? 0) > 0;
+            $isRecharge = (string)($row['source_document_type'] ?? '') === 'recharge';
             $details[] = [
                 'factId' => $factId,
                 'businessDate' => (string)($row['business_date'] ?? ''),
@@ -339,8 +342,13 @@ final class MobileWarehouseServices
                     (string)($context['service_record_no'] ?? ''),
                     (string)($context['document_no_snapshot'] ?? '')
                 ),
-                'itemName' => trim((string)($detailMode === 'labor'
+                'itemName' => $isRecharge ? '充值' : trim((string)($detailMode === 'labor'
                     ? ($context['project_name_snapshot'] ?? '') : ($context['sale_item_name'] ?? ''))),
+                'isRecharge' => $isRecharge,
+                // Recharge principal belongs to the original order, while the
+                // metric value remains this employee's allocated performance.
+                'displayRechargeAmount' => $isRecharge && isset($rechargeAmounts[$factId])
+                    ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan($rechargeAmounts[$factId]) : '',
                 'displaySaleAmount' => $hasSale
                     ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$context['sale_amount_cents']) : '—',
                 'displayConsumptionAmount' => $hasService
@@ -354,6 +362,11 @@ final class MobileWarehouseServices
                 'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                'memberPhone' => (string)($contactPhones[$factId] ?? ''),
+                'serviceObject' => $hasService ? self::detailServiceObject((string)($context['service_object'] ?? ''), $context['friend_counts_as_customer'] ?? null) : '',
+                'serviceQuantity' => $hasService ? (string)($context['service_quantity'] ?? '') : '',
+                'serviceUnit' => $hasService ? self::detailCraftsmanUnit((string)($context['craftsmen_snapshot_json'] ?? ''), $employeeId) : '',
+                'participants' => $hasService ? self::detailCraftsmen((string)($context['craftsmen_snapshot_json'] ?? '')) : '',
                 'sourceLineId' => (string)($row['source_line_id'] ?? ''),
                 'ruleName' => (string)($row['rule_name_snapshot'] ?? ''),
                 'value' => $amount,
@@ -415,11 +428,90 @@ final class MobileWarehouseServices
                 "sv.tenant_id=p.tenant_id AND sv.store_id=p.store_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status='completed'")
             ->where('p.tenant_id', '0')->whereIn('p.store_id', $storeIds)
             ->where('p.employee_id', $employeeId)->whereIn('p.fact_id', array_values(array_unique($factIds)))
-            ->fieldRaw("p.fact_id,COUNT(sf.fact_id) sale_fact_count,MAX(sf.order_no_snapshot) sale_order_no,GROUP_CONCAT(DISTINCT NULLIF(sf.item_name_snapshot,'') SEPARATOR '、') sale_item_name,COALESCE(SUM(sf.sale_amount_cents),0) sale_amount_cents,COUNT(DISTINCT sv.service_fact_id) service_fact_count,MAX(sv.service_record_no) service_record_no,MAX(sv.document_no_snapshot) document_no_snapshot,MAX(sv.project_name_snapshot) project_name_snapshot,MAX((SELECT COALESCE(SUM(pc.amount_cents),0) FROM eb_cashier_v3_performance_fact pc WHERE pc.tenant_id=p.tenant_id AND pc.store_id=p.store_id AND pc.checkout_request_id=p.checkout_request_id AND pc.source_line_id=p.source_line_id AND pc.performance_type='consumption_performance_recorded' AND pc.status='effective')) consumption_amount_cents")
+            ->fieldRaw("p.fact_id,COUNT(sf.fact_id) sale_fact_count,MAX(sf.order_no_snapshot) sale_order_no,GROUP_CONCAT(DISTINCT NULLIF(sf.item_name_snapshot,'') SEPARATOR '、') sale_item_name,COALESCE(SUM(sf.sale_amount_cents),0) sale_amount_cents,COUNT(DISTINCT sv.service_fact_id) service_fact_count,MAX(sv.service_record_no) service_record_no,MAX(sv.document_no_snapshot) document_no_snapshot,MAX(sv.project_name_snapshot) project_name_snapshot,MAX(sv.quantity) service_quantity,MAX(sv.service_object) service_object,MAX(sv.friend_counts_as_customer) friend_counts_as_customer,MAX(sv.craftsmen_snapshot_json) craftsmen_snapshot_json,MAX((SELECT COALESCE(SUM(pc.amount_cents),0) FROM eb_cashier_v3_performance_fact pc WHERE pc.tenant_id=p.tenant_id AND pc.store_id=p.store_id AND pc.checkout_request_id=p.checkout_request_id AND pc.source_line_id=p.source_line_id AND pc.performance_type='consumption_performance_recorded' AND pc.status='effective')) consumption_amount_cents")
             ->group('p.fact_id')->select()->toArray();
         $context = [];
         foreach ($rows as $row) $context[(string)$row['fact_id']] = $row;
         return $context;
+    }
+
+    /** Contact numbers are read only for members on the already authorized detail page; missing profiles stay blank. */
+    private function detailContactPhones(array $detailRows): array
+    {
+        $memberIds = [];
+        foreach ($detailRows as $row) {
+            $memberId = (int)($row['member_id'] ?? 0);
+            if ($memberId > 0) $memberIds[$memberId] = $memberId;
+        }
+        $memberPhones = $memberIds === [] ? [] : Db::name('user')->whereIn('uid', array_values($memberIds))->column('phone', 'uid');
+        $result = [];
+        foreach ($detailRows as $row) {
+            $factId = (string)($row['fact_id'] ?? '');
+            $memberId = (int)($row['member_id'] ?? 0);
+            $result[$factId] = trim((string)($memberPhones[$memberId] ?? ''));
+        }
+        return $result;
+    }
+
+    /** Batch-read original recharge principal only for this authorized page's exact order, store and member. */
+    private function detailRechargeAmounts(array $detailRows): array
+    {
+        $ids = [];
+        foreach ($detailRows as $row) {
+            if ((string)($row['source_document_type'] ?? '') !== 'recharge') continue;
+            $orderId = (string)($row['order_id'] ?? '');
+            if (preg_match('/^RCH:([1-9][0-9]*)$/D', $orderId, $match) === 1) $ids[(int)$match[1]] = (int)$match[1];
+        }
+        if ($ids === []) return [];
+        $orders = [];
+        foreach (Db::name('user_recharge')->whereIn('id', array_values($ids))
+            ->fieldRaw('id,store_id,uid,CAST(ROUND(price * 100, 0) AS SIGNED) principal_cents')->select()->toArray() as $order) {
+            $orders[(int)$order['id'] . ':' . (int)$order['store_id'] . ':' . (int)$order['uid']] = (int)$order['principal_cents'];
+        }
+        $amounts = [];
+        foreach ($detailRows as $row) {
+            $orderId = (string)($row['order_id'] ?? '');
+            if (preg_match('/^RCH:([1-9][0-9]*)$/D', $orderId, $match) !== 1) continue;
+            $key = (int)$match[1] . ':' . (int)($row['store_id'] ?? 0) . ':' . (int)($row['member_id'] ?? 0);
+            if (isset($orders[$key])) $amounts[(string)$row['fact_id']] = $orders[$key];
+        }
+        return $amounts;
+    }
+
+    /** Historical service-object and friend-count flags describe the saved visit, not a recalculated customer count. */
+    private static function detailServiceObject(string $object, $friendCounts): string
+    {
+        if (in_array($object, ['friend', 'FRIEND', '朋友'], true)) return (int)$friendCounts === 1 ? '朋友算' : '朋友不算';
+        return in_array($object, ['self', 'SELF', '本人'], true) ? '本人' : '';
+    }
+
+    /** Decode only persisted craftsmen names and point/round flags; current staff assignments cannot rewrite old visits. */
+    private static function detailCraftsmen(string $json): string
+    {
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) return '';
+        $labels = [];
+        foreach ($rows as $person) {
+            if (!is_array($person)) continue;
+            $name = trim((string)($person['name'] ?? $person['staff_name_snapshot'] ?? $person['staffName'] ?? ''));
+            if ($name === '') continue;
+            $point = $person['isPointCustomer'] ?? $person['is_point_customer'] ?? null;
+            $labels[] = $name . ($point === null ? '' : ((bool)$point ? '（点）' : '（轮）'));
+        }
+        return implode('、', array_values(array_unique($labels)));
+    }
+
+    /** The selected employee's saved point/round role supplies the writeoff unit; missing old flags remain unlabeled. */
+    private static function detailCraftsmanUnit(string $json, int $employeeId): string
+    {
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) return '';
+        foreach ($rows as $person) {
+            if (!is_array($person) || (int)($person['employeeId'] ?? $person['employee_id'] ?? 0) !== $employeeId) continue;
+            $point = $person['isPointCustomer'] ?? $person['is_point_customer'] ?? null;
+            return $point === null ? '' : ((bool)$point ? '点' : '轮');
+        }
+        return '';
     }
 
     /** A completion receipt ID is an internal reference, never a sales or service document number. */

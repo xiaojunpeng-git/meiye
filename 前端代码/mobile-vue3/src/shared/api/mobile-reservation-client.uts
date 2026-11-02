@@ -20,6 +20,8 @@ const reservationTransportContract : any = {
 		confirmReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/confirm', requestMetadataProfile: 'MERCHANT_SESSION' },
 		rejectReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/reject', requestMetadataProfile: 'MERCHANT_SESSION' },
 		startReservationService: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/start-service', requestMetadataProfile: 'MERCHANT_SESSION' },
+		changeReservationServiceDuration: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/service-duration', requestMetadataProfile: 'MERCHANT_SESSION' },
+		changeReservationServiceProjects: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/service-projects', requestMetadataProfile: 'MERCHANT_SESSION' },
 		endReservationService: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/end-service', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
 	requestMetadataProfiles: {
@@ -61,4 +63,8 @@ export function cancelMobileReservation(reservationId : number, payload : any, d
 export function confirmMobileReservation(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('confirmReservation', reservationId, payload, done) }
 export function rejectMobileReservation(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('rejectReservation', reservationId, payload, done) }
 export function startMobileReservationService(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('startReservationService', reservationId, payload, done) }
+// 只提交计时分钟与预约命令上下文；预约时段和项目由服务端保持不变。
+export function changeMobileReservationServiceDuration(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('changeReservationServiceDuration', reservationId, payload, done) }
+// 服务中仅保存最终关联项目，服务计时和预约时段由服务端保持原值。
+export function changeMobileReservationServiceProjects(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('changeReservationServiceProjects', reservationId, payload, done) }
 export function endMobileReservationService(reservationId : number, payload : any, done : (value : any) => void) : void { reservationRequest('endReservationService', reservationId, payload, done) }

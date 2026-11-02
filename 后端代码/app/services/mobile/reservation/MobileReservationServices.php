@@ -110,6 +110,24 @@ final class MobileReservationServices
         return $this->dispatch($merchant, 'start-reservation-service', $this->actionPayload('start-reservation-service', $reservationId, $payload));
     }
 
+    /** 商家端仅转发到 V3 预约命令，维持与门店端同一份计时与权限。 */
+    public function changeServiceDuration(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'change-reservation-service-duration', array_merge(
+            $this->actionPayload('change-reservation-service-duration', $reservationId, $payload),
+            ['serviceDurationMinutes' => $payload['serviceDurationMinutes'] ?? null]
+        ));
+    }
+
+    /** 仅转发所选项目到 V3 服务中修改命令，权益扣减仍在结束服务事务发生。 */
+    public function changeServiceProjects(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'change-reservation-service-projects', array_merge(
+            $this->actionPayload('change-reservation-service-projects', $reservationId, $payload),
+            ['projects' => $payload['projects'] ?? null]
+        ));
+    }
+
     public function confirm(array $merchant, int $reservationId, array $payload): array
     {
         $actionPayload = $this->actionPayload('confirm-reservation', $reservationId, $payload);
