@@ -147,6 +147,18 @@ function sourceIsExpired(source = {}) {
   return Number.isFinite(endOfExpiryDay) && endOfExpiryDay < Date.now()
 }
 
+// 延期恢复的是既有卡的有效期；过期不能消费，不等于不能延期。
+// 只放行仍有余次的过期持卡，原单作废、停用或升级状态继续阻断。
+function isSourceExtendable(source = {}) {
+  if (isSourceAvailable(source)) return true
+  return Boolean(entitlementCardHolderId(source))
+    && sourceIsExpired(source)
+    && sourceHasRemainingTimes(source)
+    && source.disabled !== true
+    && !String(source.disabledReason || '').trim()
+    && !['disabled', 'upgraded'].includes(String(source.statusCode || '').toLowerCase())
+}
+
 function sourceMatchesValidCardFilter(source = {}) {
   const status = String(source.statusCode || source.status || '').trim().toLocaleLowerCase()
   return sourceHasRemainingTimes(source)
@@ -381,7 +393,7 @@ function chooseSourceOperation(source = {}) {
       emit('contract-error', { code: 'CARD_NOT_DISABLED', message: '该卡当前不是停用状态，无需启用。' })
       return
     }
-  } else if (!isSourceAvailable(source)) {
+  } else if (!(props.operationMode === 'card-extension' ? isSourceExtendable(source) : isSourceAvailable(source))) {
     emit('contract-error', { code: 'CARD_UNAVAILABLE', message: '该卡当前不可办理此操作。' })
     return
   }
@@ -511,7 +523,7 @@ function operationProjectSelected(source = {}, project = {}) {
                 v-if="sourceOperationLabel()"
                 type="button"
                 class="cashier-entitlement-table__add"
-                :disabled="submitting || (operationMode === 'card-to-balance' ? Boolean(cardToBalanceUnavailableReason(source)) : operationMode !== 'card-enable' && !isSourceAvailable(source))"
+                :disabled="submitting || (operationMode === 'card-to-balance' ? Boolean(cardToBalanceUnavailableReason(source)) : operationMode === 'card-extension' ? !isSourceExtendable(source) : operationMode !== 'card-enable' && !isSourceAvailable(source))"
                 :title="operationMode === 'card-to-balance' ? cardToBalanceUnavailableReason(source) || undefined : undefined"
                 @click="chooseSourceOperation(source)"
               >{{ operationMode === 'card-upgrade' && operationSourceSelected(source)
