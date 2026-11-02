@@ -389,7 +389,7 @@ const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || 
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
 // 总部拓客、会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
 // 大单两端按应计自然月查询；其余报表维持原周期。
-const reportPeriodMode = computed(() => isLargeOrderReport.value ? 'month' : (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+const reportPeriodMode = computed(() => activeReport.value === 'store_item_analysis' ? 'day' : isLargeOrderReport.value ? 'month' : (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -399,6 +399,7 @@ const reportDateRange = computed(() => {
     const { start, end } = monthBounds(selectedMonth.value)
     return { min: start, max: end }
   }
+  if (reportPeriodMode.value === 'day') return { min: endDate.value, max: endDate.value }
   return { min: startDate.value, max: endDate.value }
 })
 
@@ -818,6 +819,8 @@ function reportParams(overrides = {}) {
     ? yearBounds(selectedYear.value)
     : reportPeriodMode.value === 'month'
     ? monthBounds(selectedMonth.value)
+    : reportPeriodMode.value === 'day'
+    ? { start: endDate.value, end: endDate.value }
     : { start: startDate.value, end: endDate.value }
   return {
     report: activeReport.value,
@@ -1488,7 +1491,7 @@ function openItemAnalysisDetail(row, column) {
   const metric = key.match(/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/)
   const category = key.match(/^item_analysis_category_\d+_(cash|after_split|consume)$/)
   const title = metric
-    ? ({ cash: '现金业绩', share: '分成业绩', actual: '分成后业绩', consume: '消耗业绩' }[metric[1]] + (metric[2] === 'today' ? ' · 当日' : ' · 累计'))
+    ? ({ cash: '现金业绩', share: '分成业绩', actual: '分成后业绩', consume: '消耗业绩' }[metric[1]] + (metric[2] === 'today' ? ' · 当日' : ` · ${Number(endDate.value.slice(5, 7))}月累计`))
     : `${String(drilldownConfig(row, column)?.params?.category_label || '分类')} · ${String(column.label || '品项')}`
   if (!metric && !category) return
   detailMemberFilter.value = ''

@@ -371,6 +371,8 @@
     }
   },
   "merchantRoot": {
+    "optional": ["storeContexts"],
+    "storeContextsDescription": "可选的客户页门店选择列表；是contexts中STORE上下文的子集，使用相同contextSummary结构，不包含成长专用组织上下文；只由服务端当前授权投影产生。",
     "required": [
       "contractVersion",
       "merchantToken",

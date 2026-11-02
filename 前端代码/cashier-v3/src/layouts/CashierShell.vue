@@ -3107,6 +3107,8 @@ onBeforeUnmount(() => {
     :title="memberSelectorContext === 'imported-card-refund' ? '选择退款会员' : '选择会员'"
     :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
     :show-scope-toggle="['cashier', 'reservation', 'imported-card-refund'].includes(memberSelectorContext)"
+    :default-scope="['cashier', 'reservation'].includes(memberSelectorContext) && state.storeDisplayOptions?.memberDefaultAll === true ? 'all' : 'store'"
+    :hide-scope-controls="['cashier', 'reservation'].includes(memberSelectorContext) && state.storeDisplayOptions?.memberDefaultAll === true"
     :align-scope-right="memberSelectorContext === 'imported-card-refund'"
     :show-name-initials-hint="memberSelectorContext !== 'imported-card-refund'"
     :current-store-name="state.storeName || ''"

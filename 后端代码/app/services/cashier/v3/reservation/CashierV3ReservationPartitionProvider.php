@@ -27,9 +27,11 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $now = time();
         $workflow = strtolower(trim((string)($hints['workflow'] ?? '')));
         $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
-        // “全部待确认”只放开默认日期，仍强制当前租户/门店与待确认状态；
+        // 商家确认队列没有日期选择器，须与“全部待确认”一样跨日期读取；
+        // 只放开默认日期，仍强制当前租户/门店与待确认状态；
         // 不让任意 allDates 参数改变普通日历，显式提交的列表筛选继续生效。
         $allDates = ($workflow === 'service' && !empty($hints['allDates']))
+            || $workflow === 'confirmation'
             || $quickFilter === 'all_pending_confirmation';
         $page = max(1, (int)($hints['page'] ?? 1));
         $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));

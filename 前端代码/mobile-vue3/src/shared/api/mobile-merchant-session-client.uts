@@ -2,10 +2,12 @@ import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './requ
 import { sendMobileRequest } from './mobile-http.uts'
 import { merchantContextSwitchInstallDecision } from '../../app/state/root-state.uts'
 import { clearMerchantRoot, currentMerchantRoot, merchantRequestSession, saveMerchantRoot } from '../platform/mobile-merchant-session.uts'
+import { merchantContextRefreshDecision } from '../platform/merchant-context-refresh.uts'
 
 const merchantSessionTransportContract : any = {
 	contractVersion: 'mobile-merchant-v1',
 	endpoints: {
+		bootstrap: { method: 'GET', path: '/mobile/merchant/bootstrap', requestMetadataProfile: 'MERCHANT_SESSION' },
 		switchContext: { method: 'POST', path: '/mobile/merchant/context/switch', requestMetadataProfile: 'MERCHANT_SESSION' },
 		logout: { method: 'POST', path: '/mobile/merchant/logout', requestMetadataProfile: 'MERCHANT_SESSION' }
 	},
@@ -38,6 +40,20 @@ function merchantSessionPlan(endpoint : string, root : any) : any {
 function logoutPlan() : any {
 	let root = currentMerchantRoot()
 	return merchantSessionPlan('logout', root)
+}
+
+// 使用既有bootstrap刷新授权选项，不把登录缓存当作当前组织范围，不改变当前选中门店。
+export function refreshMobileMerchantContexts(done : (value : any) => void) : void {
+	let requested = currentMerchantRoot()
+	let plan = merchantSessionPlan('bootstrap', requested)
+	if (plan == null) { done({ ok: false, message: '当前商家会话尚未准备好。' }); return }
+	sendMobileRequest(plan, {}, (result : any) => {
+		if (!result.ok) { done(result); return }
+		let decision = merchantContextRefreshDecision(requested, currentMerchantRoot(), result.body)
+		if (decision !== 'ACCEPT') { done({ ok: false, message: '会话已变化，请重新打开门店选择。' }); return }
+		saveMerchantRoot(result.body)
+		done({ ok: true, body: result.body })
+	})
 }
 
 export function switchMobileMerchantContext(targetContextId : string, done : (value : any) => void) : void {

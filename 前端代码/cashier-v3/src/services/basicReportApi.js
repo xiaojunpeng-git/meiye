@@ -25,6 +25,8 @@ export const loadBasicReportCatalog = (platform, signal) => request(platform, 'c
 export const loadBasicReportScope = (pageCode, signal) => request(true, 'scope', { pageCode, signal })
 export const loadBasicReport = (platform, query, storeIds, signal) => request(platform, 'query', { query, storeIds, signal })
 export const saveBasicRegistration = (platform, body) => request(platform, 'save', { body })
+/** 真删除只发送已查询行的身份、版本及原内容证明；结果仍由共享查询重取。 */
+export const deleteBasicRegistration = (platform, body) => request(platform, 'delete', { body })
 
 /** 工资人工补充独立保存，不复用刷单写入口；权限与冻结最终由后端校验。 */
 export const saveBasicSalary = (platform, body) => request(platform, 'salary/save', { body })
