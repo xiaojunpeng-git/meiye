@@ -25,10 +25,28 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
         $input = self::dates($payload, (string)$context['query_cutoff_date']);
         $validationQuery = $payload;
         unset($validationQuery['start_date'], $validationQuery['end_date'], $validationQuery['as_of_date']);
+        unset($validationQuery['unconsumed_task_id']);
         // 未登记字段、非法条件和表达式先由框架拒绝，避免错误请求触发昂贵的权益读取。
         $this->execution->validatedPlan(static::CODE, [], $validationQuery, $context);
-        $read = function () use ($context, $payload, $stores, $input): array {
-            $source = BasicBusinessReportServices::read(static::CODE, $stores, $input, $context);
+        // 多店当前权益超过同步来源窗口时，先生成同一范围的私有快照；
+        // 完成前不返回局部行或合计，完成后仍由统一执行器筛选、排序和分页。
+        $async = null;
+        if (\app\services\report\BasicUnconsumedTaskServices::applies(static::CODE, $stores)) {
+            // 当前权益不能通过后台任务号伪装为历史快照；与单店同步来源
+            // 保持同一天的 as_of 校验，再允许入队。
+            if ($input['as_of_date'] !== (string)$context['query_cutoff_date']) {
+                throw new \InvalidArgumentException('本报表仅支持当天实时资产，不能查询历史日期。');
+            }
+            $taskId = $payload['unconsumed_task_id'] ?? null;
+            if ($taskId !== null && !is_string($taskId)) throw new \InvalidArgumentException('报表任务编号无效');
+            $async = (new \app\services\report\BasicUnconsumedTaskServices())
+                ->resolve(static::CODE, $stores, $context, $taskId);
+            if ($async['pending']) return ['async_report' => $async,
+                'queryFields' => BasicBusinessReportServices::fields(static::CODE)];
+        }
+        $read = function () use ($context, $payload, $stores, $input, $async): array {
+            $source = $async === null ? BasicBusinessReportServices::read(static::CODE, $stores, $input, $context)
+                : $async['source'];
             $fields = BasicBusinessReportServices::fields(static::CODE);
             // 动态完整性只可收紧列的合计资格，不能增加未登记字段或把未知工资合计成0。
             $dynamic = array_column($source['fields'] ?? [], null, 'key');
@@ -78,23 +96,35 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
                 $summaries[] = ['field' => $key, 'aggregation' => 'sum'];
             }
             $query = $payload;
-            unset($query['start_date'], $query['end_date'], $query['as_of_date']);
+            // 任务号只用于认证后定位私有快照，不属于统一查询的业务筛选字段。
+            unset($query['start_date'], $query['end_date'], $query['as_of_date'], $query['unconsumed_task_id']);
             $query['limit'] = 20;
             $summaryChunks = array_chunk($summaries, UnifiedQueryExecutionServices::MAX_SUMMARIES);
             $query['summaries'] = $summaryChunks[0] ?? [];
-            $rows = $source['rows'];
+            $rows = $source['rows'] ?? [];
             // 不丢弃未经授权的错误投影后还返回受污染合计；领域行归属异常直接失败。
             foreach ($rows as $row) {
                 $ids = isset($row['store_ids']) ? $row['store_ids'] : [(int)($row['store_id'] ?? 0)];
                 if (!$ids || array_diff(array_map('intval', $ids), $stores)) throw new \InvalidArgumentException('报表行归属超出当前数据权限');
             }
-            $result = $this->execution->execute(static::CODE, $rows, [], $query, $context, static function () { return true; });
+            $scopeFilter = static function (array $row) use ($stores): bool {
+                $ids = isset($row['store_ids']) ? $row['store_ids'] : [(int)($row['store_id'] ?? 0)];
+                if (!$ids || array_diff(array_map('intval', $ids), $stores)) {
+                    throw new \InvalidArgumentException('报表行归属超出当前数据权限');
+                }
+                return true;
+            };
+            $result = $async === null
+                ? $this->execution->execute(static::CODE, $rows, [], $query, $context, $scopeFilter)
+                : $this->execution->executeBatches(static::CODE, $async['batch_factory'](), [], $query, $context, $scopeFilter);
             // 工资等宽表超过20项可加总列时分批请求同一执行器；源行、过滤和排序保持完全相同。
             foreach (array_slice($summaryChunks, 1) as $chunk) {
                 $summaryQuery = $query;
                 unset($summaryQuery['export']);
                 $summaryQuery['summaries'] = $chunk;
-                $part = $this->execution->execute(static::CODE, $rows, [], $summaryQuery, $context, static function () { return true; });
+                $part = $async === null
+                    ? $this->execution->execute(static::CODE, $rows, [], $summaryQuery, $context, $scopeFilter)
+                    : $this->execution->executeBatches(static::CODE, $async['batch_factory'](), [], $summaryQuery, $context, $scopeFilter);
                 $result['summaries'] = array_merge($result['summaries'], $part['summaries']);
             }
             // 工具栏指标与当前完整筛选集使用同一执行器结果，不另跑未带筛选的总数。
@@ -108,11 +138,12 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
                 'can_edit' => false, 'source_kind' => 'unified_business_facts', 'range' => $input,
                 'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => $source['table_layout']['summary_position'] ?? 'first_row'],
                 'coverage_start' => array_key_exists('coverage_start', $source) ? $source['coverage_start'] : '2026-08-10',
-                'aggregation_caught_up' => true, 'data_as_of' => time(),
+                'aggregation_caught_up' => true, 'data_as_of' => $source['data_as_of'] ?? time(),
                 'complete' => $source['complete'] ?? true, 'gaps' => $source['gaps'] ?? [],
                 'data_gaps' => $source['data_gaps'] ?? [],
                 'limitations' => $source['limitations'] ?? [], 'drilldowns' => $source['drilldowns'] ?? [],
-                'metric_version' => $source['metric_version'] ?? 'basic-unified-facts-v1']);
+                'metric_version' => $source['metric_version'] ?? 'basic-unified-facts-v1',
+                'unconsumed_task_id' => $async['task_id'] ?? null]);
         };
         // 工资Reader自行建立独立一致读取并拒绝嵌套；后续框架仅处理内存行，不再读取数据库。
         return static::CODE === 'basic_salary_realtime' ? $read() : Db::transaction($read);

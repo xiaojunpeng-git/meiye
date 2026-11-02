@@ -42,6 +42,24 @@ class Report extends AuthController
             return $this->success('ok', \app\services\report\BasicReportHostServices::query($context, $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
+        catch (\RuntimeException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 门店端同一报表导出入口；当前会话只能使用本店权限范围。 */
+    public function basicUnconsumedExport(Request $request)
+    {
+        try {
+            $raw = (string)$request->get('query', '{}');
+            if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
+            $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+            if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
+            $code = (string)($payload['pageCode'] ?? '');
+            if (!\app\services\report\BasicUnconsumedTaskServices::supportsCode($code))
+                throw new \InvalidArgumentException('该报表无需后台导出');
+            $this->assertBasicReportFeature($code);
+            $file = (new \app\services\report\BasicUnconsumedTaskServices())->exportCsv($this->basicContext(false), $payload);
+            return download($file['path'], $file['filename'])->mimeType('text/csv');
+        } catch (\InvalidArgumentException | \JsonException | \RuntimeException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     /** 门店只可修改当前登录店的工资人工项；冻结由共享服务事务锁强制校验。 */

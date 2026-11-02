@@ -11,7 +11,7 @@ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePic
 import TablePagination from '@/components/common/TablePagination.vue'
 import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, deleteBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, downloadBasicUnconsumedCsv, saveBasicRegistration, deleteBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
 const state = useCashierV3State()
@@ -26,6 +26,7 @@ const scope = ref({ tree: [], allowed_store_ids: [] })
 const scopeLabel = ref('当前权限范围')
 const loading = ref(false)
 const error = ref('')
+const asyncTask = ref(null)
 const exporting = ref(false)
 const fieldGuide = ref(false)
 const commissionProof = ref(null)
@@ -50,6 +51,7 @@ const salaryMonth = ref(today.slice(0, 7))
 let requestId = 0
 let controller
 let returnFocus
+let asyncPollTimer
 const active = computed(() => catalog.value.find(report => report.code === route.params.report))
 const visibleFields = computed(() => {
   return fields.value.filter(field => field.defaultVisible)
@@ -77,6 +79,7 @@ async function run(next = query.value) {
   // 动态门店/逐日列由专用展示组件消费同一后端契约，避免宿主重复发起通用表查询。
   if (reconciliationReport.value) return
   const id = ++requestId
+  clearTimeout(asyncPollTimer)
   controller?.abort()
   controller = new AbortController()
   loading.value = true
@@ -89,6 +92,17 @@ async function run(next = query.value) {
   try {
     const result = await loadBasicReport(platform.value, query.value, stores.value, controller.signal)
     if (id !== requestId) return
+    // 后台生成期间不展示旧查询的行或伪合计；轮询只复用同一认证任务号。
+    if (result.async_report?.pending) {
+      asyncTask.value = result.async_report
+      query.value.unconsumed_task_id = result.async_report.task_id
+      data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
+      executedQuery.value = null
+      fields.value = result.queryFields || fields.value
+      asyncPollTimer = setTimeout(() => { if (id === requestId) void run({ ...query.value }) }, 2500)
+      return
+    }
+    asyncTask.value = null
     const lastPage = Math.max(1, Math.ceil(result.pagination.total / 20))
     if (result.pagination.page > lastPage) { await run({ ...query.value, page: lastPage }); return }
     salaryDraft.value = null
@@ -100,6 +114,7 @@ async function run(next = query.value) {
   } catch (e) {
     if (id === requestId && e.name !== 'AbortError') {
       error.value = e.message
+      asyncTask.value = null
       data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
       executedQuery.value = null
     }
@@ -107,7 +122,9 @@ async function run(next = query.value) {
 }
 /** 日期是聚合前的事实范围，翻页和导出复用已执行范围，不读取未提交的日期草稿。 */
 function submitQuery(next) {
-  if (active.value?.code === 'basic_brush_registration') { void run({ ...next, page: 1 }); return }
+  const fresh = { ...next, page: 1 }
+  delete fresh.unconsumed_task_id
+  if (active.value?.code === 'basic_brush_registration') { void run(fresh); return }
   const range = { ...dates.value }
   if (['realtime_month', 'month'].includes(active.value?.time_mode)) {
     if (!/^\d{4}-\d{2}$/.test(salaryMonth.value)) { error.value = '请选择工资月份'; return }
@@ -117,7 +134,7 @@ function submitQuery(next) {
     if (range.end_date > today) range.end_date = today
     range.as_of_date = range.end_date
   }
-  void run({ ...next, ...range, page: 1 })
+  void run({ ...fresh, ...range })
 }
 function applyPeriod(value) {
   dates.value.start_date = value.min
@@ -127,7 +144,15 @@ function selectScope(value) {
   stores.value = value.storeIds
   // 010 平台菜单授权的空选择代表全部门店，不能继续显示旧的数据权限文案。
   scopeLabel.value = !value.storeIds.length && scope.value.authorization_mode === 'all' ? '全部门店' : value.label
-  void run({ ...query.value, page: 1 })
+  const fresh = { ...query.value, page: 1 }
+  delete fresh.unconsumed_task_id
+  void run(fresh)
+}
+/** 刷新显式创建新快照；翻页与导出继续使用已完成的同一任务。 */
+function refreshReport() {
+  const fresh = { ...query.value, page: 1 }
+  delete fresh.unconsumed_task_id
+  void run(fresh)
 }
 /** 每张表独立取后端门店树；切回全部时与该表的读授权保持一致。 */
 async function refreshScope(code) {
@@ -222,9 +247,13 @@ async function exportRows() {
   const selectedStores = [...stores.value]
   const selectedFields = visibleFields.value.map(field => ({ ...field }))
   try {
-    const result = await loadBasicReport(platform.value, { ...frozen,
-      export: { scope: 'query', fields: selectedFields.map(field => field.key) } }, selectedStores)
-    const blob = new Blob([registrationCsv(selectedFields, result.exportRows, result.summaries, result.field_sources, result.table_layout?.summary_position !== 'none', result.row_sources || [], result.summary_cards || [])], { type: 'text/csv;charset=utf-8' })
+    const exportQuery = { ...frozen, export: { scope: 'query', fields: selectedFields.map(field => field.key) } }
+    let blob
+    if (frozen.unconsumed_task_id) blob = await downloadBasicUnconsumedCsv(platform.value, exportQuery, selectedStores)
+    else {
+      const result = await loadBasicReport(platform.value, exportQuery, selectedStores)
+      blob = new Blob([registrationCsv(selectedFields, result.exportRows, result.summaries, result.field_sources, result.table_layout?.summary_position !== 'none', result.row_sources || [], result.summary_cards || [])], { type: 'text/csv;charset=utf-8' })
+    }
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url; anchor.download = (active.value?.name || '基础报表') + '.csv'; anchor.click()
@@ -234,7 +263,7 @@ async function exportRows() {
 }
 function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
-  // 刷单登记允许分精度输入，明细与合计按产品指定展示两位；其他金额沿用整元默认口径。
+  // 刷单登记沿用已上线的两位金额展示。
   if (active.value?.code === 'basic_brush_registration' && field.key === 'amount') return formatReportMoney(row[field.key], 2)
   // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
   if (active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(row[field.key]).toFixed(2)
@@ -297,6 +326,7 @@ watch(() => Boolean(editor.value || fieldGuide.value || commissionProof.value ||
 })
 watch(() => route.params.report, async () => {
   const routeRequest = ++requestId
+  clearTimeout(asyncPollTimer); asyncTask.value = null
   controller?.abort(); salaryDraft.value = null; salaryEditing.value = false; freezeDialog.value = null; editor.value = null; commissionProof.value = null; executedQuery.value = null
   // 切换报表立即清掉上一张表的行、合计和编辑资格，不能把旧数据短暂展示在新表名下。
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
@@ -322,7 +352,7 @@ onMounted(async () => {
     if (active.value?.available) await run()
   } catch (e) { error.value = e.message }
 })
-onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentElement.classList.remove('basic-reports-document') })
+onBeforeUnmount(() => { requestId++; clearTimeout(asyncPollTimer); controller?.abort(); document.documentElement.classList.remove('basic-reports-document') })
 </script>
 
 <template>
@@ -333,6 +363,8 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     </header>
     <p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p>
     <p v-else-if="data.complete === false" class="basic-reports__error" role="status">部分计算条件缺失，待核对项目显示为“-”，不计入合计。{{ (data.data_gaps || []).map(gap => gap.label).filter(Boolean).join('；') }}</p>
+    <p v-if="asyncTask" class="basic-reports__snapshot" role="status" aria-live="polite">正在后台生成完整报表：已处理 {{ asyncTask.completed_stores }} / {{ asyncTask.total_stores }} 家门店。完成后才显示结果和合计。</p>
+    <p v-if="data.unconsumed_task_id && data.data_as_of" class="basic-reports__snapshot" role="status">本次结果的数据时点：{{ new Date(data.data_as_of * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}（北京时间）。点击刷新可重新生成。</p>
     <p v-if="data.coverage_start && data.range?.start_date < data.coverage_start" class="basic-reports__error" role="status">本表仅包含 {{ data.coverage_start }} 起纳入统一数据底层的业务，更早历史尚未纳入本表。</p>
     <p v-if="salaryReport && data.realtime_start_date" class="basic-reports__snapshot" role="status">{{ data.source_kind === 'saved_salary_snapshot' ? data.coverage : data.realtime_start_date + ' 起按业务发生日期实时统计；此前月份读取历史保存工资。' }}</p>
     <p v-if="active?.code === 'basic_cross_store_settlement' && data.source_kind === 'sealed_legacy_settlement_snapshot'" class="basic-reports__snapshot" role="status">{{ data.coverage }}</p>
@@ -351,21 +383,21 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
           <button v-if="salaryReport && data.salary_can_edit" type="button" class="button button--secondary" :disabled="loading || salarySaving" @click="salaryEditing = !salaryEditing; salaryDraft = null">{{ salaryEditing ? '取消编辑' : '编辑' }}</button>
           <button v-if="salaryReport && data.salary_can_freeze" type="button" class="button button--secondary" :disabled="loading || salarySaving || !executedQuery" @click="requestSalaryFreeze">{{ !data.salary_readonly && data.salary_state?.frozen ? '取消冻结' : '冻结' }}</button>
           <button type="button" class="basic-reports__icon" title="列名取值来源" aria-label="列名取值来源" @click="fieldGuide = true"><BookOpen :size="17" /></button>
-          <button type="button" class="basic-reports__icon" title="刷新" aria-label="刷新" :disabled="loading" @click="run()"><RefreshCw :size="17" /></button>
+          <button type="button" class="basic-reports__icon" title="刷新" aria-label="刷新" :disabled="loading || !!asyncTask" @click="refreshReport"><RefreshCw :size="17" /></button>
           <button type="button" class="basic-reports__icon" title="导出" aria-label="导出" :disabled="!executedQuery || exporting || loading" @click="exportRows"><Download :size="17" /></button>
         </template>
       </UnifiedReportQueryToolbar>
       <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="!data.salary_readonly && data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
       <div v-if="data.summary_cards?.length" class="basic-reports__metric-summary" aria-label="当前查询汇总"><span v-for="card in data.summary_cards" :key="card.key">{{ card.label }}：<strong>{{ card.value == null ? '-' : card.money ? formatReportMoney(card.value) : card.value }}</strong></span></div>
-      <section class="basic-reports__results" :aria-busy="loading">
+      <section class="basic-reports__results" :aria-busy="loading || !!asyncTask">
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
-            <tr v-if="data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
+            <tr v-if="!asyncTask && data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
             <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button><button type="button" class="basic-reports__edit" :aria-label="'删除登记 ' + row.registration_id" @click="requestDelete(row)">删除</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
-          <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
+          <p v-if="!data.rows.length" class="basic-reports__empty">{{ asyncTask ? '正在后台生成完整报表…' : loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
         </div>
-        <TablePagination :total="data.pagination.total" :page="data.pagination.page" :page-size="20" :page-size-options="[20]" show-page-count @change="run({ ...query, page: $event.page })" />
+        <TablePagination v-if="!asyncTask" :total="data.pagination.total" :page="data.pagination.page" :page-size="20" :page-size-options="[20]" show-page-count @change="run({ ...query, page: $event.page })" />
       </section>
     </template>
     <Teleport to="body">

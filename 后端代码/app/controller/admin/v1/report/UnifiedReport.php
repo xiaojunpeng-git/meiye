@@ -77,6 +77,24 @@ class UnifiedReport extends AuthController
             return app('json')->success(\app\services\report\BasicReportHostServices::query($context, $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
+        catch (\RuntimeException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 多店未消耗导出只取已完成的同权限任务，文件由后端流式生成。 */
+    public function basicUnconsumedExport(Request $request)
+    {
+        try {
+            $raw = (string)$request->get('query', '{}');
+            if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
+            $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+            if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
+            $code = (string)($payload['pageCode'] ?? '');
+            if (!\app\services\report\BasicUnconsumedTaskServices::supportsCode($code)
+                || !$this->canReadBasicReport($code)) throw new \InvalidArgumentException('当前账号未授权该报表导出');
+            $context = $this->basicReadContext($request->get(), $code);
+            $file = (new \app\services\report\BasicUnconsumedTaskServices())->exportCsv($context, $payload);
+            return download($file['path'], $file['filename'])->mimeType('text/csv');
+        } catch (\InvalidArgumentException | \JsonException | \RuntimeException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     /** 工资人工编辑与刷单写入分离，不能用基础报表读菜单代替工资写权限。 */

@@ -11,6 +11,8 @@ namespace app\services\query;
  */
 class UnifiedQueryExecutionServices
 {
+    // 大范围报表复用完全相同的验证/过滤/合计规则，只将来源行改为有界批次。
+    use UnifiedQueryStreamingExecution;
     public const MAX_SOURCE_ROWS = 10000;
     public const MAX_CUSTOM_FIELDS = 20;
     public const MAX_FILTERS = 20;

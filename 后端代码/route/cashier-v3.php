@@ -63,6 +63,7 @@ Route::group('cashierapi/v3', function () {
             ->option(['real_name' => '收银V3经营报表目录']);
         Route::get('report/basic/catalog', 'Report/basicCatalog')->option(['real_name' => '基础报表目录']);
         Route::get('report/basic/query', 'Report/basicQuery')->option(['real_name' => '基础报表统一查询']);
+        Route::get('report/basic/export', 'Report/basicUnconsumedExport')->option(['real_name' => '未消耗报表导出']);
         Route::post('report/basic/save', 'Report/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::post('report/basic/delete', 'Report/basicDelete')->option(['real_name' => '删除刷单登记']);
         Route::post('report/basic/salary/save', 'Report/basicSalarySave')->option(['real_name' => '保存工资人工项']);

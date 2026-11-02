@@ -49,7 +49,7 @@ final class Sidebar007UnconsumedV3ReadServices
      * @param int[] $authorizedStoreIds Host 已裁剪门店范围
      */
     public function read(string $code, array $authorizedStoreIds, array $input, ?callable $authorityRead = null,
-        ?callable $amountRead = null): array
+        ?callable $amountRead = null, ?array $populationStores = null): array
     {
         if (!in_array($code, self::CODES, true)) throw new \InvalidArgumentException('未登记未消耗报表');
         $stores = $this->storeIds($authorizedStoreIds);
@@ -59,7 +59,7 @@ final class Sidebar007UnconsumedV3ReadServices
             throw new \LogicException('未消耗实时明细仅支持当天查询');
         }
         $authorityRead ??= static fn(string $page, array $scope, array $filter): array
-            => (new BasicEntitlementReportServices())->read($page, $scope, $filter);
+            => (new BasicEntitlementReportServices())->read($page, $scope, $filter, $populationStores);
         $sourceCode = $code === 'basic_unconsumed_summary' ? BasicEntitlementReportServices::UNCONSUMED_SUMMARY_SOURCE
             : BasicEntitlementReportServices::UNCONSUMED_COMPONENT_SOURCE;
         try {

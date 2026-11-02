@@ -108,7 +108,7 @@ final class BasicEntitlementReportServices
      * The caller/Provider owns a consistent read transaction and all execution
      * filtering, sorting, summaries and pagination of this complete population.
      */
-    public function read(string $code, array $stores, array $input): array
+    public function read(string $code, array $stores, array $input, ?array $populationStores = null): array
     {
         // 007四表按当前会员所属店归集全部合法卡项。仅内部source代码启用，
         // 通用资产查询仍要求卡来源店也在权限内，不能被前端参数放宽。
@@ -117,6 +117,14 @@ final class BasicEntitlementReportServices
         $customerRightsReport = $code === self::CUSTOMER_RIGHTS_SOURCE;
         $includeExhaustedForReport = in_array($code,
             [self::UNCONSUMED_COMPONENT_SOURCE, self::UNCONSUMED_SUMMARY_SOURCE], true);
+        // 后台快照仅分割会员所属店的人口窗口；持卡资格、组织权限和
+        // 导入权益归属始终使用完整授权门店集，跨店持卡不会随批次丢失。
+        if ($populationStores !== null) {
+            $populationStores = array_values(array_unique(array_map('intval', $populationStores)));
+            if (!$memberStoreReport || !$populationStores || array_diff($populationStores, $stores)) {
+                throw new \InvalidArgumentException('未消耗报表人口分批范围无效');
+            }
+        } else $populationStores = $stores;
         if ($code === self::CUSTOMER_RIGHTS_SOURCE) $code = 'basic_customer_entitlements';
         if ($code === self::UNCONSUMED_COMPONENT_SOURCE) $code = 'basic_customer_entitlements';
         if ($code === self::UNCONSUMED_SUMMARY_SOURCE) $code = 'basic_unconsumed_summary';
@@ -137,7 +145,7 @@ final class BasicEntitlementReportServices
         // Belonging-store attribution avoids repeating one balance in all
         // stores where a member has an active relation. The subquery avoids fanout.
         $populationQuery = Db::name('user')->alias('u')
-                ->where('u.status', 1)->where('u.is_del', 0)->whereIn('u.belong_store_id', $stores)
+                ->where('u.status', 1)->where('u.is_del', 0)->whereIn('u.belong_store_id', $populationStores)
                 // Match the shared balance authority's current-member boundary.
                 // Old timestamp/integer schemas represent "not deleted" in
                 // different ways; CAST avoids implicit datetime conversion.

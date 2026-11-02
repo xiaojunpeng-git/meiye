@@ -24,6 +24,22 @@ export const loadBasicReportCatalog = (platform, signal) => request(platform, 'c
 /** 平台基础报表的可选门店范围与查询共用菜单授权；门店端始终固定当前登录门店。 */
 export const loadBasicReportScope = (pageCode, signal) => request(true, 'scope', { pageCode, signal })
 export const loadBasicReport = (platform, query, storeIds, signal) => request(platform, 'query', { query, storeIds, signal })
+/** 大范围未消耗导出由后端读取已完成任务并流式生成，不在浏览器装入全部会员行。 */
+export async function downloadBasicUnconsumedCsv(platform, query, storeIds = [], signal) {
+  const base = platform ? '/adminapi/report/basic/' : '/cashierapi/v3/report/basic/'
+  const url = new URL(base + 'export', window.location.origin)
+  url.searchParams.set('query', JSON.stringify(query))
+  if (platform && storeIds.length) url.searchParams.set('store_ids', storeIds.join(','))
+  const cookie = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
+  const token = platform ? (cookie ? decodeURIComponent(cookie[1]) : '') : readStoreV3SessionToken()
+  const response = await fetch(url, { credentials: platform ? 'same-origin' : 'omit', cache: 'no-store', signal,
+    headers: { Accept: 'text/csv, application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) } })
+  if (!response.ok || !response.headers.get('content-type')?.includes('text/csv')) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.msg || '未消耗报表导出失败，请重试。')
+  }
+  return response.blob()
+}
 export const saveBasicRegistration = (platform, body) => request(platform, 'save', { body })
 /** 真删除只发送已查询行的身份、版本及原内容证明；结果仍由共享查询重取。 */
 export const deleteBasicRegistration = (platform, body) => request(platform, 'delete', { body })

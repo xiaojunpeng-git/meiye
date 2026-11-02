@@ -1,0 +1,24 @@
+[Unit]
+Description=Mohe basic unconsumed report worker (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# 与 Web 进程共用 www 身份，私有报表文件必须可由同实例页面读取。
+User=www
+Group=www
+WorkingDirectory=@APP_ROOT@
+# Install one worker per authorized instance with its fully qualified queue name.
+# The dedicated Redis connection reserves the job for 2520 seconds.
+ExecStart=@PHP_BIN@ think queue:work unconsumed_redis --queue=@QUEUE_NAME@ --timeout=2400 --memory=768 --sleep=2 --tries=1 -q
+Restart=always
+RestartSec=5
+TimeoutStopSec=35
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mohe-basic-unconsumed-worker-%i
+
+[Install]
+WantedBy=multi-user.target
