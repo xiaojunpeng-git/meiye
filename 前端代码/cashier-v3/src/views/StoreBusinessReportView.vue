@@ -1489,7 +1489,8 @@ function openOperationsServiceDetail(row, column) {
 function openItemAnalysisDetail(row, column) {
   const key = String(column.key || '')
   const metric = key.match(/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/)
-  const category = key.match(/^item_analysis_category_\d+_(cash|after_split|consume)$/)
+  // 旧分类列仍对应当日；新增的 _cumulative 由后端按月初至所选日下钻。
+  const category = key.match(/^item_analysis_category_\d+_(cash|after_split|consume)(?:_cumulative)?$/)
   const title = metric
     ? ({ cash: '现金业绩', share: '分成业绩', actual: '分成后业绩', consume: '消耗业绩' }[metric[1]] + (metric[2] === 'today' ? ' · 当日' : ` · ${Number(endDate.value.slice(5, 7))}月累计`))
     : `${String(drilldownConfig(row, column)?.params?.category_label || '分类')} · ${String(column.label || '品项')}`
