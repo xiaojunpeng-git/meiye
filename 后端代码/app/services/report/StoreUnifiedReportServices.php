@@ -1559,14 +1559,13 @@ class StoreUnifiedReportServices extends BaseServices
         // 当日与月累计共用同一次组织归属快照；当日只读一次事实，避免重复扫描。
         $dimensions->beginCurrentDimensionSnapshot();
         try {
-            $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
-            $daily = $period;
+            $daily = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
             $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
         } finally {
             $dimensions->endCurrentDimensionSnapshot();
         }
         $rows = [];
-        foreach ([$period, $daily, $total] as $metrics) {
+        foreach ([$daily, $total] as $metrics) {
             foreach ($metrics['stores'] as $storeIdKey => $store) {
                 if (!isset($rows[$storeIdKey])) {
                     $rows[$storeIdKey] = [
@@ -1590,6 +1589,7 @@ class StoreUnifiedReportServices extends BaseServices
             foreach ($definitions as $definition) {
                 foreach (['cash', 'after_split', 'consume'] as $metric) {
                     $row[$definition['key'] . '_' . $metric] = '0';
+                    $row[$definition['key'] . '_' . $metric . '_cumulative'] = '0';
                 }
             }
         }
@@ -1609,17 +1609,23 @@ class StoreUnifiedReportServices extends BaseServices
                 $rows[$storeIdKey]['_item_analysis_metric_cents']['item_analysis_consume_' . $suffix] = (int)$store['consume_cents'];
             }
         }
-        foreach ($period['categories'] as $storeIdKey => $categories) {
-            if (!isset($rows[$storeIdKey])) continue;
-            foreach ($categories as $categoryKey => $amounts) {
-                if (!isset($definitions[$categoryKey])) continue;
-                $base = $definitions[$categoryKey]['key'];
-                $rows[$storeIdKey][$base . '_cash'] = $this->money((int)$amounts['cash_cents']);
-                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_cash'] = (int)$amounts['cash_cents'];
-                $rows[$storeIdKey][$base . '_after_split'] = $this->money($this->itemAnalysisAfterSplitCents($amounts));
-                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_after_split'] = $this->itemAnalysisAfterSplitCents($amounts);
-                $rows[$storeIdKey][$base . '_consume'] = $this->money((int)$amounts['consume_cents']);
-                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_consume'] = (int)$amounts['consume_cents'];
+        // 分类的当日与月累计都来自相同的事实读取器；旧列键继续表示当日，
+        // 新的累计列只加时间后缀，避免历史下钻链接被误解释为月累计。
+        foreach (['today' => $daily, 'cumulative' => $total] as $periodKey => $metrics) {
+            $suffix = $periodKey === 'today' ? '' : '_cumulative';
+            foreach ($metrics['categories'] as $storeIdKey => $categories) {
+                if (!isset($rows[$storeIdKey])) continue;
+                foreach ($categories as $categoryKey => $amounts) {
+                    if (!isset($definitions[$categoryKey])) continue;
+                    $base = $definitions[$categoryKey]['key'];
+                    foreach (['cash' => (int)$amounts['cash_cents'],
+                        'after_split' => $this->itemAnalysisAfterSplitCents($amounts),
+                        'consume' => (int)$amounts['consume_cents']] as $metric => $cents) {
+                        $key = $base . '_' . $metric . $suffix;
+                        $rows[$storeIdKey][$key] = $this->money($cents);
+                        $rows[$storeIdKey]['_item_analysis_metric_cents'][$key] = $cents;
+                    }
+                }
             }
         }
         uasort($rows, static function (array $left, array $right): int {
@@ -1672,11 +1678,19 @@ class StoreUnifiedReportServices extends BaseServices
                 ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按项目的平台当前分类归入本列；冲销按发生日扣回。'],
             ];
             foreach ($metricExplanations as $metric) {
-                $key = $definition['key'] . '_' . $metric[0];
-                $keys[] = $key;
-                $columns[] = ['key' => $key, 'label' => $metric[1], 'logic' => $metric[2],
-                    'drilldown' => ['report' => 'store_item_analysis_detail',
-                        'params' => ['category_label' => $definition['label']]]];
+                foreach ([['today', '当日'], ['cumulative', (int)substr($range['end'], 5, 2) . '月累计']] as $periodLabel) {
+                    $isCumulative = $periodLabel[0] === 'cumulative';
+                    $key = $definition['key'] . '_' . $metric[0] . ($isCumulative ? '_cumulative' : '');
+                    $keys[] = $key;
+                    // 时间范围由列键明确声明；列表、明细、说明和导出不能把当日与整月混读。
+                    $timeLogic = $isCumulative
+                        ? '从所选日期所在月的月初累计到所选日期；统一事实覆盖起点为 2026-08-10。'
+                        : '只看查询结束日当天。';
+                    $columns[] = ['key' => $key, 'label' => $metric[1] . '·' . $periodLabel[1],
+                        'logic' => $metric[2] . $timeLogic,
+                        'drilldown' => ['report' => 'store_item_analysis_detail',
+                            'params' => ['category_label' => $definition['label']]]];
+                }
             }
             $groups[] = ['label' => $definition['label'], 'column_keys' => $keys, 'tone' => 'category'];
         }
@@ -1691,17 +1705,20 @@ class StoreUnifiedReportServices extends BaseServices
             }
             $summaryValues['item_analysis_actual_' . $suffix] = $this->money((int)$summaryCents['cash'] - (int)$summaryCents['share']);
         }
-        foreach ($definitions as $definition) {
-            $categoryId = (string)$definition['category_id'];
-            $categoryTotals = ['cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
-            foreach ($period['categories'] as $categories) {
-                foreach (array_keys($categoryTotals) as $amountKey) {
-                    $categoryTotals[$amountKey] += (int)($categories[$categoryId][$amountKey] ?? 0);
+        foreach (['today' => $daily, 'cumulative' => $total] as $periodKey => $metrics) {
+            $suffix = $periodKey === 'today' ? '' : '_cumulative';
+            foreach ($definitions as $definition) {
+                $categoryId = (string)$definition['category_id'];
+                $categoryTotals = ['cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
+                foreach ($metrics['categories'] as $categories) {
+                    foreach (array_keys($categoryTotals) as $amountKey) {
+                        $categoryTotals[$amountKey] += (int)($categories[$categoryId][$amountKey] ?? 0);
+                    }
                 }
+                $summaryValues[$definition['key'] . '_cash' . $suffix] = $this->money($categoryTotals['cash_cents']);
+                $summaryValues[$definition['key'] . '_after_split' . $suffix] = $this->money($this->itemAnalysisAfterSplitCents($categoryTotals));
+                $summaryValues[$definition['key'] . '_consume' . $suffix] = $this->money($categoryTotals['consume_cents']);
             }
-            $summaryValues[$definition['key'] . '_cash'] = $this->money($categoryTotals['cash_cents']);
-            $summaryValues[$definition['key'] . '_after_split'] = $this->money($this->itemAnalysisAfterSplitCents($categoryTotals));
-            $summaryValues[$definition['key'] . '_consume'] = $this->money($categoryTotals['consume_cents']);
         }
         // 固定列的通用默认文案会覆盖本报表写明的业务说明；先填入用户实际
         // 看到的 source_explanation，保证弹窗与导出读到同一段明确文字。
@@ -1713,7 +1730,7 @@ class StoreUnifiedReportServices extends BaseServices
         unset($column);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140]);
         return [
-            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-item-refund-v6', 'columns' => $columns,
+            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-item-refund-v7', 'columns' => $columns,
             'column_groups' => $groups, 'records' => array_values($rows),
             'total' => count($rows), 'page' => 1, 'page_size' => count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
@@ -1879,17 +1896,17 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function storeItemAnalysisDetail($storeId, array $range, array $input): array
     {
-        // 明细与汇总共用所选日和月初边界；不能让旧区间链接扩大分类明细范围。
+        // 明细与汇总共用所选日和月初边界；旧无后缀分类列仍表示当日。
         $range = ['start' => $range['end'], 'end' => $range['end']];
         $metricKey = trim((string)($input['metric_code'] ?? ''));
         $summaryMetric = preg_match('/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/', $metricKey, $matches) === 1;
-        $categoryMetric = !$summaryMetric && preg_match('/^item_analysis_category_(\d+)_(cash|after_split|consume)$/', $metricKey, $matches) === 1;
+        $categoryMetric = !$summaryMetric && preg_match('/^item_analysis_category_(\d+)_(cash|after_split|consume)(_cumulative)?$/', $metricKey, $matches) === 1;
         if (!$summaryMetric && !$categoryMetric) throw new \InvalidArgumentException('无效的品项分析指标');
         $kind = $summaryMetric ? $matches[1] : $matches[2];
         $categoryId = $categoryMetric ? (string)(int)$matches[1] : null;
-        $detailRange = $summaryMetric
-            ? ($matches[2] === 'today' ? ['start' => $range['end'], 'end' => $range['end']]
-                : ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']])
+        $isCumulative = $summaryMetric ? $matches[2] === 'cumulative' : !empty($matches[3]);
+        $detailRange = $isCumulative
+            ? ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']]
             : $range;
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         if ($categoryMetric && !isset($definitions[$categoryId])) throw new \InvalidArgumentException('无效的品项分类');
@@ -2010,7 +2027,7 @@ class StoreUnifiedReportServices extends BaseServices
                 'source_explanation' => '所点列在本笔事实上的正负贡献；合计按分精度汇总后展示整数元。'],
         ], ['business_date' => 112, 'store_name' => 140, 'order_no' => 165, 'member_name' => 100,
             'item_name' => 160, 'category_name' => 130, 'fact_type' => 110]);
-        return ['title' => '门店品项明细', 'metric_version' => 'store-item-analysis-detail-v1',
+        return ['title' => '门店品项明细', 'metric_version' => 'store-item-analysis-detail-v2',
             'columns' => $columns, 'records' => !empty($input['_internal_all']) ? $records
                 : array_slice($records, ($this->page($input) - 1) * $this->limit($input), $this->limit($input)),
             'total' => count($records), 'page' => $this->page($input), 'page_size' => $this->limit($input),
