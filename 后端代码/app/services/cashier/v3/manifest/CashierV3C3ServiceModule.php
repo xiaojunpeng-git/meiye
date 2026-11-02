@@ -112,6 +112,7 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
             'cancel-reservation',
             'start-reservation-service',
             'end-reservation-service',
+            'change-reservation-service-duration',
             'select-reservation-member',
         ] as $action) {
             $command[$action] = self::POLICY_RESERVATION_OPERATION;

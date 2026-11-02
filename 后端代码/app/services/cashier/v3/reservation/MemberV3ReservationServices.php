@@ -202,6 +202,8 @@ final class MemberV3ReservationServices
                 'room_name_snapshot' => '',
                 'appointment_start_at' => $appointmentStart,
                 'appointment_end_at' => $appointmentEnd,
+                // 会员预约同样在创建时固定计时初值；门店确认后可独立修改。
+                'service_countdown_duration_minutes' => max(1, (int)ceil(($appointmentEnd - $appointmentStart) / 60)),
                 'status' => 'PENDING_CONFIRMATION',
                 'confirmed_at' => 0,
                 'rejected_at' => 0,

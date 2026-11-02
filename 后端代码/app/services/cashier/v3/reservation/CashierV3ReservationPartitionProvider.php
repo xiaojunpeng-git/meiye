@@ -208,7 +208,10 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             $version = (int)($row['version'] ?? 0);
             if ($version > 0) $versions[] = ['kind' => 'reservation', 'id' => (string)$id, 'version' => $version];
             $actualStartedAt = (int)($row['actual_service_started_at'] ?? 0);
-            $totalDurationSeconds = max(60, (int)$row['appointment_end_at'] - (int)$row['appointment_start_at']);
+            // 与详情使用同一预约头时长，避免列表计时与详情计时分叉。
+            $durationMinutes = (int)($row['service_countdown_duration_minutes'] ?? 0);
+            if ($durationMinutes <= 0) $durationMinutes = max(1, (int)ceil(((int)$row['appointment_end_at'] - (int)$row['appointment_start_at']) / 60));
+            $totalDurationSeconds = $durationMinutes * 60;
             $expectedEndAt = $actualStartedAt > 0 ? $actualStartedAt + $totalDurationSeconds : 0;
             $records[] = [
                 'id' => $id,
@@ -235,7 +238,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'serviceCountdownEndsAt' => $expectedEndAt,
                 'expectedEndAt' => $expectedEndAt,
                 'totalDurationSeconds' => $totalDurationSeconds,
-                'isOvertime' => $actualStartedAt > 0
+                'serviceDurationMinutes' => $durationMinutes,
+                'isOvertime' => $statusCode === 'IN_SERVICE' && $actualStartedAt > 0
                     && (int)($row['actual_service_ended_at'] ?? 0) <= 0
                     && $now > $expectedEndAt,
                 'dueNotArrived' => $dueNotArrived,

@@ -112,7 +112,10 @@ final class CashierV3ReservationDetailQueryServices
         $endAt = (int)($reservation['appointment_end_at'] ?? 0);
         $actualStartAt = (int)($reservation['actual_service_started_at'] ?? $serviceOrder['service_started_at'] ?? 0);
         $actualEndAt = (int)($reservation['actual_service_ended_at'] ?? $serviceOrder['completed_at'] ?? 0);
-        $plannedDurationSeconds = max(60, $endAt - $startAt);
+        // 旧行可从预约时段兜底；已保存的独立时长才是服务计时权威值。
+        $durationMinutes = (int)($reservation['service_countdown_duration_minutes'] ?? 0);
+        if ($durationMinutes <= 0) $durationMinutes = max(1, (int)ceil(($endAt - $startAt) / 60));
+        $plannedDurationSeconds = $durationMinutes * 60;
         $version = (int)($reservation['version'] ?? 0);
         $displayProjectIndex = 0;
 
@@ -187,10 +190,11 @@ final class CashierV3ReservationDetailQueryServices
             'actualServiceEndedAt' => $actualEndAt,
             'actualStartTimestamp' => $actualStartAt,
             'actualEndTimestamp' => $actualEndAt,
+            'serviceDurationMinutes' => $durationMinutes,
             'serviceCountdownEndsAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
             'expectedEndAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
             'totalDurationSeconds' => $plannedDurationSeconds,
-            'isOvertime' => $actualStartAt > 0 && $actualEndAt <= 0 && time() > $actualStartAt + $plannedDurationSeconds,
+            'isOvertime' => $status === 'IN_SERVICE' && $actualStartAt > 0 && $actualEndAt <= 0 && time() > $actualStartAt + $plannedDurationSeconds,
             'plannedCraftsmen' => array_map(static function (array $staff) use ($plannedPointCustomerByStaffId): array {
                 $staffId = (int)($staff['id'] ?? 0);
                 return [
@@ -477,21 +481,23 @@ final class CashierV3ReservationDetailQueryServices
 
     private static function actions(string $status): array
     {
+        // 入口始终可见，便于无项目预约了解操作位置；实际保存仍要求已选项目。
+        $durationAction = [['action' => 'change-reservation-service-duration', 'label' => '修改服务时长', 'enabled' => true]];
         if ($status === 'PENDING_CONFIRMATION') {
-            return [
+            return array_merge($durationAction, [
                 ['action' => 'confirm-reservation', 'label' => '确认', 'enabled' => true],
                 ['action' => 'reject-reservation', 'label' => '拒绝', 'enabled' => true],
-            ];
+            ]);
         }
         if ($status === 'UNSTARTED') {
-            return [
+            return array_merge($durationAction, [
                 ['action' => 'edit-reservation', 'label' => '编辑', 'enabled' => true],
                 ['action' => 'cancel-reservation', 'label' => '删除', 'enabled' => true],
                 ['action' => 'start-reservation-service', 'label' => '开始服务', 'enabled' => true],
-            ];
+            ]);
         }
         if ($status === 'IN_SERVICE') {
-            return [['action' => 'end-reservation-service', 'label' => '结束服务', 'enabled' => true]];
+            return array_merge($durationAction, [['action' => 'end-reservation-service', 'label' => '结束服务', 'enabled' => true]]);
         }
         return [];
     }
@@ -506,6 +512,7 @@ final class CashierV3ReservationDetailQueryServices
             'REJECT' => '拒绝预约',
             'MARK_NO_SHOW' => '标记爽约',
             'UPDATE' => '更新预约',
+            'CHANGE_SERVICE_DURATION' => '修改服务时长',
             'END_SERVICE' => '结束服务',
         ][$operation] ?? '预约状态更新';
     }

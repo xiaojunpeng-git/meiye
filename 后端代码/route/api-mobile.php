@@ -138,6 +138,8 @@ Route::group('api/mobile/merchant', function () {
         Route::post('reservations/:reservationId/reject', 'Reservation/reject')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端拒绝预约']);
         Route::post('reservations/:reservationId/start-service', 'Reservation/startService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端开始服务']);
         Route::post('reservations/:reservationId/end-service', 'Reservation/endService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端结束服务']);
+        // 与商家预约的其他写操作共用会话中间件，时长只更新计时字段。
+        Route::post('reservations/:reservationId/service-duration', 'Reservation/changeServiceDuration')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端修改服务时长']);
     })->middleware([MobileMerchantSessionMiddleware::class]);
 })->prefix('mobile.merchant.')->middleware([
     InstallMiddleware::class,

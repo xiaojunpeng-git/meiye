@@ -1,0 +1,34 @@
+# 第100轮：预约服务计时时长本地固定候选
+
+- 基线 HEAD：`7cdfbf429ed28f4ceb70a70256e53954615a8188`。共享工作区另有大量其他任务的未提交改动；下列是本轮触及文件的当前完整文件指纹，不能把这些文件整体暂存为本轮提交。
+- 范围：预约独立正整数分钟时长；门店和商家端显示与修改；实际开始时间加时长形成倒计时，超时不自动结束；普通编辑保存后按预约时段重置；结束后停止倒计时。未改排班时段、价格、核销与服务事实。
+- 数据库迁移仅在本地 `ruihao` 执行：旧预约 16,529 条，0 条未赋值，0 条与历史预约时段不一致；重复运行不覆盖非零值。正式客户实例尚未迁移。
+- 验证：PHP 7.4 本地事务测试 `R100_DURATION_MYSQL passed=7` 且回滚；旧预约详情集成测试 5/5；详情投影合同测试更新为项目条件后通过；门店 Vue 构建及 70 项预构建通过；商家 H5 构建和预约页 12/12 测试通过；本地商家页读到旧预约时长 60 分钟，无项目预约不出现修改入口；受影响 PHP 语法检查通过。未执行真实开始、结束或结账。
+- 限制：既有生命周期静态合同测试仍有与本轮无关的旧字符串断言失败；跨端旧集成脚本在本地夹具权限下返回 `PERMISSION_DENIED`。共享工作区其他任务改动未纳入本轮验收。提交和远程操作仍待各自门禁。
+
+## 固定文件 SHA-256
+
+```text
+40e23746e1f37ac10bf712ac5bae45757030e65ed967ad5c04b6f9b3efe744b1  后端代码/app/services/cashier/v3/reservation/CashierV3ReservationModule.php
+5321fe4c739f2c90bf67d238284606e4dbcca072a6ba32e9c0ccb574912b5b54  后端代码/app/services/cashier/v3/reservation/CashierV3ReservationDetailQueryServices.php
+a5e1c8332aa09ae9b9571ba3e3b2743f5d4376c772a0ca501738ebc80ff56001  后端代码/app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php
+cae268220ba4248667a0f696c143a220068dce7d91ef42780364d3031d8bf1ce  后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php
+24eb378a7bf5ec9a0a45819a31ed8bc517930c55007e8671ba984b5de6bcf2e5  后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php
+01f93e25d0e5ddf93beaec7c4cf0079fbd422352742bc0f698aa04ad7608886b  后端代码/app/services/cashier/v3/manifest/CashierV3C3ServiceModule.php
+b51f5ee4df3bf462ca2c2bd65cffc9e832fbebc90086fc136ed80faaf844e628  后端代码/app/services/cashier/v3/registry/CashierV3PermissionGuard.php
+3333e8f7f6570b4e39f9f9e7fb657b7d0ed466015d606c63e7ef7adda43f3d93  后端代码/app/services/mobile/reservation/MobileReservationServices.php
+c73fd0cca038800a23cfa5b086f6d100e46f238229844735765504fb358086d2  后端代码/app/controller/mobile/merchant/Reservation.php
+e588bc75af59fe0e9ec2f5a784da8255e182adc3b31d602e5900638888d410eb  后端代码/route/api-mobile.php
+9f6eae9a17200ab6981bbbfc4a6c562e74f5307ee7ecbe5ab895de46ae7f5386  前端代码/cashier-v3/src/components/reservation/ReservationDetailOverlay.vue
+8774a12eb55af19f8f07592b4f5ce733ae70a85c87fbb2fe06673def08a5919c  前端代码/cashier-v3/src/views/ReservationListView.vue
+62c230dfb34c730bad911a1ea32cdaf9583dc6b0f39e32da1b62a2aed919cc4d  前端代码/mobile-vue3/src/shared/api/mobile-reservation-client.uts
+e7cfc867f38dc7a4d093ef8b3a0531843b3a0040cb965669170624ef3cf21abd  前端代码/mobile-vue3/src/shared/contracts/mobile-merchant-v1.contract.json
+100d077e8607b5ea80e15882d87e91d2d02399fb8fc8220537d4d55570af4ae7  前端代码/mobile-vue3/src/merchant/pages/reservations/index.uvue
+4726ceaaffc711ac5d02ae8d46dea1dac589fca7def1ce942b9f4d5a3674cbc6  后端代码/database/upgrades/2026-11-02-预约服务计时时长/01-升级前检查.sql
+2e9a5e33e892af021ea5dada976b73b1a0c894567f47d0d36c9f3ba16c8325a9  后端代码/database/upgrades/2026-11-02-预约服务计时时长/02-正式升级.sql
+7aa68aa235516ef901e8c93da1f69da104a5d8b71fde66d9f57703b4964e06b0  后端代码/database/upgrades/2026-11-02-预约服务计时时长/03-升级后验证.sql
+bcb3391aa338cc366742189969ff4a0e45bfe3f39902ed45ceaec5ab552863d8  tests/cashier-v3/php/r100-reservation-duration-mysql.php
+1e5efbb740593a33cee8efee44170526a544d3334643614c5ef1acf01f7a7ac3  tests/cashier-v3/php/reservation-detail-projection-contract.php
+```
+
+新增及修改业务代码已补职责、权威来源、计时与历史边界注释。生成物位于本地临时目录及被忽略的构建目录，不作为源码交付。

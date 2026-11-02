@@ -359,6 +359,16 @@
       "response": "cashierV3ReservationAction",
       "legacyReservationForbidden": true
     },
+    "changeReservationServiceDuration": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/service-duration",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command", "serviceDurationMinutes"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
     "endReservationService": {
       "method": "POST",
       "path": "/mobile/merchant/reservations/:reservationId/end-service",

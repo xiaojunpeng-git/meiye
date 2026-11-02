@@ -190,6 +190,8 @@ const C3_ACTIONS = {
     'mark-reservation-no-show': FEATURE_RESERVATION,
     'create-reservation': 'policy:reservation_operation',
     'update-reservation': 'policy:reservation_operation',
+    // 独立时长写入沿用预约的门店范围与状态校验，不新增岗位权限门槛。
+    'change-reservation-service-duration': 'policy:reservation_operation',
     // 当前预约的视觉标记，继承已有预约操作策略及同键重试恢复。
     'mark-reservation-color': 'policy:reservation_operation',
     'select-reservation-member': 'policy:reservation_operation',
