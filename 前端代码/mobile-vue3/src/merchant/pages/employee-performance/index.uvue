@@ -23,11 +23,11 @@
 						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
 							<!-- Contact and service labels are supplied from the authorized server detail, never inferred from the rendered order number. -->
-							<view class="employee-performance__detail-member"><text>会员：{{ item.memberName || '—' }}</text><text>手机：{{ item.memberPhone || '—' }}</text></view>
+							<view class="employee-performance__detail-member"><text>会员：{{ item.isGuest ? '游客' : (item.memberName || '—') }}{{ item.serviceObject ? ' [' + item.serviceObject + ']' : '' }}</text><text>手机：{{ item.memberPhone || '—' }}</text></view>
 							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">{{ item.isRecharge ? '充值' : '商品名称：' + (item.itemName || '—') }}</text><text class="employee-performance__detail-amount">{{ item.isRecharge ? '充值金额：' + (item.displayRechargeAmount || '—') : detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
-							<view v-if="detailMode === 'labor' && item.serviceQuantity" class="employee-performance__detail-service"><text>核销数量：{{ item.serviceQuantity }}{{ item.serviceUnit ? ' ' + item.serviceUnit : '' }}</text></view>
-							<view v-if="detailMode === 'labor' && (item.serviceObject || item.participants)" class="employee-performance__detail-service"><text v-if="item.serviceObject">服务对象与客数：{{ item.serviceObject }}</text><text v-if="item.participants">参与：{{ item.participants }}</text></view>
-							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">项目数：{{ item.displayProjectCount || '—' }}</text><text v-if="detailMode === 'labor' && !calculated">手工费：{{ item.displayLaborFee || '—' }}</text></view>
+							<view v-if="detailMode === 'labor' && (item.serviceQuantity || item.displayProjectCount)" class="employee-performance__detail-member"><text>核销数量：{{ item.serviceQuantity || '—' }}</text><text>项目数：{{ item.displayProjectCount || '—' }}</text></view>
+							<view v-if="detailMode === 'labor' && item.participants" class="employee-performance__detail-service"><text>参与：{{ item.participants }}</text></view>
+							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}{{ detailMode === 'labor' && item.serviceUnit ? '（' + item.serviceUnit + '）' : '' }}</text><text v-if="detailMode === 'labor' && !calculated">手工费：{{ item.displayLaborFee || '—' }}</text></view>
                             <view v-if="detailMode === 'labor' && calculated" class="employee-performance__commission" @tap="toggleCommission(item.factId)">
                                 <text>劳动提成（预计）：{{ item.displayCommission || '待核对' }}</text><text>{{ expandedFact === item.factId ? '收起' : '计算依据' }}</text>
                             </view>
@@ -193,7 +193,7 @@
 	.employee-performance__detail-date { flex-shrink: 0; margin-left: 10px; font-size: 11px; color: #8a99aa; }
 	.employee-performance__detail-item { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__detail-amount { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; color: #40546b; }
-	/* 项目数两种模式都显示；可修改模式同时保留手工费，窄屏自然换行。 */
+	/* 核销数量与项目数同排；可修改模式另显示手工费，窄屏自然换行。 */
 	.employee-performance__detail-result { flex-wrap: wrap; column-gap: 10px; row-gap: 4px; }
 	.employee-performance__detail-result text { font-size: 13px; font-weight: 700; line-height: 20px; color: #173451; }
     .employee-performance__commission { display: flex; flex-direction: row; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #1677cc; }
