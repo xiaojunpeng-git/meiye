@@ -56,4 +56,21 @@ foreach ([
     }
 }
 
+// Service-object and participation labels must come from saved service facts;
+// split project counts remain attached to the selected employee's allocation.
+$object = new ReflectionMethod(MobileWarehouseServices::class, 'detailServiceObject');
+$craftsmen = new ReflectionMethod(MobileWarehouseServices::class, 'detailCraftsmen');
+$unit = new ReflectionMethod(MobileWarehouseServices::class, 'detailCraftsmanUnit');
+if (PHP_VERSION_ID < 80100) {
+    $object->setAccessible(true);
+    $craftsmen->setAccessible(true);
+    $unit->setAccessible(true);
+}
+foreach ([['self', 1, '本人'], ['friend', 1, '朋友算'], ['friend', 0, '朋友不算'], ['', 1, '']] as [$source, $count, $expected]) {
+    if ($object->invoke(null, $source, $count) !== $expected) throw new RuntimeException('Service object snapshot label changed');
+}
+$participants = '[{"employeeId":217,"name":"江佩茹","isPointCustomer":false},{"employeeId":1386,"name":"小王","isPointCustomer":true}]';
+if ($craftsmen->invoke(null, $participants) !== '江佩茹（轮）、小王（点）') throw new RuntimeException('Point/round snapshot label changed');
+if ($unit->invoke(null, $participants, 217) !== '轮' || $unit->invoke(null, $participants, 1386) !== '点') throw new RuntimeException('Writeoff unit changed');
+
 echo "mobile warehouse employee metrics and document numbers: PASS\n";
