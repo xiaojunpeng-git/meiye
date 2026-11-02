@@ -110,10 +110,13 @@ const otherCraftsmanSearchOpen = ref(false)
 const otherCraftsmanKeyword = ref('')
 const otherCraftsmanNode = ref(null)
 const otherCraftsmanNodeLabel = ref('组织范围')
+const otherCraftsmanSearchStarted = ref(false)
 // Selection is a query filter only; chosen attribution records are not reset by node/page changes.
 function selectOtherCraftsmanNode(node) {
   otherCraftsmanNode.value = node ? { type: node.type, id: node.id } : null
   otherCraftsmanNodeLabel.value = node?.label || '组织范围'
+  // Opening the picker selects the highest organization for navigation, but must not populate staff results.
+  if (node?.defaultSelection && !otherCraftsmanSearchStarted.value) return
   searchOtherCraftsmen(1)
 }
 const otherSalespersonNode = ref(null)
@@ -808,6 +811,7 @@ function openOtherCraftsmanSearch() {
   otherCraftsmanKeyword.value = ''
   otherCraftsmanNode.value = null
   otherCraftsmanNodeLabel.value = '组织范围'
+  otherCraftsmanSearchStarted.value = false
   validationMessage.value = ''
   otherCraftsmanSearchOpen.value = true
 }
@@ -834,7 +838,8 @@ function searchOtherSalespeople(page = 1, optionsOnly = false) {
   })
 }
 watch(otherSalespersonSearchOpen, (open) => {
-  if (open && props.otherSalespersonOrganizationEnabled) searchOtherSalespeople(1, true)
+  // 已有组织树时由选择器复用最高组织并发起查询，避免旧的选项请求覆盖新范围结果。
+  if (open && props.otherSalespersonOrganizationEnabled && !props.otherSalespersonOrganizationTree.length) searchOtherSalespeople(1, true)
 })
 
 function otherSalespersonSelected(item) {
@@ -862,6 +867,7 @@ function searchOtherCraftsmen(page = 1, optionsOnly = false) {
     if (!props.otherCraftsmanOrganizationEnabled) validationMessage.value = '请输入至少 2 个字符后搜索其他手艺人。'
     return
   }
+  if (!optionsOnly) otherCraftsmanSearchStarted.value = true
   validationMessage.value = ''
   emit('search-personnel', {
     scope: 'cashier_other_craftsmen', keyword: keywordValue, target: 'otherCraftsmen',
@@ -870,7 +876,8 @@ function searchOtherCraftsmen(page = 1, optionsOnly = false) {
   })
 }
 watch(otherCraftsmanSearchOpen, (open) => {
-  if (open && props.otherCraftsmanOrganizationEnabled) searchOtherCraftsmen(1, true)
+  // 与销售人使用同一组织元数据加载边界，重新打开弹窗不重复发起空结果请求。
+  if (open && props.otherCraftsmanOrganizationEnabled && !props.otherCraftsmanOrganizationTree.length) searchOtherCraftsmen(1, true)
 })
 
 // A person may have both a store staff ID and a virtual group ID; never allocate twice to that employee.
@@ -1295,11 +1302,11 @@ function searchGroupPersonnel(scope) {
           <div class="personnel-attribution-search-toolbar">
             <input v-model="otherCraftsmanKeyword" type="search" placeholder="姓名、工号或至少4位手机号" @keyup.enter="searchOtherCraftsmen">
             <button type="button" class="button button--primary" @click="searchOtherCraftsmen">搜索</button>
-            <OrganizationStoreScopePicker v-if="otherCraftsmanOrganizationEnabled" node-selection :tree="otherCraftsmanOrganizationTree" :allowed-store-ids="otherCraftsmanAllowedStoreIds" :label="otherCraftsmanNodeLabel" @node-change="selectOtherCraftsmanNode" />
+            <OrganizationStoreScopePicker v-if="otherCraftsmanOrganizationEnabled" node-selection default-select-highest-node :tree="otherCraftsmanOrganizationTree" :allowed-store-ids="otherCraftsmanAllowedStoreIds" :label="otherCraftsmanNodeLabel" @node-change="selectOtherCraftsmanNode" />
           </div>
           <p v-if="otherCraftsmanLoading" class="personnel-empty" role="status">正在读取人员…</p>
           <p v-else-if="otherCraftsmanError" class="personnel-empty" role="alert">{{ otherCraftsmanError }}</p>
-          <p v-else-if="!otherCraftsmanNode && otherCraftsmanKeyword.trim().length < 2" class="personnel-empty">{{ otherCraftsmanOrganizationEnabled ? '请选择组织或输入至少 2 个字符搜索' : '请输入至少 2 个字符后搜索其他手艺人' }}</p>
+          <p v-else-if="!otherCraftsmanSearchStarted || (!otherCraftsmanNode && otherCraftsmanKeyword.trim().length < 2)" class="personnel-empty">{{ otherCraftsmanOrganizationEnabled ? '请选择组织或搜索人员' : '请输入至少 2 个字符后搜索其他手艺人' }}</p>
           <div v-else class="personnel-attribution-search-results">
             <article v-for="item in filteredOtherCraftsmen" :key="`other-craftsman-${item.id}`">
               <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '当前门店人员' }}</small></div>
@@ -1307,7 +1314,7 @@ function searchGroupPersonnel(scope) {
             </article>
             <p v-if="!filteredOtherCraftsmen.length" class="personnel-empty">未找到匹配的在职人员</p>
           </div>
-          <footer v-if="otherCraftsmanOrganizationEnabled && (otherCraftsmanNode || otherCraftsmanKeyword.trim().length >= 2)" class="personnel-craftsman-pagination">
+          <footer v-if="otherCraftsmanOrganizationEnabled && otherCraftsmanSearchStarted && (otherCraftsmanNode || otherCraftsmanKeyword.trim().length >= 2)" class="personnel-craftsman-pagination">
             <span>共 {{ otherCraftsmanTotal }} 条 · 每页 20 条 · 第 {{ otherCraftsmanPage }} / {{ Math.max(1, Math.ceil(otherCraftsmanTotal / 20)) }} 页</span>
             <button type="button" class="button button--secondary" :disabled="otherCraftsmanLoading || otherCraftsmanPage <= 1" @click="searchOtherCraftsmen(otherCraftsmanPage - 1)">上一页</button>
             <button type="button" class="button button--secondary" :disabled="otherCraftsmanLoading || otherCraftsmanPage * 20 >= otherCraftsmanTotal" @click="searchOtherCraftsmen(otherCraftsmanPage + 1)">下一页</button>
@@ -1321,7 +1328,7 @@ function searchGroupPersonnel(scope) {
           <div class="personnel-attribution-search-toolbar">
             <input v-model="otherSalespersonKeyword" type="search" placeholder="姓名、工号或至少4位手机号" @keyup.enter="searchOtherSalespeople">
             <button type="button" class="button button--primary" @click="searchOtherSalespeople">搜索</button>
-            <OrganizationStoreScopePicker v-if="otherSalespersonOrganizationEnabled" node-selection :tree="otherSalespersonOrganizationTree" :allowed-store-ids="otherSalespersonAllowedStoreIds" :label="otherSalespersonNodeLabel" @node-change="selectOtherSalespersonNode" />
+            <OrganizationStoreScopePicker v-if="otherSalespersonOrganizationEnabled" node-selection default-select-highest-node :tree="otherSalespersonOrganizationTree" :allowed-store-ids="otherSalespersonAllowedStoreIds" :label="otherSalespersonNodeLabel" @node-change="selectOtherSalespersonNode" />
           </div>
           <p v-if="otherSalespersonLoading" class="personnel-empty" role="status">正在读取人员…</p>
           <p v-else-if="otherSalespersonError" class="personnel-empty" role="alert">{{ otherSalespersonError }}</p>

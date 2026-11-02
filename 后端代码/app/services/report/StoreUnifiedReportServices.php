@@ -1545,18 +1545,20 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function storeItemAnalysis($storeId, array $range, array $input): array
     {
+        // 本报表按查询结束日选定单日；旧日期区间链接也收敛到同一天，
+        // 保证分类列、当日列、下钻和导出不会各用不同的日期范围。
         $today = ['start' => $range['end'], 'end' => $range['end']];
-        $cumulative = ['start' => self::COVERAGE_START, 'end' => $range['end']];
+        $range = $today;
+        $cumulative = ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']];
         // Header categories come from every existing platform category,
         // never from whichever facts happened to occur in the selected period.
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         $dimensions = $this->organizationDimensions();
-        // Period, day and cumulative values must use one current organization
-        // assignment snapshot; a later request starts fresh after this read.
+        // 当日与月累计共用同一次组织归属快照；当日只读一次事实，避免重复扫描。
         $dimensions->beginCurrentDimensionSnapshot();
         try {
             $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
-            $daily = $this->itemAnalysisMetricRows($storeId, $today, $input, $definitions);
+            $daily = $period;
             $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
         } finally {
             $dimensions->endCurrentDimensionSnapshot();
@@ -1642,12 +1644,12 @@ class StoreUnifiedReportServices extends BaseServices
         ] as $summary) {
             [$metric, $label, $logic, $tone] = $summary;
             $keys = [];
-            foreach ([['today', '当日'], ['cumulative', '累计']] as $periodLabel) {
+            foreach ([['today', '当日'], ['cumulative', (int)substr($range['end'], 5, 2) . '月累计']] as $periodLabel) {
                 $key = 'item_analysis_' . $metric . '_' . $periodLabel[0];
                 $keys[] = $key;
                 $timeLogic = $periodLabel[0] === 'today'
                     ? '只看查询结束日当天。'
-                    : '从 2026-08-10 累计到查询结束日。';
+                    : '从所选日期所在月的月初累计到所选日期；统一事实覆盖起点为 2026-08-10。';
                 $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic,
                     'drilldown' => ['report' => 'store_item_analysis_detail']];
             }
@@ -1875,6 +1877,8 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function storeItemAnalysisDetail($storeId, array $range, array $input): array
     {
+        // 明细与汇总共用所选日和月初边界；不能让旧区间链接扩大分类明细范围。
+        $range = ['start' => $range['end'], 'end' => $range['end']];
         $metricKey = trim((string)($input['metric_code'] ?? ''));
         $summaryMetric = preg_match('/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/', $metricKey, $matches) === 1;
         $categoryMetric = !$summaryMetric && preg_match('/^item_analysis_category_(\d+)_(cash|after_split|consume)$/', $metricKey, $matches) === 1;
@@ -1883,7 +1887,7 @@ class StoreUnifiedReportServices extends BaseServices
         $categoryId = $categoryMetric ? (string)(int)$matches[1] : null;
         $detailRange = $summaryMetric
             ? ($matches[2] === 'today' ? ['start' => $range['end'], 'end' => $range['end']]
-                : ['start' => self::COVERAGE_START, 'end' => $range['end']])
+                : ['start' => max(self::COVERAGE_START, substr($range['end'], 0, 7) . '-01'), 'end' => $range['end']])
             : $range;
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         if ($categoryMetric && !isset($definitions[$categoryId])) throw new \InvalidArgumentException('无效的品项分类');

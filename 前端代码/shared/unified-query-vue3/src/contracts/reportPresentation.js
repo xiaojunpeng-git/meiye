@@ -1,8 +1,9 @@
-/** 仅用于报表展示：正负金额对称四舍五入为整元，不用于筛选、计算、保存或导出。 */
-export function formatReportMoney(value) {
+/** 仅用于报表展示：默认整元；明确要求分位的人工登记传 2，不改变计算、保存或导出原值。 */
+export function formatReportMoney(value, fractionDigits = 0) {
   if (value == null || value === '') return '-'
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '-'
+  if (fractionDigits === 2) return `¥${amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const whole = Math.sign(amount) * Math.round(Math.abs(amount)) || 0
   return `¥${whole.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}`
 }

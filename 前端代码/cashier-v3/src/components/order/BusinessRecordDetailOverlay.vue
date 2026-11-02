@@ -33,7 +33,9 @@ const props = defineProps({
 const emit = defineEmits(['close', 'field-action'])
 
 // 列表直达作废时先校验本条记录仍具备该操作，避免复用弹窗暴露无权动作。
-const activeForm = ref(props.lifecycleActions.includes(props.initialLifecycleAction) ? props.initialLifecycleAction : '')
+const activeForm = ref(props.lifecycleActions.includes(props.initialLifecycleAction)
+  ? props.initialLifecycleAction
+  : props.lifecycleActions.includes('gift-void') ? 'gift-void' : '')
 const cashRefundAmount = ref('')
 const principalAmount = ref('0')
 const bonusAmount = ref('0')
@@ -45,7 +47,7 @@ const detailBody = ref(null)
 onMounted(async () => {
   if (activeForm.value !== 'replacement-void') return
   await nextTick()
-  if (detailBody.value) detailBody.value.scrollTop = detailBody.value.scrollHeight
+  if (detailBody.value) detailBody.value.scrollTop = 0
 })
 
 const rows = computed(() => props.fields.map((field) => {
@@ -59,15 +61,28 @@ const rows = computed(() => props.fields.map((field) => {
   }
 }))
 
-// 仅补交作废操作置于详情最上方，打开弹窗即可看到表单；
+// 补交、赠送与项目替换的作废操作置于详情最上方，打开弹窗即可看到表单；
 // 其余业务记录沿用原先先展示详情、再展示操作的顺序。
-const detailSectionOrder = computed(() => activeForm.value === 'supplement-void'
+const detailSectionOrder = computed(() => ['supplement-void', 'gift-void', 'replacement-void'].includes(activeForm.value)
   ? ['lifecycle', 'fields']
   : ['fields', 'lifecycle'])
+
+// 赠送作废没有底栏二次入口；取消直接关闭详情，下次打开仍可重新操作。
+function cancelLifecycleForm() {
+  if (activeForm.value === 'gift-void') emit('close')
+  else activeForm.value = ''
+}
 
 // 补交作废从固定底栏进入；切换内容顺序后同步回到顶部，避免滚动位置仍停在原详情底部。
 async function openSupplementVoidForm() {
   activeForm.value = 'supplement-void'
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = 0
+}
+
+// 从详情底栏进入项目替换作废时，表单已在顶部，滚动位置必须同步复位。
+async function openReplacementVoidForm() {
+  activeForm.value = 'replacement-void'
   await nextTick()
   if (detailBody.value) detailBody.value.scrollTop = 0
 }
@@ -144,7 +159,7 @@ async function submitLifecycleAction() {
             </div>
           </dl>
           <section v-else-if="activeForm" class="business-record-detail__lifecycle"
-            :class="{ 'business-record-detail__lifecycle--top': activeForm === 'supplement-void' }">
+            :class="{ 'business-record-detail__lifecycle--top': ['supplement-void', 'gift-void', 'replacement-void'].includes(activeForm) }">
             <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : activeForm === 'replacement-void' ? '作废项目替换' : activeForm === 'refund-record-void' ? '作废退款记录' : '作废充值订单' }}</h3>
             <template v-if="activeForm === 'refund'">
               <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
@@ -158,7 +173,7 @@ async function submitLifecycleAction() {
             <small v-if="activeForm === 'refund-record-void'">误录退款将整笔撤销。余额或权益已发生后续变化而无法安全恢复时，不会作废，并会提示具体原因。</small>
             <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
             <p v-if="actionError" role="alert">{{ actionError }}</p>
-            <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
+            <div><button type="button" class="button button--text" :disabled="pending" @click="cancelLifecycleForm">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">{{ ['gift-void', 'replacement-void'].includes(activeForm) ? '确认作废' : '确认' }}</button></div>
           </section>
         </template>
         <section v-if="attributionChanges.length" class="business-record-detail__changes">
@@ -185,8 +200,7 @@ async function submitLifecycleAction() {
         <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
         <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
         <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="openSupplementVoidForm">作废</button>
-        <button v-if="lifecycleActions.includes('gift-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'gift-void'">作废</button>
-        <button v-if="lifecycleActions.includes('replacement-void') && activeForm !== 'replacement-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'replacement-void'">作废</button>
+        <button v-if="lifecycleActions.includes('replacement-void') && activeForm !== 'replacement-void'" type="button" class="button button--secondary" :disabled="pending" @click="openReplacementVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('refund-record-void') && activeForm !== 'refund-record-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund-record-void'">作废</button>
         <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
       </footer>

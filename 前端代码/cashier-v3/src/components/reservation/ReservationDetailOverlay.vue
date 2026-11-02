@@ -151,6 +151,7 @@ const RESERVATION_ACTION_ALIASES = {
 
 const RESERVATION_DETAIL_ACTIONS = new Set([
   'edit-reservation',
+  'change-reservation-service-duration',
   'confirm-reservation',
   'reject-reservation',
   'start-reservation-service',
@@ -178,6 +179,7 @@ function normalizeActionDefinition(action) {
 function actionLabel(key) {
   return {
     'edit-reservation': '编辑',
+    'change-reservation-service-duration': '修改服务时长',
     'confirm-reservation': '确认预约',
     'reject-reservation': '拒绝',
     'start-reservation-service': '开始服务',
@@ -263,6 +265,7 @@ const entitlementOccupationLabel = computed(() => {
 
 function parseServerTimestamp(value) {
   if (!value) return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value < 100000000000 ? value * 1000 : value
   const normalized = typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(value)
     ? value.replace(' ', 'T')
     : value
@@ -271,7 +274,7 @@ function parseServerTimestamp(value) {
 }
 
 const serviceExpectedEndTimestamp = computed(() => {
-  const explicit = firstValue(reservation.value, ['serviceExpectedEndAt', 'countdownEndsAt', 'expectedServiceEndAt'])
+  const explicit = firstValue(reservation.value, ['serviceCountdownEndsAt', 'serviceExpectedEndAt', 'countdownEndsAt', 'expectedServiceEndAt'])
     || firstValue(firstObject(reservation.value, ['serviceCountdown', 'countdown']), ['endsAt', 'expectedEndAt'])
   const explicitTimestamp = parseServerTimestamp(explicit)
   if (explicitTimestamp !== null) return explicitTimestamp
@@ -580,6 +583,17 @@ async function requestReload() {
 }
 
 async function triggerAction(action) {
+  if (action.key === 'change-reservation-service-duration') {
+    if (!projectLines.value.length) {
+      actionError.value = '请先为预约选择项目，再修改服务时长。'
+      actionErrorCode.value = ''
+      return
+    }
+    durationDraft.value = String(reservation.value?.serviceDurationMinutes || '')
+    durationError.value = ''
+    durationOpen.value = true
+    return
+  }
   if (action.key === 'reject-reservation') {
     rejectReason.value = ''
     rejectReasonError.value = ''
@@ -587,6 +601,21 @@ async function triggerAction(action) {
     return
   }
   await executeAction(action)
+}
+
+// 独立时长输入只改变预约计时字段；保存成功后由调用方重读服务端详情。
+const durationOpen = ref(false)
+const durationDraft = ref('')
+const durationError = ref('')
+async function saveServiceDuration() {
+  if (!/^[1-9]\d*$/.test(durationDraft.value) || Number(durationDraft.value) > 71582788) {
+    durationError.value = '请输入大于0的整数分钟。'
+    return
+  }
+  const action = availableActions.value.find((item) => item.key === 'change-reservation-service-duration')
+  if (!action) return
+  const result = await executeAction(action, { serviceDurationMinutes: Number(durationDraft.value) })
+  if (!isActionResultError(result)) durationOpen.value = false
 }
 
 async function submitRejection() {
@@ -742,6 +771,7 @@ useModalFocusTrap({
               </header>
               <dl class="reservation-detail__info-list">
                 <div v-for="row in timeRows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
+                <div><dt>服务时长</dt><dd>{{ Number(reservation.serviceDurationMinutes || 0) }} 分钟</dd></div>
               </dl>
               <div
                 v-if="serviceClock"
@@ -858,6 +888,13 @@ useModalFocusTrap({
 
       <footer class="reservation-detail__footer">
         <template v-if="isDetailReady">
+        <form v-if="durationOpen" class="reservation-detail__duration-form" @submit.prevent="saveServiceDuration">
+          <label for="reservation-service-duration">服务时长（分钟）</label>
+          <input id="reservation-service-duration" v-model.trim="durationDraft" type="number" min="1" step="1" inputmode="numeric" autofocus @input="durationError = ''" />
+          <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="durationOpen = false">取消</button>
+          <button type="submit" class="reservation-detail__button reservation-detail__button--primary" :disabled="activeActionKey !== ''">保存时长</button>
+          <span v-if="durationError" role="alert">{{ durationError }}</span>
+        </form>
         <div v-if="isRejectReasonOpen" class="reservation-detail__reason-panel">
           <div><strong>拒绝会员预约</strong><span>提交后将释放本单占用的卡项次数。</span></div>
           <label for="reservation-reject-reason"><span>拒绝原因</span>
@@ -887,7 +924,7 @@ useModalFocusTrap({
           <span>{{ actionError }}</span>
           <small v-if="actionErrorCode">错误编号：{{ actionErrorCode }}</small>
         </div>
-        <div v-if="!isRejectReasonOpen" class="reservation-detail__actions">
+        <div v-if="!isRejectReasonOpen && !durationOpen" class="reservation-detail__actions">
           <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
           <template v-for="action in availableActions" :key="action.key">
             <button
@@ -1540,6 +1577,9 @@ useModalFocusTrap({
   animation: reservation-detail-spin .85s linear infinite;
 }
 
+.reservation-detail__duration-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; }
+.reservation-detail__duration-form input { width: 120px; min-height: 34px; padding: 4px 8px; border: 1px solid #cbd6e2; border-radius: 5px; }
+.reservation-detail__duration-form [role="alert"] { width: 100%; color: #b95151; }
 .reservation-detail__footer {
   display: flex;
   align-items: center;

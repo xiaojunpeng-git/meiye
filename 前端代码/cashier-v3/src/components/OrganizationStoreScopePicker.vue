@@ -17,7 +17,9 @@ const props = defineProps({
   // 不能把整个组织的门店范围当作一次选择结果。
   singleStoreOnly: { type: Boolean, default: false },
   // Personnel selection needs a real organization node even when it has no stores.
-  nodeSelection: { type: Boolean, default: false }
+  nodeSelection: { type: Boolean, default: false },
+  // 人员查询打开后从组织树最高节点开始，右栏展示该组织下的全部门店。
+  defaultSelectHighestNode: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['update:modelValue', 'change', 'node-change'])
@@ -29,6 +31,7 @@ const expandedKeys = ref(new Set())
 const selectedOrganizationKey = ref('')
 const selectedOrganizationName = ref('')
 const selectedStores = ref([])
+const selectedNodeStoreId = ref(0)
 let panelResizeHandler = null
 const panelScrollTargets = []
 
@@ -159,7 +162,8 @@ function nodeStores(node) {
   const stores = []
   const walk = (item) => {
     const storeId = Number(item?.store_id || (item?.node_type === 'store' ? item?.id : 0))
-    if (storeId > 0 && allowedStoreIdSet.value.has(storeId)) {
+    // 人员选择使用服务端返回的完整组织树；切换门店等入口仍按可进入门店过滤。
+    if (storeId > 0 && (props.nodeSelection || allowedStoreIdSet.value.has(storeId))) {
       stores.push({ id: storeId, name: item?.title || item?.name || `门店${storeId}` })
     }
     ;(Array.isArray(item?.children) ? item.children : []).forEach(walk)
@@ -168,11 +172,19 @@ function nodeStores(node) {
   return stores.filter((store, index, all) => all.findIndex((item) => item.id === store.id) === index)
 }
 
-function selectNode(option) {
+function selectNode(option, defaultSelection = false) {
   if (props.nodeSelection) {
-    selectedOrganizationKey.value = option.key
-    emit('node-change', { type: option.storeId > 0 ? 'store' : 'org', id: option.storeId || Number(option.node.id || option.node.org_id), label: option.name })
-    open.value = false
+    if (option.storeId > 0) {
+      selectedNodeStoreId.value = option.storeId
+    } else {
+      selectedOrganizationKey.value = option.key
+      selectedOrganizationName.value = option.name
+      selectedStores.value = nodeStores(option.node)
+      selectedNodeStoreId.value = 0
+    }
+    emit('node-change', { type: option.storeId > 0 ? 'store' : 'org', id: option.storeId || Number(option.node.id || option.node.org_id), label: option.name, defaultSelection })
+    // 组织节点保留双栏视图以便继续挑门店；选中具体门店才收起浮层。
+    if (option.storeId > 0) open.value = false
     return
   }
   if (option.storeId > 0) {
@@ -190,11 +202,39 @@ function selectNode(option) {
 
 function selectStore(store) {
   const storeId = Number(store?.id)
-  if (!storeId || !allowedStoreIdSet.value.has(storeId)) return
+  if (!storeId || (!props.nodeSelection && !allowedStoreIdSet.value.has(storeId))) return
+  if (props.nodeSelection) {
+    selectedNodeStoreId.value = storeId
+    emit('node-change', { type: 'store', id: storeId, label: store?.name || `门店${storeId}` })
+    open.value = false
+    return
+  }
   emitChange([storeId], store?.name || `门店${storeId}`, true)
 }
 
+// 人员筛选与切店共用双栏树；首次打开优先选最高组织，右栏显示该组织全部门店。
+// 人员查询和最终分配仍由服务端校验组织归属与在职身份。
+function selectHighestNode(force = false) {
+  if (!props.nodeSelection || !props.defaultSelectHighestNode) return
+  const highest = visibleNodes.value.find((option) => option.depth === 0 && option.storeId <= 0)
+  if (highest && (force || !selectedOrganizationKey.value)) selectNode(highest, true)
+}
+
+watch(() => [open.value, props.tree, props.allowedStoreIds], () => {
+  if (selectedOrganizationKey.value) {
+    const selected = visibleNodes.value.find((option) => option.key === selectedOrganizationKey.value)
+    if (selected) selectedStores.value = nodeStores(selected.node)
+  }
+  selectHighestNode()
+}, { immediate: true, deep: true })
+
 function chooseAll() {
+  // 人员查询的“全部”固定回到最大组织节点，避免退回到含糊的权限范围。
+  if (props.nodeSelection && props.defaultSelectHighestNode) {
+    selectedOrganizationKey.value = ''
+    selectHighestNode()
+    return
+  }
   if (props.nodeSelection) emit('node-change', null)
   selectedOrganizationKey.value = ''
   selectedOrganizationName.value = ''
@@ -205,6 +245,8 @@ function chooseAll() {
 watch(open, async (value) => {
   if (props.embedded) return
   if (value) {
+    // 每次展开都回到最高组织，避免上次选择的下级组织缩小右栏门店列表。
+    if (selectedOrganizationKey.value !== visibleNodes.value.find((option) => option.depth === 0 && option.storeId <= 0)?.key) selectHighestNode(true)
     bindPanelPositioning()
     await nextTick()
     updatePanelPosition()
@@ -234,12 +276,12 @@ onBeforeUnmount(() => {
       <ChevronDown :size="15" aria-hidden="true" />
     </button>
 
-    <section ref="panelRef" v-if="embedded || open" class="organization-store-scope-picker__panel" :class="{ 'organization-store-scope-picker__panel--embedded': embedded }" :style="embedded ? {} : panelStyle" aria-label="组织和门店权限范围">
+    <section ref="panelRef" v-if="embedded || open" class="organization-store-scope-picker__panel" :class="{ 'organization-store-scope-picker__panel--embedded': embedded }" :style="embedded ? {} : panelStyle" :aria-label="nodeSelection ? '组织和门店列表' : '组织和门店权限范围'">
       <header>组织 / 门店</header>
       <div class="organization-store-scope-picker__body">
         <div class="organization-store-scope-picker__tree" aria-label="组织树">
           <p v-if="loading" class="organization-store-scope-picker__empty">正在读取组织范围。</p>
-          <p v-else-if="!visibleNodes.length" class="organization-store-scope-picker__empty">当前权限范围内暂无门店。</p>
+          <p v-else-if="!visibleNodes.length" class="organization-store-scope-picker__empty">{{ nodeSelection ? '暂无组织或门店。' : '当前权限范围内暂无门店。' }}</p>
           <div v-for="node in visibleNodes" :key="node.key" class="organization-store-scope-picker__tree-row" :style="{ paddingLeft: `${node.depth * 18}px` }">
             <button v-if="node.hasChildren" type="button" class="organization-store-scope-picker__toggle" :aria-label="node.expanded ? '收起组织' : '展开组织'" @click.stop="toggleNode(node)">
               <ChevronDown v-if="node.expanded" :size="15" aria-hidden="true" />
@@ -249,16 +291,16 @@ onBeforeUnmount(() => {
             <button type="button" class="organization-store-scope-picker__option" :class="{ 'organization-store-scope-picker__option--selected': selectedOrganizationKey === node.key, 'organization-store-scope-picker__option--store': node.storeId > 0 }" @click="selectNode(node)">{{ node.name }}</button>
           </div>
         </div>
-        <div v-if="!nodeSelection" class="organization-store-scope-picker__stores" aria-label="可选门店">
+        <div class="organization-store-scope-picker__stores" aria-label="可选门店">
           <p class="organization-store-scope-picker__stores-title">{{ selectedOrganizationName || '选择组织后查看组织及下级门店' }}</p>
           <div v-if="selectedStores.length" class="organization-store-scope-picker__store-list">
-            <button v-for="store in selectedStores" :key="store.id" type="button" :class="{ 'is-active': selectedStoreIds.length === 1 && selectedStoreIds[0] === store.id }" @click="selectStore(store)">{{ store.name }}</button>
+            <button v-for="store in selectedStores" :key="store.id" type="button" :class="{ 'is-active': nodeSelection ? selectedNodeStoreId === store.id : selectedStoreIds.length === 1 && selectedStoreIds[0] === store.id }" @click="selectStore(store)">{{ store.name }}</button>
           </div>
           <p v-else class="organization-store-scope-picker__empty">请选择左侧组织。</p>
         </div>
       </div>
       <footer v-if="showScopeFooter">
-        <button v-if="!singleStoreOnly" type="button" @click="chooseAll">当前权限范围</button>
+        <button v-if="!singleStoreOnly" type="button" @click="chooseAll">{{ nodeSelection && defaultSelectHighestNode ? '最高组织' : '当前权限范围' }}</button>
         <span v-else class="organization-store-scope-picker__scope-label">当前权限范围</span>
         <span>{{ nodeSelection ? '选择组织加载该组织及下级人员；选择门店加载该店人员。' : singleStoreOnly ? '选择组织查看其下级门店；请选择一间门店登录。' : '选择组织查询其全部下级门店；选择门店仅查询该门店。' }}</span>
       </footer>
@@ -267,7 +309,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.organization-store-scope-picker--nodes .organization-store-scope-picker__body { grid-template-columns: 1fr; }
 .organization-store-scope-picker { position: relative; display: inline-block; }
 .organization-store-scope-picker--embedded { display: block; width: 100%; }
 .organization-store-scope-picker__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 1px solid #dcdee2; border-radius: 4px; padding: 5px 10px; background: #fff; color: #515a6e; font: inherit; font-size: 13px; cursor: pointer; }

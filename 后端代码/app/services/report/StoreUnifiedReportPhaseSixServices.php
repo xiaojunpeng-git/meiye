@@ -281,7 +281,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('salesperson_name','门店销售人','销售事实中的销售人历史姓名快照。'),
             $this->column('partner_name','合作方名称','商品分类合作方名称快照。'),
             $this->column('experience_people','体验人数','购物车体验标签的有效记录。',true),
-            $this->column('deal_people','成交人数','原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原销售门店。跨分类单归达标时分摊金额最大的分类，退款不改变人数。',true),
+            $this->column('deal_people','成交人数','同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原销售门店。跨分类单归达标时分摊金额最大的分类，退款不改变人数。',true),
             $this->column('item_name','成交品名','现金购买商品明细名称。'),
             $this->column('quantity','商品数量','对应销售明细数量。',true),
             $this->column('cash_amount','成交金额','花园分类已登记实际业绩：成功现金收款减成功现金退款；卡项与独立退款按已核实项目归类。',true),
@@ -1441,7 +1441,7 @@ final class StoreUnifiedReportPhaseSixServices
     private function acquisitionSource(array $stores,array $range):array
     {
         $map=[];
-        // 成交只取原单首次达标事件；实际业绩仍读取独立的正负财务事实。
+        // 成交只取共用首次达标事件；实际业绩仍读取独立的正负财务事实。
         foreach($this->acquisitionQualifiedFacts($stores,$range) as $fact){
             $source=$this->acquisitionSourceLabel($fact,false);
             $map[$source]??=['category'=>$source,'amount_cents'=>0,'members'=>[],'deal_members'=>[]];
@@ -1469,7 +1469,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         unset($row);
         $drilldown=['report'=>'phase_six_acquisition_source'];
-        return $this->result('拓客部门客户来源数据分析表',[$this->column('category','类别','进店按完成服务时保存的来源；历史服务未保存时取同明细销售来源，仍无来源显示“来源未标记”。成交按原销售单来源；A 来源不参与本表。',false,true),$this->column('visit_count','进店人数','已完成且未作废的非体验服务会员按非 A 来源去重；人员“不算人数人次”不影响门店进店。',true,false,120,$drilldown),$this->column('deal_count','成交人数','非 A 来源原销售单独立累计有效现金收款，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，会员同日跨单跨店只计1，多日可累计。旧导入和旧卡录入原单补交不推动门槛，游客与退款不参与人数资格。',true,false,120,$drilldown),$this->column('amount','金额','非 A 来源已登记实际业绩，成功现金收款减成功现金退款；体验不排除金额。',true,false,120,$drilldown),$this->column('deal_rate','成交率','成交人数/进店人数，分母为0显示-。'),$this->column('unit_output','成交单产','实际业绩/成交人数，分母为0显示-。')],array_values($map),$range);
+        return $this->result('拓客部门客户来源数据分析表',[$this->column('category','类别','进店按完成服务时保存的来源；历史服务未保存时取同明细销售来源，仍无来源显示“来源未标记”。成交按原销售单来源；A 来源不参与本表。',false,true),$this->column('visit_count','进店人数','已完成且未作废的非体验服务会员按非 A 来源去重；人员“不算人数人次”不影响门店进店。',true,false,120,$drilldown),$this->column('deal_count','成交人数','非 A 来源同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，会员同日跨单跨店只计1，多日可累计。旧导入和旧卡录入原单补交不推动门槛，游客与退款不参与人数资格。',true,false,120,$drilldown),$this->column('amount','金额','非 A 来源已登记实际业绩，成功现金收款减成功现金退款；体验不排除金额。',true,false,120,$drilldown),$this->column('deal_rate','成交率','成交人数/进店人数，分母为0显示-。'),$this->column('unit_output','成交单产','实际业绩/成交人数，分母为0显示-。')],array_values($map),$range);
     }
 
     /** Money uses the registered signed population; source filtering uses each fact's frozen source. */

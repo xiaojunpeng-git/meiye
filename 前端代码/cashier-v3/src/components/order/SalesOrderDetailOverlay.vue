@@ -699,7 +699,7 @@ async function runAction(action, payload = {}) {
             <div><h3>基本信息</h3></div>
           </header>
           <dl class="sales-order-detail-info-grid">
-            <div v-for="row in basicInfoRows" :key="row.label" :class="{ 'sales-order-detail-info-grid__item--wide': row.wide }">
+            <div v-for="row in basicInfoRows" :key="row.label" :class="{ 'sales-order-detail-info-grid__item--wide': row.wide, 'sales-order-detail-info-grid__item--voided': row.label === '订单状态' && row.value === '已作废' }">
               <dt>{{ row.label }}</dt>
               <dd>{{ displayText(row.value) }}</dd>
             </div>
@@ -1180,6 +1180,12 @@ async function runAction(action, payload = {}) {
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+/* 作废是终态，详情中须比普通状态更醒目；不更改实际订单状态。 */
+.sales-order-detail-info-grid__item--voided dd {
+  color: #c62828;
+  font-weight: 700;
 }
 
 .sales-order-detail-summary-grid dd {

@@ -448,6 +448,7 @@ const RESERVATION_ACTION_ALIASES = {
 const ALLOWED_RESERVATION_RECORD_ACTIONS = new Set([
   'open-reservation-detail',
   'edit-reservation',
+  'change-reservation-service-duration',
   'confirm-reservation',
   'reject-reservation',
   'start-reservation-service',
@@ -1009,10 +1010,13 @@ async function handleReservationDetailAction(payload = {}) {
   if (['cancel-reservation', 'reject-reservation', 'mark-reservation-no-show'].includes(action)) {
     approved.payload.reason = typeof payload.reason === 'string' ? payload.reason.trim() : ''
   }
+  if (action === 'change-reservation-service-duration') {
+    approved.payload.serviceDurationMinutes = payload.serviceDurationMinutes
+  }
   const result = await requestReservationRecordAction(action, approved.payload)
   if (
     resultSucceeded(result)
-    && ['confirm-reservation', 'start-reservation-service', 'end-reservation-service'].includes(action)
+    && ['confirm-reservation', 'start-reservation-service', 'end-reservation-service', 'change-reservation-service-duration'].includes(action)
     && String(activeDetailReservationId.value) === String(payload.reservationId)
   ) {
     // 服务状态已变更后重新读取该预约的完整详情，保留详情窗并切换可用操作。

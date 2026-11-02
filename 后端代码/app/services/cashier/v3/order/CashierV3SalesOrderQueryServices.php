@@ -869,6 +869,29 @@ final class CashierV3SalesOrderQueryServices
         $orderId = (string)$row['order_id'];
         if (!isset($snapshots[$orderId])) return null;
         $detail = $this->mapAuthorityOrder($snapshots[$orderId], true);
+        // 仅在订单权限查询命中后补展示当前会员电话；游客及无号码资料不推断号码，
+        // 不把可变联系方式写入历史销售事实或扩展列表查询范围。
+        $memberId = (int)($row['member_id'] ?? 0);
+        if ($memberId > 0) {
+            $detail['phone'] = trim((string)Db::name('user')->where('uid', $memberId)->value('phone'));
+        }
+        // 操作流水保存的是全局唯一的门店员工记录 ID，员工调店后记录所属门店
+        // 可能不同于历史订单门店。订单已通过权限查询，按 ID 解析姓名才能保留
+        // 历史操作人；确实查不到对应员工时才回退编号，不按姓名猜测身份。
+        $operatorIds = array_values(array_unique(array_filter(array_map(static function (array $operation): int {
+            return (int)($operation['operatorId'] ?? 0);
+        }, (array)($detail['related']['operationLogs'] ?? [])))));
+        if ($operatorIds) {
+            $operatorNames = Db::name('system_store_staff')->whereIn('id', $operatorIds)
+                ->column('staff_name', 'id');
+            foreach (['operationLogs', 'voids', 'refunds', 'reopenings'] as $group) {
+                foreach ((array)($detail['related'][$group] ?? []) as $index => $operation) {
+                    $operatorId = (int)($operation['operatorId'] ?? 0);
+                    $name = trim((string)($operatorNames[$operatorId] ?? ''));
+                    if ($name !== '') $detail['related'][$group][$index]['operatorName'] = $name;
+                }
+            }
+        }
         // 小票联系方式使用订单所属门店的当前资料；先通过订单权限查询，
         // 不使用客户端门店ID、不改变历史门店名称快照，也不回写订单事实。
         $store = Db::name('system_store')->where('id', (int)$row['store_id'])
@@ -3570,9 +3593,8 @@ final class CashierV3SalesOrderQueryServices
             'dianping_voucher' => '大众验券',
             'douyin_voucher' => '抖音验券',
             'partner' => '合作方收款',
-                // 银行转账是独立的实际到账方式，不借用其他收款，也不重写历史渠道。
+            // 保留 010 已上线的独立实收渠道展示，避免本轮发布把银行转账和其他收入退化为‘其他收款’。
             'bank_transfer' => '银行转账',
-            // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
             'other_income' => '其他收入',
             'partner_collection' => '合作方收款',
             'other' => '其他收款',

@@ -602,6 +602,8 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['reservation.updated' => []],
             ],
+            // 计时修正有预约操作审计，但不产生服务、核销或经营事实。
+            'change-reservation-service-duration' => $eventless('仅修改预约服务计时时长；预约操作表保留前后值。'),
             'select-reservation-member' => $eventless($selection),
             // 仅改变预约视觉标记；审计由 reservation_operation 保存，不生成服务或经营事实。
             'mark-reservation-color' => $eventless('仅保存当前预约的日历颜色标记，不改变预约状态、会员资料或服务事实。'),

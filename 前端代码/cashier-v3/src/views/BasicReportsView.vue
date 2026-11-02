@@ -11,7 +11,7 @@ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePic
 import TablePagination from '@/components/common/TablePagination.vue'
 import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, deleteBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
 const state = useCashierV3State()
@@ -33,6 +33,9 @@ const resultsScroll = ref(null)
 const editor = ref(null)
 const saving = ref(false)
 const saveError = ref('')
+const deleteDialog = ref(null)
+const deleting = ref(false)
+const deleteError = ref('')
 const salaryEditing = ref(false)
 const salaryDraft = ref(null)
 const salarySaving = ref(false)
@@ -192,6 +195,26 @@ async function save() {
   } catch (e) { saveError.value = e.message }
   finally { saving.value = false }
 }
+/** 用户确认后才删除；沿用已查询行的版本和内容证明，结果从后端重新读取。 */
+function requestDelete(row) {
+  deleteError.value = ''
+  deleteDialog.value = {
+    id: row.registration_id, store_id: row.store_id, expected_version: row.record_version,
+    expected_source_hash: row.source_hash, idempotency_key: 'basic-registration-delete:' + crypto.randomUUID(),
+    store_name: row.store_name, coupon_code: row.coupon_code
+  }
+}
+async function confirmDelete() {
+  if (!deleteDialog.value || deleting.value) return
+  deleting.value = true; deleteError.value = ''
+  try {
+    const { store_name, coupon_code, ...body } = deleteDialog.value
+    await deleteBasicRegistration(platform.value, body)
+    deleteDialog.value = null
+    await run({ ...executedQuery.value })
+  } catch (e) { deleteError.value = e.message }
+  finally { deleting.value = false }
+}
 async function exportRows() {
   if (!executedQuery.value || exporting.value || loading.value) return
   exporting.value = true
@@ -211,6 +234,8 @@ async function exportRows() {
 }
 function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
+  // 刷单登记允许分精度输入，明细与合计按产品指定展示两位；其他金额沿用整元默认口径。
+  if (active.value?.code === 'basic_brush_registration' && field.key === 'amount') return formatReportMoney(row[field.key], 2)
   // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
   if (active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(row[field.key]).toFixed(2)
   if (active.value?.code === 'basic_cross_store_settlement' && ['settlement_total', 'total_amount'].includes(field.key)) return String(Math.trunc(Number(row[field.key])))
@@ -238,6 +263,7 @@ function formatReportCount(value, field) {
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
+  if (amount != null && active.value?.code === 'basic_brush_registration' && field.key === 'amount') return formatReportMoney(amount, 2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(amount).toFixed(2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && ['settlement_total', 'total_amount'].includes(field.key)) return String(Math.trunc(Number(amount)))
   // 合计与明细使用同一数量显示口径；金额仍使用统一金额格式化函数。
@@ -335,7 +361,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
             <tr v-if="data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
-            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
+            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button><button type="button" class="basic-reports__edit" :aria-label="'删除登记 ' + row.registration_id" @click="requestDelete(row)">删除</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
           <p v-if="!data.rows.length" class="basic-reports__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
         </div>
@@ -343,6 +369,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
       </section>
     </template>
     <Teleport to="body">
+      <div v-if="deleteDialog" class="basic-report-dialog" role="dialog" aria-modal="true" aria-labelledby="registration-delete-title" @keydown="trapFocus" @keydown.esc="!deleting && (deleteDialog = null)"><section><header><h2 id="registration-delete-title">确认删除刷单登记</h2><button type="button" class="basic-reports__icon" aria-label="关闭" :disabled="deleting" @click="deleteDialog = null"><X :size="18" /></button></header><p>确认删除 {{ deleteDialog.store_name }}的登记 {{ deleteDialog.coupon_code || deleteDialog.id }}？删除后查询、合计和导出均不再包含这条记录。</p><p v-if="deleteError" class="basic-reports__error" role="alert">{{ deleteError }}</p><footer><button type="button" class="button button--secondary" :disabled="deleting" @click="deleteDialog = null">取消</button><button type="button" class="button button--primary" :disabled="deleting" @click="confirmDelete">{{ deleting ? '删除中…' : '确认删除' }}</button></footer></section></div>
       <div v-if="freezeDialog" class="basic-report-dialog" role="dialog" aria-modal="true" aria-labelledby="salary-freeze-title" @keydown="trapFocus" @keydown.esc="!salarySaving && (freezeDialog = null)"><section><p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p><h2 id="salary-freeze-title">{{ freezeDialog.frozen ? '冻结' : '取消冻结' }} {{ freezeDialog.month }}</h2><p>{{ freezeDialog.frozen ? '冻结后，全部门店不可编辑当月人工项，平台仍可编辑。实时业绩和工资计算继续更新。' : '取消冻结后，已获编辑权限的门店可继续编辑当月人工项。' }}</p><footer><button type="button" class="button button--secondary" :disabled="salarySaving" @click="freezeDialog = null">取消</button><button type="button" class="button button--primary" :disabled="salarySaving" @click="saveSalaryFreeze">确认</button></footer></section></div>
       <div v-if="editor" class="basic-report-dialog" role="dialog" aria-modal="true" aria-labelledby="registration-title" @keydown="trapFocus" @keydown.esc="!saving && (editor = null)">
         <form @submit.prevent="save"><header><h2 id="registration-title">{{ editor.id ? '编辑登记' : '新增登记' }}</h2><button type="button" class="basic-reports__icon" aria-label="关闭" :disabled="saving" @click="editor = null"><X :size="18" /></button></header>

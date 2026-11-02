@@ -279,7 +279,7 @@ const EMPTY_BOOTSTRAP = {
   },
   navigationRules: [],
   // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
-  storeDisplayOptions: { preSaleEnabled: true, salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true },
+  storeDisplayOptions: { preSaleEnabled: true, salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true, memberDefaultAll: false },
   // Old, unmigrated servers retain their previous source behavior; current
   // servers explicitly provide false for fixed-source mode, never truthy-fallback.
   businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
@@ -1956,7 +1956,8 @@ function normalizeBootstrap(rawBootstrap = {}) {
       experienceEnabled: raw.storeDisplayOptions?.experienceEnabled !== false,
       craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false,
       // 缺省兼容可修改；仅后端明确关闭展示时隐藏，金额快照不参与归一化。
-      laborFeeVisible: raw.storeDisplayOptions?.laborFeeVisible !== false
+      laborFeeVisible: raw.storeDisplayOptions?.laborFeeVisible !== false,
+      memberDefaultAll: raw.storeDisplayOptions?.memberDefaultAll === true
     },
     businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
       ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },

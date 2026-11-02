@@ -89,6 +89,14 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  defaultScope: {
+    type: String,
+    default: 'store'
+  },
+  hideScopeControls: {
+    type: Boolean,
+    default: false
+  },
   alignScopeRight: {
     type: Boolean,
     default: false
@@ -107,7 +115,8 @@ const selectingRecordId = ref(null)
 const queryError = ref('')
 const selectError = ref('')
 const activeView = ref(props.initialView === 'creator' ? 'creator' : 'selector')
-const memberScope = ref('store')
+// 每次打开选择器时固定查询范围；隐藏范围按钮只影响展示，查询仍须显式传递 all 并接受后端权限校验。
+const memberScope = ref(props.showScopeToggle && props.defaultScope === 'all' ? 'all' : 'store')
 const isSelectingGuest = ref(false)
 let querySequence = 0
 let recentQuerySequence = 0
@@ -342,9 +351,9 @@ async function handleCreated(payload = {}) {
       <form class="member-selector__search" :class="{ 'member-selector__search--scope-right': alignScopeRight }" @submit.prevent="submitQuery">
         <label class="member-selector__search-field">
           <span>查询会员</span>
-          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle && showNameInitialsHint ? '姓名或拼音首字母、完整手机号或会员编号' : '姓名、完整手机号或会员编号'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
+          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle && showNameInitialsHint ? '姓名或拼音首字母、手机号片段或会员编号片段' : '姓名、手机号片段或会员编号片段'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
-        <fieldset v-if="showScopeToggle" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
+        <fieldset v-if="showScopeToggle && !hideScopeControls" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
           <legend>查询范围</legend>
           <label><input type="radio" name="member-selector-scope" value="store" :checked="memberScope === 'store'" @change="changeScope('store')">本店</label>
           <label><input type="radio" name="member-selector-scope" value="all" :checked="memberScope === 'all'" @change="changeScope('all')">全部</label>
