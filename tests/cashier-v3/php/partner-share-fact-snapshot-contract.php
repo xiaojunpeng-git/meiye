@@ -34,17 +34,20 @@ $shareMethod = new ReflectionMethod(StoreReportPartnerCategorySnapshotServices::
 if (PHP_VERSION_ID < 80100) {
     $shareMethod->setAccessible(true);
 }
-$share = $shareMethod->invoke(new StoreReportPartnerCategorySnapshotServices(), 123, 33);
-if ($share !== 41) {
-    throw new RuntimeException('partner share cents must use half-up integer rounding');
+$resolver = new StoreReportPartnerCategorySnapshotServices();
+if ($shareMethod->invoke($resolver, 12300, 33) !== 4100
+    || $shareMethod->invoke($resolver, 100, 50) !== 100
+    || $shareMethod->invoke($resolver, 100, 49) !== 0
+    || $shareMethod->invoke($resolver, 50, 100) !== 0) {
+    throw new RuntimeException('new partner shares must round half-up to whole yuan without exceeding cash');
 }
 
 $source = file_get_contents($root . '/后端代码/app/services/report/StoreReportPartnerCategorySnapshotServices.php');
 foreach ([
-    'two_level' => '$levelTwo = $chain[1] ?? null',
+    'third_level' => '$levelThree = $chain[2] ?? null',
     'child_suppresses_parent' => '!$this->hasEnabledSecondLevel',
     'ratio_snapshot' => 'partner_default_ratio_snapshot',
-    'ratio_rounding' => "bcadd(bcmul((string)\$cashPerformanceAmountCents, (string)\$ratio, 0), '50', 0)",
+    'whole_yuan_rounding' => "bcadd(bcmul((string)\$cashPerformanceAmountCents, (string)\$ratio, 0), '5000', 0)",
 ] as $name => $needle) {
     if (strpos($source, $needle) === false) {
         throw new RuntimeException("partner share snapshot contract missing {$name}");

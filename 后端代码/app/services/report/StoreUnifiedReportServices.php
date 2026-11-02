@@ -1403,9 +1403,18 @@ class StoreUnifiedReportServices extends BaseServices
         $allRefundIds = array_map('intval', (clone $refundQuery)->column('refund_operation.id'));
         $refundRows = $refundReader->rows($refundQuery, $allRefundIds);
         $partnerProjection = $this->memberPartnerCategoryProjection($query, $refundRows, $partnerDefinitions);
-        $partnerDefinitions = $partnerProjection['definitions'];
+        $supplementPartnerRows = (clone $supplementQuery)
+            ->fieldRaw('repayment_payment.order_id repayment_id,COALESCE(allocation.sale_fact_id,\'\') sale_fact_id,COALESCE(s.source_line_id,\'\') source_line_id')
+            ->group('repayment_payment.order_id,allocation.sale_fact_id,s.source_line_id')->select()->toArray();
+        $supplementPartner = $this->memberConsumptionSupplementPartnerProjection(
+            $supplementPartnerRows, array_column($supplementPartnerRows, 'repayment_id'));
+        // A later disabled third-level switch may hide a column, never its
+        // already frozen supplement amount. Include observed facts in the header.
+        $partnerDefinitions = $this->memberObservedPartnerDefinitions(
+            $partnerProjection['definitions'], $supplementPartner['totals']);
         $summaryValues = $this->memberConsumptionSummaryValues($query, $supplementQuery,
-            $rechargeQuery, $rechargeSupplementQuery, $storeId, $partnerDefinitions, $partnerProjection['totals']);
+            $rechargeQuery, $rechargeSupplementQuery, $storeId, $partnerDefinitions,
+            $partnerProjection['totals'], $supplementPartner['totals']);
         $refundById = [];
         $refundShares = [];
         $verifiedRefundCents = 0;
@@ -2900,14 +2909,14 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * Configured zero columns follow current switches. Observed current categories
-     * are added by the member projection; only monetary values remain frozen.
+     * Configured zero columns follow current switches through level three.
+     * Observed current categories are added by the member projection; only
+     * monetary values and the original rule level remain frozen.
      * Later classification edits must never recalculate historical partner ratios.
      *
      * A configured root is shown only when none of its direct second-level
-     * children is configured.  Once a second-level category is configured,
-     * the root column is replaced by that second-level column.  Deeper levels
-     * never create a third-level column.
+     * children is configured. A configured third-level child gets its own
+     * member-consumption column; its parent remains for other projects.
      */
     private function partnerPerformanceDefinitions($storeId): array
     {
@@ -2943,6 +2952,8 @@ class StoreUnifiedReportServices extends BaseServices
                 if (!$this->hasEnabledPartnerSecondLevel($rootId, $enabled, $categories)) {
                     $effective = $chain[0];
                 }
+            } elseif (count($chain) >= 3 && (int)$chain[2]['id'] === (int)$configuredId) {
+                $effective = $chain[2];
             } elseif ((int)$chain[1]['id'] === (int)$configuredId) {
                 // The checkout snapshot uses the configured second-level
                 // category for all deeper product classifications.
@@ -2966,6 +2977,38 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($definitions as &$definition) unset($definition['sort_path']);
         unset($definition);
         return array_values($definitions);
+    }
+
+    /** A disabled rule cannot erase a nonzero repayment share frozen before it changed. */
+    private function memberObservedPartnerDefinitions(array $definitions, array $observedTotals): array
+    {
+        $known = array_fill_keys(array_map(static function (array $definition): int {
+            return (int)$definition['category_id'];
+        }, $definitions), true);
+        $missing = [];
+        foreach ($observedTotals as $categoryId => $cents) {
+            $id = (int)$categoryId;
+            if ($id > 0 && (int)$cents !== 0 && !isset($known[$id])) $missing[$id] = true;
+        }
+        if ($missing === []) return $definitions;
+        $categories = [];
+        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()->toArray() as $category) {
+            $categories[(int)$category['id']] = $category;
+        }
+        foreach (array_keys($missing) as $id) {
+            $chain = $this->partnerCategoryChain((int)$id, $categories);
+            $path = $chain === [] ? '未分类' : $this->partnerCategoryPathLabel($chain, (int)$id);
+            $definitions[] = ['key' => 'partner_category_' . $id, 'category_id' => $id,
+                'category_path' => $path, 'label' => $path . '分成业绩'];
+        }
+        usort($definitions, static function (array $left, array $right): int {
+            if ((int)$left['category_id'] === 0) return (int)$right['category_id'] === 0 ? 0 : 1;
+            if ((int)$right['category_id'] === 0) return -1;
+            return strcmp((string)$left['category_path'], (string)$right['category_path'])
+                ?: ((int)$left['category_id'] <=> (int)$right['category_id']);
+        });
+        return $definitions;
     }
 
     /** @return array<int,string> */
@@ -3039,7 +3082,7 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function memberPartnerCategoryProjection($query, array $refunds, array $definitions): array
     {
-        $sales = (clone $query)->fieldRaw('s.fact_id sale_fact_id,s.store_id,s.source_type,d.item_id product_id,d.partner_share_amount_cents')
+        $sales = (clone $query)->fieldRaw('s.fact_id sale_fact_id,s.store_id,s.source_type,d.item_id product_id,d.partner_category_id_snapshot,d.partner_share_amount_cents')
             ->select()->toArray();
         $resolved = (new StoreReportSaleCategoryServices())->resolve($sales);
         $tree = [];
@@ -3052,11 +3095,23 @@ class StoreUnifiedReportServices extends BaseServices
             $chain = $this->partnerCategoryChain((int)($category['id'] ?? 0), $tree);
             $id = 0; $path = '未分类';
             if ($chain !== []) {
-                // Respect existing configured first/second-level columns; otherwise retain the current two-level path.
+                // Preserve the level frozen on the original fact when it is
+                // still in the current category chain. New third-level rules
+                // must not reclassify an older parent-level share.
                 $node = $chain[min(1, count($chain) - 1)];
                 $id = (int)$node['id'];
-                foreach (array_reverse(array_slice($chain, 0, 2)) as $ancestor) {
-                    if (isset($configured[(int)$ancestor['id']])) { $id = (int)$ancestor['id']; break; }
+                $frozenId = (int)($category['partner_category_id_snapshot'] ?? 0);
+                $eligible = array_slice($chain, 0, 3);
+                foreach ($eligible as $ancestor) {
+                    if ($frozenId > 0 && (int)$ancestor['id'] === $frozenId) {
+                        $id = $frozenId;
+                        break;
+                    }
+                }
+                if ($frozenId <= 0 || $id !== $frozenId) {
+                    foreach (array_reverse($eligible) as $ancestor) {
+                        if (isset($configured[(int)$ancestor['id']])) { $id = (int)$ancestor['id']; break; }
+                    }
                 }
                 $path = $this->partnerCategoryPathLabel($chain, $id);
             }
@@ -3198,7 +3253,8 @@ class StoreUnifiedReportServices extends BaseServices
      * row-level operating supplement and are not merged into a business total.
      */
     private function memberConsumptionSummaryValues($query, $supplementQuery, $rechargeQuery,
-        $rechargeSupplementQuery, $storeId, array $partnerDefinitions, array $shareByCategory): array
+        $rechargeSupplementQuery, $storeId, array $partnerDefinitions, array $shareByCategory,
+        array $supplementShareByCategory): array
     {
         $base = (clone $query)->fieldRaw('SUM(s.quantity) quantity')->find() ?: [];
         $paymentRows = (clone $query)
@@ -3218,12 +3274,7 @@ class StoreUnifiedReportServices extends BaseServices
             $method = (string)$payment['payment_method'];
             $payments[$method] = (int)($payments[$method] ?? 0) + (int)$payment['amount_cents'];
         }
-        $supplementPartnerRows = (clone $supplementQuery)
-            ->fieldRaw('repayment_payment.order_id repayment_id,COALESCE(allocation.sale_fact_id,\'\') sale_fact_id,COALESCE(s.source_line_id,\'\') source_line_id')
-            ->group('repayment_payment.order_id,allocation.sale_fact_id,s.source_line_id')->select()->toArray();
-        $supplementPartner = $this->memberConsumptionSupplementPartnerProjection(
-            $supplementPartnerRows, array_column($supplementPartnerRows, 'repayment_id'));
-        foreach ($supplementPartner['totals'] as $categoryId => $share) {
+        foreach ($supplementShareByCategory as $categoryId => $share) {
             $shareByCategory[(int)$categoryId] = (int)($shareByCategory[(int)$categoryId] ?? 0) + (int)$share;
         }
         // 充值与充值补交各取自已收窄的事实查询；纯赠送充值保留明细行但不伪造现金。

@@ -9,6 +9,7 @@ namespace app\services {
 namespace {
     $root = dirname(__DIR__, 3);
     $serviceSource = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+    $categorySource = (string)file_get_contents($root . '/后端代码/app/services/report/StoreReportSaleCategoryServices.php');
     $cashierController = (string)file_get_contents($root . '/后端代码/app/controller/cashier/v3/Report.php');
     $storeController = (string)file_get_contents($root . '/后端代码/app/controller/store/report/UnifiedReport.php');
     $adminController = (string)file_get_contents($root . '/后端代码/app/controller/admin/v1/report/UnifiedReport.php');
@@ -19,10 +20,13 @@ namespace {
         'group by frozen full path' => '$this->partnerSummaryGroupKey($month, $fact, $categoryPath)',
         'show frozen full path' => "'performance_type' => \$categoryPath",
         'exact category drilldown' => "'category_path_exact'=>'category_path_snapshot'",
-        'exact query comparison' => "COALESCE(c.category_path_snapshot,d.category_path_snapshot)=?",
+        'exact query comparison' => 'if (!StoreReportSaleCategoryServices::matches($categories, $input)) continue;',
         'detail shows full path' => "\$row['performance_type'] = (string)\$row['category_path_snapshot']",
     ] as $name => $needle) {
         if (strpos($serviceSource, $needle) === false) throw new RuntimeException("missing {$name}");
+    }
+    if (strpos($categorySource, "if (\$exact !== '' && \$path !== \$exact) continue;") === false) {
+        throw new RuntimeException('exact category filter must compare verified current paths');
     }
     if (strpos($serviceSource, "'category_path_exact'=>'category_path_snapshot', 'partner_name'=>'partner_name_snapshot'") !== false) {
         throw new RuntimeException('hidden partner label still splits category drilldown');

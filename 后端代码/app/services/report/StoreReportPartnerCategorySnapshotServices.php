@@ -127,10 +127,15 @@ final class StoreReportPartnerCategorySnapshotServices
         }
         $levelOne = $chain[0];
         $levelTwo = $chain[1] ?? null;
+        $levelThree = $chain[2] ?? null;
         $configs = $this->enabledConfigs($tenantId);
 
         $effective = null;
-        if ($levelTwo !== null && isset($configs[(string)$levelTwo['id']])) {
+        // A third-level rule applies only to new settlements that freeze this
+        // snapshot. Older facts keep their original category, ratio and cents.
+        if ($levelThree !== null && isset($configs[(string)$levelThree['id']])) {
+            $effective = $levelThree;
+        } elseif ($levelTwo !== null && isset($configs[(string)$levelTwo['id']])) {
             $effective = $levelTwo;
         } elseif (isset($configs[(string)$levelOne['id']]) && !$this->hasEnabledSecondLevel($configs, (int)$levelOne['id'])) {
             $effective = $levelOne;
@@ -233,7 +238,12 @@ final class StoreReportPartnerCategorySnapshotServices
         if ($cashPerformanceAmountCents === 0 || $ratio === 0) {
             return 0;
         }
-        // Half-up rounding at the cent: no floats, and no later report-time rounding.
-        return (int)bcdiv(bcadd(bcmul((string)$cashPerformanceAmountCents, (string)$ratio, 0), '50', 0), '100', 0);
+        // New performance facts are saved in whole yuan. Round the percentage
+        // once at that boundary and never borrow a fractional-yuan tail from
+        // the cash pool; older cent-level facts remain untouched.
+        $roundedYuan = (int)bcdiv(
+            bcadd(bcmul((string)$cashPerformanceAmountCents, (string)$ratio, 0), '5000', 0),
+            '10000', 0);
+        return min($roundedYuan, intdiv($cashPerformanceAmountCents, 100)) * 100;
     }
 }
