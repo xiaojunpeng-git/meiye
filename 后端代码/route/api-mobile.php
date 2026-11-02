@@ -119,6 +119,14 @@ Route::group('api/mobile/merchant', function () {
         Route::post('warehouse/overview', 'Warehouse/overview')->option(['real_name' => '手机商家端组织业绩数仓']);
 		// 员工业绩下钻复用商家会话与数仓权限中间件，不能落入无权限上下文的兜底路由。
 		Route::post('warehouse/employee-performance', 'Warehouse/employeePerformance')->option(['real_name' => '手机商家端员工业绩明细']);
+		Route::get('target-scheme/catalog', 'TargetScheme/catalog')->option(['real_name' => '商家端目标方案目录']);
+		Route::get('target-scheme/products', 'TargetScheme/products')->option(['real_name' => '商家端目标商品选择']);
+		Route::get('target-scheme/list', 'TargetScheme/listing')->option(['real_name' => '商家端目标方案列表']);
+		Route::get('target-scheme/detail', 'TargetScheme/detail')->option(['real_name' => '商家端目标方案详情']);
+		Route::post('target-scheme/create', 'TargetScheme/create')->option(['real_name' => '商家端新建目标方案']);
+		Route::post('target-scheme/lines', 'TargetScheme/replaceLines')->option(['real_name' => '商家端保存目标明细']);
+		Route::post('target-scheme/activate', 'TargetScheme/activate')->option(['real_name' => '商家端启用目标方案']);
+		Route::get('target-scheme/analysis', 'TargetScheme/analysis')->option(['real_name' => '商家端目标分析']);
 		Route::get('engineering-ledger/catalog', 'EngineeringLedger/catalog')->option(['real_name' => '手机商家端工程管理台账目录']);
 		Route::get('engineering-ledger/list', 'EngineeringLedger/list')->option(['real_name' => '手机商家端工程管理台账列表']);
 		Route::post('engineering-ledger/save', 'EngineeringLedger/save')->option(['real_name' => '手机商家端工程管理台账保存']);
@@ -137,9 +145,9 @@ Route::group('api/mobile/merchant', function () {
         Route::post('reservations/:reservationId/confirm', 'Reservation/confirm')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端确认预约']);
         Route::post('reservations/:reservationId/reject', 'Reservation/reject')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端拒绝预约']);
         Route::post('reservations/:reservationId/start-service', 'Reservation/startService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端开始服务']);
-        Route::post('reservations/:reservationId/end-service', 'Reservation/endService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端结束服务']);
-        // 与商家预约的其他写操作共用会话中间件，时长只更新计时字段。
         Route::post('reservations/:reservationId/service-duration', 'Reservation/changeServiceDuration')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端修改服务时长']);
+        Route::post('reservations/:reservationId/service-projects', 'Reservation/changeServiceProjects')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端修改服务项目']);
+        Route::post('reservations/:reservationId/end-service', 'Reservation/endService')->pattern(['reservationId' => '\\d+'])->option(['real_name' => '手机商家端结束服务']);
     })->middleware([MobileMerchantSessionMiddleware::class]);
 })->prefix('mobile.merchant.')->middleware([
     InstallMiddleware::class,

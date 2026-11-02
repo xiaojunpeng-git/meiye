@@ -146,6 +146,8 @@ final class CashierV3ReservationDetailQueryServices
                 $project = [
                     'id' => (int)($line['id'] ?? 0),
                     'projectId' => (int)($line['project_id'] ?? 0),
+                    'skuId' => (int)($line['sku_id'] ?? 0),
+                    'entitlementSourceDetailId' => (int)($line['entitlement_source_detail_id'] ?? 0),
                     'name' => (string)($line['project_name_snapshot'] ?? ''),
                     'source' => $checkoutServiceLinks
                         ? 'checkout'
@@ -497,7 +499,11 @@ final class CashierV3ReservationDetailQueryServices
             ]);
         }
         if ($status === 'IN_SERVICE') {
-            return array_merge($durationAction, [['action' => 'end-reservation-service', 'label' => '结束服务', 'enabled' => true]]);
+            return array_merge([
+                ['action' => 'change-reservation-service-projects', 'label' => '修改服务项目', 'enabled' => true],
+            ], $durationAction, [
+                ['action' => 'end-reservation-service', 'label' => '结束服务', 'enabled' => true],
+            ]);
         }
         return [];
     }
@@ -513,6 +519,7 @@ final class CashierV3ReservationDetailQueryServices
             'MARK_NO_SHOW' => '标记爽约',
             'UPDATE' => '更新预约',
             'CHANGE_SERVICE_DURATION' => '修改服务时长',
+            'CHANGE_SERVICE_PROJECTS' => '修改服务项目',
             'END_SERVICE' => '结束服务',
         ][$operation] ?? '预约状态更新';
     }

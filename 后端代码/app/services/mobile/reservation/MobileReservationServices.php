@@ -119,6 +119,15 @@ final class MobileReservationServices
         ));
     }
 
+    /** 仅转发所选项目到 V3 服务中修改命令，权益扣减仍在结束服务事务发生。 */
+    public function changeServiceProjects(array $merchant, int $reservationId, array $payload): array
+    {
+        return $this->dispatch($merchant, 'change-reservation-service-projects', array_merge(
+            $this->actionPayload('change-reservation-service-projects', $reservationId, $payload),
+            ['projects' => $payload['projects'] ?? null]
+        ));
+    }
+
     public function confirm(array $merchant, int $reservationId, array $payload): array
     {
         $actionPayload = $this->actionPayload('confirm-reservation', $reservationId, $payload);

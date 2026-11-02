@@ -88,7 +88,7 @@ class CashierV3PermissionGuard
             && $dataScope->allowsStore($dataScope->forcedStoreId())
             && $dataScope->hasFeature('cashier.v3.reservation')
             && in_array($action, [
-                'create-reservation', 'update-reservation', 'change-reservation-service-duration', 'cancel-reservation',
+                'create-reservation', 'update-reservation', 'change-reservation-service-duration', 'change-reservation-service-projects', 'cancel-reservation',
                 'confirm-reservation', 'reject-reservation',
                 'start-reservation-service', 'end-reservation-service',
             ], true);

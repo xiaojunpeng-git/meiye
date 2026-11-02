@@ -241,6 +241,10 @@ final class CashierV3ReservationModule
             $result = self::changeServiceDuration($scope);
             return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '服务时长已修改。'];
         });
+        self::registerCommand($handlers, 'change-reservation-service-projects', function (array $scope) use ($catalog, $entitlementProjection): array {
+            $result = self::changeServiceProjects($scope, $catalog, $entitlementProjection);
+            return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '服务项目已修改。'];
+        });
         self::registerCommand($handlers, 'cancel-reservation', function (array $scope): array {
             $result = self::cancel($scope);
             return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '预约已删除。'];
@@ -306,7 +310,7 @@ final class CashierV3ReservationModule
             // 允许空 contexts 是为了禁止前端决定批量写入边界。
             $dispatcher->policies()->register(new CashierV3ContextPolicy('complete-checkout-reservations', [], [], null, [], [], [], true));
         }
-        foreach (['cancel-reservation', 'confirm-reservation', 'reject-reservation', 'start-reservation-service', 'end-reservation-service', 'change-reservation-service-duration'] as $action) {
+        foreach (['cancel-reservation', 'confirm-reservation', 'reject-reservation', 'start-reservation-service', 'end-reservation-service', 'change-reservation-service-duration', 'change-reservation-service-projects'] as $action) {
             if (!$dispatcher->policies()->has($action)) {
                 $dispatcher->policies()->register(new CashierV3ContextPolicy($action, ['reservation'], [], null, ['reservation']));
             }
@@ -638,6 +642,88 @@ final class CashierV3ReservationModule
             'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
         self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''),
             'CHANGE_SERVICE_DURATION', (int)$header['version'], $nextVersion, $result, $now);
+        return $result;
+    }
+
+    /**
+     * 服务开始后只更换实际关联项目。结束服务从最终预约行扣已购权益；
+     * 预约时段、独立计时分钟、实际开始时间和人员安排均不得随项目重算。
+     */
+    private static function changeServiceProjects(array $scope, CashierV3SaleCatalogServices $catalog, CashierV3EntitlementProjectionServices $entitlementProjection): array
+    {
+        $header = self::reservationHeader($scope);
+        if ((string)$header['status'] !== self::STATUS_IN_SERVICE) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '仅服务中可以修改服务项目。');
+        }
+        $payload = (array)($scope['payload'] ?? []);
+        $projects = $payload['projects'] ?? null;
+        if (!is_array($projects) || !$projects || count($projects) > 100) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请至少选择一个服务项目。');
+        }
+        $operator = $scope['operator_scope'];
+        $dataScope = $scope['data_scope'];
+        $tenantId = $dataScope->tenantId();
+        $reservationId = (int)$header['id'];
+        $beforeLines = self::lineSnapshot($reservationId, $tenantId);
+        $available = [];
+        foreach (self::catalogOptions($catalog, $entitlementProjection, $operator, $dataScope, (int)$header['member_id']) as $option) {
+            if (empty($option['selectable'])) continue;
+            $key = strtolower((string)$option['source']) . ':' . (int)$option['projectId'] . ':' . (int)($option['entitlementSourceDetailId'] ?? 0);
+            $available[$key] = $option;
+        }
+        // 原预约已占用的最后一次卡项可能暂不出现在“可用”目录里；
+        // 允许保留它的原有选择，结束服务仍由权威核销事务判定是否可扣。
+        foreach ($beforeLines as $line) {
+            if ($line['source'] !== 'card') continue;
+            $key = 'card:' . (int)$line['projectId'] . ':' . (int)$line['entitlementSourceDetailId'];
+            if (!isset($available[$key])) $available[$key] = [
+                'projectId' => (int)$line['projectId'], 'skuId' => (int)$line['skuId'],
+                'name' => (string)$line['name'], 'source' => 'card',
+                'entitlementSourceDetailId' => (int)$line['entitlementSourceDetailId'],
+                'retainedQuantity' => (int)$line['quantity'],
+            ];
+        }
+        $selected = [];
+        $selectedProjects = [];
+        foreach ($projects as $project) {
+            if (!is_array($project)) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '服务项目无效。');
+            $source = strtolower((string)($project['source'] ?? 'unpaid')) === 'card' ? 'card' : 'unpaid';
+            $key = $source . ':' . (int)($project['projectId'] ?? 0) . ':' . ($source === 'card' ? (int)($project['entitlementSourceDetailId'] ?? 0) : 0);
+            if (!isset($available[$key]) || isset($selected[$key])) {
+                throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '服务项目已变化，请重新选择。');
+            }
+            $selected[$key] = true;
+            $option = $available[$key];
+            $quantity = (int)($project['quantity'] ?? 1);
+            if ($quantity < 1 || $quantity > 1000) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '服务项目数量无效。');
+            if (isset($option['retainedQuantity']) && $quantity !== (int)$option['retainedQuantity']) {
+                throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '原已购项目次数已变化，请重新选择。');
+            }
+            $selectedProjects[] = [
+                'projectId' => (int)$option['projectId'], 'skuId' => (int)($option['skuId'] ?? 0),
+                'name' => (string)$option['name'], 'source' => $source,
+                'entitlementSourceDetailId' => (int)($option['entitlementSourceDetailId'] ?? 0), 'quantity' => $quantity,
+            ];
+        }
+        [$plans] = self::projectPlansForStore($selectedProjects, $operator->storeId());
+        $now = time();
+        $staffIds = self::scheduledStaffIds($tenantId, $reservationId, [], true);
+        $lifecycle = new CashierV3ReservationLifecycleServices();
+        $lifecycle->releaseInTx($tenantId, $reservationId, $now);
+        $newLines = self::replaceLines($reservationId, $tenantId, $plans, $staffIds, $now);
+        $lifecycle->replaceStartedServiceLinesInTx($header, $newLines, $now);
+        $nextVersion = (int)$header['version'] + 1;
+        self::advanceHeader($header, $dataScope, $nextVersion, ['updated_at' => $now]);
+        self::record($scope, 'reservation.service_projects_changed', 'reservation', (string)$reservationId,
+            $nextVersion, $header, $now, date('Y-m-d', $now), [
+                'reservationNo' => (string)$header['reservation_no'],
+                'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $staffIds),
+            ]);
+        $result = ['status' => 'succeeded', 'reservationId' => $reservationId,
+            'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion,
+            'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
+        self::operation($tenantId, $reservationId, (string)($scope['idempotency_key'] ?? ''),
+            'CHANGE_SERVICE_PROJECTS', (int)$header['version'], $nextVersion, $result, $now);
         return $result;
     }
 
