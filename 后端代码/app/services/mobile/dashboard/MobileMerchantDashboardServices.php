@@ -11,6 +11,7 @@ use app\services\report\GroupManagementDashboardServices;
 use app\services\merchant\MerchantCustomerMetricServices;
 use app\services\mobile\customer\MobileCustomerQueryServices;
 use app\services\merchant\MerchantBusinessSecondaryMetricServices;
+use app\services\query\metric\RegisteredMetricReadServices;
 
 /**
  * Mobile merchant unified home projection.
@@ -91,7 +92,15 @@ final class MobileMerchantDashboardServices
             $overview = ['state' => 'ready', 'cards' => $sections['cards']];
             $sources = $sections['sources'] ?? ['records' => [], 'source_explanation' => '当前账号没有客户查看权限'];
             $sources['state'] = $canViewCustomers ? (empty($sources['records']) ? 'empty' : 'ready') : 'unavailable';
-            $extension = ['sale_type_cards' => $sections['sale_type_cards'], 'categories' => $sections['categories'], 'sources' => $sources];
+            // 充值独立读取已入账本金，不与办卡销售混算；沿用服务端授权门店和首页日期。
+            $rechargeCents = (new RegisteredMetricReadServices())->summary('recharge_amount', '0', $storeIds,
+                ['start' => $period['startDate'], 'end' => $period['endDate']]);
+            $extension = [
+                'recharge_card' => $rechargeCents !== 0 ? ['amount_cents' => $rechargeCents] : null,
+                'sale_type_cards' => $sections['sale_type_cards'],
+                'categories' => $sections['categories'],
+                'sources' => $sources,
+            ];
             $extensionBlocks = ['sources' => $sources['state']];
         } else {
             // 已上传旧包仍读取 customer/product；明确按请求版本兼容，不能随新首页上线删除。
