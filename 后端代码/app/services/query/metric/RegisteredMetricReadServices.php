@@ -1558,7 +1558,9 @@ final class RegisteredMetricReadServices
         $projectExpression = ($contract['source']['filters']['performance_type'] ?? null) === $projectSource['filters']['performance_type']
             ? (string)$projectSource['amount'] : 'NULL';
         return [
-            'rows' => (clone $query)->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,' . $projectExpression . ' project_count_micro_value,p.labor_fee_amount_cents,p.project_count_half_units,p.project_count_decimal,p.rule_name_snapshot')
+            // Detail decoration may use these saved identifiers;
+            // the registered metric expression and authorized row set stay unchanged.
+            'rows' => (clone $query)->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_id,p.order_no_snapshot,p.source_document_type,p.member_id,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,' . $projectExpression . ' project_count_micro_value,p.labor_fee_amount_cents,p.project_count_half_units,p.project_count_decimal,p.rule_name_snapshot')
                 ->order('p.business_date', 'desc')->order('p.id', 'desc')->page($page, $pageSize)->select()->toArray(),
             'total' => (int)(clone $query)->count('p.id'),
         ];

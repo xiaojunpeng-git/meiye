@@ -359,6 +359,16 @@
       "response": "cashierV3ReservationAction",
       "legacyReservationForbidden": true
     },
+    "changeReservationServiceDuration": {
+      "method": "POST",
+      "path": "/mobile/merchant/reservations/:reservationId/service-duration",
+      "requestMetadataProfile": "MERCHANT_SESSION",
+      "merchantContextRequired": true,
+      "authorization": "RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE",
+      "requestBodyRequired": ["command", "serviceDurationMinutes"],
+      "response": "cashierV3ReservationAction",
+      "legacyReservationForbidden": true
+    },
     "endReservationService": {
       "method": "POST",
       "path": "/mobile/merchant/reservations/:reservationId/end-service",
@@ -371,6 +381,8 @@
     }
   },
   "merchantRoot": {
+    "optional": ["storeContexts"],
+    "storeContextsDescription": "可选的客户页门店选择列表；是contexts中STORE上下文的子集，使用相同contextSummary结构，不包含成长专用组织上下文；只由服务端当前授权投影产生。",
     "required": [
       "contractVersion",
       "merchantToken",

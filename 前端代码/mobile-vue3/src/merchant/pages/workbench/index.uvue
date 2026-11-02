@@ -1,5 +1,7 @@
 <template>
 	<view class="merchant-workbench" :class="{ 'merchant-workbench--native-mini': platformUsesNativeCanvas }">
+		<!-- 小程序胶囊占位独立于组织按钮；权限隐藏按钮时仍保留系统顶部安全区。 -->
+		<view v-if="platformUsesNativeCanvas && !organizationEntryVisible" class="merchant-workbench__native-top-inset" :style="{ height: nativeTopInset + 'px' }"></view>
 		<view v-if="organizationEntryVisible" class="merchant-workbench__header">
 			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore">
 				<view class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
@@ -18,8 +20,8 @@
 						<text class="merchant-workbench__chevron">›</text>
 					</view>
 					<view v-if="canOpenReservationEntry('service')" class="merchant-workbench__todo" @tap="openTodo('reservations')">
-						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : dueNotArrivedCount) }}</text></view>
-						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约未到店</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '已到预约时间，尚未开始服务' }}</text></view>
+						<view class="merchant-workbench__todo-count merchant-workbench__todo-count--warm"><text>{{ reservationLoading ? '—' : (reservationFailed ? '!' : pendingServiceCount) }}</text></view>
+						<view class="merchant-workbench__todo-copy"><text class="merchant-workbench__todo-title">预约待服务</text><text class="merchant-workbench__todo-note">{{ reservationFailed ? '数据暂不可用，点击进入后重试' : '所有日期的待服务预约' }}</text></view>
 						<text class="merchant-workbench__chevron">›</text>
 					</view>
 					<view v-if="canOpenReservationEntry('confirmation')" class="merchant-workbench__todo" @tap="openTodo('reservation-confirmation')">
@@ -45,6 +47,7 @@
 </template>
 
 <script setup lang="uts">
+	import { merchantMiniTopInset } from '../../../shared/platform/merchant-mini-top-inset.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
 	import { queryMobileReservations } from '../../../shared/api/mobile-reservation-client.uts'
@@ -55,7 +58,7 @@
 	import { merchantActionIsAllowed, merchantOrganizationEntryVisible } from '../../../shared/platform/merchant-tab-permissions.uts'
 
 	const openTaskCount = ref(0)
-	const dueNotArrivedCount = ref(0)
+	const pendingServiceCount = ref(0)
 	const pendingConfirmationCount = ref(0)
 	const careLoading = ref(false)
 	const reservationLoading = ref(false)
@@ -70,9 +73,10 @@
 	const activeStoreLabel = ref('门店信息加载中')
 	const switchingStore = ref(false)
 	const storeSwitchMessage = ref('')
+	const nativeTopInset = ref(0)
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 
-	onShow(() => { if (ensureMerchantTabAccess('workbench')) { loadStoreContext(); loadTodos() } })
+	onShow(() => { if (ensureMerchantTabAccess('workbench')) { nativeTopInset.value = merchantMiniTopInset(); loadStoreContext(); loadTodos() } })
 
 	function loadStoreContext() : void {
 		let root = currentMerchantRoot()
@@ -107,8 +111,8 @@
 		let reservationsAllowed = canOpenReservationEntry('service')
 		if (careAllowed) loadOpenTasks()
 		else { careLoading.value = false; careFailed.value = false; openTaskCount.value = 0 }
-		if (reservationsAllowed) loadDueReservations()
-		else { reservationLoading.value = false; reservationFailed.value = false; dueNotArrivedCount.value = 0 }
+		if (reservationsAllowed) loadPendingServices()
+		else { reservationLoading.value = false; reservationFailed.value = false; pendingServiceCount.value = 0 }
 		if (canOpenReservationEntry('confirmation')) loadPendingConfirmations()
 		else { confirmationLoading.value = false; confirmationFailed.value = false; pendingConfirmationCount.value = 0 }
 	}
@@ -141,15 +145,16 @@
 		})
 	}
 
-	function loadDueReservations() : void {
+	// 数字复用预约服务“待服务”页的后端查询及总数，不按到店时间另算一套。
+	function loadPendingServices() : void {
 		reservationLoading.value = true
 		reservationFailed.value = false
-		queryMobileReservations({}, (response : any) => {
+		queryMobileReservations({ workflow: 'service', quickFilter: 'unstarted', allDates: true, page: 1, pageSize: 1 }, (response : any) => {
 			reservationLoading.value = false
 			let payload = response != null && response.body != null ? response.body.reservation : null
 			let view = payload != null && payload.data != null ? payload.data.reservation : null
-			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null || view.quickCounts == null) { reservationFailed.value = true; return }
-			dueNotArrivedCount.value = Number(view.quickCounts.dueNotArrived || 0)
+			if (!response.ok || payload == null || payload.result == null || payload.result.status != 'success' || view == null || !Number.isFinite(Number(view.total)) || Number(view.total) < 0) { reservationFailed.value = true; return }
+			pendingServiceCount.value = Number(view.total)
 		})
 	}
 
@@ -256,5 +261,6 @@
 	.merchant-workbench__entry-icon--order { background-color: #e8f6f7; color: #287f90; }
 	.merchant-workbench__entry-icon--engineering { background-color: #f2eaff; color: #7652c5; }
 	.merchant-workbench__entry-label { margin-top: 7px; font-size: 12px; line-height: 18px; color: #38516a; }
+	.merchant-workbench__native-top-inset { flex-shrink: 0; width: 100%; }
 	.merchant-workbench--native-mini .merchant-workbench__header { padding-top: 84px; }
 </style>

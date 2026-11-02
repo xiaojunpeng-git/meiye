@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+$categoryResolver = (string)file_get_contents($root . '/后端代码/app/services/report/StoreReportSaleCategoryServices.php');
 
 function partnerProjectionAssert(bool $condition, string $message): void
 {
@@ -23,21 +24,23 @@ partnerProjectionAssert(
 partnerProjectionAssert(
     str_contains($service, 'count($chain) === 1')
         && str_contains($service, 'hasEnabledPartnerSecondLevel')
+        && str_contains($service, 'count($chain) >= 3')
         && str_contains($service, 'elseif ((int)$chain[1][\'id\'] === (int)$configuredId)'),
-    'enabled second-level categories replace their root and no third level is projected'
+    'enabled second-level categories replace their root and third-level columns have their own keys'
 );
 partnerProjectionAssert(
     str_contains($service, 'd.partner_category_id_snapshot')
         && str_contains($service, 'd.partner_share_amount_cents')
-        && str_contains($service, 'cc.partner_category_id_snapshot')
-        && str_contains($service, 'cc.partner_share_amount_cents'),
+        && str_contains($categoryResolver, 'partner_category_id_snapshot,partner_share_amount_cents')
+        && str_contains($categoryResolver, 'cashier_v3_card_sale_category_allocation_fact'),
     'ordinary rows and card allocations read frozen partner share facts rather than live ratios'
 );
 partnerProjectionAssert(
-    str_contains($service, 'private function cardPartnerSharesBySaleFact')
-        && str_contains($service, "->field('sale_fact_id,partner_category_id_snapshot,partner_share_amount_cents')")
-        && str_contains($service, "\$this->operationSaleQuery(\$storeId, \$range, \$input, false)"),
-    'card rows stay one row per sold card and aggregate their component snapshots by sale fact'
+    str_contains($service, "\$this->operationSaleQuery(\$storeId, \$range, \$input, false)")
+        && str_contains($service, 'memberPartnerCategoryProjection')
+        && str_contains($service, "\$frozenId = (int)(\$category['partner_category_id_snapshot'] ?? 0)")
+        && str_contains($categoryResolver, "\$components[\$item['store_id'] . ':' . \$item['sale_fact_id']][]"),
+    'card rows stay one row and preserve the original partner rule level when third-level settings change'
 );
 partnerProjectionAssert(
     str_contains($service, "\$row['partner_performance'] = \$this->money(\$partnerPerformanceCents);")

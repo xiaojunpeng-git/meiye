@@ -53,6 +53,10 @@ const props = defineProps({
   onAction: {
     type: Function,
     default: null
+  },
+  onProjectCatalog: {
+    type: Function,
+    default: null
   }
 })
 
@@ -152,6 +156,7 @@ const RESERVATION_ACTION_ALIASES = {
 const RESERVATION_DETAIL_ACTIONS = new Set([
   'edit-reservation',
   'change-reservation-service-duration',
+  'change-reservation-service-projects',
   'confirm-reservation',
   'reject-reservation',
   'start-reservation-service',
@@ -180,6 +185,7 @@ function actionLabel(key) {
   return {
     'edit-reservation': '编辑',
     'change-reservation-service-duration': '修改服务时长',
+    'change-reservation-service-projects': '修改服务项目',
     'confirm-reservation': '确认预约',
     'reject-reservation': '拒绝',
     'start-reservation-service': '开始服务',
@@ -224,7 +230,10 @@ const availableActions = computed(() => {
     ]
   }
   if (phase === 'serving') {
-    return [{ key: 'end-service', label: '结束服务', raw: { code: 'end-service' }, disabled: false, disabledReason: '', primary: true }]
+    return [
+      { key: 'change-reservation-service-projects', label: '修改服务项目', raw: { code: 'change-reservation-service-projects' }, disabled: false },
+      { key: 'end-service', label: '结束服务', raw: { code: 'end-service' }, disabled: false, disabledReason: '', primary: true }
+    ]
   }
   return []
 })
@@ -234,7 +243,7 @@ const reservationStatus = computed(() => (isDetailReady.value ? reservationPhase
 const reservationStatusHint = computed(() => ({
   pending: '会员提交的预约正在等待门店确认；确认或拒绝会同步到商家端。',
   unstarted: '预约已确认，可由门店端或商家端开始服务。',
-  serving: '正在服务，倒计时以实际开始时间和项目总时长为准。',
+  serving: '正在服务，倒计时以实际开始时间和独立服务时长为准；修改项目不重置计时。',
   rejected: '预约已拒绝，卡项次数占用应已释放。',
   ended: '该预约已结束，不再提供服务操作。'
 }[reservationPhase.value.phase] || ''))
@@ -583,6 +592,10 @@ async function requestReload() {
 }
 
 async function triggerAction(action) {
+  if (action.key === 'change-reservation-service-projects') {
+    await openServiceProjectEditor()
+    return
+  }
   if (action.key === 'change-reservation-service-duration') {
     if (!projectLines.value.length) {
       actionError.value = '请先为预约选择项目，再修改服务时长。'
@@ -607,6 +620,60 @@ async function triggerAction(action) {
 const durationOpen = ref(false)
 const durationDraft = ref('')
 const durationError = ref('')
+const projectEditorOpen = ref(false)
+const projectOptions = ref([])
+const selectedProjects = ref([])
+const projectSearch = ref('')
+const projectSource = ref('card')
+const projectLoading = ref(false)
+const projectError = ref('')
+const serviceProjectKey = (project) => `${project?.source === 'card' ? 'card' : 'unpaid'}:${Number(project?.projectId || project?.id || 0)}:${Number(project?.entitlementSourceDetailId || 0)}`
+const visibleProjectOptions = computed(() => projectOptions.value.filter((project) =>
+  project?.selectable !== false
+  && (projectSource.value !== 'card' || project.source === 'card')
+  && String(project.name || '').toLowerCase().includes(projectSearch.value.trim().toLowerCase())
+))
+
+/** 仅服务中读取当前会员的项目目录；选择不触碰预约排班或计时。 */
+async function openServiceProjectEditor() {
+  if (!props.onProjectCatalog || activeActionKey.value) return
+  const memberId = Number(member.value.id || 0)
+  if (!memberId) return
+  projectEditorOpen.value = true
+  projectLoading.value = true
+  projectError.value = ''
+  projectSearch.value = ''
+  projectSource.value = 'card'
+  selectedProjects.value = projectLines.value.map((line) => ({ ...line }))
+  try {
+    const catalog = await props.onProjectCatalog({ memberId })
+    if (!projectEditorOpen.value) return
+    projectOptions.value = Array.isArray(catalog?.catalogOptions) ? catalog.catalogOptions : []
+  } catch {
+    projectError.value = '项目目录加载失败，请重试。'
+  } finally {
+    projectLoading.value = false
+  }
+}
+
+function toggleServiceProject(project) {
+  const key = serviceProjectKey(project)
+  const index = selectedProjects.value.findIndex((item) => serviceProjectKey(item) === key)
+  if (index >= 0) selectedProjects.value.splice(index, 1)
+  else selectedProjects.value.push({ ...project, quantity: 1 })
+  projectError.value = ''
+}
+
+async function saveServiceProjects() {
+  if (!selectedProjects.value.length) {
+    projectError.value = '请至少选择一个服务项目。'
+    return
+  }
+  const action = availableActions.value.find((item) => item.key === 'change-reservation-service-projects')
+  if (!action) return
+  const result = await executeAction(action, { projects: selectedProjects.value })
+  if (!isActionResultError(result)) projectEditorOpen.value = false
+}
 async function saveServiceDuration() {
   if (!/^[1-9]\d*$/.test(durationDraft.value) || Number(durationDraft.value) > 71582788) {
     durationError.value = '请输入大于0的整数分钟。'
@@ -643,6 +710,10 @@ function closeRejection() {
 
 function requestClose() {
   if (activeActionKey.value) return
+  if (projectEditorOpen.value) {
+    projectEditorOpen.value = false
+    return
+  }
   if (isRejectReasonOpen.value) {
     closeRejection()
     return
@@ -888,6 +959,22 @@ useModalFocusTrap({
 
       <footer class="reservation-detail__footer">
         <template v-if="isDetailReady">
+        <form v-if="projectEditorOpen" class="reservation-detail__project-editor" @submit.prevent="saveServiceProjects">
+          <div class="reservation-detail__project-editor-head"><strong>修改服务项目</strong><span>结束服务时按所选已购项目核销，服务计时保持原值。</span></div>
+          <div class="reservation-detail__project-editor-filter">
+            <button type="button" :aria-pressed="projectSource === 'card'" @click="projectSource = 'card'">已购买项目</button>
+            <button type="button" :aria-pressed="projectSource === 'all'" @click="projectSource = 'all'">全部项目</button>
+            <input v-model="projectSearch" aria-label="搜索服务项目" placeholder="搜索项目名称" />
+          </div>
+          <div class="reservation-detail__project-editor-options">
+            <span v-if="projectLoading">正在加载项目…</span>
+            <button v-for="project in visibleProjectOptions" :key="serviceProjectKey(project)" type="button" :aria-pressed="selectedProjects.some((item) => serviceProjectKey(item) === serviceProjectKey(project))" @click="toggleServiceProject(project)">{{ project.name }}{{ project.source === 'card' ? ' · 已购' : '' }}</button>
+            <span v-if="!projectLoading && !visibleProjectOptions.length">没有可选项目</span>
+          </div>
+          <div class="reservation-detail__project-editor-selected">已选：<button v-for="project in selectedProjects" :key="serviceProjectKey(project)" type="button" @click="toggleServiceProject(project)">{{ project.name }} ×</button></div>
+          <span v-if="projectError" role="alert">{{ projectError }}</span>
+          <div class="reservation-detail__project-editor-actions"><button type="button" class="reservation-detail__button reservation-detail__button--secondary" @click="projectEditorOpen = false">取消</button><button type="submit" class="reservation-detail__button reservation-detail__button--primary" :disabled="activeActionKey !== '' || projectLoading">保存服务项目</button></div>
+        </form>
         <form v-if="durationOpen" class="reservation-detail__duration-form" @submit.prevent="saveServiceDuration">
           <label for="reservation-service-duration">服务时长（分钟）</label>
           <input id="reservation-service-duration" v-model.trim="durationDraft" type="number" min="1" step="1" inputmode="numeric" autofocus @input="durationError = ''" />
@@ -924,7 +1011,7 @@ useModalFocusTrap({
           <span>{{ actionError }}</span>
           <small v-if="actionErrorCode">错误编号：{{ actionErrorCode }}</small>
         </div>
-        <div v-if="!isRejectReasonOpen && !durationOpen" class="reservation-detail__actions">
+        <div v-if="!isRejectReasonOpen && !durationOpen && !projectEditorOpen" class="reservation-detail__actions">
           <button type="button" class="reservation-detail__button reservation-detail__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
           <template v-for="action in availableActions" :key="action.key">
             <button
@@ -1580,6 +1667,15 @@ useModalFocusTrap({
 .reservation-detail__duration-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; }
 .reservation-detail__duration-form input { width: 120px; min-height: 34px; padding: 4px 8px; border: 1px solid #cbd6e2; border-radius: 5px; }
 .reservation-detail__duration-form [role="alert"] { width: 100%; color: #b95151; }
+.reservation-detail__project-editor { display: grid; gap: 10px; width: 100%; }
+.reservation-detail__project-editor-head, .reservation-detail__project-editor-filter, .reservation-detail__project-editor-selected, .reservation-detail__project-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reservation-detail__project-editor-head span { color: #667085; font-size: 12px; }
+.reservation-detail__project-editor-filter input { min-height: 36px; padding: 6px 10px; border: 1px solid #cbd6e2; border-radius: 5px; }
+.reservation-detail__project-editor-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow-y: auto; }
+.reservation-detail__project-editor-filter button, .reservation-detail__project-editor-options button, .reservation-detail__project-editor-selected button { padding: 7px 10px; border: 1px solid #cbd6e2; border-radius: 5px; background: #fff; cursor: pointer; }
+.reservation-detail__project-editor-filter button[aria-pressed="true"], .reservation-detail__project-editor-options button[aria-pressed="true"] { border-color: #1677e5; background: #eff6ff; color: #1259aa; }
+.reservation-detail__project-editor-actions { justify-content: flex-end; }
+.reservation-detail__project-editor [role="alert"] { color: #b95151; }
 .reservation-detail__footer {
   display: flex;
   align-items: center;

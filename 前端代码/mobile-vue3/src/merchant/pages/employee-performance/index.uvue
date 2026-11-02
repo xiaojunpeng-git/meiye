@@ -22,7 +22,11 @@
 						<view v-if="details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
 						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
-							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">商品名称：{{ item.itemName || '—' }}</text><text class="employee-performance__detail-amount">{{ detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
+							<!-- Contact and service labels are supplied from the authorized server detail, never inferred from the rendered order number. -->
+							<view class="employee-performance__detail-member"><text>会员：{{ item.memberName || '—' }}</text><text>手机：{{ item.memberPhone || '—' }}</text></view>
+							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">{{ item.isRecharge ? '充值' : '商品名称：' + (item.itemName || '—') }}</text><text class="employee-performance__detail-amount">{{ item.isRecharge ? '充值金额：' + (item.displayRechargeAmount || '—') : detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
+							<view v-if="detailMode === 'labor' && item.serviceQuantity" class="employee-performance__detail-service"><text>核销数量：{{ item.serviceQuantity }}{{ item.serviceUnit ? ' ' + item.serviceUnit : '' }}</text></view>
+							<view v-if="detailMode === 'labor' && (item.serviceObject || item.participants)" class="employee-performance__detail-service"><text v-if="item.serviceObject">服务对象与客数：{{ item.serviceObject }}</text><text v-if="item.participants">参与：{{ item.participants }}</text></view>
 							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">项目数：{{ item.displayProjectCount || '—' }}</text><text v-if="detailMode === 'labor' && !calculated">手工费：{{ item.displayLaborFee || '—' }}</text></view>
                             <view v-if="detailMode === 'labor' && calculated" class="employee-performance__commission" @tap="toggleCommission(item.factId)">
                                 <text>劳动提成（预计）：{{ item.displayCommission || '待核对' }}</text><text>{{ expandedFact === item.factId ? '收起' : '计算依据' }}</text>
@@ -181,8 +185,10 @@
 	.employee-performance__detail-tab--active { border-bottom-color: #1677cc; }
 	.employee-performance__detail-tab--active text { color: #1677cc; }
 	.employee-performance__detail-row { display: flex; min-height: 90px; flex-direction: column; padding: 12px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
-	.employee-performance__detail-head, .employee-performance__detail-business, .employee-performance__detail-result { display: flex; min-width: 0; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
-	.employee-performance__detail-business, .employee-performance__detail-result { margin-top: 6px; }
+	.employee-performance__detail-head, .employee-performance__detail-member, .employee-performance__detail-business, .employee-performance__detail-result, .employee-performance__detail-service { display: flex; min-width: 0; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
+	.employee-performance__detail-member, .employee-performance__detail-business, .employee-performance__detail-result, .employee-performance__detail-service { margin-top: 6px; }
+	.employee-performance__detail-member text, .employee-performance__detail-service text { min-width: 0; font-size: 12px; line-height: 18px; color: #667b90; }
+	.employee-performance__detail-service { flex-wrap: wrap; gap: 4px 10px; justify-content: flex-start; }
 	.employee-performance__detail-order { overflow: hidden; font-size: 12px; font-weight: 700; line-height: 18px; color: #1677cc; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__detail-date { flex-shrink: 0; margin-left: 10px; font-size: 11px; color: #8a99aa; }
 	.employee-performance__detail-item { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }

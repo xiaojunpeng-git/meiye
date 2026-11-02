@@ -1,0 +1,17 @@
+// Hidden business controls must not remove the native status bar/capsule reservation.
+// Geometry is in CSS pixels; H5 receives zero and retains its existing compact layout.
+export function merchantMiniTopInsetFromGeometry(statusBarHeight : number, capsuleBottom : number) : number {
+	let status = Number.isFinite(statusBarHeight) && statusBarHeight > 0 ? statusBarHeight : 0
+	let bottom = Number.isFinite(capsuleBottom) && capsuleBottom > status ? capsuleBottom : status + 44
+	return bottom + 12
+}
+
+export function merchantMiniTopInset() : number {
+	let inset = 0
+	// #ifdef MP-WEIXIN
+	let windowInfo = uni.getWindowInfo()
+	let capsule = uni.getMenuButtonBoundingClientRect()
+	inset = merchantMiniTopInsetFromGeometry(Number(windowInfo.statusBarHeight || 0), Number(capsule.bottom || 0))
+	// #endif
+	return inset
+}

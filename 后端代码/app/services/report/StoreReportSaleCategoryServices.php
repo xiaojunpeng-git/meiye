@@ -34,7 +34,7 @@ final class StoreReportSaleCategoryServices
             foreach (Db::name('cashier_v3_card_sale_category_allocation_fact')
                 ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 ->whereIn('store_id', array_keys($stores))->whereIn('sale_fact_id', $chunk)->where('status', 'effective')
-                ->field('store_id,sale_fact_id,card_receipt_id,category_id_snapshot,partner_share_amount_cents')->select()->toArray() as $fact) {
+                ->field('store_id,sale_fact_id,card_receipt_id,category_id_snapshot,partner_category_id_snapshot,partner_share_amount_cents')->select()->toArray() as $fact) {
                 $key = $this->groupKey($fact);
                 $shares[$key]['row'] = $fact;
                 $shares[$key]['cents'] = ($shares[$key]['cents'] ?? 0) + (int)$fact['partner_share_amount_cents'];
@@ -52,10 +52,14 @@ final class StoreReportSaleCategoryServices
                     ? ($index === $last ? $remaining : (int)bcdiv(bcmul((string)abs($share), (string)$weights[$index], 0), (string)$total, 0)) : 0);
                 $remaining -= $part;
                 $item['partner_share_amount_cents'] = $share < 0 ? -$part : $part;
+                // Keep the checkout rule level beside frozen cents. A later
+                // child configuration must not move old parent shares into it.
+                $item['partner_category_id_snapshot'] = (int)($shares[$groupKey]['row']['partner_category_id_snapshot'] ?? 0);
                 $components[$item['store_id'] . ':' . $item['sale_fact_id']][] = $item;
             }
             if ($remaining > 0) {
                 $item = $items[0]; $item['product_id'] = 0;
+                $item['partner_category_id_snapshot'] = 0;
                 foreach (['sale_amount_cents','configured_amount_cents','cash_performance_amount_cents'] as $field) $item[$field] = 0;
                 $item['partner_share_amount_cents'] = $share < 0 ? -$remaining : $remaining;
                 $components[$item['store_id'] . ':' . $item['sale_fact_id']][] = $item;
@@ -65,7 +69,8 @@ final class StoreReportSaleCategoryServices
         foreach ($shares as $share) {
             $fact = $share['row'];
             $components[$fact['store_id'] . ':' . $fact['sale_fact_id']][] = [
-                'product_id' => 0, 'partner_share_amount_cents' => $share['cents']];
+                'product_id' => 0, 'partner_category_id_snapshot' => 0,
+                'partner_share_amount_cents' => $share['cents']];
         }
         $links = $owners = [];
         foreach ($rows as $key => $row) {
@@ -73,9 +78,11 @@ final class StoreReportSaleCategoryServices
             $items = ($row['source_type'] ?? '') === 'card'
                 ? ($components[$store . ':' . ($row['sale_fact_id'] ?? '')] ?? [])
                 : [['product_id' => (int)($row['product_id'] ?? 0),
+                    'partner_category_id_snapshot' => (int)($row['partner_category_id_snapshot'] ?? 0),
                     'partner_share_amount_cents' => (int)($row['partner_share_amount_cents'] ?? 0)]];
             // Missing component identity must retain any known amount in unclassified.
             if ($items === []) $items = [['product_id' => 0,
+                'partner_category_id_snapshot' => 0,
                 'partner_share_amount_cents' => (int)($row['partner_share_amount_cents'] ?? 0)]];
             foreach ($items as $item) {
                 $links[] = ['store_id' => $store, 'product_id' => (int)$item['product_id']];

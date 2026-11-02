@@ -256,6 +256,34 @@ final class CashierV3ReservationLifecycleServices
             ]);
         }
 
+        $this->appendServiceLinesInTx($header, $lines, $serviceId, $now);
+        return ['id' => $serviceId, 'service_order_no' => $serviceNo, 'service_started_at' => $now];
+    }
+
+    /** 服务中修改项目只替换当前服务行，历史行保留用于追溯。 */
+    public function replaceStartedServiceLinesInTx(array $header, array $lines, int $now): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.replaceStartedServiceLines');
+        $tenantId = (string)$header['tenant_id'];
+        $serviceId = (int)($header['service_order_id'] ?? 0);
+        $service = $serviceId > 0 ? Db::name('cashier_v3_service_order')
+            ->where('tenant_id', $tenantId)->where('id', $serviceId)->lock(true)->find() : null;
+        if (!$service || (string)$service['status'] !== 'OPEN') throw $this->failure('服务状态已变化，请刷新后重试。');
+        Db::name('cashier_v3_service_order_line')->where('tenant_id', $tenantId)
+            ->where('service_order_id', $serviceId)->where('status', 'ACTIVE')
+            ->update(['status' => 'RELEASED', 'updated_at' => $now]);
+        $this->appendServiceLinesInTx($header, $lines, $serviceId, $now);
+        $changed = Db::name('cashier_v3_service_order')->where('tenant_id', $tenantId)->where('id', $serviceId)
+            ->where('version', (int)$service['version'])
+            ->update(['version' => (int)$service['version'] + 1, 'updated_at' => $now]);
+        if ((int)$changed !== 1) throw $this->failure('服务状态已变化，请刷新后重试。');
+    }
+
+    /** 新服务行继承开始服务时固定的人员安排；不修改计时字段。 */
+    private function appendServiceLinesInTx(array $header, array $lines, int $serviceId, int $now): void
+    {
+        $tenantId = (string)$header['tenant_id'];
+        $reservationId = (int)$header['id'];
         foreach ($lines as $line) {
             $staffIds = $this->positiveIds($line['artisan_staff_ids_json'] ?? '[]');
             $staffId = $staffIds[0] ?? 0;
@@ -294,7 +322,6 @@ final class CashierV3ReservationLifecycleServices
             Db::name('cashier_v3_reservation_line')->where('id', (int)$line['id'])->where('tenant_id', $tenantId)
                 ->update(['service_order_line_id' => $serviceLineId, 'updated_at' => $now]);
         }
-        return ['id' => $serviceId, 'service_order_no' => $serviceNo, 'service_started_at' => $now];
     }
 
     /** @return array<int,array{staff_id:int,employee_id:int,staff_name_snapshot:string,is_point_customer:bool}> */
