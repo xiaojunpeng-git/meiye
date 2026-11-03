@@ -46,7 +46,6 @@ async function request(runtime, path, query = {}) {
 export const queryStoreBusinessReportCatalog = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/catalog'))
 export const queryStoreBusinessReportScope = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/scope'))
 export const queryStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/query'), query)
-export const exportStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/export'), query)
 
 /** XLSX downloads use the same authenticated export endpoint and server-side report scope as JSON exports. */
 export async function exportStoreBusinessReportXlsx(query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) {
@@ -71,11 +70,6 @@ export async function exportStoreBusinessReportXlsx(query = {}, runtime = STORE_
   return response.blob()
 }
 
-/** 品项分析沿用原入口和固定业务白名单。 */
-export function exportStoreItemAnalysisXlsx(query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) {
-  if (query.report !== 'store_item_analysis') throw new Error('当前报表不支持 XLSX 导出。')
-  return exportStoreBusinessReportXlsx(query, runtime)
-}
 export const queryStoreBusinessReportPersonnel = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => {
   if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'unified/personnel'), query)
   throw new Error('当前门店端人员选择器应由收银会话服务处理。')

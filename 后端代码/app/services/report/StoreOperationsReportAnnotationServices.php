@@ -77,7 +77,8 @@ final class StoreOperationsReportAnnotationServices
             'target_holiday_3_amount', 'post_sale_visit_target'],
         // 单价已从此报表移除；历史补充记录保留审计，但不再允许新写入。
         'phase_six_other_multi_payment' => ['领取日期', '领取数量', '备注'],
-        'phase_six_salary_detail' => ['备注'],
+        // 薪资明细备注改读收银明细快照；历史手填记录保留审计，旧页面也不得继续写入。
+        'phase_six_salary_detail' => [],
         'phase_six_training_employee' => ['mentor_name', 'exam_apply_time', 'exam_level', 'passed_level', 'skill_score', 'professional_score'],
         'phase_six_human_store_health' => ['beautician_establishment_count'],
     ];

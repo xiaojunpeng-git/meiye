@@ -1,3 +1,4 @@
+import { saveReportWorkbook, reportWorkbookFilename } from './reportWorkbookDownload'
 function readPlatformAdminToken() {
   try {
     const matched = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
@@ -50,17 +51,14 @@ export async function exportCustomerAnalytics(filters = {}) {
   const token = readPlatformAdminToken()
   const response = await fetch(url.href, {
     method: 'GET', credentials: 'same-origin', cache: 'no-store',
-    headers: { Accept: 'text/csv,application/octet-stream', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) }
+    headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) }
   })
-  if (!response.ok) throw new Error('客户分析导出失败，请稍后重试。')
+  // 非工作簿响应（包括业务失败 JSON）不得保存成伪 XLSX。
+  if (!response.ok || !String(response.headers.get('content-type') || '').includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) throw new Error('客户分析导出失败，请稍后重试。')
   const blob = await response.blob()
   const disposition = response.headers.get('content-disposition') || ''
-  const filename = decodeURIComponent(disposition.match(/filename\*?=(?:UTF-8''|\"?)([^;\"]+)/i)?.[1] || '客户分析.csv')
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = filename
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(link.href), 0)
+  const filename = reportWorkbookFilename(disposition, '客户分析.xlsx')
+  saveReportWorkbook(blob, filename)
   return { filename }
 }
 

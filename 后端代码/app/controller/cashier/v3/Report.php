@@ -6,8 +6,7 @@ use app\controller\cashier\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreReportGuestDisplayServices;
-use app\services\report\StoreItemAnalysisXlsxExporter;
-use app\services\report\StoreUnifiedReportDetailXlsxExporter;
+use app\services\report\StoreReportXlsxWriter;
 use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
@@ -46,7 +45,7 @@ class Report extends AuthController
     }
 
     /** 门店端同一报表导出入口；当前会话只能使用本店权限范围。 */
-    public function basicUnconsumedExport(Request $request)
+    public function basicExport(Request $request)
     {
         try {
             $raw = (string)$request->get('query', '{}');
@@ -54,11 +53,10 @@ class Report extends AuthController
             $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
             $code = (string)($payload['pageCode'] ?? '');
-            if (!\app\services\report\BasicUnconsumedTaskServices::supportsCode($code))
-                throw new \InvalidArgumentException('该报表无需后台导出');
+            \app\services\report\BasicReportCatalogServices::definition($code);
             $this->assertBasicReportFeature($code);
-            $file = (new \app\services\report\BasicUnconsumedTaskServices())->exportCsv($this->basicContext(false), $payload);
-            return download($file['path'], $file['filename'])->mimeType('text/csv');
+            $file = (new \app\services\report\BasicReportXlsxExportServices())->export($this->basicContext(false), $payload);
+            return (new StoreReportXlsxWriter())->fileResponse($file);
         } catch (\InvalidArgumentException | \JsonException | \RuntimeException $e) { return app('json')->fail($e->getMessage()); }
     }
 
@@ -254,32 +252,16 @@ class Report extends AuthController
             }
             if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
             $report = (string)($input['report'] ?? '');
-            if ($export && $report === 'store_item_analysis' && (string)($input['format'] ?? '') === 'xlsx') {
-                $file = $services->exportItemAnalysisXlsx($storeIds, $input);
-                // 门店登录身份和个人数据权限先裁剪 storeIds，再生成可下载工作簿。
-                return \think\Response::create($file['content'], 'html')->header([
-                    'Content-Type' => StoreItemAnalysisXlsxExporter::MIME_TYPE,
-                    'Content-Disposition' => 'attachment; filename="store-item-analysis.xlsx"; filename*=UTF-8\'\'' . rawurlencode($file['filename']),
-                    'Cache-Control' => 'no-store',
-                ]);
-            }
             $result = $phaseSix->supports($report)
                 ? $phaseSix->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
                 : ($phaseFour->supports($report)
                 ? $phaseFour->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
                 : ($export ? $services->export($storeIds, $input) : $services->query($storeIds, $input)));
-            // 授权查询与导出共用游客姓名投影，保留汇总和历史事实。
+            // 页面与所有 XLSX 工作簿共用同一游客姓名投影；汇总行保持原样。
             $result = StoreReportGuestDisplayServices::project($result);
-            if ($export && (string)($input['format'] ?? '') === 'xlsx' && StoreUnifiedReportDetailXlsxExporter::supports($report)) {
-                // The existing report/data-scope check above also governs download; no separate feature permission is introduced.
-                $exporter = new StoreUnifiedReportDetailXlsxExporter();
-                $content = $exporter->render($report, $result);
-                return \think\Response::create($content, 'html')->header([
-                    'Content-Type' => StoreUnifiedReportDetailXlsxExporter::MIME_TYPE,
-                    'Content-Disposition' => 'attachment; filename="report-detail.xlsx"; filename*=UTF-8\'\'' . rawurlencode($exporter->filename($report)),
-                    'Cache-Control' => 'no-store',
-                    'X-Content-Type-Options' => 'nosniff',
-                ]);
+            if ($export && (string)($input['format'] ?? '') === 'xlsx') {
+                // 与页面相同的授权、筛选、完整行集和游客投影；仅统一文件编码，不另算业务数据。
+                return (new StoreReportXlsxWriter())->response($report, $result);
             }
             return $this->success('ok', $result);
         } catch (\InvalidArgumentException $exception) {

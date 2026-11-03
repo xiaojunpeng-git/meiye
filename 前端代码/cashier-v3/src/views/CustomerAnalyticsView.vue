@@ -23,7 +23,7 @@ import UserPlus from '@lucide/vue/dist/esm/icons/user-plus.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
 import WalletCards from '@lucide/vue/dist/esm/icons/wallet-cards.mjs'
 import { customerAnalyticsPreviewData } from '@/dev/customerAnalyticsPreviewData'
-import { queryCustomerAnalytics, queryCustomerAnalyticsScope } from '@/services/customerAnalyticsApi'
+import { queryCustomerAnalytics, queryCustomerAnalyticsScope, exportCustomerAnalytics } from '@/services/customerAnalyticsApi'
 
 const groups = [
   { label: '客户概况', items: [{ key: 'overview', label: '客户概况', icon: Users }] },
@@ -69,6 +69,11 @@ const customPeriod = computed({
 })
 const demoState = ref('normal')
 const loading = ref(false)
+const exporting = ref(false)
+// 下载只使用最后一次成功查询的不可变条件，不让日期或组织草稿改变当前结果的导出范围。
+const executedExportQuery = ref(null)
+const canExportCurrentReport = computed(() => Boolean(executedExportQuery.value) && executedExportQuery.value.report === apiReportCode())
+
 const notice = ref('正在读取客户分析数据…')
 const scopeOpen = ref(false)
 const scopeTree = ref([])
@@ -387,13 +392,16 @@ async function loadReport(action = '查询') {
   loading.value = true
   notice.value = `${action}中，正在读取${activeTitle.value}...`
   try {
-    const payload = await queryCustomerAnalytics(reportQuery())
+    const submittedQuery = { ...reportQuery() }
+    const payload = await queryCustomerAnalytics(submittedQuery)
     applyBackendMeta(payload)
     applyCustomerPayload(payload)
+    executedExportQuery.value = Object.freeze({ ...submittedQuery })
     dataSource.value = '接口数据'
     if (demoState.value !== 'empty') demoState.value = 'normal'
     notice.value = `${action}完成：已返回${activeTitle.value}的权限、字段来源和数据状态。`
   } catch (error) {
+    executedExportQuery.value = null
     dataSource.value = '接口异常'
     demoState.value = 'error'
     notice.value = `${action}失败：${error?.message || '客户分析接口暂不可用'}。`
@@ -401,6 +409,17 @@ async function loadReport(action = '查询') {
     loading.value = false
     trendSeed.value += 1
   }
+}
+/** 所有客户分析统一下载授权后完整结果；页面中的展示比例、金额和分页不参与文件生成。 */
+async function exportCurrentReport() {
+  if (loading.value || exporting.value || !canExportCurrentReport.value) return
+  exporting.value = true
+  try {
+    await exportCustomerAnalytics({ ...executedExportQuery.value })
+    notice.value = 'XLSX 文件已生成。'
+  } catch (error) {
+    notice.value = error?.message || '客户分析导出失败，请重试。'
+  } finally { exporting.value = false }
 }
 function setModule(key) { active.value = key; period.value = defaultPeriodForReport(keyToReport[key]); const report = keyToReport[key]; if (report && String(route.params.report || '') !== report) router.replace({ path: `/platform/customer-analytics/${report}`, query: route.query }).catch(() => {}); loadReport('切换') }
 async function loadScope() {
@@ -511,7 +530,7 @@ function isError() { return demoState.value === 'error' }
             <button type="button" class="scope-trigger" @click="scopeOpen = !scopeOpen"><SlidersHorizontal :size="16" />{{ scopeLabel }}<ChevronDown :size="15" :class="{ 'is-rotated': scopeOpen }" /></button>
             <div class="periods" role="tablist"><button v-for="item in [['month','本月'],['year','本年'],['custom','自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="period = item[0]">{{ item[1] }}</button></div>
             <div v-if="period === 'custom'" class="date-field"><UnifiedQueryDateRange v-model="customPeriod" :allow-clear="false" label="客户分析自定义周期" /></div>
-            <div class="query-actions"><button type="button" class="button button--primary" :disabled="loading" @click="runQuery()"><Search :size="15" />查询</button><button type="button" class="button" :disabled="loading" @click="runQuery('刷新')"><RefreshCw :size="15" :class="{ 'is-spinning': loading }" />刷新</button></div>
+            <div class="query-actions"><button type="button" class="button button--primary" :disabled="loading" @click="runQuery()"><Search :size="15" />查询</button><button type="button" class="button" :disabled="loading" @click="runQuery('刷新')"><RefreshCw :size="15" :class="{ 'is-spinning': loading }" />刷新</button><button type="button" class="button" :disabled="loading || exporting || !canExportCurrentReport" @click="exportCurrentReport"><Download :size="15" />{{ exporting ? '正在导出' : '导出 XLSX' }}</button></div>
           </div>
           <div class="query-card__row query-card__row--meta"><span>数据范围：{{ scopeLabel }}</span><span>统计周期：{{ currentPeriodLabel }}</span><span class="meta-status"><i></i>{{ notice }}</span></div>
           <div v-if="scopeOpen" class="scope-panel">
@@ -591,7 +610,7 @@ function isError() { return demoState.value === 'error' }
             </div>
 
             <div class="panel">
-              <header class="panel__header"><div><span class="panel__kicker"><TriangleAlert :size="15" />退款明细</span><h2>退款业绩明细</h2></div><button type="button" class="link-button">导出 <Download :size="14" /></button></header>
+              <header class="panel__header"><div><span class="panel__kicker"><TriangleAlert :size="15" />退款明细</span><h2>退款业绩明细</h2></div></header>
               <div class="table-wrap"><table class="data-table"><thead><tr><th>退款日期</th><th>分公司</th><th>门店</th><th>退款人数</th><th>退款项目</th><th>退款金额</th></tr></thead><tbody><tr v-for="row in data.returns.rows" :key="`${row[0]}-${row[1]}-${row[4]}`"><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ number(row[3]) }}</td><td>{{ row[4] }}</td><td class="value-red">{{ row[5] }}</td></tr></tbody></table></div>
             </div>
 
@@ -615,7 +634,7 @@ function isError() { return demoState.value === 'error' }
           <section v-if="active === 'unconsumed'" class="module-stack">
             <div class="metric-grid metric-grid--three"><article v-for="card in data.unconsumed.cards" :key="card[0]" class="metric-card" :class="`metric-card--${card[3]}`"><div class="metric-card__title"><WalletCards :size="17" /><span>{{ card[0] }}</span></div><strong>{{ card[1] }}</strong><span class="metric-card__caption">{{ card[2] }}</span></article></div>
             <div class="panel-grid panel-grid--wide"><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Activity :size="15" />分公司未耗数</span><h2>分公司未耗数柱状图</h2></div><span class="panel__hint">金额 / 数量</span></header><div class="unconsumed-company-chart"><div class="unconsumed-company-chart__legend"><span><i class="legend-color legend-color--current"></i>未耗金额</span><span><i class="legend-color legend-color--previous"></i>未耗数量</span></div><div v-for="row in data.unconsumed.branches" :key="row[0]" class="unconsumed-company-row"><strong>{{ row[0] }}</strong><div class="unconsumed-company-row__bars"><div><i class="unconsumed-company-row__amount" :style="{ width: `${row[1] / maxUnconsumedBranchAmount * 100}%` }"></i></div><div><i class="unconsumed-company-row__count" :style="{ width: `${row[2] / maxUnconsumedBranchCount * 100}%` }"></i></div></div><b>{{ money(row[1]) }}</b><em>{{ number(row[2]) }}个</em></div></div></article><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Tags :size="15" />未耗品项</span><h2>前六名未耗品项分析</h2></div><span class="panel__hint">仅展示前六名</span></header><div class="unconsumed-pie-grid"><div class="unconsumed-pie" :style="refundPieStyle(data.unconsumed.itemProportions)" aria-label="前六名未耗品项占比饼图"><div class="unconsumed-pie__hole"><strong>未耗品项</strong><span>前六名占比</span></div></div><div class="legend-list legend-list--appearance"><div v-for="item in data.unconsumed.itemProportions" :key="item[0]"><i :style="{ background: item[2] }"></i><span>{{ item[0] }}</span><b>{{ money(item[3]) }}</b><em>{{ pct(item[1]) }}</em></div></div></div></article></div>
-            <div class="panel-grid panel-grid--wide"><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Tags :size="15" />未耗品项排行</span><h2>前10名未耗品项</h2></div><button type="button" class="link-button">导出 <Download :size="14" /></button></header><div class="rank-list rank-list--stores"><div v-for="(row, index) in data.unconsumed.topItems" :key="row[0]" class="rank-list__row"><span class="rank-badge" :class="`rank-badge--${index + 1}`">{{ index + 1 }}</span><span>{{ row[0] }}</span><div><i :style="{ width: `${row[1] / data.unconsumed.topItems[0][1] * 100}%` }"></i></div><b>{{ money(row[1]) }}</b></div></div></article><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Store :size="15" />门店排行</span><h2>前10名未耗门店</h2></div><button type="button" class="link-button">导出 <Download :size="14" /></button></header><div class="rank-list rank-list--stores"><div v-for="(row, index) in data.unconsumed.stores" :key="row[0]" class="rank-list__row"><span class="rank-badge" :class="`rank-badge--${index + 1}`">{{ index + 1 }}</span><span>{{ row[0] }}</span><div><i :style="{ width: `${row[1] / maxStore * 100}%` }"></i></div><b>{{ money(row[1]) }}</b></div></div></article></div>
+            <div class="panel-grid panel-grid--wide"><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Tags :size="15" />未耗品项排行</span><h2>前10名未耗品项</h2></div></header><div class="rank-list rank-list--stores"><div v-for="(row, index) in data.unconsumed.topItems" :key="row[0]" class="rank-list__row"><span class="rank-badge" :class="`rank-badge--${index + 1}`">{{ index + 1 }}</span><span>{{ row[0] }}</span><div><i :style="{ width: `${row[1] / data.unconsumed.topItems[0][1] * 100}%` }"></i></div><b>{{ money(row[1]) }}</b></div></div></article><article class="panel"><header class="panel__header"><div><span class="panel__kicker"><Store :size="15" />门店排行</span><h2>前10名未耗门店</h2></div></header><div class="rank-list rank-list--stores"><div v-for="(row, index) in data.unconsumed.stores" :key="row[0]" class="rank-list__row"><span class="rank-badge" :class="`rank-badge--${index + 1}`">{{ index + 1 }}</span><span>{{ row[0] }}</span><div><i :style="{ width: `${row[1] / maxStore * 100}%` }"></i></div><b>{{ money(row[1]) }}</b></div></div></article></div>
           </section>
         </template>
       </section>

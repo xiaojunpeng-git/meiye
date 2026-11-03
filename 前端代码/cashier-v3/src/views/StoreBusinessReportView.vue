@@ -1,4 +1,5 @@
 <script setup>
+import { saveReportWorkbook } from '@/services/reportWorkbookDownload'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
@@ -21,7 +22,6 @@ import {
 } from '@/constants/phaseFourReports'
 import { PHASE_SIX_REPORTS, PHASE_SIX_REPORT_CODES, PHASE_SIX_CROSS_END_REPORT_TABS } from '@/constants/phaseSixReports'
 import {
-  exportStoreBusinessReport,
   exportStoreBusinessReportXlsx,
   queryStoreBusinessReport,
   queryStoreBusinessReportCatalog,
@@ -917,21 +917,6 @@ function nextPage() {
   loadReport()
 }
 
-function csvValue(value) {
-  const text = String(value ?? '')
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
-}
-
-function exportHeaderRows(exportColumns) {
-  return buildHeaderRows(exportColumns).map((headerRow) => {
-    const values = Array.from({ length: exportColumns.length }, () => '')
-    headerRow.forEach((cell) => {
-      values[cell.startIndex] = cell.label
-    })
-    return values
-  })
-}
-
 async function exportReport() {
   exporting.value = true
   errorMessage.value = ''
@@ -941,32 +926,12 @@ async function exportReport() {
       ? String(result.value?.range?.start || route.query?.month || route.query?.start_date || selectedMonth.value).slice(0, 7)
       : ''
     const visibleMonthDates = visibleMonth ? monthBounds(visibleMonth) : null
-    // 导出仍由服务端使用同一权限和固定字段白名单，浏览器只负责下载结果。
-    const exported = await exportStoreBusinessReport(reportParams({
+    // XLSX 同样使用可见结果月份，不能把尚未查询的新月份带入导出。
+    const workbook = await exportStoreBusinessReportXlsx(reportParams({
       page: 1, limit: 100,
       ...(visibleMonthDates ? { month: visibleMonth, start_date: visibleMonthDates.start, end_date: visibleMonthDates.end } : {})
     }), reportRuntime.value)
-    const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
-    const exportRecords = Array.isArray(exported.records) ? exported.records : []
-    const summaryRow = exported.summary_row || exported.summaryRow
-    const headers = exportHeaderRows(exportColumns)
-    const lines = []
-    headers.forEach((header) => lines.push(header.map(csvValue).join(',')))
-    if (summaryRow && typeof summaryRow === 'object' && Object.keys(summaryRow).length) {
-      lines.push(exportColumns.map((column) => csvValue(summaryRow[column.key] ?? '-')).join(','))
-    }
-    exportRecords.forEach((row) => lines.push(exportColumns.map((column) => csvValue(row?.[column.key])).join(',')))
-    lines.push('')
-    lines.push([csvValue('列名取值来源'), csvValue(`口径版本：${exported.metric_version || result.value.metric_version || '-'}`)].join(','))
-    exportColumns.forEach((column) => lines.push([csvValue(columnDisplayLabel(column)), csvValue(fieldLogic(column))].join(',')))
-    const url = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = String(exported.filename || `${currentReportName.value}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    saveReportWorkbook(workbook, `${currentReportName.value}-${today().replaceAll('-', '')}.xlsx`)
   } catch (error) {
     errorMessage.value = error?.message || '经营报表导出失败，请稍后重试。'
   } finally {
@@ -1693,14 +1658,7 @@ async function exportDetailDialog() {
     const params = memberVisitDetail.value.open ? memberVisitDetailParams() : bdeghDetailParams()
     const workbook = await exportStoreBusinessReportXlsx(params, reportRuntime.value)
     if (requestId !== detailExportRequestId || !detailDialog.value.open) return
-    const url = URL.createObjectURL(workbook)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${detailDialog.value.title.replace(/[\\/:*?"<>|]/g, '-')}-${today().replaceAll('-', '')}.xlsx`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    saveReportWorkbook(workbook, `${detailDialog.value.title}-${today().replaceAll('-', '')}.xlsx`)
   } catch (error) {
     if (requestId === detailExportRequestId) detailExportError.value = error?.message || '明细导出失败，请稍后重试。'
   } finally {

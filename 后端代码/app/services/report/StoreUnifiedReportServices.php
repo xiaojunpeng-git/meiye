@@ -162,6 +162,8 @@ class StoreUnifiedReportServices extends BaseServices
         // rather than the first browser page capped at 100 records.
         $result = $this->query($storeId, array_merge($input, ['_internal_all' => true, 'page' => 1]));
         return [
+            // JSON 结构仅保留旧客户端元数据；真实 XLSX 文件名和编码由共用写入器生成。
+            'title' => (string)($result['title'] ?? '门店经营报表'),
             'filename' => '门店经营报表-' . ($result['title'] ?? '数据') . '-' . date('YmdHis') . '.csv',
             'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
             // Keep the export metadata aligned with the queried report. Phase
@@ -171,19 +173,6 @@ class StoreUnifiedReportServices extends BaseServices
             'metric_version' => $result['metric_version'] ?? self::METRIC_VERSION,
             'data_as_of' => $result['data_as_of'] ?? '',
             'aggregation_status' => $result['aggregation_status'] ?? '',
-        ];
-    }
-
-    /** XLSX 与 JSON 导出共用同一已授权完整行集；仅改变门店品项分析的文件呈现。 */
-    public function exportItemAnalysisXlsx($storeId, array $input): array
-    {
-        if ((string)($input['report'] ?? '') !== 'store_item_analysis') {
-            throw new \InvalidArgumentException('该报表不支持 XLSX 导出');
-        }
-        $export = $this->export($storeId, $input);
-        return [
-            'filename' => '门店品项分析-' . date('YmdHis') . '.xlsx',
-            'content' => (new StoreItemAnalysisXlsxExporter())->render($export),
         ];
     }
 

@@ -1074,6 +1074,7 @@ final class StoreUnifiedReportPhaseSixServices
         $facts=$this->filterSalaryFactsByEmployeeName($this->salaryFactsWithReportingDimensions($stores,$range),$employeeName);
         if($employeeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['employee_id']===$employeeId));
         if($storeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['store_id']===$storeId));
+        $facts=$this->salaryDetailRemarks($facts,$stores);
         $orderReferences=$this->salaryOrderReferences($facts);
         $categories=$categoryKey!==''?$this->salaryCategoryDefinitions($this->observedSalaryCategories($facts)):null;
         $categoryLabel=$categoryKey===self::SALARY_PRESALE_KEY?'售前':'';
@@ -1127,6 +1128,7 @@ final class StoreUnifiedReportPhaseSixServices
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
                 'store_id' => (int)$f['store_id'], 'employee_id' => (int)$f['employee_id'],
                 'source_line_id' => (string)$f['source_line_id'],
+                '备注' => (string)$f['detail_remark'],
                 'annotation_subject_type' => 'phase_six_row',
                 'annotation_subject_key' => 'phase_six:salary:' . (string)$f['row_key'],
             ];
@@ -1156,9 +1158,61 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后分配给该员工的消耗金额；后来作废的记录不再统计。',true),
             $this->column('cash_amount','现金业绩','销售分配金额减去退款日分配给该员工的退款业绩；售前分配单独归入售前，其他分配按商品分类。原销售分配不回写。',true),
             $this->column('labor_fee','手工费','该笔服务最终分配给员工的手工费；后续人员调整按有效结果显示，作废后不再统计。',true),
-            $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
+            $this->column('备注','备注','读取收银时该商品或服务项目填写的明细备注；多人参与同一明细时显示相同备注。退款有原销售明细时读取原明细备注，未填写或无法关联时显示“-”。报表内不可编辑。')
         ]);
         return $this->salaryResult('员工薪资明细月报表',$columns,$rows,$range,$employeeName,$categoryKey!=='',$documentNo,true,$input);
+    }
+
+    /**
+     * 备注只读结账后的明细快照，不读工作台草稿、整单备注或历史报表手填值。
+     * 服务优先绑定其唯一服务事实（空备注也保留）；纯销售按结账行匹配，退款按原销售行匹配。
+     * 批量读取并以租户、门店、单据和明细共同校验，不能按商品名或同号行串单串店。
+     */
+    private function salaryDetailRemarks(array $facts,array $stores):array
+    {
+        $serviceIds=[];$checkoutLines=[];$refundLines=[];
+        foreach($facts as $fact){
+            if(!in_array((int)$fact['store_id'],$stores,true))continue;
+            $serviceId=(string)($fact['service_fact_id']??'');
+            if($serviceId!=='')$serviceIds[$serviceId]=true;
+            elseif((string)($fact['source_sales_line_id']??'')!=='')$refundLines[(string)$fact['source_sales_line_id']]=true;
+            elseif((string)($fact['source_line_id']??'')!=='')$checkoutLines[(string)$fact['source_line_id']][(string)$fact['checkout_request_id']]=true;
+        }
+        $remarks=[];
+        foreach(array_chunk(array_keys($serviceIds),300) as $ids){
+            $rows=Db::name('cashier_v3_entitlement_service_fact')
+                ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('store_id',$stores)
+                ->whereIn('service_fact_id',$ids)->where('service_status','completed')
+                ->field('store_id,service_fact_id,checkout_request_id,source_line_id,detail_remark_snapshot')->select()->toArray();
+            foreach($rows as $row)$remarks['service|'.$row['store_id'].'|'.$row['service_fact_id'].'|'.$row['checkout_request_id'].'|'.$row['source_line_id']]=(string)($row['detail_remark_snapshot']??'');
+        }
+        foreach(['checkout_line_id'=>$checkoutLines,'order_line_id'=>$refundLines] as $field=>$lineIds){
+            foreach(array_chunk(array_keys($lineIds),300) as $ids){
+                $query=Db::name('cashier_v3_sales_order_line')
+                    ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('store_id',$stores)
+                    ->whereIn($field,$ids)->where('line_direction','forward');
+                if($field==='checkout_line_id'){
+                    // 带齐唯一结账行索引的前缀；跨月批量读取也不能逐块扫描整店销售明细。
+                    $requests=[];
+                    foreach($ids as $id)$requests+= $checkoutLines[$id];
+                    $query->whereIn('checkout_request_id',array_keys($requests));
+                }
+                $rows=$query->field('store_id,order_id,order_line_id,checkout_request_id,checkout_line_id,detail_remark_snapshot')->select()->toArray();
+                foreach($rows as $row){
+                    $remarks['sale|'.$row['store_id'].'|'.$row['order_id'].'|'.$row['order_line_id']]=(string)($row['detail_remark_snapshot']??'');
+                    $remarks['checkout|'.$row['store_id'].'|'.$row['checkout_request_id'].'|'.$row['checkout_line_id']]=(string)($row['detail_remark_snapshot']??'');
+                }
+            }
+        }
+        foreach($facts as &$fact){
+            $store=(int)$fact['store_id'];$serviceId=(string)($fact['service_fact_id']??'');
+            if($serviceId!=='')$key='service|'.$store.'|'.$serviceId.'|'.(string)$fact['checkout_request_id'].'|'.(string)$fact['source_line_id'];
+            elseif((string)($fact['source_sales_line_id']??'')!=='')$key='sale|'.$store.'|'.(string)($fact['source_sales_order_id']??'').'|'.(string)$fact['source_sales_line_id'];
+            else $key='checkout|'.$store.'|'.(string)$fact['checkout_request_id'].'|'.(string)$fact['source_line_id'];
+            $fact['detail_remark']=$remarks[$key]??'';
+        }
+        unset($fact);
+        return $facts;
     }
 
     /**

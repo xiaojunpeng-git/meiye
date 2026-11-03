@@ -9,8 +9,7 @@ use app\services\organization\OrganizationScopeService;
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreReportGuestDisplayServices;
-use app\services\report\StoreItemAnalysisXlsxExporter;
-use app\services\report\StoreUnifiedReportDetailXlsxExporter;
+use app\services\report\StoreReportXlsxWriter;
 use app\services\report\StoreOperationsReportAnnotationServices;
 use app\services\report\StoreReportParticipantScopeServices;
 use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
@@ -80,8 +79,8 @@ class UnifiedReport extends AuthController
         catch (\RuntimeException $e) { return app('json')->fail($e->getMessage()); }
     }
 
-    /** 多店未消耗导出只取已完成的同权限任务，文件由后端流式生成。 */
-    public function basicUnconsumedExport(Request $request)
+    /** 全部基础报表导出共用查询授权；大范围未消耗仍只读取同权限已完成任务。 */
+    public function basicExport(Request $request)
     {
         try {
             $raw = (string)$request->get('query', '{}');
@@ -89,11 +88,11 @@ class UnifiedReport extends AuthController
             $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
             $code = (string)($payload['pageCode'] ?? '');
-            if (!\app\services\report\BasicUnconsumedTaskServices::supportsCode($code)
-                || !$this->canReadBasicReport($code)) throw new \InvalidArgumentException('当前账号未授权该报表导出');
+            \app\services\report\BasicReportCatalogServices::definition($code);
+            if (!$this->canReadBasicReport($code)) throw new \InvalidArgumentException('当前账号未授权该报表导出');
             $context = $this->basicReadContext($request->get(), $code);
-            $file = (new \app\services\report\BasicUnconsumedTaskServices())->exportCsv($context, $payload);
-            return download($file['path'], $file['filename'])->mimeType('text/csv');
+            $file = (new \app\services\report\BasicReportXlsxExportServices())->export($context, $payload);
+            return (new StoreReportXlsxWriter())->fileResponse($file);
         } catch (\InvalidArgumentException | \JsonException | \RuntimeException $e) { return app('json')->fail($e->getMessage()); }
     }
 
@@ -267,7 +266,7 @@ class UnifiedReport extends AuthController
             if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
             $input['_report_scope'] = $this->reportAuthorization();
             $file = $services->export((string)$input['report'], $stores, $range, $input);
-            return download($file['path'], $file['filename']);
+            return (new StoreReportXlsxWriter())->fileResponse($file);
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }
@@ -733,6 +732,7 @@ class UnifiedReport extends AuthController
                 $result = $phaseSix->query($report, $storeIds, $range, $queryInput);
                 if ($export) {
                     $result = [
+                        'title' => (string)($result['title'] ?? '报表'),
                         'filename' => '统一数据报表-' . (string)($result['title'] ?? '报表') . '-' . date('YmdHis') . '.csv',
                         'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
                         'summary_row' => $result['summary_row'] ?? [], 'column_groups' => $result['column_groups'] ?? [],
@@ -747,6 +747,7 @@ class UnifiedReport extends AuthController
                 $result = $phaseFour->query($report, $storeIds, $range, $queryInput);
                 if ($export) {
                     $result = [
+                        'title' => (string)($result['title'] ?? '报表'),
                         'filename' => '统一数据报表-' . (string)($result['title'] ?? '报表') . '-' . date('YmdHis') . '.csv',
                         'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
                         'summary_row' => $result['summary_row'] ?? [], 'column_groups' => $result['column_groups'] ?? [],
@@ -761,6 +762,7 @@ class UnifiedReport extends AuthController
                 $result = $phaseThree->query($report, $storeIds, $range, $queryInput);
                 if ($export) {
                     $result = [
+                        'title' => (string)($result['title'] ?? '报表'),
                         'filename' => '统一数据报表-' . (string)($result['title'] ?? '报表') . '-' . date('YmdHis') . '.csv',
                         'columns' => $result['columns'] ?? [], 'records' => $result['records'] ?? [],
                         'summary_row' => $result['summary_row'] ?? [], 'column_groups' => $result['column_groups'] ?? [],
@@ -769,29 +771,13 @@ class UnifiedReport extends AuthController
                     ];
                 }
             } else {
-                if ($export && $report === 'store_item_analysis' && (string)($input['format'] ?? '') === 'xlsx') {
-                    $file = $services->exportItemAnalysisXlsx($storeIds, $input);
-                    // 文件内容先由相同权限范围的统一服务生成，不能让下载入口扩大筛选范围。
-                    return \think\Response::create($file['content'], 'html')->header([
-                        'Content-Type' => StoreItemAnalysisXlsxExporter::MIME_TYPE,
-                        'Content-Disposition' => 'attachment; filename="store-item-analysis.xlsx"; filename*=UTF-8\'\'' . rawurlencode($file['filename']),
-                        'Cache-Control' => 'no-store',
-                    ]);
-                }
                 $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
             }
-            // 授权查询与导出共用游客姓名投影，保留汇总和历史事实。
+            // 页面与所有 XLSX 工作簿在授权查询后使用相同的游客展示值。
             $result = StoreReportGuestDisplayServices::project($result);
-            if ($export && (string)($input['format'] ?? '') === 'xlsx' && StoreUnifiedReportDetailXlsxExporter::supports($report)) {
-                // Reuse the same menu/data authorization and complete result as the visible detail; no extra export permission.
-                $exporter = new StoreUnifiedReportDetailXlsxExporter();
-                $content = $exporter->render($report, $result);
-                return \think\Response::create($content, 'html')->header([
-                    'Content-Type' => StoreUnifiedReportDetailXlsxExporter::MIME_TYPE,
-                    'Content-Disposition' => 'attachment; filename="report-detail.xlsx"; filename*=UTF-8\'\'' . rawurlencode($exporter->filename($report)),
-                    'Cache-Control' => 'no-store',
-                    'X-Content-Type-Options' => 'nosniff',
-                ]);
+            if ($export && (string)($input['format'] ?? '') === 'xlsx') {
+                // 与页面相同的授权、筛选、完整行集和游客投影；仅统一文件编码，不另算业务数据。
+                return (new StoreReportXlsxWriter())->response($report, $result);
             }
             return app('json')->success($result);
         } catch (\InvalidArgumentException $e) {

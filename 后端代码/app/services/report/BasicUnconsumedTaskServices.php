@@ -97,10 +97,10 @@ final class BasicUnconsumedTaskServices
     }
 
     /**
-     * 导出复用同一已完成快照与统一筛选/合计执行结果，流式写入私有 CSV。
+     * 导出复用同一已完成快照与统一筛选/合计执行结果，流式写入私有 XLSX。
      * 不把数十万条会员权益明细序列化给浏览器后再由浏览器拼表。
      */
-    public function exportCsv(array $context, array $payload): array
+    public function exportXlsx(array $context, array $payload): array
     {
         $code = (string)($payload['pageCode'] ?? '');
         $taskId = (string)($payload['unconsumed_task_id'] ?? '');
@@ -113,47 +113,12 @@ final class BasicUnconsumedTaskServices
         if (!empty($result['async_report']['pending'])) throw new \InvalidArgumentException('报表仍在生成，请完成后再导出');
         $rows = $result['exportRows'] ?? null;
         if (!is_iterable($rows)) throw new \RuntimeException('报表导出结果无效');
-        $requested = $export['fields'] ?? [];
-        if (!is_array($requested) || !$requested) throw new \InvalidArgumentException('请选择导出列');
-        $fieldMap = array_column($result['queryFields'] ?? [], null, 'key');
-        $fields = [];
-        foreach ($requested as $key) {
-            if (!is_string($key) || !isset($fieldMap[$key])) throw new \InvalidArgumentException('报表导出列无效');
-            $fields[] = $fieldMap[$key];
-        }
-        $path = $this->path($taskId, 'export.' . bin2hex(random_bytes(8)) . '.csv');
-        $stream = fopen($path, 'xb');
-        if ($stream === false) throw new \RuntimeException('报表导出文件不可用');
-        chmod($path, 0600);
-        try {
-            fwrite($stream, "\xEF\xBB\xBF");
-            fputcsv($stream, array_column($fields, 'label'));
-            foreach ($rows as $row) {
-                $line = [];
-                foreach ($fields as $field) {
-                    $value = $row[$field['key']] ?? '';
-                    $text = $value === null ? '' : (string)$value;
-                    // 表格软件公式开头必须转成文本，与既有前端导出保护一致。
-                    $line[] = preg_match('/^\s*[=+\-@]/u', $text) ? "\t" . $text : $text;
-                }
-                fputcsv($stream, $line);
-            }
-            if (($result['table_layout']['summary_position'] ?? 'first_row') !== 'none') {
-                $line = [];
-                foreach ($fields as $i => $field) $line[] = $i === 0 ? '合计'
-                    : ($result['summaries'][$field['key'] . ':sum'] ?? '-');
-                fputcsv($stream, $line);
-            }
-            fputcsv($stream, []);
-            fputcsv($stream, ['列名取值来源']);
-            foreach ($fields as $field) fputcsv($stream, [$field['label'],
-                $result['field_sources'][$field['key']] ?? '该条业务记录的稳定身份。']);
-            fflush($stream);
-        } catch (\Throwable $e) {
-            fclose($stream); @unlink($path); throw $e;
-        }
-        fclose($stream);
-        return ['path' => $path, 'filename' => ($code === 'basic_unconsumed_summary' ? '门店未消耗统计表' : '门店未消耗明细表') . '.csv'];
+        // 使用同一授权任务的迭代器逐行写 XLSX，不能退化为全量加载或另一次事实查询。
+        $workbook=BasicReportXlsxExportServices::payload($result,$payload);
+        $path=$this->path($taskId,'export.'.bin2hex(random_bytes(8)).'.xlsx');
+        $title=$code==='basic_unconsumed_summary'?'门店未消耗统计表':'门店未消耗明细表';
+        (new StoreReportXlsxWriter())->writeFile($path,$workbook,$title,['summary_position'=>'last']);
+        return ['path'=>$path,'filename'=>$title.'.xlsx'];
     }
 
     /**

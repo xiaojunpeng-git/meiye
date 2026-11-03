@@ -1,9 +1,10 @@
 <script setup>
+import { saveReportWorkbook } from '@/services/reportWorkbookDownload'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { UnifiedReportQueryToolbar, UnifiedQueryDateRange, cloneUnifiedQuerySnapshot, formatReportMoney } from '@mohe/unified-query-vue3'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
-import { loadBasicReport, loadBasicReportScope, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReport, loadBasicReportScope, downloadBasicReportXlsx } from '@/services/basicReportApi'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
 
 const props = defineProps({ platform: Boolean })
@@ -109,11 +110,9 @@ async function exportData(isDetail = false) {
   if (isDetail) detailExporting.value = true
   else exporting.value = true
   try {
-    const result = await loadBasicReport(props.platform, payload, [...source.storeIds])
-    const text = registrationCsv(targetFields, result.exportRows, result.summaries, result.field_sources, isDetail)
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
-    const anchor = document.createElement('a'); anchor.href = url; anchor.download = isDetail ? '门店对账单明细.csv' : '门店对账单.csv'; anchor.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    // 主表和下钻明细均使用同一已执行快照，文件由统一后端生成。
+    const blob = await downloadBasicReportXlsx(props.platform, payload, [...source.storeIds])
+    saveReportWorkbook(blob, isDetail ? '门店对账单明细.xlsx' : '门店对账单.xlsx')
   } catch (e) { if (isDetail) detailError.value = e.message; else error.value = e.message }
   finally { if (isDetail) detailExporting.value = false; else exporting.value = false }
 }

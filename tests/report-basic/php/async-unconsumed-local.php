@@ -63,10 +63,12 @@ foreach (['basic_unconsumed_summary', 'basic_unconsumed_detail'] as $code) {
         throw new RuntimeException('不同账号复用了私有报表');
     } catch (InvalidArgumentException $expectedDenied) { /* 任务身份隔离通过。 */ }
     $fields = array_column(array_filter($result['queryFields'], static fn($f) => $f['defaultVisible']), 'key');
-    $file = $taskService->exportCsv($context, $payload + ['export' => ['scope' => 'query', 'fields' => $fields]]);
-    $csv = file_get_contents($file['path']);
-    if ($csv === false || substr_count($csv, "\n") < $expected + 2) {
-        throw new RuntimeException('导出缺少完整查询结果：' . $code);
+    $file = $taskService->exportXlsx($context, $payload + ['export' => ['scope' => 'query', 'fields' => $fields]]);
+    $zip=new ZipArchive();
+    if($zip->open($file['path'])!==true)throw new RuntimeException('导出不是真正 XLSX');
+    $xml=$zip->getFromName('xl/worksheets/sheet1.xml');$zip->close();
+    if($xml===false||substr_count($xml,'<row ')<$expected+2){
+        throw new RuntimeException('XLSX 导出缺少完整查询结果：'.$code);
     }
     @unlink($file['path']);
     echo $code . ' PASS rows=' . $expected . ' page=' . count($result['rows']) . PHP_EOL;

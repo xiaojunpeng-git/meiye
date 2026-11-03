@@ -5,6 +5,7 @@ use app\controller\store\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreReportGuestDisplayServices;
+use app\services\report\StoreReportXlsxWriter;
 use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
@@ -49,11 +50,14 @@ class UnifiedReport extends AuthController
             $report = (string)($input['report'] ?? '');
             if ($phaseSix->supports($report) || $phaseFour->supports($report)) {
                 $result = ($phaseSix->supports($report) ? $phaseSix : $phaseFour)->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], array_merge($input, ['_internal_all' => true]));
-                // 完整导出和分页查询共用游客投影，不能让 CSV 重新出现空姓名。
+                // 完整导出与查询共用游客投影；XLSX 只改变文件呈现。
                 $result = StoreReportGuestDisplayServices::project($result);
+                if ((string)($input['format'] ?? '') === 'xlsx') return (new StoreReportXlsxWriter())->response($report, $result);
                 return $this->success(['filename' => '统一数据报表-' . date('YmdHis') . '.csv', 'columns' => $result['columns'], 'records' => $result['records'], 'summary_row' => $result['summary_row'], 'column_groups' => $result['column_groups'], 'metric_version' => $result['metric_version']]);
             }
-            return $this->success(StoreReportGuestDisplayServices::project($services->export((int)$this->storeId, $input)));
+            $result=StoreReportGuestDisplayServices::project($services->export((int)$this->storeId, $input));
+            if ((string)($input['format'] ?? '') === 'xlsx') return (new StoreReportXlsxWriter())->response($report, $result);
+            return $this->success($result);
         }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
@@ -98,7 +102,7 @@ class UnifiedReport extends AuthController
         // 仅透传统一固定列筛选，字段白名单和统计后裁剪由报表服务负责。
         // Exact path only narrows a grouped report drilldown; free category search keeps its prefix semantics.
         // 薪资单号筛选及分类/指标下钻使用服务端列键和稳定 ID，门店权限仍二次裁剪。
-        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['row_filters',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['employee_name',''],['document_no',''],['salary_employee_id',0],['salary_store_id',0],['salary_category_key',''],['salary_metric_key',''],['page',1],['limit',20]];
+        return [['format',''],['report','partner_item_summary'],['start_date',''],['end_date',''],['row_filters',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['employee_name',''],['document_no',''],['salary_employee_id',0],['salary_store_id',0],['salary_category_key',''],['salary_metric_key',''],['page',1],['limit',20]];
     }
 
     private function isPlatformOnlyReport(string $report): bool

@@ -1,4 +1,5 @@
 <script setup>
+import { saveReportWorkbook } from '@/services/reportWorkbookDownload'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { UnifiedReportQueryToolbar, UnifiedQueryDateRange, cloneUnifiedQuerySnapshot, formatReportMoney } from '@mohe/unified-query-vue3'
@@ -11,7 +12,7 @@ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePic
 import TablePagination from '@/components/common/TablePagination.vue'
 import StoreReconciliationReport from '@/components/reports/StoreReconciliationReport.vue'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, downloadBasicUnconsumedCsv, saveBasicRegistration, deleteBasicRegistration, saveBasicSalary, freezeBasicSalary, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, downloadBasicReportXlsx, saveBasicRegistration, deleteBasicRegistration, saveBasicSalary, freezeBasicSalary } from '@/services/basicReportApi'
 
 const route = useRoute()
 const state = useCashierV3State()
@@ -248,16 +249,9 @@ async function exportRows() {
   const selectedFields = visibleFields.value.map(field => ({ ...field }))
   try {
     const exportQuery = { ...frozen, export: { scope: 'query', fields: selectedFields.map(field => field.key) } }
-    let blob
-    if (frozen.unconsumed_task_id) blob = await downloadBasicUnconsumedCsv(platform.value, exportQuery, selectedStores)
-    else {
-      const result = await loadBasicReport(platform.value, exportQuery, selectedStores)
-      blob = new Blob([registrationCsv(selectedFields, result.exportRows, result.summaries, result.field_sources, result.table_layout?.summary_position !== 'none', result.row_sources || [], result.summary_cards || [])], { type: 'text/csv;charset=utf-8' })
-    }
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url; anchor.download = (active.value?.name || '基础报表') + '.csv'; anchor.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    // 后端校验完整查询快照、所选列和权限后生成同一 XLSX，浏览器只保存文件。
+    const blob = await downloadBasicReportXlsx(platform.value, exportQuery, selectedStores)
+    saveReportWorkbook(blob, (active.value?.name || '基础报表') + '.xlsx')
   } catch (e) { error.value = e.message }
   finally { exporting.value = false }
 }

@@ -124,53 +124,23 @@ final class CustomerAnalyticsServices
         $records = (array)($result['records'] ?? []);
         $path = tempnam(sys_get_temp_dir(), 'customer-analytics-');
         if ($path === false) throw new \RuntimeException('客户分析导出文件创建失败');
-        $handle = fopen($path, 'wb');
-        if ($handle === false) throw new \RuntimeException('客户分析导出文件打开失败');
-        fwrite($handle, "\xEF\xBB\xBF");
-        $keys = array_map(static fn(array $column): string => (string)($column['key'] ?? ''), $columns);
-        $labels = array_map(static fn(array $column): string => (string)($column['label'] ?? $column['key'] ?? ''), $columns);
-        $sections = (array)($result['sections'] ?? []);
-        if ($sections !== []) {
-            // A report may expose an aggregate section and a detail section;
-            // keep both in one deterministic CSV instead of mixing their
-            // rows under one header.  The blank separator is intentional and
-            // makes the two contracts readable in spreadsheet software.
-            foreach ($sections as $index => $section) {
-                if ($index > 0) fputcsv($handle, []);
-                $sectionColumns = (array)($section['columns'] ?? []);
-                $sectionKeys = array_map(static fn(array $column): string => (string)($column['key'] ?? ''), $sectionColumns);
-                $sectionLabels = array_map(static fn(array $column): string => (string)($column['label'] ?? $column['key'] ?? ''), $sectionColumns);
-                fputcsv($handle, [(string)($section['label'] ?? '')]);
-                fputcsv($handle, $sectionLabels);
-                foreach ((array)($section['records'] ?? []) as $record) {
-                    $row = [];
-                    foreach ($sectionKeys as $key) $row[] = $key === '' ? '' : ($record[$key] ?? '-');
-                    fputcsv($handle, $row);
-                }
-                if ($index === count($sections) - 1 && (array)($result['summary_row'] ?? []) !== []) {
-                    $summary = (array)$result['summary_row'];
-                    $row = [];
-                    foreach ($sectionKeys as $key) $row[] = $key === '' ? '' : ($summary[$key] ?? '-');
-                    fputcsv($handle, $row);
-                }
-            }
-        } else {
-            fputcsv($handle, $labels);
-            foreach ($records as $record) {
-                $row = [];
-                foreach ($keys as $key) $row[] = $key === '' ? '' : ($record[$key] ?? '-');
-                fputcsv($handle, $row);
-            }
-            if ((array)($result['summary_row'] ?? []) !== []) {
-                $summary = (array)$result['summary_row'];
-                $row = [];
-                foreach ($keys as $key) $row[] = $key === '' ? '' : ($summary[$key] ?? '-');
-                fputcsv($handle, $row);
-            }
+        // 多区段仍来自同一次完整授权结果，分别放入工作表；不重新查询或计算客户指标。
+        $workbook=$result;
+        $enrich=static function(array $columns)use($result):array{
+            foreach($columns as &$column)$column['source_explanation']=$column['source_explanation']
+                ??$result['field_explanations'][$column['key']]??'-';
+            unset($column);return $columns;
+        };
+        $workbook['columns']=$enrich($columns);
+        if(!empty($workbook['sections'])){
+            foreach($workbook['sections'] as $index=>&$section){
+                $section['columns']=$enrich($section['columns']??[]);
+                if($index===count($workbook['sections'])-1)$section['summary_row']=$result['summary_row']??[];
+            }unset($section);
         }
-        fclose($handle);
+        (new StoreReportXlsxWriter())->writeFile($path,$workbook,(string)($result['title']??'客户分析'),['summary_position'=>'last']);
         return [
-            'filename' => '客户分析-' . (string)($result['title'] ?? $report) . '-' . date('YmdHis') . '.csv',
+            'filename' => '客户分析-' . (string)($result['title'] ?? $report) . '-' . date('YmdHis') . '.xlsx',
             'path' => $path, 'columns' => $columns, 'records' => $records,
             'summary_row' => $result['summary_row'] ?? [], 'column_groups' => $result['column_groups'] ?? [],
             'sections' => $result['sections'] ?? [],

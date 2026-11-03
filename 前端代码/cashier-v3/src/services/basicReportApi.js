@@ -24,8 +24,8 @@ export const loadBasicReportCatalog = (platform, signal) => request(platform, 'c
 /** 平台基础报表的可选门店范围与查询共用菜单授权；门店端始终固定当前登录门店。 */
 export const loadBasicReportScope = (pageCode, signal) => request(true, 'scope', { pageCode, signal })
 export const loadBasicReport = (platform, query, storeIds, signal) => request(platform, 'query', { query, storeIds, signal })
-/** 大范围未消耗导出由后端读取已完成任务并流式生成，不在浏览器装入全部会员行。 */
-export async function downloadBasicUnconsumedCsv(platform, query, storeIds = [], signal) {
+/** 所有基础报表 XLSX 由同权限后端生成，大范围未消耗仍走已完成任务的流式读取。 */
+export async function downloadBasicReportXlsx(platform, query, storeIds = [], signal) {
   const base = platform ? '/adminapi/report/basic/' : '/cashierapi/v3/report/basic/'
   const url = new URL(base + 'export', window.location.origin)
   url.searchParams.set('query', JSON.stringify(query))
@@ -33,10 +33,10 @@ export async function downloadBasicUnconsumedCsv(platform, query, storeIds = [],
   const cookie = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
   const token = platform ? (cookie ? decodeURIComponent(cookie[1]) : '') : readStoreV3SessionToken()
   const response = await fetch(url, { credentials: platform ? 'same-origin' : 'omit', cache: 'no-store', signal,
-    headers: { Accept: 'text/csv, application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) } })
-  if (!response.ok || !response.headers.get('content-type')?.includes('text/csv')) {
+    headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json', ...(token ? { 'Authori-zation': `Bearer ${token}` } : {}) } })
+  if (!response.ok || !response.headers.get('content-type')?.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
     const body = await response.json().catch(() => null)
-    throw new Error(body?.msg || '未消耗报表导出失败，请重试。')
+    throw new Error(body?.msg || '报表 XLSX 导出失败，请重试。')
   }
   return response.blob()
 }
@@ -47,22 +47,3 @@ export const deleteBasicRegistration = (platform, body) => request(platform, 'de
 /** 工资人工补充独立保存，不复用刷单写入口；权限与冻结最终由后端校验。 */
 export const saveBasicSalary = (platform, body) => request(platform, 'salary/save', { body })
 export const freezeBasicSalary = body => request(true, 'salary/freeze', { body })
-
-/** CSV始终取后端统一查询完整导出集；避免券码等人工文本被表格软件当公式执行。 */
-export function registrationCsv(fields, rows, summaries, sources, includeSummary = true, rowSources = [], summaryCards = []) {
-  const cell = (value) => {
-    const text = value == null ? '' : String(value)
-    const safe = typeof value === 'string' && /^[\s]*[=+\-@]/.test(text) ? '\t' + text : text
-    return '"' + safe.replaceAll('"', '""') + '"'
-  }
-  const lines = [fields.map(field => field.label), ...rows.map(row => fields.map(field => row[field.key] ?? ''))]
-  // 对账矩阵每个支付方式已有横向合计；不再叠加把人工刷单混入实际收款的纵向总额。
-  if (includeSummary) lines.push(fields.map((field, i) => i === 0 ? '合计' : (summaries[`${field.key}:sum`] ?? '-')))
-  // 表上方汇总独立于表内合计，仍来自同一后端完整筛选集。
-  if (summaryCards.length) lines.push([], ['当前查询汇总'], ...summaryCards.map(card => [card.label, card.value ?? '-']))
-  lines.push([], ['列名取值来源'])
-  fields.forEach(field => lines.push([field.label, sources[field.key] || '该条业务记录的稳定身份。']))
-  // 指标纵行的业务含义随同一后端查询导出，避免门店列只有通用说明。
-  rowSources.forEach(source => lines.push([source.label, source.description]))
-  return '\ufeff' + lines.map(row => row.map(cell).join(',')).join('\r\n')
-}

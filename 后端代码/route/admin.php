@@ -1769,7 +1769,7 @@ Route::group('adminapi', function () {
         Route::get('basic/catalog', 'v1.report.UnifiedReport/basicCatalog')->option(['real_name' => '基础报表目录']);
         Route::get('basic/scope', 'v1.report.UnifiedReport/basicScope')->option(['real_name' => '基础报表门店范围']);
         Route::get('basic/query', 'v1.report.UnifiedReport/basicQuery')->option(['real_name' => '基础报表统一查询']);
-        Route::get('basic/export', 'v1.report.UnifiedReport/basicUnconsumedExport')->option(['real_name' => '未消耗报表导出']);
+        Route::get('basic/export', 'v1.report.UnifiedReport/basicExport')->option(['real_name' => '基础报表 XLSX 导出']);
         Route::post('basic/save', 'v1.report.UnifiedReport/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::post('basic/delete', 'v1.report.UnifiedReport/basicDelete')->option(['real_name' => '删除刷单登记']);
         Route::post('basic/salary/save', 'v1.report.UnifiedReport/basicSalarySave')->option(['real_name' => '保存工资人工项']);
