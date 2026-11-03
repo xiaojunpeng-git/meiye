@@ -5483,6 +5483,197 @@ html.group-dashboard-document #app {
   padding: 6px 6px 0;
 }
 
+/* 普通使用权益采用卡/项目分组；每个数值紧邻字段名，窄面板不需要横向找表头。 */
+.cashier-entitlement-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 2px 2px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.cashier-entitlement-card {
+  --entitlement-card-background: #f0f6ff;
+  --entitlement-card-border: #c9dcf5;
+  --entitlement-card-accent: #79afea;
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--entitlement-card-border);
+  border-left: 3px solid var(--entitlement-card-accent);
+  border-radius: 8px;
+  background: var(--entitlement-card-background);
+}
+
+/* 相邻已购卡交替使用冷暖浅色，颜色只帮助区分卡归属，不承载可用状态。 */
+.cashier-entitlement-card:nth-child(even) {
+  --entitlement-card-background: #fff6e9;
+  --entitlement-card-border: #eed8b6;
+  --entitlement-card-accent: #e7ae62;
+}
+
+.cashier-entitlement-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 6px;
+}
+
+.cashier-entitlement-card__identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.cashier-entitlement-card__name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.cashier-entitlement-card__name > strong,
+.cashier-entitlement-card__project-name > strong {
+  overflow: hidden;
+  min-width: 0;
+  color: #1f2329;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cashier-entitlement-card__identity > small {
+  overflow: hidden;
+  color: #7b8797;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cashier-entitlement-card__expiry {
+  display: grid;
+  flex: none;
+  gap: 1px;
+  text-align: right;
+}
+
+.cashier-entitlement-card__expiry > span,
+.cashier-entitlement-card__metrics span,
+.cashier-entitlement-card__project-metrics span {
+  color: #65758a;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.cashier-entitlement-card__expiry > strong {
+  color: #34465a;
+  font-size: 10px;
+}
+
+.cashier-entitlement-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 8px;
+  padding: 0 10px 8px;
+}
+
+.cashier-entitlement-card__metrics > div,
+.cashier-entitlement-card__project-metrics > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 3px;
+}
+
+.cashier-entitlement-card__metrics strong,
+.cashier-entitlement-card__project-metrics strong {
+  overflow: hidden;
+  color: #25364a;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cashier-entitlement-card__project {
+  padding: 7px 10px 8px 15px;
+  border-top: 1px solid #e2eaf3;
+  background: #fff;
+}
+
+.cashier-entitlement-card__project + .cashier-entitlement-card__project {
+  /* 同一卡内多项目用连续实线分开，避免细虚线与数据行混在一起。 */
+  border-top: 2px solid #c7d7e8;
+}
+
+.cashier-entitlement-card__project-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 5px;
+}
+
+.cashier-entitlement-card__project-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.cashier-entitlement-card__project-name > span {
+  flex: none;
+  color: #1677cc;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.cashier-entitlement-card__project-top .cashier-entitlement-table__add {
+  flex: none;
+  height: 24px;
+  min-width: 42px;
+  font-size: 11px;
+}
+
+.cashier-entitlement-card__project-top .cashier-entitlement-table__add:not(:disabled) {
+  border-color: #1677cc;
+  background: #1677cc;
+  color: #fff;
+}
+
+.cashier-entitlement-card__project-top .cashier-entitlement-table__add:hover:not(:disabled) {
+  border-color: #1066b1;
+  background: #1066b1;
+}
+
+.cashier-entitlement-card__project-reason {
+  display: block;
+  margin-bottom: 5px;
+  color: #8c5a2b;
+  font-size: 10px;
+}
+
+.cashier-entitlement-card__project-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 14px;
+}
+
+.cashier-entitlement-card__project.is-added {
+  animation: entitlement-add-row .7s ease;
+}
+
+.cashier-entitlement-card__project.is-unavailable {
+  background: #f8f9fb;
+}
+
 .cashier-entitlement-selector-panel .cashier-entitlement-table {
   /* 九列保留可读宽度，单价紧随购买金额；仅表内横向滚动，不扩张收银面板。 */
   overflow-x: auto;

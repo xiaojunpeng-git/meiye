@@ -3579,12 +3579,12 @@ final class CashierV3CashierWorkspaceServices
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
             if ($id <= 0) continue;
-            // 已耗尽的一次性券退出选券；多次抵用券有使用时间仍可能有余额，不能一并隐藏。
-            if ((int)$row['status'] === 1 || ((int)$row['coupon_type'] !== 3 && (int)$row['use_time'] > 0)) continue;
+            // 作废和已用完的券不进入收银选券结果；多次抵用券有使用时间但仍有余额时继续可选。
+            if ((int)$row['is_fail'] !== 0 || (int)$row['status'] === 1
+                || ((int)$row['coupon_type'] !== 3 && (int)$row['use_time'] > 0)) continue;
             // 其他不可用券保留原因；展示范围不替代最终后端用券校验。
             $reasons = \app\services\activity\coupon\StoreCouponEligibilityRule::reasons($row, $memberId, $storeId, $hasConsumed);
             if (isset($used[$id])) $reasons[] = '已在本次其他商品中选择';
-            if ((int)$row['is_fail'] !== 0) $reasons[] = '优惠券已作废';
             if ((int)$row['status'] === 2 || ((int)$row['end_time'] > 0 && (int)$row['end_time'] < $now)) $reasons[] = '优惠券已过期';
             if ((int)$row['start_time'] > $now) $reasons[] = '尚未到使用时间';
             if (!$this->couponAllowsStore($row, $storeId)) $reasons[] = '当前门店不适用';
