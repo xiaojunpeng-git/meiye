@@ -1070,9 +1070,12 @@ export default {
     applyPersonComplete(data, extraInfo = {}) {
       const scope = (data && data.scope) || {};
       const base = this.getDefaultForm();
-      // 其它信息可用 read 补全扩展字段；组织场景禁止依赖 staff/read
+      // 完整人员详情是直属员工档案的权威回显；旧 read 只补它未返回的扩展字段。
+      // 不能让无店直属依赖不存在的 staff/read，否则身份证和入职日期始终显示为空。
       Object.keys(base).forEach((key) => {
-        if (Object.prototype.hasOwnProperty.call(extraInfo, key) && extraInfo[key] !== undefined) {
+        if (Object.prototype.hasOwnProperty.call(data || {}, key) && data[key] !== undefined) {
+          base[key] = data[key];
+        } else if (Object.prototype.hasOwnProperty.call(extraInfo, key) && extraInfo[key] !== undefined) {
           base[key] = extraInfo[key];
         }
       });
