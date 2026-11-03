@@ -106,7 +106,8 @@ export function registerReset(data) {
  *
  */
 export function getMenuList() {
-	return request.get("menu/user", {}, {
+	// The member menu follows admin visibility settings; a fresh query prevents a cached old menu hiding an enabled entry.
+	return request.get("menu/user", { _menu_refresh: Date.now() }, {
 		noAuth: true
 	});
 }
