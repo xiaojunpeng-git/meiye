@@ -400,6 +400,8 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                     'sourceDetailId' => $deduction['source_detail_id'],
                 ]);
             }
+            // 最终扣减精确命中锁定的来源类型；问卷奖励原明细为 cart_type=0。
+            $sourceCartType = (int)($authorities['details'][$deduction['source_detail_id']]['cart_type'] ?? -1);
             $affected = (int)Db::name(self::DETAIL_TABLE)
                 ->where('id', $deduction['source_detail_id'])
                 ->where('oid', $deduction['origin_order_id'])
