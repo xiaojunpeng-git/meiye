@@ -139,9 +139,12 @@ export function checkLogin() {
 	let token = Cache.get(LOGIN_STATUS);
 	let expiresTime = Cache.get(EXPIRES_TIME);
 	let newTime = Math.round(new Date() / 1000);
-	if (expiresTime < newTime || !token) {
+	// Token cache already owns its TTL. Older logins did not persist EXPIRES_TIME;
+	// missing metadata must not invalidate that still-live token on every restart.
+	const expiry = Number(expiresTime);
+	if (!token || (Number.isFinite(expiry) && expiry > 0 && expiry <= newTime)) {
 		uni.setStorageSync('authIng', false)
-		Cache.clear(LOGIN_STATUS);
+		store.commit('LOGOUT');
 		Cache.clear(EXPIRES_TIME);
 		Cache.clear(USER_INFO);
 		Cache.clear(STATE_R_KEY);

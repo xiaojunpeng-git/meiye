@@ -2,7 +2,7 @@
 	import {checkLogin} from './libs/login';
 	import { remindMemberSurvey, beginSurveyForeground } from '@/utils/memberSurveyReminder';
 	import {HTTP_REQUEST_URL} from './config/app';
-	import { LOGIN_STATUS } from "./config/cache.js"
+	import { beginMemberSessionRecovery, isMemberSessionExpired } from '@/utils/memberSessionRecovery';
 	import { getShopConfig, silenceAuth, getLogo } from '@/api/public';
 	import Auth from '@/libs/wechat.js';
 	import Routine from './libs/routine.js';
@@ -76,8 +76,12 @@
 			// 公开调查不抢先静默登录；填写后提交才进入身份认证，并保留问卷深链。
 			const publicSurveyEntry = String(option.path || '').replace(/^\//, '') === 'pages/users/survey/index';
 			uni.hideTabBar()
+			// #ifdef MP
+			// Recovery starts before page hooks or protected requests; public surveys stay public.
+			if (!publicSurveyEntry) beginMemberSessionRecovery(() => this.restoreMemberSession());
+			// #endif
 			// #ifdef MP-WEIXIN
-			// 手机号授权是会员端全局入口条件，必须在任何业务页面发起跳转前安装拦截器。
+			// 公开浏览页可访客进入；会员业务在跳转前由同一门禁校验手机号。
 			installMemberPhoneGate(this.$store);
 			// Start the global font without blocking business startup or waiting
 			// for simulator callbacks; the rendered glyphs are verified separately.
@@ -336,22 +340,7 @@
 				}
 			}
 			// #endif
-			// #ifdef MP
-			// 小程序静默授权
-			if (!publicSurveyEntry && !this.$store.getters.isLogin) {
-				Routine.getCode().then(code => {
-					this.silenceAuth(code);
-				}).catch(res => {
-					uni.hideLoading();
-				});
-			}else if(!publicSurveyEntry && this.$store.getters.isLogin && await this.getExpired()){
-				//处理小程序有token情况下但是静默授权失败
-				this.$Cache.clear(LOGIN_STATUS);
-				Routine.getCode().then(code => {
-					this.silenceAuth(code);
-				})
-			}
-			// #endif
+
 		},
 		onShow(options) {
 			beginSurveyForeground();
@@ -359,7 +348,7 @@
 			let that = this;
 			const enterOptions = uni.getEnterOptionsSync();
 			// #ifdef MP-WEIXIN
-			// 冷启动、分享卡片和从后台恢复都重新校验，避免直接落到业务深链。
+			// 冷启动、分享卡片和后台恢复只拦截受保护业务深链，不打断首页浏览。
 			enforceMemberPhoneGate(this.$store, (options && options.path) || enterOptions.path || '');
 			// #endif
 			if (enterOptions.query && enterOptions.query.spid) {
@@ -397,7 +386,7 @@
 			// 小程序静默授权
 			silenceAuth(code) {
 				let that = this;
-				silenceAuth({
+				return silenceAuth({
 						code: code,
 						spread_code: that.globalData.code
 					})
@@ -411,9 +400,7 @@
 							});
 							that.$store.commit('SETUID', res.data.userInfo.uid);
 							that.$store.commit('UPDATE_USERINFO', res.data.userInfo);
-							// #ifdef MP-WEIXIN
-							enforceMemberPhoneGate(that.$store);
-							// #endif
+
 						}
 					}).catch(err => {
 						return that.$util.Tips({
@@ -465,16 +452,27 @@
 					})
 				}
 			},
-			async getExpired(){
-				// 通过一个个人中心的接口判断token是否生效，catch捕获到就证明token过期，返回true
+			/** Restore cached identity first; only explicit backend auth failures justify logout. */
+			async restoreMemberSession() {
 				try {
-					const response = await getUserInfo();
-					// 使用服务端最新会员资料覆盖缓存，手机号门禁不能依赖过期的本地快照。
-					this.$store.commit('SETUID', response.data.uid);
-					this.$store.commit('UPDATE_USERINFO', response.data);
-					return false; // token有效
-				} catch (err) {
-					return true; // token过期
+					if (checkLogin()) {
+						try {
+							const response = await getUserInfo({ sessionProbe: true });
+							this.$store.commit('SETUID', response.data.uid);
+							this.$store.commit('UPDATE_USERINFO', response.data);
+							return;
+						} catch (error) {
+							if (!isMemberSessionExpired(error)) return;
+							this.$store.commit('LOGOUT');
+						}
+					}
+					// Existing bound members recover with a fresh WeChat code. New/unbound
+					// members receive no business token; protected actions still need phone authorization.
+					const code = await Routine.getCode();
+					await this.silenceAuth(code);
+				} catch (error) {
+					// Do not erase a valid cached session because the network is unavailable.
+					uni.hideLoading();
 				}
 			}
 		},

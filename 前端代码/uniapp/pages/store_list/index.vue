@@ -243,7 +243,8 @@
 			},
 			// 门店列表
 			getlist() {
-				getList(this.content).then(res => {
+				// 会员门店目录只扩大公开门店资料的展示范围；常用/地区/名称条件仍由后端处理，不能改变购店或管理权限。
+				getList({ ...this.content, member_directory: 1 }).then(res => {
 					this.info = res.data
 					res.data.forEach(item => {
 						if (this.sortIndex == item.id) {

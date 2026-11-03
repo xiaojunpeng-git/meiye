@@ -56,7 +56,7 @@
 		</view>
 		<Verify @success="success" captchaType="clickWord" :imgSize="{ width: '330px', height: '155px' }"
 			ref="verify"></Verify>
-		<editUserModal :isShow="isShow" @closeEdit="closeEdit" @editSuccess="editSuccess">
+		<editUserModal :isShow="isShow" :initialProfile="userInfo" @closeEdit="closeEdit" @editSuccess="editSuccess">
 		</editUserModal>
 		<!-- #ifdef MP -->
 		<privacyAgreementPopup v-if="canGetPrivacySetting" @onReject="onReject" @onAgree="onAgree">
@@ -71,6 +71,7 @@
 	import { HTTP_REQUEST_URL } from '@/config/app';
 	import sendVerifyCode from "@/mixins/SendVerifyCode";
 	import colors from '@/mixins/color.js';
+	import { needsMemberProfileCompletion } from '@/utils/memberProfileCompletion';
 	import editUserModal from '@/components/eidtUserModal/index.vue'
 	import privacyAgreementPopup from '../components/privacyAgreementPopup/index.vue'
 	import {
@@ -260,7 +261,8 @@
 					that.userInfo = res.data;
 					that.$store.commit('SETUID', res.data.uid);
 					that.$store.commit('UPDATE_USERINFO', res.data);
-					if (new_user) {
+					// Rebinding a phone must not recollect an already completed profile.
+					if (needsMemberProfileCompletion(new_user, res.data)) {
 						this.isShow = true
 					} else {
 						// #ifdef MP

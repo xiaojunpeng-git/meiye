@@ -69,6 +69,8 @@
 	export default {
 		mixins: [colors],
 		props: {
+			// Login passes the freshly loaded member; other callers may use Vuex.
+			initialProfile: { type: Object, default: null },
 			isShow: {
 				type: Boolean,
 				value: false
@@ -94,6 +96,17 @@
 				canvasStatus: false,
 				configData: this.$Cache.get('BASIC_CONFIG')
 			};
+		},
+		watch: {
+			isShow: {
+				immediate: true,
+				handler(visible) {
+					if (!visible) return;
+					const profile = this.initialProfile || (this.$store && this.$store.state.app.userInfo) || {};
+					// Preserve completed fields, but do not edit Vuex before Save succeeds.
+					this.userInfo = { avatar: profile.avatar || '', nickname: profile.nickname || '' };
+				}
+			}
 		},
 		mounted() {
 			try{
@@ -167,6 +180,9 @@
 				});
 				this.userInfo.nickname = e.detail.value.nickname
 				userEdit(this.userInfo).then(res => {
+					// Keep the phone/UID and all other member fields when updating the
+					// two profile fields; the next foreground gate sees the saved profile.
+					if (this.$store) this.$store.commit('UPDATE_USERINFO', Object.assign({}, this.$store.state.app.userInfo, this.userInfo));
 					this.$emit('editSuccess')
 					return that.$util.Tips({
 						title: res.msg,

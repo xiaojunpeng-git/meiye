@@ -20,6 +20,7 @@ import {
 import store from '../store';
 import Cache from '@/utils/cache';
 import { MERCHANT_STAFF_TOKEN } from '@/config/cache';
+import { getMemberSessionRecovery } from '@/utils/memberSessionRecovery';
 import pako from '../plugin/pako/pako.es5.min.js'
 
 function toLoginMp(){
@@ -66,7 +67,14 @@ function baseRequest(url, method, data, {
 	noAuth = false,
 	noVerify = false,
 	merchantAuth = false,
+	sessionProbe = false,
 }) {
+	// Queue only member-protected calls while startup validates/restores the
+	// session. The probe and public code exchange cannot depend on this promise.
+	const recovery = getMemberSessionRecovery();
+	if (!merchantAuth && !noAuth && !sessionProbe && recovery) {
+		return recovery.then(() => baseRequest(url, method, data, { noAuth, noVerify, merchantAuth, sessionProbe }));
+	}
 	let Url = getRequestUrl(),
 		header = Object.assign({}, HEADER);
 
@@ -112,7 +120,7 @@ function baseRequest(url, method, data, {
 					reslove(res.data, res);
 				else if ([410000, 410001, 410002].indexOf(res.data.status) !== -1) {
 					if (merchantAuth) Cache.clear(MERCHANT_STAFF_TOKEN);
-					else toLogin();
+					else if (!sessionProbe) toLogin();
 					reject(res.data);
 				} else if (res.data.status == 410010) {
 					uni.showModal({
@@ -121,6 +129,9 @@ function baseRequest(url, method, data, {
 						showCancel: false,
 						confirmText: '我知道了'
 					});
+					// Settle the startup probe even during maintenance; leaving this
+					// pending would hold every protected request indefinitely.
+					reject(res.data);
 				} else if(res.data.status == 410020){
 					// reject(res.data.msg);
 					uni.showModal({
@@ -130,6 +141,7 @@ function baseRequest(url, method, data, {
 						confirmText: '我知道了'
 					});
 					uni.setStorageSync('authIng', true)
+					reject(res.data);
 				} else if(res.data.status == 403){
 					reject(res.data);
 				} else {

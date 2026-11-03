@@ -104,6 +104,23 @@ export function openPaySubscribe() {
 }
 
 /**
+ * Cashier writeoff and balance deductions happen at the store, away from the
+ * member's phone. Request these two permissions only from a member tap, using
+ * this instance's live template IDs; a stale local cache or another client's
+ * IDs must never be used to claim subscription success.
+ */
+export function openCheckoutNoticeSubscribe(templates) {
+	const ids = [...new Set([
+		templates && templates.cika_chuange,
+		templates && templates.yue_change
+	].filter(id => typeof id === 'string' && id.trim()))];
+	if (ids.length !== 2) throw new Error('checkout_notice_templates_missing');
+	// Invoke WeChat directly from the tap handler: fetching IDs here would lose
+	// the user gesture that requestSubscribeMessage requires.
+	return subscribe(ids).then(result => ids.every(id => result && result[id] === 'accept'));
+}
+
+/**
  * Request the existing member notifications from an explicit checkout click.
  * Refund permission is collected with payment because a later store refund has
  * no member-side click. Denial/SDK errors must never change the payment result.

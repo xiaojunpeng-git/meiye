@@ -1,11 +1,17 @@
 import { LOGIN_STATUS, USER_INFO } from '@/config/cache';
 import Cache from '@/utils/cache';
+import { getMemberSessionRecovery } from '@/utils/memberSessionRecovery';
 
-// 公开调查仅允许查看与填写；提交和奖励仍由认证接口保护，其他业务深链继续执行手机号门禁。
+// 访客可浏览公开首页、分类、门店与商品；会员权益和个人业务仍在进入时校验手机号。
 const PHONE_GATE_ALLOWLIST = [
 	'pages/users/wechat_login/index',
 	'pages/users/privacy/index',
-	'pages/users/survey/index'
+	'pages/users/survey/index',
+	'pages/index/index',
+	'pages/goods_cate/goods_cate',
+	'pages/store_list/index',
+	'pages/store/home/index',
+	'pages/goods_details/index'
 ];
 const LOGIN_ROUTE = '/pages/users/wechat_login/index';
 let interceptorsInstalled = false;
@@ -25,7 +31,7 @@ function isAllowedRoute(route) {
 }
 
 /**
- * 手机号是会员端有效会话的一部分：只有 token 与非空手机号同时存在才允许浏览业务页。
+ * 手机号是会员端有效会话的一部分：只有 token 与非空手机号同时存在才允许进入个人业务页。
  * 这里读取 Vuex 和持久缓存，兼容冷启动时 Vuex 尚未完成恢复的短暂窗口。
  */
 export function hasMemberPhoneAuthorization(store) {
@@ -37,7 +43,17 @@ export function hasMemberPhoneAuthorization(store) {
 	return Boolean(token && String(userInfo.phone || '').trim());
 }
 
-function redirectToMemberLogin() {
+function redirectToMemberLogin(pendingRoute = '') {
+	// Never let cold-start onShow race the existing-session/code recovery. Block
+	// the attempted navigation now, then recheck its target after identity is known.
+	const recovery = getMemberSessionRecovery();
+	if (recovery) {
+		// 当前页可能是公开首页；不能用当前页代替刚被拦下的会员业务目标。
+		recovery.then(() => {
+			if (!hasMemberPhoneAuthorization(memberStore) && !isAllowedRoute(pendingRoute)) redirectToMemberLogin(pendingRoute);
+		});
+		return;
+	}
 	if (redirecting || currentRoute() === normalizeRoute(LOGIN_ROUTE)) return;
 	redirecting = true;
 	uni.reLaunch({
@@ -48,13 +64,23 @@ function redirectToMemberLogin() {
 	});
 }
 
+/** 返回时按真实页面栈判定目标，避免访客从商品详情返回公开首页时被误送登录。 */
+function routeAfterBack(delta = 1) {
+	const pages = getCurrentPages();
+	const steps = Math.max(1, Number(delta) || 1);
+	const target = pages[pages.length - 1 - steps];
+	return target ? normalizeRoute(target.route) : '';
+}
+
+let memberStore = null;
+
 /**
  * 校验当前页面；返回 false 表示当前业务页已被拦截并开始跳转登录页。
  */
 export function enforceMemberPhoneGate(store, pendingRoute = '') {
     // 冷启动时页面栈尚未建立，使用框架传入的落地页；已有页面永远优先，不能借旧扫码路径放宽门禁。
     if (hasMemberPhoneAuthorization(store) || isAllowedRoute(currentRoute() || pendingRoute)) return true;
-	redirectToMemberLogin();
+	redirectToMemberLogin(currentRoute() || pendingRoute);
 	return false;
 }
 
@@ -62,14 +88,15 @@ export function enforceMemberPhoneGate(store, pendingRoute = '') {
  * 拦截全部常见页面跳转（包括返回），防止用户从分享链接、底部导航或历史页面绕过手机号授权。
  */
 export function installMemberPhoneGate(store) {
+	memberStore = store;
 	if (interceptorsInstalled) return;
 	interceptorsInstalled = true;
 	['navigateTo', 'redirectTo', 'reLaunch', 'switchTab', 'navigateBack'].forEach(method => {
 		uni.addInterceptor(method, {
 			invoke(options = {}) {
-				const targetRoute = method === 'navigateBack' ? '' : normalizeRoute(options.url || '');
+				const targetRoute = method === 'navigateBack' ? routeAfterBack(options.delta) : normalizeRoute(options.url || '');
 				if (hasMemberPhoneAuthorization(store) || isAllowedRoute(targetRoute)) return true;
-				redirectToMemberLogin();
+				redirectToMemberLogin(targetRoute);
 				return false;
 			}
 		});

@@ -667,18 +667,23 @@ class StoreCombinationServices extends BaseServices
      * @param $id
      * @return array
      */
-    public function combinationStatistics(int $id)
+    public function combinationStatistics(int $id, array $admin)
     {
         /** @var StorePinkServices $pinkServices */
         $pinkServices = app()->make(StorePinkServices::class);
-        /** @var StoreOrderServices $orderServices */
-        $orderServices = app()->make(StoreOrderServices::class);
         $people_count = $pinkServices->getDistinctCount([['cid', '=', $id]], 'uid', false);
         $spread_count = $pinkServices->getDistinctCount([['cid', '=', $id], ['k_id', '>', 0]], 'uid', false);
         $start_count = $pinkServices->count(['cid' => $id, 'k_id' => 0]);
         $success_count = $pinkServices->count(['cid' => $id, 'k_id' => 0, 'status' => 2]);
-        $pay_price = $orderServices->sum(['type' => 3, 'activity_id' => $id, 'paid' => 1, 'pid' => [0, -1]], 'pay_price', true);
-        $pay_count = $orderServices->getDistinctCount(['type' => 3, 'activity_id' => $id, 'paid' => 1, 'pid' => [0, -1]], 'uid');
+        // 付款卡片复用活动流水的原订单身份；成团改为普通类型不丢付款，权限仍按本人购买门店裁剪。
+        $scope = new CombinationGroupListServices();
+        $scope->assertManagement($admin);
+        $paid = (new CombinationActivityFlowServices())->originalPaidOrders($id)->whereIn('pid',[0,-1]);
+        $allowed = $scope->allowedStores($admin);
+        if ($allowed !== null) $paid->whereIn('store_id',$allowed ?: [0])->where('store_id','>',0);
+        $pay_price = bcadd((string)(clone $paid)->sum('pay_price'),'0',2);
+        // 付款人数按会员去重，不能把同一会员的多笔付款当作多个人。
+        $pay_count = (int)((clone $paid)->fieldRaw('COUNT(DISTINCT uid) AS paying_members')->select()->toArray()[0]['paying_members'] ?? 0);
         return compact('people_count', 'spread_count', 'start_count', 'success_count', 'pay_price', 'pay_count');
     }
 

@@ -16,10 +16,7 @@
 					width: `${item.areaWidth}rpx`,
 					height: `${item.areaHeight}rpx`,
 				}" class="area" @click="goPage(item.link)">
-					<view class="area-caption">
-						<text class="area-caption__title">{{ item.name }}</text>
-						<text class="iconfont icon-ic_rightarrow area-caption__arrow"></text>
-					</view>
+					<!-- 图片热区仅保留配置中的点击范围和跳转；名称用于装修管理，不叠加显示在图片上。 -->
 				</view>
 			</block>
 		</view>
@@ -84,40 +81,6 @@
 		.area {
 			position: absolute;
 			box-sizing: border-box;
-			display: flex;
-			align-items: flex-end;
-			padding: 18rpx;
-			border-radius: 28rpx;
-			transition: background-color .2s ease;
-
-			&:active { background: rgba(123, 41, 65, .06); }
-		}
-
-		.area-caption {
-			display: inline-flex;
-			align-items: center;
-			max-width: 100%;
-			padding: 10rpx 14rpx;
-			border: 1rpx solid rgba(255,255,255,.76);
-			border-radius: 999rpx;
-			background: rgba(255, 253, 251, .68);
-			box-shadow: 0 6rpx 18rpx rgba(100, 55, 65, .08);
-			backdrop-filter: blur(10px);
-			color: #6f2b40;
-		}
-
-		.area-caption__title {
-			overflow: hidden;
-			font-size: 22rpx;
-			font-weight: 600;
-			line-height: 28rpx;
-			white-space: nowrap;
-			text-overflow: ellipsis;
-		}
-
-		.area-caption__arrow {
-			margin-left: 6rpx;
-			font-size: 18rpx;
 		}
 
 		.quick-entry-grid {

@@ -21,7 +21,7 @@
 				<button hover-class="none" @click="wechatLogin" class="bg-color btn1">授权登录</button>
 				<!-- #endif -->
 				<!-- #ifdef MP -->
-				<!-- 手机号授权是会员端强制入口，不能再由后台开关或短信登录绕过。 -->
+				<!-- 会员业务仍须授权手机号；访客可以返回公开首页浏览。 -->
 				<template>
 					<button hover-class="none" v-if="authPreparing" disabled class="bg-color btn1">正在准备登录...</button>
 					<button hover-class="none" v-else-if="!authReady" @tap="userLogin"
@@ -31,7 +31,8 @@
 					<button hover-class="none" v-else @tap="getAuthLogin"
 						class="bg-color btn1">授权登录</button>
 				</template>
-				<view class="acea-row row-center-wrapper fs-30 text--w111-999">授权手机号后方可进入会员端</view>
+				<view class="acea-row row-center-wrapper fs-30 text--w111-999">授权手机号后可使用会员权益</view>
+				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @tap="browseHome">先浏览首页</view>
 				<!-- #endif -->
 			</view>
 		</view>
@@ -48,7 +49,7 @@
 		</view>
 	
 		<block>
-			<editUserModal :isShow="isShow" :navigateOnSuccess="profileEditNavigatesBack" @closeEdit="closeEdit" @editSuccess="editSuccess">
+			<editUserModal :isShow="isShow" :initialProfile="userInfo" :navigateOnSuccess="profileEditNavigatesBack" @closeEdit="closeEdit" @editSuccess="editSuccess">
 			</editUserModal>
 		</block>
 		<!-- #ifdef MP -->
@@ -62,6 +63,7 @@
 	const app = getApp();
 	let statusBarHeight = uni.getSystemInfoSync().statusBarHeight + 'px';
 	import { HTTP_REQUEST_URL } from '@/config/app';
+	import { needsMemberProfileCompletion } from '@/utils/memberProfileCompletion';
 	import editUserModal from '@/components/eidtUserModal/index.vue'
 	import privacyAgreementPopup from '../components/privacyAgreementPopup/index.vue'
 	
@@ -177,6 +179,10 @@
 			uni.removeStorageSync('form_type_cart');
 		},
 		methods: {
+			// 访客主动退出登录页只回公开首页，领取权益等受保护操作仍由全局门禁拦截。
+			browseHome() {
+				uni.switchTab({ url: '/pages/index/index' });
+			},
 			getErrorMessage(error, fallback = '登录失败，请稍后重试') {
 				if (typeof error === 'string') return error;
 				return (error && (error.msg || error.message || error.errMsg)) || fallback;
@@ -417,7 +423,8 @@
 					that.userInfo = res.data;
 					that.$store.commit('SETUID', res.data.uid);
 					that.$store.commit('UPDATE_USERINFO', res.data);
-					if (new_user) {
+					// The backend switch enables completion prompts, not repeated collection.
+					if (needsMemberProfileCompletion(new_user, res.data)) {
 						this.isShow = true
 					} else {
 						// #ifdef MP

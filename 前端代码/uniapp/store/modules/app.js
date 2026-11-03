@@ -13,6 +13,7 @@ import { diyProductApi } from "@/api/store.js"
 import { getAgentBrokerage } from "@/api/public.js"
 import {
 	LOGIN_STATUS,
+	EXPIRES_TIME,
 	NON_WIFI_AUTOPLAY,
 	UID,
 	USER_INFO,
@@ -24,7 +25,8 @@ import Cache from '@/utils/cache';
 const state = {
 	token: Cache.get(LOGIN_STATUS) || false,
 	backgroundColor: "#fff",
-	userInfo: Cache.get(USER_INFO) || {},
+	// Restore an object on cold start so phone/profile checks see the same member.
+	userInfo: Cache.get(USER_INFO, true) || {},
 	uid: Cache.get(UID) || 0,
 	homeActive: false,
 	phoneStatus: true,
@@ -72,6 +74,9 @@ const mutations = {
 	LOGIN(state, opt) {
 		state.token = opt.token;
 		Cache.set(LOGIN_STATUS, opt.token, opt.time);
+		// Persist the matching absolute expiry; never inherit a prior account's timestamp.
+		Cache.clear(EXPIRES_TIME);
+		if (Number.isFinite(opt.time) && opt.time > 0) Cache.set(EXPIRES_TIME, Cache.time() + opt.time, opt.time);
 	},
 	SETUID(state, val) {
 		state.uid = val;
@@ -82,6 +87,7 @@ const mutations = {
 	},
 	LOGOUT(state) {
 		Cache.clear(LOGIN_STATUS);
+		Cache.clear(EXPIRES_TIME);
 		Cache.clear(UID);
 		Cache.clear(USER_INFO);
 		Cache.clear('newcomerGift');

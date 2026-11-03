@@ -14,8 +14,9 @@ import request from "@/utils/request.js";
  * 获取用户信息
  *
  */
-export function getUserInfo() {
-	return request.get('user');
+// Startup probe reports auth errors to its coordinator without redirecting midway.
+export function getUserInfo(options = {}) {
+	return request.get('user', {}, { sessionProbe: options.sessionProbe === true });
 }
 
 /**

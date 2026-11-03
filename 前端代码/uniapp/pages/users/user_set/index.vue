@@ -1,8 +1,10 @@
 <script>
 import { getUserInfo, getLogout } from '@/api/user.js';
 import { getChangelogUnread } from '@/api/changelog.js';
+import { getTemlIds } from '@/api/api.js';
 import { LAST_CHANGELOG_READ_TIME } from '@/config/cache';
 import { toLogin } from '@/libs/login.js';
+import { openCheckoutNoticeSubscribe } from '@/utils/SubscribeMessage.js';
 import { mapGetters, mapMutations } from 'vuex';
 import colors from '@/mixins/color.js';
 import tuiModal from '@/components/tui-modal/index.vue';
@@ -19,6 +21,7 @@ export default {
 			showModal: false,
 			homeHide: false,
 			changelogUnread: false,
+			checkoutNoticeTemplateIds: null,
 		};
 	},
 	mixins: [colors],
@@ -27,6 +30,9 @@ export default {
 		if (this.isLogin) {
 			this.getUserInfo();
 			this.checkChangelogUnread();
+			// #ifdef MP
+			this.loadCheckoutNoticeTemplateIds();
+			// #endif
 		} else {
 			toLogin();
 		}
@@ -36,6 +42,28 @@ export default {
 	},
 	methods: {
 		...mapMutations(['SET_AUTOPLAY']),
+		/** Prefetch this instance's IDs before the member taps the subscription row. */
+		loadCheckoutNoticeTemplateIds() {
+			getTemlIds().then(res => {
+				this.checkoutNoticeTemplateIds = res && res.data ? res.data : null;
+			}).catch(() => {
+				this.checkoutNoticeTemplateIds = null;
+			});
+		},
+		/** A member tap is required before WeChat can grant cashier message consent. */
+		subscribeCheckoutNotices() {
+			// #ifdef MP
+			try {
+				openCheckoutNoticeSubscribe(this.checkoutNoticeTemplateIds).then(accepted => {
+					uni.showToast({ title: accepted ? '订阅成功' : '请同意核销和余额通知', icon: 'none' });
+				}).catch(() => {
+					uni.showToast({ title: '订阅暂不可用，请稍后重试', icon: 'none' });
+				});
+			} catch (error) {
+				uni.showToast({ title: '消息配置加载中，请稍后重试', icon: 'none' });
+			}
+			// #endif
+		},
 		/**
 		 * 小程序设置
 		 */
@@ -137,6 +165,10 @@ export default {
 					<switch :checked="autoplay" @change="autoplayChange" />
 				</view>
 				<!-- #ifdef MP -->
+				<view v-if="checkoutNoticeTemplateIds && checkoutNoticeTemplateIds.cika_chuange && checkoutNoticeTemplateIds.yue_change" class="item acea-row row-between-wrapper" role="button" @click="subscribeCheckoutNotices">
+					<view>订阅核销与余额通知</view>
+					<view class="grab"><text class="iconfont icon-ic_rightarrow"></text></view>
+				</view>
 				<view class="item acea-row row-between-wrapper">
 					<view>权限设置</view>
 					<view class="input grab" @click="Setting">

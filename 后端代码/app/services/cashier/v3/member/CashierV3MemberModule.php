@@ -1008,15 +1008,16 @@ final class CashierV3MemberModule
             $query->leftJoin('member_name_initial_search name_search', 'name_search.uid = u.uid');
         }
         if ($keyword !== '') {
-            $like = '%' . addcslashes($keyword, '%_') . '%';
-            $query->where(function ($q) use ($like, $keyword, $initials) {
+            // 会员选择器所有可查询身份字段使用同一字面片段；转义通配符，不能让输入扩大后端门店范围。
+            $like = '%' . addcslashes($keyword, '\\%_') . '%';
+            $query->where(function ($q) use ($like, $initials) {
                 $q->whereLike('u.nickname', $like)
                     ->whereLike('u.real_name', $like, 'OR')
-                    ->whereOr('u.phone', $keyword)
-                    ->whereOr('u.bar_code', $keyword);
+                    ->whereLike('u.phone', $like, 'OR')
+                    ->whereLike('u.bar_code', $like, 'OR');
                 // 先按数据库权限确定候选，再在同一 SQL 内计数/分页；不能只筛当前页。
                 if ($initials !== '') {
-                    $q->whereOr('name_search.initials', 'like', $initials . '%');
+                    $q->whereLike('name_search.initials', '%' . $initials . '%', 'OR');
                 }
             });
         }
@@ -1319,7 +1320,7 @@ final class CashierV3MemberModule
         if ($profileFields) {
             try {
                 $extendInfo = self::encodeMemberExtendInfo(
-                    $userServices->handelExtendInfo($profileFields),
+                    $userServices->handelExtendInfo($profileFields) ?? [],
                     $profileFields
                 );
             } catch (\Throwable $e) {
@@ -1333,7 +1334,8 @@ final class CashierV3MemberModule
             'real_name' => $name,
             'phone' => $phone,
             'bar_code' => $memberNo,
-            'avatar' => sys_config('h5_avatar'),
+            // 未配置头像时沿用字段空串缺省，避免NULL写入非空列；已配置的头像地址原样保留。
+            'avatar' => (string)(sys_config('h5_avatar') ?? ''),
             'user_type' => 'cashier',
             'belong_store_id' => $operatorScope->storeId(),
             'status' => 1,
@@ -1516,7 +1518,7 @@ final class CashierV3MemberModule
         try {
             $updates['card_id'] = trim((string)($payload['idCard'] ?? $payload['card_id'] ?? ($member['card_id'] ?? '')));
             $updates['extend_info'] = self::encodeMemberExtendInfo(
-                $userServices->handelExtendInfo($profileFields),
+                $userServices->handelExtendInfo($profileFields) ?? [],
                 $profileFields,
                 $member
             );
@@ -1878,6 +1880,14 @@ final class CashierV3MemberModule
      */
     private static function encodeMemberExtendInfo(array $configured, array $submitted, array $member = []): string
     {
+        // 未配置扩展档案时不重建历史数据；避免普通资料或手机号编辑清空旧档案。
+        if (!$configured && !$submitted) {
+            $original = $member['extend_info'] ?? '';
+            if (!is_array($original)) return (string)$original;
+            $encoded = json_encode($original, JSON_UNESCAPED_UNICODE);
+            if (!is_string($encoded)) throw new \RuntimeException('member_extend_info_encode_failed');
+            return $encoded;
+        }
         $storedRows = $member['extend_info'] ?? [];
         $storedRows = is_array($storedRows) ? $storedRows : (json_decode((string)$storedRows, true) ?: []);
         $storedValues = [];

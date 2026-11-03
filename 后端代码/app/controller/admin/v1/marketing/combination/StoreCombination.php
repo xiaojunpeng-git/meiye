@@ -73,7 +73,8 @@ class StoreCombination extends AuthController
      */
     public function combinationStatistics($id)
     {
-        $data = $this->services->combinationStatistics((int)$id);
+        // 统计付款金额沿用活动流水的数据范围，不允许历史兼容补入超出当前账号门店的付款。
+        $data = $this->services->combinationStatistics((int)$id, $this->adminInfo);
         return app('json')->success($data);
     }
 
