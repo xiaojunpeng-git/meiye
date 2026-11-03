@@ -211,8 +211,34 @@ class StoreCombination extends AuthController
             $id = 0;
             unset($data['copy']);
         }
+        // 奖励内容与活动一次保存；配置人只取已认证的管理会话，不能由请求伪造。
+        $reward = $this->request->post('leader_reward', null);
+        if ($reward !== null) {
+            if (!is_array($reward)) throw new \think\exception\ValidateException('团长奖励配置格式无效');
+            $data['leader_reward'] = $reward;
+            $data['_leader_reward_admin_id'] = (int)$this->request->adminId();
+        }
         $this->services->saveData($id, $data);
         return $this->success('保存成功');
+    }
+
+    /** 奖励选品沿用共享总部目录；拼团仅允许项目与券，不借用调查任务权限。 */
+    public function leaderRewardCatalog()
+    {
+        (new \app\services\activity\combination\CombinationLeaderRewardServices())->assertConfigurationAccess($this->adminInfo);
+        $filters = $this->request->getMore([['page',1],['limit',20],['store_name',''],['type',1],['cate_id',0]]);
+        $filters['product_type'] = '6';
+        return $this->success((new \app\services\user\MemberRewardCatalogServices())->catalog(0,$filters));
+    }
+
+    /** 奖励查询与重试共用原拼团管理范围，重试不会重新读取活动配置。 */
+    public function leaderRewardStatus($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationLeaderRewardServices())->adminStatus((int)$id,$this->adminInfo));
+    }
+    public function retryLeaderReward($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationLeaderRewardServices())->adminStatus((int)$id,$this->adminInfo,true));
     }
 
     /**

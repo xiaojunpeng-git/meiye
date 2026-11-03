@@ -553,6 +553,9 @@ Route::group('api', function () {
         Route::post('bargain/user/cancel', 'v1.activity.StoreBargain/user_cancel')->name('bargainUserCancel');//砍价取消
         Route::get('bargain/poster_info/:bargainId', 'v1.activity.StoreBargain/posterInfo')->name('posterInfo');//砍价海报详细信息
         //活动---拼团
+        // 登录会员推广明细固定本人身份，不能用请求 UID 扩大数据范围。
+        Route::get('combination/promotion/summary', 'v1.activity.CombinationPromotion/summary');
+        Route::get('combination/promotion/orders', 'v1.activity.CombinationPromotion/orders');
         Route::get('combination/member/records/:id', 'v1.activity.StoreCombination/memberRecordDetail')->name('combinationMemberRecordDetail');//当前会员历史拼团详情
         Route::get('combination/member/records', 'v1.activity.StoreCombination/memberRecords')->name('combinationMemberRecords');//当前会员拼团记录
         Route::get('combination/pink/:id', 'v1.activity.StoreCombination/pink')->name('combinationPink');//拼团开团

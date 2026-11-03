@@ -266,6 +266,8 @@ class CombinationRefundServices
                         Db::name('combination_order_refund')->where('order_id', $orderId)
                             ->update(['state' => 'success', 'updated_at' => time()]);
                     });
+                    // 只在原单成功全退后撤销未使用的团长赠品；撤销失败由回执重试。
+                    (new CombinationLeaderRewardServices())->onLeaderOrderRefunded($orderId);
                 }
             }
         } catch (\Throwable $error) {

@@ -36,7 +36,7 @@ final class CashierV3RechargeModule
     // non-cash checkout settlement must never mint member balance.
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
-        'douyin_voucher', 'bank_transfer', 'other_income', 'partner_collection',
+        'douyin_voucher', 'bank_transfer', 'other_income', 'third_party', 'partner_collection',
     ];
 
     public static function install(CashierV3ActionDispatcher $dispatcher): void
@@ -130,6 +130,11 @@ final class CashierV3RechargeModule
         );
         $accountingConfig = new CashierV3BusinessConfigServices();
         foreach ($input['paymentLines'] as $index => $paymentLine) {
+            // 会员自助充值经可信支付回调确认；人工充值不得伪造该自动分类。
+            if ($paymentLine['paymentMethod'] === 'third_party'
+                && ($dataScope->operatorProfile()['actor_type'] ?? '') !== 'member') {
+                throw self::failure('third_party_accounting_requires_member_order', '第三方支付仅用于会员端订单。');
+            }
             $snapshot = $accountingConfig->resolveAccountingMethodSnapshot((string)$paymentLine['paymentMethod'], true);
             $input['paymentLines'][$index]['paymentMethodNameSnapshot'] = (string)$snapshot['displayNameSnapshot'];
         }

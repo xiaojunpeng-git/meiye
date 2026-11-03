@@ -336,6 +336,8 @@
 				addressId:'',
 				store_id :'',
 				memberStoreId: 0,
+				// 仅当前邀请链接的身份；globalData.spid是旧永久推荐链，不能用作本单归属。
+				shareUid: 0,
 				delivery_type:0,
 				store_name:'',
 				endTime: false,
@@ -380,7 +382,7 @@
 					if (newV) {
 						this.userInfo = newV;
 						this.memberStoreId = Number(newV.belong_store_id) || 0;
-						app.globalData.openPages = '/pages/activity/goods_combination_status/index?id=' + this.pinkId+'&spid=' + this.userInfo.uid;
+						app.globalData.openPages = this.groupSharePath();
 					}
 				},
 				deep: true
@@ -388,13 +390,14 @@
 		},
 		onLoad(options) {
 			var that = this;
+			this.shareUid = Number(options.spid) || 0;
 			// #ifdef MP
 			if (options.scene) {
 				var value = util.getUrlParams(decodeURIComponent(options.scene));
 				if (typeof value === 'object') {
 					if (value.id) options.id = value.id;
 					//记录推广人uid
-					if (value.spid) app.globalData.spid = value.spid;
+					if (value.spid) { app.globalData.spid = value.spid; this.shareUid = Number(value.spid) || 0; }
 				}
 			}
 			// #endif
@@ -406,20 +409,15 @@
 			// 记录推广人uid；
 			if (options.spid) app.globalData.spid = options.spid;
 			if (that.isLogin == false) {
-				this.$Cache.set('login_back_url', `/pages/activity/goods_combination_status/index?id=${options.id}`);
 				this.getIsLogin();
 			} else {
 				this.getCombinationPink();
 			}
 			// #ifdef H5
-			this.val = window.location.origin + '/pages/activity/goods_combination_status/index?id=' + this.pinkId +
-				'&spid=' +
-				this.$store.state.app.uid
+			this.val = window.location.origin + this.groupSharePath()
 			// #endif
 			// #ifdef APP-PLUS
-			this.val = HTTP_REQUEST_URL + '/pages/activity/goods_combination_status/index?id=' + this.pinkId +
-				'&spid=' +
-				this.$store.state.app.uid
+			this.val = HTTP_REQUEST_URL + this.groupSharePath()
 			// #endif
 		},
 		onShow() {
@@ -440,19 +438,25 @@
 			const user = this.userInfo || {};
 			return {
 				title: '您的好友' + (user.nickname || '') + '邀请您参团' + (this.storeCombination.title || ''),
-				path: '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.pinkId)
-					+ (user.uid ? '&spid=' + encodeURIComponent(user.uid) : ''),
+				path: this.groupSharePath(),
 				imageUrl: this.storeCombination.image
 			};
 		},
 		//#endif
 		methods: {
+			/** 当前会员主动分享生成新邀请；不改写用于本次下单的入站 shareUid。 */
+			groupSharePath() {
+				return '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.pinkId)
+					+ '&spid=' + encodeURIComponent(this.$store.state.app.uid || 0);
+			},
 			onLoadFun() {
 				this.getCombinationPink();
 				this.isShowAuth = false;
 			},
 			getIsLogin() {
-				toLogin()
+				// 显式交给登录服务保存，避免先写缓存后被默认无参 route 覆盖。
+				toLogin(undefined, undefined, '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.pinkId)
+					+ '&spid=' + encodeURIComponent(this.shareUid || 0));
 			},
 			// 授权关闭
 			authColse: function(e) {
@@ -720,7 +724,7 @@
 				postCartAdd(data)
 					.then(res => {
 						uni.navigateTo({
-							url: '/pages/goods/order_confirm/index?new=1&cartId=' + res.data.cartId + '&pinkId=' + that.pinkId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+that.store_id+'&store_name='+that.store_name+'&product_id=' + that.storeCombination.product_id+'&group_purchase=1'
+							url: '/pages/goods/order_confirm/index?new=1&spid=' + encodeURIComponent(that.shareUid || 0) + '&cartId=' + res.data.cartId + '&pinkId=' + that.pinkId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+that.store_id+'&store_name='+encodeURIComponent(that.store_name || '')+'&product_id=' + that.storeCombination.product_id+'&group_purchase=1'
 						});
 					})
 					.catch(res => {
@@ -743,9 +747,9 @@
 			},
 			//拼团详情
 			goDetail: function(id) {
-				this.pinkId = id;
+				// 从当前团返回活动继续购买，保留收到的分享归属，不能把活动 ID 写成团 ID。
 				uni.navigateTo({
-					url: '/pages/activity/goods_details/index?id=' + id + '&type=3'
+					url: '/pages/activity/goods_details/index?id=' + encodeURIComponent(id) + '&type=3&spid=' + encodeURIComponent(this.shareUid || 0)
 				});
 			},
 			//拼团信息
@@ -776,8 +780,7 @@
 						}
 						
 						that.selectSku = that.skuArr[0];
-						let uid = that.userInfo.uid?that.userInfo.uid:0
-						app.globalData.openPages = '/pages/activity/goods_combination_status/index?id=' + this.pinkId + '&spid='+uid;
+						app.globalData.openPages = this.groupSharePath();
 						res.data.store_combination.delivery_type.sort((x,y)=>x - y);
 						that.$set(that.attr, 'deliveryType', res.data.store_combination.delivery_type);
 						that.attr.productAttr = res.data.store_combination.productAttr;
@@ -811,8 +814,7 @@
 				let configTimeline = {
 					title: '您的好友' + that.userInfo.nickname + '邀请您参团' + that.storeCombination.title,
 					desc: that.storeCombination.title,
-					link: window.location.protocol + '//' + window.location.host +
-						'/pages/activity/goods_combination_status/index?id=' + that.pinkId + '&spid=' + that.userInfo.uid,
+					link: window.location.origin + this.groupSharePath(),
 					imgUrl: that.storeCombination.image
 				};
 				if (this.$wechat.isWeixin()) {

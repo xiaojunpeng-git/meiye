@@ -60,6 +60,9 @@ class CombinationGroupManagementServices
         });
         // Failed issuance is recoverable from pending receipts. Never roll back a successful group because a notification failed.
         $this->issueCompleted($groupId);
+        // 统一奖励服务会剔除虚拟成团；独立失败由持久回执恢复。
+        try { (new CombinationLeaderRewardServices())->onGroupCompleted($groupId); }
+        catch (\Throwable $error) { \think\facade\Log::warning('团长奖励待重试 gid=' . $groupId); }
         return $result;
     }
 

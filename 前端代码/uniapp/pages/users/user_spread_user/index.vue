@@ -47,6 +47,11 @@
 				</view>
 			</view>
 			<view class="statistics acea-row">
+				<!-- 拼团推广使用独立的本人归属查询，不混入分销佣金订单或提现金额。 -->
+				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(13)">
+					<view class="img"><image :src="imgHost+'/statics/images/spread_dd.png'" class="image"></image></view>
+					<view class="item-r"><view class="text">拼团推广</view></view>
+				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(8)">
 					<view class="img">
 						<image :src="imgHost+'/statics/images/spread_dd.png'" class="image"></image>
@@ -254,6 +259,7 @@
 					'/pages/users/user_distribution_level/index',
 					'/pages/users/user_distribution_info/index',
 					'/pages/users/user_withdrawal/index',
+					'/pages/users/combination_promotion/index',
 				]
 				if(type==10 && !this.headerStatus){
 					return false

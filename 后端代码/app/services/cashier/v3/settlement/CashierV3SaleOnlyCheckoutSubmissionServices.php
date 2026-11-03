@@ -223,6 +223,11 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             // The ordinary checkout grant is insufficient for historical
             // card entry. Recheck the server-locked payment draft at submit.
             foreach ((array)$aggregate['payments'] as $payment) {
+                // 在锁定的最终付款草稿再次校验，防止人工入口跳过快照准备伪造自动分类。
+                if (($payment['payment_method'] ?? '') === 'third_party'
+                    && ($dataScope->operatorProfile()['actor_type'] ?? '') !== 'member') {
+                    throw self::failure('third_party_accounting_requires_member_order');
+                }
                 if ((string)($payment['payment_method'] ?? '') === 'old_card_entry'
                     && !$dataScope->hasFeature('cashier.v3.cashier.old_card_entry')) {
                     throw self::failure('old_card_entry_permission_denied');

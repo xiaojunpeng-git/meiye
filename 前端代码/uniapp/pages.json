@@ -466,6 +466,10 @@
 					}
 				},
 				{
+					"path": "combination_promotion/index",
+					"style": { "navigationBarTitleText": "拼团推广" }
+				},
+				{
 					"path": "user_spread_code/index",
 					"style": {
 						"navigationBarTitleText": "分销海报",

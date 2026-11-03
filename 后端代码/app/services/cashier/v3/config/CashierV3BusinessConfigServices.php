@@ -36,6 +36,8 @@ final class CashierV3BusinessConfigServices extends BaseServices
         'bank_transfer' => '银行转账',
         // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
         'other_income' => '其他收入',
+        // 新会员端订单的统一记账分类；真实支付渠道单独保留。
+        'third_party' => '第三方支付',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
         'old_card_entry' => '旧数据录入',
@@ -197,7 +199,10 @@ final class CashierV3BusinessConfigServices extends BaseServices
             'sources' => array_values(array_filter($this->sourceTree(true), static function (array $source): bool {
                 return !self::isRefundSourceName((string)$source['name']);
             })),
-            'accountingMethods' => $this->accountingMethods(true),
+            // 第三方支付由会员订单自动分类，不能作为人工收银可选的实际渠道。
+            'accountingMethods' => array_values(array_filter($this->accountingMethods(true), static function (array $method): bool {
+                return $method['code'] !== 'third_party';
+            })),
             'sourceMaxLevel' => 2,
             'configVersion' => $this->configVersion(),
         ];
@@ -365,10 +370,14 @@ final class CashierV3BusinessConfigServices extends BaseServices
             $displayName = $this->normalizeName($input['displayName'] ?? $input['display_name'] ?? $row['display_name']);
             $status = $this->normalizeStatus($input['status'] ?? $row['status']);
             $sort = $this->normalizeSort($input['sort'] ?? $row['sort']);
+            // 手机端付款回调使用固定系统分类，不能改名或停用后造成已收款订单无法落账。
+            if ($code === 'third_party' && ($displayName !== '第三方支付' || $status !== 1)) {
+                throw new ValidateException('第三方支付是会员端订单的固定记账方式，名称和启用状态不可修改。');
+            }
             if ($status === 0 && (int)$row['status'] === 1) {
                 $activeCount = (int)Db::name('cashier_v3_payment_method_config')
                     ->where('status', 1)
-                    ->where('code', '<>', 'old_card_entry')
+                    ->whereNotIn('code', ['old_card_entry', 'third_party'])
                     ->count();
                 if ($activeCount <= 1) {
                     throw new ValidateException('至少保留一种启用的记账收款方式');

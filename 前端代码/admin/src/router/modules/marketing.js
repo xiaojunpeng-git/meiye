@@ -39,6 +39,12 @@ export default {
       component: () => import('@/pages/marketing/storeCombination/index')
     },
     {
+      path: 'store_combination/dashboard',
+      name: `${pre}combinationDashboard`,
+      meta: { auth: ['marketing-store_combination-dashboard'], title: '拼团大屏' },
+      component: () => import('@/pages/marketing/storeCombination/dashboard')
+    },
+    {
       path: 'store_combination/combina_list',
       name: `${pre}combinaList`,
       meta: {

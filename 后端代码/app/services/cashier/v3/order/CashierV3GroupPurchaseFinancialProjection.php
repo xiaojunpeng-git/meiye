@@ -14,7 +14,7 @@ final class CashierV3GroupPurchaseFinancialProjection
         $orders=Db::name('store_order')->alias('o')->join('combination_order_fulfillment f','f.order_id=o.id')
             ->leftJoin('system_store s','s.id=o.store_id')->whereIn('o.id',$ids)->where('o.paid',1)->whereIn('f.state',['issued','delivering'])
             ->where('o.refund_status',0)->where('o.terminal_action',0)
-            ->field('o.id,o.order_id,o.uid,o.store_id,o.pay_type,o.trade_no,o.pay_time,o.pay_price,o.total_price,o.cash_pay_price,o.yue_pay_price,o.debt_amount,o.coupon_price,o.total_postage,s.name AS current_store_name')->select()->toArray();
+            ->field('o.id,o.order_id,o.uid,o.store_id,o.pay_type,o.accounting_method,o.trade_no,o.pay_time,o.pay_price,o.total_price,o.cash_pay_price,o.yue_pay_price,o.debt_amount,o.coupon_price,o.total_postage,s.name AS current_store_name')->select()->toArray();
         $lines=Db::name('store_order_cart_info')->whereIn('oid',array_column($orders,'id'))->where('cart_type',0)->where('is_gift',0)->select()->toArray();
         $byOrder=[];foreach($lines as$l)$byOrder[(int)$l['oid']][]=$l;
         // 商户号仅从已付款渠道尝试读取，不使用当前可编辑商户配置冒充历史凭据。
@@ -41,12 +41,25 @@ final class CashierV3GroupPurchaseFinancialProjection
         foreach(['receivableAmount'=>$amount,'receivable_amount'=>$amount,'actualReceivedAmount'=>$cash,'actual_received_amount'=>$cash,'debtAmount'=>0.0,'debt_amount'=>0.0,'couponDiscountAmount'=>$coupon,'coupon_discount_amount'=>$coupon,'amountBeforeCoupon'=>$amount+$coupon]as$k=>$v)$mapped[$k]=$v;
         $methods=[];$pay=[];$labels=['weixin'=>['wechat','微信'],'alipay'=>['alipay','支付宝']];
         if($cash>0&&isset($labels[$o['pay_type']])){[$code,$name]=$labels[$o['pay_type']];$methods[]=$name;$pay[]=['id'=>'group-payment-'.$o['id'],'paymentMethodCode'=>$code,'methodName'=>$name,'amount'=>$cash,'externalTransactionNo'=>(string)$o['trade_no'],'remark'=>$e['merchant']!==''?'随行付商户号：'.$e['merchant']:'','occurredAt'=>date('Y-m-d H:i:s',(int)$o['pay_time'])];}
-        if($e['balance']>0)$methods[]='余额支付';$mapped['paymentDetails']=$pay;$mapped['paymentMethod']=$mapped['payment_method']=implode('、',$methods);$mapped['paymentDetailsDataStatus']='original_order_snapshot';
+        if($e['balance']>0){
+            $methods[]='余额支付';
+            // 新手机单统一记账名称，但余额仍为内部资金扣减，不写外部到账事实。
+            if(\app\services\member\MemberOrderAccounting::isThirdParty($o))$pay[]=[
+                'id'=>'group-balance-'.$o['id'],'paymentMethodCode'=>'member_balance','methodName'=>'余额支付',
+                'amount'=>$e['balance']/100,'externalTransactionNo'=>'','remark'=>'',
+                'occurredAt'=>date('Y-m-d H:i:s',(int)$o['pay_time'])];
+        }$mapped['paymentDetails']=$pay;$mapped['paymentMethod']=$mapped['payment_method']=implode('、',$methods);$mapped['paymentDetailsDataStatus']='original_order_snapshot';
         // 主购买明细承担销售金额，cart_type=2权益载体不重复计入。
         foreach($mapped['items']as&$item)if((int)$item['orderItemId']===(int)$l['id']){$q=(float)$l['cart_num'];$item['unitPrice']=$q>0?($amount+$coupon)/$q:null;$item['originalAmount']=$item['amountBeforeCoupon']=$amount+$coupon;$item['payableAmount']=$amount;$item['actualReceivedAmount']=$cash;$item['couponDiscountAmount']=$coupon;$item['debtAmount']=0.0;}unset($item);
         $mapped['amountSummary']=['originalAmount'=>self::cents($o['total_price'])/100,'priceChangeDiscountAmount'=>null,'couponDiscountAmount'=>$coupon,'otherDiscountAmount'=>null,'payableAmount'=>$amount,'debtAmount'=>0.0,'actualReceivedAmount'=>$cash,'balancePaymentAmount'=>$e['balance']/100,'dataStatus'=>'original_order_snapshot'];
         // 明确保留原系统来源；不能因此启用V3退款/作废命令或宣称拥有V3现金业绩快照。
-        $mapped['economicsDataStatus']='original_order_snapshot';return$mapped;
+        $mapped['economicsDataStatus']='original_order_snapshot';
+        // 保留 pay_type 和 trade_no 原始凭证，创建字段缺省的历史/旧待付款单不变。
+        if(\app\services\member\MemberOrderAccounting::isThirdParty($o)) {
+            foreach($mapped['paymentDetails'] as &$payment)if($payment['paymentMethodCode']!=='member_balance')$payment['paymentMethodCode']='third_party';
+            unset($payment);
+        }
+        return \app\services\member\MemberOrderAccounting::project($mapped,$o,(string)$o['pay_type']);
     }
     private static function cents($value): int
     {

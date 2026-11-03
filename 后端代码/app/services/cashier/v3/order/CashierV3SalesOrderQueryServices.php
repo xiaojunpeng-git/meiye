@@ -1514,7 +1514,7 @@ final class CashierV3SalesOrderQueryServices
             $row = $query->field($fields)->find();
             $row = $row ? (is_array($row) ? $row : $row->toArray()) : null;
             // 商城拼团的金额来自原购买/付款凭据，按已授权订单批读，不生成V3事实。
-            if ($row) $row = (new CashierV3GroupPurchaseFinancialProjection())->attach([$row])[0];
+            if ($row) $row = (new CashierV3MemberOrderAccountingProjection())->attach((new CashierV3GroupPurchaseFinancialProjection())->attach([$row]))[0];
             $lineRows = $row ? $this->databaseLineRows([(int)$row['id']]) : [];
             return [
                 'row' => $row,
@@ -1549,7 +1549,7 @@ final class CashierV3SalesOrderQueryServices
         }
         $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'id')))));
         $lineRows = $this->databaseLineRows($ids);
-        $rows = (new CashierV3GroupPurchaseFinancialProjection())->attach($rows);
+        $rows = (new CashierV3MemberOrderAccountingProjection())->attach((new CashierV3GroupPurchaseFinancialProjection())->attach($rows));
         return [
             'rows' => $rows,
             'total' => $total,
@@ -2111,6 +2111,15 @@ final class CashierV3SalesOrderQueryServices
                 $debtAuthoritiesByOrder[(string)$debtAuthority['sales_order_id']][] = $debtAuthority;
             }
         }
+        // 仅批读已授权、已分页的订单身份；创建时冻结分类用于余额展示，绝不重算收款事实。
+        $memberOrdersById = [];
+        if ($headersByOrder !== []) {
+            foreach (Db::name('member_commerce_order')->whereIn('sales_order_id', array_keys($headersByOrder))
+                ->where('status', 'paid')->where('accounting_method', 'third_party')
+                ->field('sales_order_id,accounting_method,snapshot_json')->select()->toArray() as $memberOrder) {
+                $memberOrdersById[(string)$memberOrder['sales_order_id']] = $memberOrder;
+            }
+        }
         $snapshots = [];
         foreach ($headersByOrder as $orderId => $header) {
             if (!empty($header['entitlement_only'])) {
@@ -2127,6 +2136,7 @@ final class CashierV3SalesOrderQueryServices
             }
             $snapshots[$orderId] = [
                 'header' => $header,
+                'memberOrderAccounting' => $memberOrdersById[$orderId] ?? [],
                 'batch' => $batchesByOrder[$orderId],
                 'request' => !empty($header['entitlement_only']) || $requestId === '' ? [] : $requestsById[$requestId],
                 'nonCashEntries' => $nonCashEntriesByRequest[$requestId] ?? [],
@@ -2365,7 +2375,7 @@ final class CashierV3SalesOrderQueryServices
                 // 只有正式实际收款可更正方式，非现金“其他收款”和余额不取得写入口。
                 count(array_filter($snapshot['collections'], static function (array $collection): bool {
                     return (int)$collection['amount_cents'] > 0
-                        && !in_array((string)$collection['payment_method'], ['other_collection', 'old_card_entry'], true);
+                        && !in_array((string)$collection['payment_method'], ['other_collection', 'old_card_entry', 'third_party'], true);
                 })) > 0 ? 'correct-sales-payment-method' : null,
                 'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
                 'update-sales-order-note',
@@ -2431,6 +2441,11 @@ final class CashierV3SalesOrderQueryServices
                 'occurredAt' => $this->formatTimestamp((int)$batch['settled_at'], 'Y-m-d H:i:s'),
             ];
         }
+        $memberOrderAccounting = (array)($snapshot['memberOrderAccounting'] ?? []);
+        $memberPaymentSnapshot = json_decode((string)($memberOrderAccounting['snapshot_json'] ?? '{}'), true) ?: [];
+        $mapped = \app\services\member\MemberOrderAccounting::project(
+            $mapped, $memberOrderAccounting, (string)($memberPaymentSnapshot['paymentMethod'] ?? '')
+        );
         if (!$detail) return $mapped;
         // The order note is a sales-order header fact. Do not replace it with
         // payment collection remarks when opening the detail projection.
@@ -3054,7 +3069,7 @@ final class CashierV3SalesOrderQueryServices
             ];
         }, $collections);
         if (!$detail) {
-            return $v3Ready ? $mapped : CashierV3GroupPurchaseFinancialProjection::project($mapped, $row);
+            return $v3Ready ? $mapped : CashierV3MemberOrderAccountingProjection::project(CashierV3GroupPurchaseFinancialProjection::project($mapped, $row), $row);
         }
 
         // 订单备注与每笔记账收款的 remark_snapshot 是两个不同事实，
@@ -3101,7 +3116,7 @@ final class CashierV3SalesOrderQueryServices
             'operationLogs' => [],
         ];
         $mapped['relatedDataStatus'] = $v3Ready ? 'ready' : self::ECONOMICS_STATUS;
-        return $v3Ready ? $mapped : CashierV3GroupPurchaseFinancialProjection::project($mapped, $row);
+        return $v3Ready ? $mapped : CashierV3MemberOrderAccountingProjection::project(CashierV3GroupPurchaseFinancialProjection::project($mapped, $row), $row);
     }
 
     private function mapLine(array $line, array $v3 = []): array
@@ -3605,9 +3620,12 @@ final class CashierV3SalesOrderQueryServices
             'dianping_voucher' => '大众验券',
             'douyin_voucher' => '抖音验券',
             'partner' => '合作方收款',
-            // 保留 010 已上线的独立实收渠道展示，避免本轮发布把银行转账和其他收入退化为‘其他收款’。
+                // 银行转账是独立的实际到账方式，不借用其他收款，也不重写历史渠道。
             'bank_transfer' => '银行转账',
+            // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
             'other_income' => '其他收入',
+        // 新会员端订单的统一记账分类；真实支付渠道单独保留。
+        'third_party' => '第三方支付',
             'partner_collection' => '合作方收款',
             'other' => '其他收款',
             'other_collection' => '其他收款',

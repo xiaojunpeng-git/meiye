@@ -17,6 +17,7 @@ return [
     'user' => null,
     // 指令定义
     'commands' => [
+        'combination:leader-rewards' => \app\command\CombinationLeaderRewards::class,
         // 成长Outbox、正式任职派发及到期处理共用一个受锁保护的批次入口。
         'growth:process' => \app\command\GrowthProcess::class,
         'make:dao' => \mohe\command\Dao::class,

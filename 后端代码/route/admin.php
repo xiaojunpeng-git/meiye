@@ -936,6 +936,16 @@ Route::group('adminapi', function () {
         Route::get('combination', 'v1.marketing.combination.StoreCombination/index')->option(['real_name' => '拼团商品列表']);
         //拼团商品统计
         Route::get('combination/statistics', 'v1.marketing.combination.StoreCombination/statistics')->option(['real_name' => '拼团商品统计']);
+        // 第44轮：固定路由先于活动 :id；查询、设置和导出统一服务端授权。
+        Route::get('combination/dashboard', 'v1.marketing.combination.CombinationPromotion/dashboard')->option(['real_name' => '拼团大屏']);
+        Route::get('combination/dashboard/settings', 'v1.marketing.combination.CombinationPromotion/settings')->option(['real_name' => '拼团大屏']);
+        Route::post('combination/dashboard/settings', 'v1.marketing.combination.CombinationPromotion/saveSettings')->option(['real_name' => '拼团大屏']);
+        Route::get('combination/dashboard/activities', 'v1.marketing.combination.CombinationPromotion/activities')->option(['real_name' => '拼团大屏']);
+        Route::get('combination/dashboard/details', 'v1.marketing.combination.CombinationPromotion/details')->option(['real_name' => '拼团大屏']);
+        Route::get('combination/dashboard/export', 'v1.marketing.combination.CombinationPromotion/export')->option(['real_name' => '拼团大屏']);
+        Route::get('combination/leader-reward/catalog', 'v1.marketing.combination.StoreCombination/leaderRewardCatalog')->option(['real_name' => '团长成团奖励']);
+        Route::get('combination/leader-reward/:id', 'v1.marketing.combination.StoreCombination/leaderRewardStatus')->option(['real_name' => '团长成团奖励']);
+        Route::post('combination/leader-reward/:id/retry', 'v1.marketing.combination.StoreCombination/retryLeaderReward')->option(['real_name' => '团长成团奖励']);
         //拼团商品详情
         Route::get('combination/:id', 'v1.marketing.combination.StoreCombination/read')->option(['real_name' => '拼团商品详情']);
         //新增或编辑拼团商品

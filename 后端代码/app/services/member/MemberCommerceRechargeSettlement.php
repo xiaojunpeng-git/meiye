@@ -37,7 +37,8 @@ final class MemberCommerceRechargeSettlement
                 'balanceVersion' => (int)Db::name('user')->where('uid', $row['member_id'])->value('balance_version'),
                 'businessDate' => $snapshot['businessDate'], 'rechargeRemark' => '会员自助充值 ' . $row['public_id']
                     . ($merchantNo !== '' ? '；' . ($snapshot['onlineProvider'] ?? 'fuyou') . '商户号：' . $merchantNo : ''),
-                'paymentMethod' => $snapshot['paymentMethod'], 'collectionReference' => $transactionId]]);
+                // 仅新会员充值使用创建时冻结的分类，实际渠道继续留在会员订单快照。
+                'paymentMethod' => MemberOrderAccounting::collectionMethod($row, (string)$snapshot['paymentMethod']), 'collectionReference' => $transactionId]]);
         $recharge = $response['data']['recharge'];
         return ['orderId' => 'RCH:' . (int)$recharge['rechargeId'], 'orderNo' => $recharge['rechargeOrderNo'], 'recharge' => $recharge];
     }

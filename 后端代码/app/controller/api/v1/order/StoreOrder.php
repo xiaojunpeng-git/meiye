@@ -363,12 +363,17 @@ class StoreOrder
         try {
             $msg = '';
 			$createServices->setItem('channel_type', $request->getFromType());
+            // 仅传本次链接身份；订单事务统一验证资格、门店并冻结，客户端不能指定业绩门店。
+            $createServices->setItem('group_promotion_uid', max(0, (int)$spid));
             $order = $createServices->createOrder($uid, $key, $cartGroup, (int)$addressId, $payType, $addressInfo, $request->user()->toArray(), !!$useIntegral, $couponId, $mark, $pinkId, $isChannel, $shipping_type, $storeId, !!$news, $customForm, (int)$invoice_id, $from, (int)$collate_code_id,$estimate_time, (int)$is_store_delivery_type);
 			$createServices->reset();
 		} catch (\Throwable $e) {
             $order = false;
             $msg = $e->getMessage();
             \think\facade\Log::error('订单生成失败，原因：' . $msg . $e->getFile() . $e->getLine());
+        } finally {
+            // 长驻进程失败重试也必须清除本次分享/渠道，不能串到下一位会员的订单。
+            $createServices->reset();
         }
         if ($order === false) {
             if ($seckill_id || $combinationId || $discountId || $bargainId) {

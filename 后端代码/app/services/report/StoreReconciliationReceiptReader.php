@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use app\services\order\ValidCashOrderServices;
+use app\services\member\MemberOrderAccounting;
 use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
 use app\services\report\query\BasicRegistrationQueryProvider;
 use think\facade\Db;
@@ -91,14 +92,14 @@ final class StoreReconciliationReceiptReader
             $where = ['time' => $businessDateMode ? [] : $times, 'cash_choose' => (int)$method['legacy_id']];
             $directQuery = ValidCashOrderServices::storeCashIncomeByCashChooseQuery($where, $archived)->whereIn('store_id', $stores);
             if ($businessDateMode) $directQuery->whereIn('id', array_keys($businessDates) ?: [0]);
-            $direct = $directQuery->field('id,id source_order_id,order_id,store_id,add_time,uid')->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
+            $direct = $directQuery->field('id,id source_order_id,order_id,store_id,add_time,uid,accounting_method')->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
             foreach ($direct as $row) {
                 $out[] = $this->legacy($row, $method['code'], false, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             }
             $combinedQuery = ValidCashOrderServices::combinationCashByCashChooseQuery($where, $archived)->whereIn('b.store_id', $stores);
             if ($businessDateMode) $combinedQuery->whereIn('b.id', array_keys($businessDates) ?: [0]);
-            $combined = $combinedQuery->field('a.id,b.id source_order_id,b.order_id,b.store_id,b.add_time,b.uid')->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
+            $combined = $combinedQuery->field('a.id,b.id source_order_id,b.order_id,b.store_id,b.add_time,b.uid,b.accounting_method')->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
             foreach ($combined as $row) $out[] = $this->legacy($row, $method['code'], true, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             $this->bounded($out);
@@ -282,12 +283,16 @@ final class StoreReconciliationReceiptReader
     /** 金额解析采用既有十进制边界，旧历史分值保持可追溯，不触发新收银写入。 */
     private function legacy(array $row, string $method, bool $combined, \DateTimeZone $timezone, ?string $businessDate = null): array
     {
+        // 资格及外部实收金额完全复用原收款查询；仅新会员订单按创建时冻结分类归列。
+        // 不能改写 cash_choose/pay_type，也不能把余额合并进收款；旧单空标记仍归原列。
+        $memberOrder = MemberOrderAccounting::isThirdParty($row);
+        if ($memberOrder) $method = self::methodCode(MemberOrderAccounting::CODE);
         return ['receipt_id' => ($combined ? 'legacy-combination:' : 'legacy-order:') . $row['id'] . ':' . $method,
             'store_id' => (int)$row['store_id'], 'method_code' => $method,
             'business_date' => $businessDate ?? (new \DateTimeImmutable('@' . (int)$row['add_time']))->setTimezone($timezone)->format('Y-m-d'),
             'amount_cents' => BasicRegistrationQueryProvider::cents($row['reconciliation_amount']),
             'document_no' => (string)$row['order_id'], 'member_id' => (int)$row['uid'],
-            'source_kind' => $combined ? '历史组合收款' : '历史订单收款', 'combined' => $combined];
+            'source_kind' => $memberOrder ? '会员订单收款' : ($combined ? '历史组合收款' : '历史订单收款'), 'combined' => $combined];
     }
 
     /** 数据库BIGINT按十进制校验后转整数，禁止浮点或溢出金额混入合计。 */

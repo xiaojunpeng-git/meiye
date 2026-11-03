@@ -871,7 +871,13 @@
 			},
 		},
 		onLoad: async function(options) {
-      if (!this.$store.getters.isLogin) { toLogin(); return; }
+      if (!this.$store.getters.isLogin) {
+        // 登录失效后恢复当前确认单参数，尤其当前分享人、参团编号和购物车键；不取全局推荐人。
+        const query = Object.keys(options).filter(key => /^[a-zA-Z0-9_]+$/.test(key) && options[key] != null)
+          .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(String(options[key])).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase())).join('&');
+        toLogin(undefined, undefined, '/pages/goods/order_confirm/index' + (query ? '?' + query : ''));
+        return;
+      }
       // Only persisted carts have numeric database IDs for this routing check.
       // Direct purchases (new=1), including group buys, use Redis cart keys
       // and must continue through the existing activity checkout contract.

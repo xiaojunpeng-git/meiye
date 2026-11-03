@@ -56,7 +56,7 @@
 		</view>
 		<Verify @success="success" captchaType="clickWord" :imgSize="{ width: '330px', height: '155px' }"
 			ref="verify"></Verify>
-		<editUserModal :isShow="isShow" :initialProfile="userInfo" @closeEdit="closeEdit" @editSuccess="editSuccess">
+		<editUserModal :isShow="isShow" :initialProfile="userInfo" :navigateOnSuccess="!backUrl" @closeEdit="closeEdit" @editSuccess="editSuccess">
 		</editUserModal>
 		<!-- #ifdef MP -->
 		<privacyAgreementPopup v-if="canGetPrivacySetting" @onReject="onReject" @onAgree="onAgree">
@@ -72,6 +72,7 @@
 	import sendVerifyCode from "@/mixins/SendVerifyCode";
 	import colors from '@/mixins/color.js';
 	import { needsMemberProfileCompletion } from '@/utils/memberProfileCompletion';
+	import { normalizeMemberLoginReturn, resumeMemberLoginReturn } from '@/utils/memberLoginReturn';
 	import editUserModal from '@/components/eidtUserModal/index.vue'
 	import privacyAgreementPopup from '../components/privacyAgreementPopup/index.vue'
 	import {
@@ -127,7 +128,9 @@
 			if (options.authKey) {
 				this.authKey = options.authKey
 			}
-			this.backUrl = options.backUrl || ''
+			// 手机号授权也是本次登录的一部分；返回参数按应用内页面白名单接收。
+			this.backUrl = normalizeMemberLoginReturn(options.backUrl) || normalizeMemberLoginReturn(this.$Cache.get('login_back_url'));
+			if (this.backUrl) this.$Cache.set('login_back_url', this.backUrl);
 			if (options.pageType) {
 				this.pageType = options.pageType || 1
 				this.pageTitle = options.pageType == 1 ? '绑定手机号' : '手机号登录'
@@ -265,6 +268,7 @@
 					if (needsMemberProfileCompletion(new_user, res.data)) {
 						this.isShow = true
 					} else {
+						if (resumeMemberLoginReturn(this.$Cache, this.backUrl)) return;
 						// #ifdef MP
 						that.$util.Tips({
 							title: '登录成功',
@@ -284,23 +288,9 @@
 			
 			wechatPhone() {
 				this.$Cache.clear('snsapiKey');
-				if (this.backUrl) {
-					let url = uni.getStorageSync('snRouter');
-					if (!url) {
-						url = '/pages/index/index';
-					}
-					this.$util.Tips({
-						title: '登录成功',
-						icon: 'success'
-					}, {
-						tab: 4,
-						url: this.url || '/pages/user/index'
-					});
-				} else {
-					uni.reLaunch({
-						url: '/pages/user/index'
-					})
-				}
+				if (resumeMemberLoginReturn(this.$Cache, this.backUrl)) return;
+				// 返回地址为空或不合法时只回会员首页，不读取另一份旧路由缓存。
+				uni.reLaunch({ url: '/pages/user/index' });
 			},
 			
 			
@@ -349,6 +339,7 @@
 			},
 			closeEdit() {
 				this.isShow = false
+				if (resumeMemberLoginReturn(this.$Cache, this.backUrl)) return;
 				this.$util.Tips({
 					title: '登录成功',
 					icon: 'success'
@@ -359,6 +350,7 @@
 			},
 			editSuccess() {
 				this.isShow = false
+				resumeMemberLoginReturn(this.$Cache, this.backUrl);
 			},
 			back() {
 				uni.navigateBack({

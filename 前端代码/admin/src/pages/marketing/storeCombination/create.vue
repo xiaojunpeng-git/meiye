@@ -266,6 +266,13 @@
                           </i-switch>
                         </FormItem>
                       </Col>
+                      <Col span="24">
+                        <FormItem label="团长成团赠送：">
+                          <i-switch v-model="formValidate.leader_reward.enabled" size="large"><span slot="open">开启</span><span slot="close">关闭</span></i-switch>
+                          <Button data-required-key="leader-reward-config" style="margin-left: 12px" @click="leaderRewardVisible = true">赠送设置</Button>
+                          <div class="tips">{{ leaderRewardSummary }}。每团真实成团后赠送一次，虚拟补齐不赠送；奖励按开团时配置发放。</div>
+                        </FormItem>
+                      </Col>
                     </Row>
                     <Row v-show="current === 2">
                         <Col span="24">
@@ -306,6 +313,11 @@
                 :gridPic="gridPic" v-if="modalPic"></uploadPictures>
         </Modal>
         <freightTemplate :template="template" v-on:changeTemplate="changeTemplate" ref="templates"></freightTemplate>
+      <member-survey-reward :visible="leaderRewardVisible" :configuration="formValidate.leader_reward"
+        :draft-mode="true" :project-only="true" :catalog-provider="leaderRewardCatalog" title="团长成团赠送设置"
+        description="团长真实成团后自动赠送项目或优惠券。办理门店按开团时团长的归属门店确定，未归属时使用购买门店；项目按对应门店品项发放，券沿用自身适用门店。已开团奖励不随活动配置更改。"
+        effective-label="真实成团当日" empty-label="未配置团长成团赠送。"
+        @configured="setLeaderReward" @close="leaderRewardVisible = false" />
     </div>
 </template>
 
@@ -315,16 +327,21 @@ import goodsList from '@/components/goodsList/index';
 import WangEditor from "@/components/wangEditor/index.vue";
 import uploadPictures from '@/components/uploadPictures';
 import freightTemplate from "@/components/freightTemplate";
+import MemberSurveyReward from '@/components/memberSurveyReward';
+import { guideRequired, clearRequiredGuidance } from '@/utils/requiredGuidance';
+import request from '@/plugins/request';
+const emptyLeaderReward = () => ({ enabled: false, store_policy: 'member', store_id: 0, product: [], coupon: [] });
 import { combinationInfoApi, combinationCreatApi, productAttrsApi } from '@/api/marketing';
 import { productGetTemplateApi, productAllUnit, productUnitCreate } from '@/api/product';
 import Setting from "@/setting";
 export default {
     name: 'storeCombinationCreate',
-    components: { goodsList, uploadPictures, WangEditor, freightTemplate },
+    components: { goodsList, uploadPictures, WangEditor, freightTemplate, MemberSurveyReward },
     data() {
         return {
                 // Only narrows this picker; product/SKU identity is still verified by the server.
                 combinationCatalogType: -1,
+                leaderRewardVisible: false,
           roterPre: Setting.roterPre,
             template: false,
             submitOpen: false,
@@ -370,6 +387,7 @@ export default {
             tableIndex: 0,
             unitNameList: [],
             formValidate: {
+                leader_reward: emptyLeaderReward(),
                 is_support_refund: 0,
                 only_new:0,
                 product_type: 0,
@@ -473,6 +491,7 @@ export default {
         }
     },
     computed: {
+        leaderRewardSummary() { const config = this.formValidate.leader_reward || emptyLeaderReward(); const count = config.product.length + config.coupon.length; return count ? `已配置 ${count} 项奖励` : '尚未配置奖励'; },
         ...mapState('admin/layout', [
             'isMobile',
             'menuCollapse'
@@ -493,6 +512,9 @@ export default {
         this.getAllUnit();
     },
     methods: {
+        // 同一赠送编辑器仅返回草稿；最终与活动保存共用后端事务。
+        setLeaderReward(config) { this.$set(this.formValidate, 'leader_reward', { ...config, enabled: this.formValidate.leader_reward.enabled }); },
+        leaderRewardCatalog(params) { return request({ url: 'marketing/combination/leader-reward/catalog', method: 'get', params }); },
         changeTemplate(msg) {
             this.template = msg;
         },
@@ -611,6 +633,7 @@ export default {
             this.modals = false;
             setTimeout(() => {
                 this.formValidate = {
+                    leader_reward: this.formValidate.leader_reward || emptyLeaderReward(),
                     is_support_refund: row.is_support_refund,
                     only_new: row.only_new,
                     product_type: row.product_type,
@@ -663,7 +686,7 @@ export default {
                     width: 60,
                     align: 'center'
                 };
-                this.formValidate = info;
+                this.formValidate = { ...info, leader_reward: info.leader_reward || emptyLeaderReward() };
                 this.description = info.description
 
                 if (parseInt(this.formValidate.virtual) !== 100) {
@@ -690,11 +713,21 @@ export default {
                 this.spinShow = false;
             }).catch(res => {
                 this.spinShow = false;
-                this.$Message.error(res.msg);
+                // 加载失败可能来自网络或解析异常，不一定包含 msg；始终给提示组件字符串，避免二次异常掩盖原错误。
+                const message = typeof res === 'string' ? res : res && (res.msg || res.message);
+                this.$Message.error(typeof message === 'string' && message ? message : '拼团信息加载失败，请刷新后重试');
             })
         },
         // 下一步
         next(name) {
+            // 本轮新增的必填奖励直接定位配置按钮；不代填，也不以通用弹窗拦截。
+            const reward = this.formValidate.leader_reward;
+            if (this.current > 0 && reward.enabled && !reward.product.length && !reward.coupon.length) {
+                this.current = 1;
+                this.$nextTick(() => guideRequired(this.$el, 'leader-reward-config', '请在这里配置团长成团赠送'));
+                return;
+            }
+            clearRequiredGuidance();
             let that = this;
             if (this.current === 2) {
                 this.formValidate.description = this.description

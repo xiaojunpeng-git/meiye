@@ -39,11 +39,11 @@ final class MemberCommerceServices
         return Db::transaction(function () use ($uid, $input): array {
             $member = $this->member($uid);
             $stores = Db::name('system_store')->where('is_show', 1)->where('is_del', 0)
-                ->field('id,name,latitude,longitude')->order('id asc')->select()->toArray();
+                ->field('id,name')->order('id asc')->select()->toArray();
             $storeId = (int)($input['store_id'] ?? 0);
-            // 显式选店继续生效；首次进入或旧门店已停用时，复用首页默认门店口径。
+            if ($storeId <= 0) $storeId = (int)$member['belong_store_id'];
             $valid = array_column($stores, 'name', 'id');
-            if (!isset($valid[$storeId])) $storeId = (new MemberStorePreferenceServices())->choose($uid, $stores, $input);
+            if (!isset($valid[$storeId])) $storeId = 0;
             $result = ['stores' => $stores, 'storeId' => $storeId,
                 'balanceCents' => max(0, self::cents((string)$member['now_money']) - self::heldBalanceCents($uid)),
                 'balanceEnabled' => self::balanceEnabled(), 'onlineProvider' => self::onlineProvider(),
@@ -148,6 +148,8 @@ final class MemberCommerceServices
             $id = (int)Db::name('member_commerce_order')->insertGetId([
                 'public_id' => $publicId, 'member_id' => $uid, 'store_id' => $intent['store'],
                 'kind' => $built['kind'], 'channel' => $channel, 'idempotency_key' => $key,
+                // 创建时冻结，重试复用原订单；旧待付订单付款时不补写此标记。
+                'accounting_method' => MemberOrderAccounting::forChannel($channel),
                 'input_fingerprint' => $intentHash, 'snapshot_json' => json_encode($snapshot, JSON_UNESCAPED_UNICODE),
                 'amount_cents' => $amount, 'balance_cents' => $balance, 'external_cents' => $amount - $balance,
                 'status' => $amount === $balance ? 'settling' : 'pending', 'result_json' => '{}',
@@ -291,10 +293,12 @@ final class MemberCommerceServices
             $result = (new MemberCommerceRechargeSettlement())->settleInTx($row, $snapshot, $scope, $transactionId, $merchantNo);
         } else {
             $lines = $snapshot['lines'];
-            if ((int)$row['amount_cents'] === 0) $lines[] = ['lineRole' => 'payment', 'paymentMethod' => 'wechat', 'amount' => '0'];
+            // 第三方支付是记账分类。snapshot.paymentMethod 保留真实渠道供回调校验与退款。
+            $accountingMethod = MemberOrderAccounting::collectionMethod($row, (string)$snapshot['paymentMethod']);
+            if ((int)$row['amount_cents'] === 0) $lines[] = ['lineRole' => 'payment', 'paymentMethod' => $accountingMethod, 'amount' => '0'];
             if ((int)$row['balance_cents'] > 0) $lines[] = ['lineRole' => 'balance_payment', 'amount' => self::money((int)$row['balance_cents'])];
             if ((int)$row['external_cents'] > 0) $lines[] = ['lineRole' => 'payment',
-                'paymentMethod' => $snapshot['paymentMethod'], 'amount' => self::money((int)$row['external_cents']),
+                'paymentMethod' => $accountingMethod, 'amount' => self::money((int)$row['external_cents']),
                 'externalTransactionNo' => $transactionId,
                 'remark' => ($snapshot['onlineProvider'] ?? 'fuyou') . '商户号：' . $merchantNo];
             $stateId = 'MSC-' . substr(hash('sha256', $row['public_id']), 0, 32);

@@ -34,7 +34,7 @@ final class CashierV3SalesOrderPlanV1
     // 销售订单快照只接受正式记账收款代码；旧卡录入保留独立迁入语义。
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
-        'bank_transfer', 'other_income', 'partner_collection', 'other_collection',
+        'bank_transfer', 'other_income', 'third_party', 'partner_collection', 'other_collection',
     ];
 
     private const MAX_PAYMENT_ROWS = 200;
@@ -956,7 +956,7 @@ final class CashierV3SalesOrderPlanV1
         $inventoryOutboundRequired = self::nonNegativeInt($row['inventory_outbound_required'] ?? 1, 'sales_order_inventory_outbound_required_invalid');
         $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
             ? null
-            : self::nonNegativeInt($row['manual_labor_fee_cents'], 'sales_order_manual_labor_fee_invalid');
+            : self::money($row['manual_labor_fee_cents'], 'sales_order_manual_labor_fee_invalid');
         $craftsmenJson = $row['craftsmen_snapshot_json'];
         $craftsmen = self::craftsmenSnapshot($craftsmenJson);
         $salespeople = self::salespeopleSnapshot($row['salespeople_snapshot_json'] ?? null);
@@ -1444,7 +1444,11 @@ final class CashierV3SalesOrderPlanV1
     private static function money($value, string $reason): int
     {
         $amount = self::nonNegativeInt($value, $reason);
-        if ($amount > self::MAX_MONEY_CENTS) {
+        // Draft validation already rejects fractional yuan. Repeat the same
+        // rule on the final locked plan so imported, replayed or future direct
+        // writers cannot persist a cent-level monetary fact by bypassing the
+        // browser draft path.
+        if ($amount > self::MAX_MONEY_CENTS || $amount % 100 !== 0) {
             throw self::failure($reason);
         }
         return $amount;
@@ -1663,6 +1667,11 @@ final class CashierV3SalesOrderPlanV1
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            // Keep the cross-store source in the checkout line fingerprint;
+            // the same marker was frozen when the checkout draft was prepared.
+            if (($row['personnelSource'] ?? 'store') === 'other') {
+                $resultRow['personnelSource'] = 'other';
+            }
             // Keep historical post-sale fingerprints unchanged while freezing
             // an explicitly selected presale role on new order lines.
             if (!empty($row['isPreSale']) || !empty($row['is_presale']) || !empty($row['marked'])) {
@@ -1670,7 +1679,7 @@ final class CashierV3SalesOrderPlanV1
             }
             if (array_key_exists('performanceAmountCents', $row)
                 || array_key_exists('performance_amount_cents', $row)) {
-                $resultRow['performanceAmountCents'] = self::nonNegativeInt(
+                $resultRow['performanceAmountCents'] = self::money(
                     $row['performanceAmountCents'] ?? $row['performance_amount_cents'],
                     'sales_order_salesperson_performance_amount_invalid'
                 );

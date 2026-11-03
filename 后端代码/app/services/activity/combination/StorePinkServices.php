@@ -123,6 +123,8 @@ class StorePinkServices extends BaseServices
                 }
                 $this->dao->update($id, ['k_id' => $nextId]);
                 \think\facade\Db::name('store_order')->where('pink_id', $root)->update(['pink_id' => $nextId]);
+                // 接任沿用原开团奖励快照；原团长回执关闭，禁止此刻活动改动造成补发。
+                (new CombinationLeaderRewardServices())->onLeaderChangedInTx($root, $nextId);
             }
         }
         $this->dao->update($id, ['is_refund' => 1, 'status' => 3]);
@@ -321,6 +323,9 @@ class StorePinkServices extends BaseServices
             if (\think\facade\Db::name('store_order')->whereIn('id', $orderIds)->where('refund_status', '<>', 0)->count()) return $pinkBool;
             if (!$this->dao->getCount([['id', 'in', $idAll], ['is_refund', '<>', 0]])) {
                 $this->dao->update([['id', 'in', $idAll]], ['stop_time' => time(), 'status' => 2]);
+                // 发奖独立于通知状态；失败留持久回执重试，不能使成功支付/成团失败。
+                try { (new CombinationLeaderRewardServices())->onGroupCompleted((int)$pinkT['id']); }
+                catch (\Throwable $rewardError) { \think\facade\Log::warning('团长奖励待重试 gid=' . (int)$pinkT['id']); }
                 if (in_array($uid, $uidAll)) {
                     if ($this->dao->getCount([['uid', 'in', $uidAll], ['is_tpl', '=', 0], ['k_id|id', '=', $pinkT['id']]]))
                         $this->orderPinkAfter($uidAll, $pinkT['id']);
@@ -494,6 +499,8 @@ class StorePinkServices extends BaseServices
                 // Snapshot the original deadline before completion changes stop_time into completion time.
                 \think\facade\Db::name('combination_group_origin')->insert(['group_id' => (int)$res1['id'],
                     'expires_at' => (int)$pink['stop_time'], 'activity_name' => (string)$product['title']]);
+                // 新团与奖励配置同事务冻结，后改活动不会改变已经开团的奖励。
+                (new CombinationLeaderRewardServices())->freezeGroupInTx((int)$res1['id']);
                 $res2 = $orderServices->update($orderInfo['id'], ['pink_id' => $res1['id']]);
                 $res = $res1 && $res2;
                 $pink['id'] = $res1['id'];

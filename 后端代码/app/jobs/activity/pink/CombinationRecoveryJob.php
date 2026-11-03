@@ -30,6 +30,9 @@ class CombinationRecoveryJob extends BaseJobs
             try { (new CombinationFulfillmentServices())->issue((int)$id); }
             catch (\Throwable $error) { Log::warning('拼团权益恢复待处理 oid=' . (int)$id); }
         }
+        // 复用现有周期任务补漏团长赠品回执，不新增依赖无人运行的专属调度。
+        try { (new \app\services\activity\combination\CombinationLeaderRewardServices())->tick(50); }
+        catch (\Throwable $error) { Log::warning("团长奖励恢复待处理"); }
         return true;
     }
 }

@@ -37,6 +37,8 @@ final class CashierV3PaymentCollectionPlanV1
         'bank_transfer' => '银行转账',
         // 其他收入表示真实到账，区别于不计现金业绩的其他收款。
         'other_income' => '其他收入',
+        // 新会员端订单的统一记账分类；真实支付渠道单独保留。
+        'third_party' => '第三方支付',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
     ];
@@ -761,7 +763,7 @@ final class CashierV3PaymentCollectionPlanV1
                 throw self::failure('payment_collection_amount_invalid');
             }
             // 新实际收款方式在最终落账边界再次拒绝小数元，不能只依赖浏览器草稿校验。
-            if (in_array($method, ['bank_transfer', 'other_income'], true) && $amount % 100 !== 0) {
+            if (in_array($method, ['bank_transfer', 'other_income', 'third_party'], true) && $amount % 100 !== 0) {
                 throw self::failure('payment_collection_bank_transfer_whole_yuan_required');
             }
             // For an exactly-zero receivable, the selected bookkeeping method

@@ -23,6 +23,7 @@
                     <template slot-scope="{ row }" slot="status_name"><span :class="'combination-status-' + row.status">{{ row.status_name }}</span></template>
                     <template slot-scope="{ row }" slot="action">
                         <a @click="Info(row)">查看详情</a>
+                        <a class="combination-action" @click="openLeaderReward(row)">团长奖励</a>
                         <a v-if="row.status === 1" class="combination-action" @click="completeGroup(row)">立即成团</a>
                         <a v-if="row.status === 2" class="combination-action" @click="openGroupRefund(row)">整团退款</a>
                     </template>
@@ -48,6 +49,17 @@
             <Table :columns="refundResultColumns" :data="groupRefundResult.results || []" size="small" :max-height="350" />
         </Modal>
 
+        <!-- 奖励独立回执只重试失败份数；已使用权益只显示人工处理，不扣会员余额。 -->
+        <Modal v-model="leaderRewardVisible" title="团长成团奖励" width="760" footer-hide :mask-closable="false">
+            <p>团编号：{{ leaderRewardGroupId }} · {{ leaderReward.status_label }}</p>
+            <p v-if="leaderRewardError" role="status" style="color:#b92b2b;margin:12px 0">{{ leaderRewardError }}</p>
+            <Table :loading="leaderRewardLoading" :columns="leaderRewardColumns" :data="leaderReward.items || []" :max-height="400" size="small" style="margin:12px 0" />
+            <p>只发放真实成团时冻结的奖励。团长原单全退或整团取消后，撤销未使用奖励；已使用奖励需人工处理。</p>
+            <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:16px">
+                <Button :loading="leaderRewardLoading" @click="loadLeaderReward(false)">刷新</Button>
+                <Button v-if="['pending','revoke_pending'].includes(leaderReward.status)" type="primary" :loading="leaderRewardLoading" @click="loadLeaderReward(true)">重试待处理奖励</Button>
+            </div>
+        </Modal>
         <!-- 详情模态框-->
         <Modal v-model="modals" class="combination-participants-modal" scrollable footer-hide closable title="查看详情" :mask-closable="false" width="1150">
             <Table ref="selection" :columns="columns2" :data="tabList3" :loading="loading2"
@@ -82,6 +94,8 @@
     import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
     import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
     import exportExcel from '@/utils/newToExcel.js';
+    // 复用平台统一请求客户端；libs 下没有请求模块，错误路径会阻断整个平台开发编译。
+    import request from '@/plugins/request';
     import { formatDate } from '@/utils/validate';
     import { combineListApi, orderPinkListApi, combinationParticipantRefundApi, combinationCompleteApi, combinationWholeRefundApi } from '@/api/marketing';
 
@@ -99,6 +113,9 @@
         data () {
             return {
                 activities: [],
+                leaderRewardVisible: false, leaderRewardLoading: false, leaderRewardGroupId: 0, leaderReward: {}, leaderRewardError: '', leaderRewardEpoch: 0,
+                leaderRewardColumns: [{ title: '奖励内容', key: 'name', minWidth: 180 }, { title: '发放状态', key: 'status_label', minWidth: 150 },
+                    { title: '处理说明', key: 'message', minWidth: 260, render: (h, { row }) => h('span', { style: { whiteSpace: 'normal', wordBreak: 'break-word' } }, row.message || '—') }],
                 appliedFilters: {}, exporting: false, listError: '', tableHeight: 400, tableFixed: false, requestSequence: 0,
                 groupRefundVisible: false, groupRefundBusy: false, groupRefundReason: '', refundGroup: {}, groupRefundResult: {},
                 groupRefundMembers: [], groupMembersLoading: false,
@@ -201,6 +218,16 @@
         },
         methods: {
             money: formatBusinessMoney,
+            openLeaderReward(row) { this.leaderRewardGroupId = row.id; this.leaderReward = {}; this.leaderRewardError = ''; this.leaderRewardVisible = true; this.loadLeaderReward(false); },
+            // 弹窗切换团时丢弃迟到响应，不把另一团的发放/撤销状态写入当前团。
+            async loadLeaderReward(retry) {
+                const epoch = ++this.leaderRewardEpoch; const groupId = this.leaderRewardGroupId; this.leaderRewardLoading = true; this.leaderRewardError = '';
+                try {
+                    const res = await request({ url: 'marketing/combination/leader-reward/' + groupId + (retry ? '/retry' : ''), method: retry ? 'post' : 'get' });
+                    if (epoch === this.leaderRewardEpoch) this.leaderReward = res.data;
+                } catch (error) { if (epoch === this.leaderRewardEpoch) this.leaderRewardError = error.msg || error.message || '奖励读取失败'; }
+                finally { if (epoch === this.leaderRewardEpoch) this.leaderRewardLoading = false; }
+            },
             // Cap long lists at the available viewport; short lists keep their natural height like other platform tables.
             fitTable() {
                 const results = this.$refs.results;
@@ -313,7 +340,7 @@
                         fixed: this.tableFixed ? column.fixed : undefined,
                         ...( ['price', 'deadline', 'status_name'].includes(column.key) ? { slot: column.key } : {}),
                         tooltip: true
-                    })).concat([{ title: '操作', slot: 'action', fixed: this.tableFixed ? 'right' : undefined, width: 156 }]);
+                    })).concat([{ title: '操作', slot: 'action', fixed: this.tableFixed ? 'right' : undefined, width: 220 }]);
                 }).catch(error => {
                     if (sequence !== this.requestSequence) return;
                     this.tableList = []; this.total = 0; this.listError = error.msg || '拼团列表加载失败';

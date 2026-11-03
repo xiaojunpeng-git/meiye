@@ -64,6 +64,7 @@
 	let statusBarHeight = uni.getSystemInfoSync().statusBarHeight + 'px';
 	import { HTTP_REQUEST_URL } from '@/config/app';
 	import { needsMemberProfileCompletion } from '@/utils/memberProfileCompletion';
+	import { normalizeMemberLoginReturn, resumeMemberLoginReturn } from '@/utils/memberLoginReturn';
 	import editUserModal from '@/components/eidtUserModal/index.vue'
 	import privacyAgreementPopup from '../components/privacyAgreementPopup/index.vue'
 	
@@ -102,6 +103,7 @@
 				code: '',
 				authKey: '',
 				options: '',
+				loginReturnUrl: '', // 仅保存校验后的本次业务返回地址。
 				userInfo: {},
 				codeNum: 0,
 				canUseGetUserProfile: false,
@@ -127,8 +129,9 @@
 				// #ifdef MP
 				return false;
 				// #endif
+				// 有业务深链时由本页收尾，避免资料弹窗再退一次覆盖拼团返回。
 				// #ifndef MP
-				return true;
+				return !this.loginReturnUrl;
 				// #endif
 			},
 			/**
@@ -139,6 +142,8 @@
 			}
 		},
 		onLoad(options) {
+			this.loginReturnUrl = normalizeMemberLoginReturn(options.back_url) || normalizeMemberLoginReturn(this.$Cache.get('login_back_url'));
+			if (this.loginReturnUrl) this.$Cache.set('login_back_url', this.loginReturnUrl);
 			this.colorData();
 			if (uni.getUserProfile) {
 				this.canUseGetUserProfile = true
@@ -160,7 +165,7 @@
 			this.code = code || '';
 			if (code) {
 				let spread_spid = this.$Cache.get("spid") || '';
-				let backUrl = options.back_url;
+				let backUrl = this.loginReturnUrl;
 				this.wechatAuthLogin({
 					code,
 					spread_spid
@@ -188,6 +193,8 @@
 				return (error && (error.msg || error.message || error.errMsg)) || fallback;
 			},
 			finishLogin() {
+				// 重启原业务页而非仅返回页面栈；未登录时确认页尚未初始化。
+				if (resumeMemberLoginReturn(this.$Cache, this.loginReturnUrl)) return;
 				const pages = getCurrentPages();
 				if (pages.length > 1) {
 					uni.navigateBack({
@@ -203,6 +210,8 @@
 			},
 			wechatAuthLogin(d, back_url) {
 				let that = this;
+				back_url = normalizeMemberLoginReturn(back_url) || normalizeMemberLoginReturn(this.$Cache.get('login_back_url'));
+				if (back_url) { this.loginReturnUrl = back_url; this.$Cache.set('login_back_url', back_url); }
 				uni.showLoading({
 					title: '正在登录中'
 				});
@@ -213,7 +222,7 @@
 					if (res.data.bindPhone) {
 						this.authKey = res.data.key
 						uni.navigateTo({
-							url: `/pages/users/binding_phone/index?authKey=${this.authKey}&backUrl=${back_url}`
+							url: `/pages/users/binding_phone/index?authKey=${this.authKey}&backUrl=${encodeURIComponent(back_url || '')}`
 						})
 					} else {
 						let time = res.data.expires_time - this.$Cache.time();
@@ -224,9 +233,8 @@
 						that.$util.Tips({
 							title: '登录成功',
 							icon: 'success'
-						}, {
-							tab: 4,
-							url: back_url || '/pages/user/index'
+						}, () => {
+							if (!resumeMemberLoginReturn(that.$Cache, back_url)) uni.reLaunch({ url: '/pages/user/index' });
 						});
 					}
 				}).catch(err => {
@@ -307,6 +315,7 @@
 			},
 			editSuccess() {
 				this.isShow = false
+				if (this.loginReturnUrl && resumeMemberLoginReturn(this.$Cache, this.loginReturnUrl)) return;
 				// #ifdef MP
 				// 资料已保存且授权状态已写入，沿用原登录返回/兜底路径及手机号门禁。
 				this.finishLogin();
@@ -437,9 +446,8 @@
 						that.$util.Tips({
 							title: '登录成功',
 							icon: 'success'
-						}, {
-							tab: 4,
-							url: back_url || '/pages/user/index'
+						}, () => {
+							if (!resumeMemberLoginReturn(that.$Cache, back_url)) uni.reLaunch({ url: '/pages/user/index' });
 						});
 						// #endif
 					}
@@ -583,27 +591,9 @@
 			// 输入手机号后的回调
 			wechatPhone() {
 				this.$Cache.clear('snsapiKey');
-				if (this.options.back_url) {
-					let url = uni.getStorageSync('snRouter');
-					url = url.indexOf('/pages/index/index') != -1 ? '/' : url;
-					if (url.indexOf('/pages/users/wechat_login/index') !== -1) {
-						url = '/';
-					}
-					if (!url) {
-						url = '/pages/index/index';
-					}
-					let self = this;
-					this.isUp = false;
-					uni.showToast({
-						title: '登录成功',
-						icon: 'none'
-					});
-					setTimeout(res => {
-						location.href = url;
-					}, 800);
-				} else {
-					uni.navigateBack();
-				}
+				if (resumeMemberLoginReturn(this.$Cache, this.loginReturnUrl)) return;
+				// 不以 snRouter 或浏览器地址绕过同一返回白名单，也不退回手机号登录页。
+				uni.reLaunch({ url: '/pages/user/index' });
 			}
 			// #endif
 		}

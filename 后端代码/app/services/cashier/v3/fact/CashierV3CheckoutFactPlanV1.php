@@ -33,7 +33,7 @@ final class CashierV3CheckoutFactPlanV1
         'alipay',
         'dianping_voucher',
         'douyin_voucher',
-        'bank_transfer', 'other_income', 'partner_collection',
+        'bank_transfer', 'other_income', 'third_party', 'partner_collection',
         'other_collection',
     ];
 

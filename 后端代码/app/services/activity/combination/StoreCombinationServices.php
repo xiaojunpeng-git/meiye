@@ -149,6 +149,10 @@ class StoreCombinationServices extends BaseServices
                 throw new AdminException('请选择运费模版');
             }
         }
+        // 独立配置不写入活动主表字段；仅显式提交时更新，旧客户端不能抹除奖励。
+        $leaderReward = $data['leader_reward'] ?? null;
+        $leaderRewardAdmin = (int)($data['_leader_reward_admin_id'] ?? 0);
+        unset($data['leader_reward'], $data['_leader_reward_admin_id']);
         $description = $data['description'];
         $detail = $data['attrs'];
         // New group prices use whole yuan; quantities and group sizes are whole counts.
@@ -177,7 +181,7 @@ class StoreCombinationServices extends BaseServices
         /** @var StoreProductAttrServices $storeProductAttrServices */
         $storeProductAttrServices = app()->make(StoreProductAttrServices::class);
 
-        $this->transaction(function () use ($id, $data, $description, $detail, $items, $storeDescriptionServices, $storeProductAttrServices) {
+        $this->transaction(function () use ($id, $data, $description, $detail, $items, $storeDescriptionServices, $storeProductAttrServices, $leaderReward, $leaderRewardAdmin) {
             if ($id) {
 				//重新编辑销量清空
 				$data['sales'] = 0;
@@ -189,6 +193,7 @@ class StoreCombinationServices extends BaseServices
                 if (!$res) throw new AdminException('添加失败');
                 $id = (int)$res->id;
             }
+            if ($leaderReward !== null) (new CombinationLeaderRewardServices())->saveConfigInTx((int)$id, $leaderReward, $leaderRewardAdmin);
             $storeDescriptionServices->saveDescription((int)$id, $description, 3);
 			$storeProductAttrServices->setItem('store_product_id', $data['product_id']);
             $skuList = $storeProductAttrServices->validateProductAttr($items, $detail, (int)$id, 3);
@@ -318,6 +323,7 @@ class StoreCombinationServices extends BaseServices
 		/** @var StoreProductAttrValueServices $storeProductAttrValueServices */
 		$storeProductAttrValueServices = app()->make(StoreProductAttrValueServices::class);
 		$info['attrs'] = $storeProductAttrValueServices->attrList($id, $info['product_id'], 3);
+        $info['leader_reward'] = (new CombinationLeaderRewardServices())->config($id);
         return $info;
     }
 

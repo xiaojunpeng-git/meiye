@@ -114,7 +114,7 @@ const BUILTIN_PROFILE_PARAMS = new Set([
   'exclusive_service_person_id',
   'mark',
   'remark',
-  'note'
+  'note', 'spread_open', 'is_promoter'
 ])
 
 const panelRef = ref(null)
@@ -143,6 +143,8 @@ const form = reactive({
   address: '',
   memberLevelId: '',
   memberTagIds: [],
+  spreadOpen: 1,
+  isPromoter: 0,
   note: ''
 })
 
@@ -213,6 +215,9 @@ function initializeMember(member) {
   const tags = firstValue(member, ['memberTagIds', 'tagIds', 'labelIds', 'member_tag_ids'])
   form.memberTagIds = Array.isArray(tags) ? [...tags] : []
   form.note = firstText(member, ['note', 'remark', 'memo'])
+  // 延用会员原有资格字段，不关联员工，也不由界面推导全局分销模式是否生效。
+  form.spreadOpen = Number(firstValue(member, ['spread_open']) ?? 1) === 0 ? 0 : 1
+  form.isPromoter = Number(firstValue(member, ['is_promoter']) ?? 0) === 1 ? 1 : 0
   const services = firstValue(member, ['exclusiveServiceStaffRecords'])
   const service = firstValue(member, ['exclusiveServiceStaffRecord', 'exclusiveServiceStaff', 'exclusiveStaff'])
   servicePeople.value = Array.isArray(services) ? services.map((item) => ({ ...item }))
@@ -574,6 +579,8 @@ function buildPayload() {
     address: form.address.trim(),
     memberLevelId: form.memberLevelId || null,
     memberTagIds: [...form.memberTagIds],
+    // 只编辑现有会员时提交；创建及旧客户端缺省沿用服务端既有默认值。
+    ...(isEditing.value ? { spread_open: form.spreadOpen, is_promoter: form.isPromoter } : {}),
     exclusiveServicePersonIds: servicePersonIds(),
     referrerMemberId: referrerMemberId(),
     note: form.note.trim(),
@@ -907,6 +914,25 @@ function cancelCreation() {
                 <span class="member-creator__label">备注</span>
                 <textarea v-model="form.note" rows="2" maxlength="500" placeholder="请输入备注" :disabled="isSubmitting || isOutcomeUncertain" />
               </label>
+
+              <fieldset v-if="isEditing" class="member-creator__field" data-error-key="spread_open">
+                <legend class="member-creator__label">推广资格</legend>
+                <div class="member-creator__choice-options">
+                  <label><input v-model="form.spreadOpen" type="radio" name="member-spread-open" :value="1" :disabled="isSubmitting || isOutcomeUncertain" @change="clearFieldError('spread_open')"><span>启用</span></label>
+                  <label><input v-model="form.spreadOpen" type="radio" name="member-spread-open" :value="0" :disabled="isSubmitting || isOutcomeUncertain" @change="clearFieldError('spread_open')"><span>禁用</span></label>
+                </div>
+                <small class="member-creator__field-hint">禁用后，该会员在任何分销模式下均无推广权限。</small>
+                <small v-if="fieldErrors.spread_open" class="member-creator__field-error">{{ fieldErrors.spread_open }}</small>
+              </fieldset>
+              <fieldset v-if="isEditing" class="member-creator__field" data-error-key="is_promoter">
+                <legend class="member-creator__label">推广员权限</legend>
+                <div class="member-creator__choice-options">
+                  <label><input v-model="form.isPromoter" type="radio" name="member-is-promoter" :value="1" :disabled="isSubmitting || isOutcomeUncertain" @change="clearFieldError('is_promoter')"><span>开启</span></label>
+                  <label><input v-model="form.isPromoter" type="radio" name="member-is-promoter" :value="0" :disabled="isSubmitting || isOutcomeUncertain" @change="clearFieldError('is_promoter')"><span>关闭</span></label>
+                </div>
+                <small class="member-creator__field-hint">指定分销模式下，控制该会员是否具有推广员权限。</small>
+                <small v-if="fieldErrors.is_promoter" class="member-creator__field-error">{{ fieldErrors.is_promoter }}</small>
+              </fieldset>
 
               <div class="member-creator__field member-creator__avatar-field" data-error-key="avatar">
                 <span class="member-creator__label">会员头像</span>

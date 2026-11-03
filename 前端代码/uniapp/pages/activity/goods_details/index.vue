@@ -803,7 +803,7 @@
 					});
 				}
 				//记录推广人uid
-				if (value.spid) app.globalData.spid = value.spid;
+				if (value.spid) { app.globalData.spid = value.spid; this.spid = value.spid; }
 				this.type = value.type;
 			}
 			// #endif
@@ -834,12 +834,10 @@
 		onReady(){
 			this.isNodes++;
 			// #ifdef H5
-			this.codeVal = window.location.origin + '/pages/activity/goods_details/index?id=' + this.id +
-				'&spid=' + this.$store.state.app.uid + '&type=' + this.type
+			this.codeVal = window.location.origin + this.activitySharePath()
 			// #endif
 			// #ifdef APP-PLUS
-			this.codeVal = HTTP_REQUEST_URL + '/pages/activity/goods_details/index?id=' + this.id +
-				'&spid=' + this.$store.state.app.uid + '&type=' + this.type
+			this.codeVal = HTTP_REQUEST_URL + this.activitySharePath()
 			// #endif
 		},
 		onShow(){
@@ -892,8 +890,19 @@
 					url:'/pages/store/list/index?type=1&isCollage=1&storeId='+this.storeList.id+'&product_id='+id
 				})
 			},
+			// 登录只回到本次活动深链；小程序默认 route 不含参数，会丢失活动和分享人。
+			activityReturnUrl() {
+				return '/pages/activity/goods_details/index?id=' + encodeURIComponent(this.id) + '&type=' + encodeURIComponent(this.type)
+					+ '&spid=' + encodeURIComponent(this.spid || 0) + (this.time_id ? '&time_id=' + encodeURIComponent(this.time_id) : '')
+					+ (this.promotions_type ? '&promotions_type=' + encodeURIComponent(this.promotions_type) : '');
+			},
 			changeLogin(){
-				toLogin()
+				toLogin(undefined, undefined, this.activityReturnUrl());
+			},
+			// 主动分享生成当前会员自己的链接；不能读其他页面改写的全局分享地址。
+			activitySharePath(shareUid = this.$store.state.app.uid) {
+				return '/pages/activity/goods_details/index?id=' + encodeURIComponent(this.id) + '&type=' + encodeURIComponent(this.type)
+					+ '&spid=' + encodeURIComponent(shareUid || 0) + (this.time_id ? '&time_id=' + encodeURIComponent(this.time_id) : '');
 			},
 			seeSpecs() {
 				this.specsInfo.show = true;
@@ -1076,11 +1085,8 @@
 					// #endif
 					that.DefaultSelect();
 					that.preloadImage();
-					if(this.type == 1){
-						app.globalData.openPages = `/pages/activity/goods_details/index?spid=${this.$store.state.app.uid}&id=${this.id}&type=1&time_id=${this.time_id}&spid=${this.storeInfo.uid}`
-					}else{
-						app.globalData.openPages =  `/pages/activity/goods_details/index?spid=${this.$store.state.app.uid}&id=${this.id}&type=${this.type}`
-					}
+					// 外发链接只含当前会员的一个分享参数；本次入站 spid 保持独立。
+					app.globalData.openPages = this.activitySharePath();
 					that.showSkeleton = false
 				}).catch(err => {
 					that.$util.Tips({
@@ -1111,7 +1117,8 @@
 					], {
 						desc: this.storeInfo.info,
 						title: this.storeInfo.title,
-						link: location.href,
+						// 重新分享由当前会员归属，不沿用收到链接的 spid 或 OAuth 查询参数。
+						link: window.location.origin + this.activitySharePath(),
 						imgUrl: this.storeInfo.image
 					}).then(res => {}).catch(err => {});
 			},
@@ -1193,7 +1200,7 @@
 			},
 			selecAttr: function() {
 				if(!this.isLogin){
-					toLogin();
+					this.changeLogin();
 					return
 				}
 				// 规格选择不请求配送定位，订单只关联会员选择的购买门店。
@@ -1300,7 +1307,7 @@
 			setCollect: Debounce(function() {
 				let that = this;
 				if (this.isLogin === false) {
-					toLogin();
+					this.changeLogin();
 				} else {
 					let that = this;
 					if (this.storeInfo.userCollect) {
@@ -1369,7 +1376,7 @@
 						this.isOpen = false
 						let id = that.type == 1?that.id:that.storeInfo.product_id
 						uni.navigateTo({
-						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&store_id='+that.store_id+'&store_name='+that.store_name+'&product_id=' + id+'&group_purchase='+(that.type == 3 ? 1 : 0)
+						  url: '/pages/goods/order_confirm/index?new=1&spid='+encodeURIComponent(this.spid || 0)+'&cartId=' + res.data.cartId+'&store_id='+that.store_id+'&store_name='+encodeURIComponent(that.store_name || '')+'&product_id=' + id+'&group_purchase='+(that.type == 3 ? 1 : 0)
 						});
 					}).catch(err => {
 						// 购物车校验失败时展示后端业务原因，便于会员重新选择规格或联系门店。
@@ -1379,7 +1386,7 @@
 						});
 					});
 				}else{
-					toLogin()
+					this.changeLogin();
 				}
 			},
 			/**
@@ -1619,14 +1626,11 @@
 			// #endif
 			setShareInfoStatus: function() {
 				let data = this.storeInfo;
-				let href = location.href;
 				if (this.$wechat.isWeixin()) {
 					this.posters = true;
 					getUserInfo().then(res => {
-						href =
-							href.indexOf("?") === -1 ?
-							href + "?spid=" + res.data.uid :
-							href + "&spid=" + res.data.uid;
+						// 同一分享路径用于微信菜单与海报，绝不追加重复 spid。
+						const href = window.location.origin + this.activitySharePath(res.data.uid);
 
 						let configAppMessage = {
 							desc: data.store_info,
@@ -1655,10 +1659,11 @@
 			spellBnt(item) {
 				if (this.isLogin) {
 					uni.navigateTo({
-						url: '/pages/activity/goods_combination_status/index?id=' + item.id
+						// 从活动进入现有团继续保留本次分享，不能改成购买人或永久推荐人。
+						url: '/pages/activity/goods_combination_status/index?id=' + item.id + '&spid=' + encodeURIComponent(this.spid || 0)
 					})
 				} else {
-					toLogin()
+					this.changeLogin();
 				}
 			},
 			goGoodCall() {
@@ -1687,7 +1692,7 @@
 		onShareAppMessage() {
 			return {
 				title: this.storeInfo.title,
-				path: app.globalData.openPages,
+				path: this.activitySharePath(),
 				imageUrl: this.storeInfo.image
 			};
 		},
@@ -1696,7 +1701,7 @@
 			return {
 				title: that.storeInfo.title,
 				imageUrl: that.storeInfo.image,
-				path: app.globalData.openPages,
+				query: that.activitySharePath().split('?')[1],
 			};
 		},
 		//#endif

@@ -34,6 +34,8 @@ final class CashierV3CheckoutSettlementKernel
     // 转账凭证由操作员确认到账，沿用整数金额、最终快照及事务校验。
     public const PAYMENT_BANK_TRANSFER = 'bank_transfer';
     public const PAYMENT_OTHER_INCOME = 'other_income';
+    // 仅会员自助入口使用，表示外部实际到账，不代替余额抵扣。
+    public const PAYMENT_THIRD_PARTY = 'third_party';
     public const PAYMENT_PARTNER_COLLECTION = 'partner_collection';
     public const PAYMENT_OTHER_COLLECTION = 'other_collection';
     public const PAYMENT_OLD_CARD_ENTRY = 'old_card_entry';
@@ -47,6 +49,7 @@ final class CashierV3CheckoutSettlementKernel
         self::PAYMENT_DOUYIN_VOUCHER,
         self::PAYMENT_BANK_TRANSFER,
         self::PAYMENT_OTHER_INCOME,
+        self::PAYMENT_THIRD_PARTY,
         self::PAYMENT_PARTNER_COLLECTION,
         self::PAYMENT_OTHER_COLLECTION,
     ];
@@ -976,7 +979,6 @@ final class CashierV3CheckoutSettlementKernel
                     // Presale belongs to this salesperson's immutable sale-line choice,
                     // not to the catalog item or current employee profile.
                     $normalizedPerson = ['staffId' => $staffId, 'allocationWeight' => $allocation];
-                    // Preserve a cross-store employee source in the immutable checkout snapshot.
                     if (($person['personnelSource'] ?? 'store') === 'other') {
                         $normalizedPerson['personnelSource'] = 'other';
                     }
@@ -1294,10 +1296,8 @@ final class CashierV3CheckoutSettlementKernel
             if ($weight > 100) {
                 throw self::failure('entitlement_craftsman_selection_weight_invalid', ['path' => $path, 'staffId' => $staffId]);
             }
-            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
-            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
-                throw self::failure('entitlement_craftsman_selection_performance_invalid', ['path' => $path, 'staffId' => $staffId]);
-            }
+            // 当前权益完成事实统一记双项业绩；输入中的旧员工类型仅属历史配置。
+            $performanceType = 'commission_labor';
             $laborFeeCents = self::money($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
             $personnelSource = (string)($row['personnelSource'] ?? 'store');
             if (!in_array($personnelSource, ['store', 'other'], true)) {

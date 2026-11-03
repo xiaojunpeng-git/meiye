@@ -300,6 +300,11 @@ class StoreOrderCreateServices extends BaseServices
             'estimate_time' => $estimate_time,
             'store_delivery_type' => $is_store_delivery_type,
         ];
+        // 会员端新订单的记账分类在创建时固定；保留 pay_type/trade_no 原始渠道凭据。
+        // 只信任控制器注入来源，平台代客/人工收银以及升级前待付单不受影响。
+        $orderInfo['accounting_method'] = \app\services\member\MemberOrderAccounting::forChannel(
+            (string)$this->getItem('channel_type', '')
+        );
         if($orderInfo['type'] == 1){
             //秒杀
             $orderInfo['source']=8;
@@ -347,6 +352,9 @@ class StoreOrderCreateServices extends BaseServices
             // Every newly created group order waits for completion; historical orders are not backfilled.
             if ((int)$type === 3) {
                 (new \app\services\activity\combination\CombinationFulfillmentServices())->register((int)$order['id']);
+                // 本次分享与购买门店独立冻结，不使用永久分销上下级或同号员工推断。
+                (new \app\services\activity\combination\CombinationPromotionServices())->registerOrderInTx(
+                    (int)$order['id'], (int)$this->getItem('group_promotion_uid', 0));
             }
             if ($couponId) {
                 /** @var StoreCouponUserServices $couponServices */

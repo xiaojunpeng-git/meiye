@@ -427,6 +427,12 @@ final class CashierV3CheckoutPreparationServices
             $stateContextId,
             $debtAmountCents
         );
+        foreach ((array)($snapshot['paymentDetails'] ?? []) as $payment) {
+            if (($payment['method'] ?? '') === 'third_party'
+                && ($dataScope->operatorProfile()['actor_type'] ?? '') !== 'member') {
+                throw self::incomplete('third_party_accounting_requires_member_order');
+            }
+        }
         if ($checkoutSnapshot !== null) {
             $snapshot['sourceDocument'] = [
                 // Only the server-created member scope can mark a self-service

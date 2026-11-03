@@ -1496,6 +1496,10 @@ final class CashierV3MemberModule
             'addres' => trim((string)($payload['address'] ?? $payload['addres'] ?? ($member['addres'] ?? ''))),
             'mark' => trim((string)($payload['note'] ?? $payload['mark'] ?? ($member['mark'] ?? ''))),
         ];
+        // 原生推广资格仍归会员自身。共用编辑命令的权限和行锁生效后才更新，
+        // 客户端未提交时保留原值，不能把旧版编辑请求解释成撤销推广资格。
+        $promotionUpdates = self::promotionPermissionUpdates($payload);
+        $updates = array_merge($updates, $promotionUpdates);
         $referrerSupplied = array_key_exists('referrerMemberId', $payload) || array_key_exists('referrer_member_id', $payload);
         if ($referrerSupplied) {
             $referrerId = self::resolveReferrerMemberId($payload, (int)$member['uid'], $operatorScope, $dataScope);
@@ -1581,10 +1585,15 @@ final class CashierV3MemberModule
         $changedFields = ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'];
         if ($phoneChanged) $changedFields[] = 'phone';
         if ($referrerSupplied) $changedFields[] = 'referrerMemberId';
+        $changedFields = array_merge($changedFields, array_keys($promotionUpdates));
         $mutationPayload = [
             'changed_fields' => $changedFields,
             'source' => 'cashier_v3',
         ];
+        if ($promotionUpdates) {
+            $mutationPayload['promotion_permissions_before'] = array_intersect_key($member, $promotionUpdates);
+            $mutationPayload['promotion_permissions_after'] = $promotionUpdates;
+        }
         if ($profile['exclusive_service_person_supplied']) {
             $changedFields[] = $profile['exclusive_service_people_supplied']
                 ? 'exclusiveServicePersonIds' : 'exclusiveServicePersonId';
@@ -1748,6 +1757,20 @@ final class CashierV3MemberModule
         return $member;
     }
 
+    /** 只允许明确的0/1；不接受布尔、浮点、空值或通过强制转换混入的非法权限值。 */
+    private static function promotionPermissionUpdates(array $payload): array
+    {
+        $updates = [];
+        foreach (['spread_open' => '推广资格', 'is_promoter' => '推广员权限'] as $field => $label) {
+            if (!array_key_exists($field, $payload)) continue;
+            if (!in_array($payload[$field], [0, 1, '0', '1'], true)) {
+                throw self::validation($field, $label . '参数无效。');
+            }
+            $updates[$field] = (int)$payload[$field];
+        }
+        return $updates;
+    }
+
     private static function editableMember(array $member): array
     {
         $uid = (int)($member['uid'] ?? 0);
@@ -1781,6 +1804,9 @@ final class CashierV3MemberModule
             'birthday' => (int)($member['birthday'] ?? 0) > 0 ? date('Y-m-d', (int)$member['birthday']) : '',
             'address' => (string)($member['addres'] ?? ''),
             'note' => (string)($member['mark'] ?? ''),
+            // 真实原字段回显；历史无值只提供编辑缺省，不写回数据库或改变全局分销模式。
+            'spread_open' => (int)($member['spread_open'] ?? 1),
+            'is_promoter' => (int)($member['is_promoter'] ?? 0),
             'memberLevelId' => (int)($member['level'] ?? 0),
             'memberTagIds' => array_values(array_unique($tagIds)),
             'profileFields' => $profileFields,
