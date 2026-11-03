@@ -8,15 +8,6 @@ use app\services\activity\combination\CombinationPromotionServices;
 
 $service = new CombinationPromotionServices();
 $admin = ['id'=>1,'level'=>0,'roles'=>[],'admin_type'=>1,'employee_id'=>987654321];
-// Existing eligibility policy is not changed by this round. Stub its result to isolate
-// transaction freezing, while keeping real user/store lookup and all report SQL authoritative.
-$original = app()->make(app\services\user\UserServices::class);
-$app->instance(app\services\user\UserServices::class, new class($original) {
-    private $original;
-    public function __construct($original) { $this->original=$original; }
-    public function checkUserPromoter(int $uid, $member): bool { return (int)$member['spread_open']===1 && (int)$member['is_promoter']===1; }
-    public function __call($name,$args) { return $this->original->$name(...$args); }
-});
 // Export owns its read-only snapshot; exercise real existing local rows before fixture rollback transaction.
 $readFilters=['start_date'=>'2020-01-01','end_date'=>'2030-01-01'];
 $readDetails=$service->details($readFilters,$admin);
@@ -41,9 +32,9 @@ try {
     check($view['metrics']['pending_amount']==='300.00' && $view['metrics']['formed_amount']==='0.00','three paid pending orders produce unformed net sales');
     check($view['metrics']['group_count']===1 && $view['metrics']['order_count']===3,'one group distinct count, three orders');
     $own=$service->memberSummary($filters,$promoter);
-    check($own['metrics']['total_amount']==='200.00' && $own['metrics']['group_count']===1,'member summary sees only own attributed orders');
+    check($own['metrics']['total_amount']==='300.00' && $own['metrics']['group_count']===1,'opening share member receives the whole group');
     $other=$service->details($filters+['uid'=>$promoter],null,$secondPromoter);
-    check($other['count']===1 && (int)$other['list'][0]['id']===$three['oid'],'request UID cannot impersonate another promoter');
+    check($other['count']===0,'joining through another share link cannot change the group promoter');
     Db::name('store_pink')->where('id|k_id',$one['pinkId'])->update(['status'=>2]);
     $view=$service->dashboard($filters,$admin);
     check($view['metrics']['formed_amount']==='300.00' && $view['metrics']['pending_amount']==='0.00' && $view['metrics']['total_amount']==='300.00','completion transfers bucket without duplicating total');
@@ -90,15 +81,17 @@ try {
     $service->settings($admin,['activity_ids'=>[$one['cid']]]);
     check($service->settings($admin)['activity_ids']===[$one['cid']],'dashboard activity settings persist and read back');
     check($service->dashboard([],$admin)['metrics']['total_amount']==='200.00','saved activity selection drives backend totals');
-    $unqualified=fixture(6,3,'yue');$service->registerOrderInTx($unqualified['oid'],$unqualified['uid']);
-    check((int)Db::name('combination_promotion_order')->where('order_id',$unqualified['oid'])->value('share_uid')===0,'non-promoter cannot gain attribution through forged link');
-    // 无推广人的购买订单保留总业绩，门店榜取原单门店，个人榜不得生成“未归属推广人”。
+    $unqualified=fixture(6,3,'yue');
     $buyerStore=(int)Db::name('store_order')->where('id',$unqualified['oid'])->value('store_id');
+    Db::name('user')->where('uid',$unqualified['uid'])->update(['belong_store_id'=>$buyerStore,'spread_open'=>0]);
+    $service->registerOrderInTx($unqualified['oid'],$unqualified['uid']);
+    check((int)Db::name('combination_promotion_order')->where('order_id',$unqualified['oid'])->value('share_uid')===0,'non-promoter cannot gain attribution through forged link');
+    // 无合格开团分享人时按团长归属门店统计；个人榜不得生成“未归属推广人”。
     $buyerName=(string)Db::name('user')->where('uid',$unqualified['uid'])->value('real_name');
     $buyerFilter=['activity_ids'=>[$unqualified['cid']]];
     $buyerView=$service->dashboard($buyerFilter,$admin);
     check($buyerView['metrics']['total_amount']==='100.00' && $buyerView['rankings']['members']===[],'unpromoted purchase stays in totals but not personal performance');
-    check((int)$buyerView['rankings']['stores'][0]['id']===$buyerStore && $buyerView['rankings']['stores'][0]['buyer_name']===$buyerName,'purchase store and single buyer remain visible in store ranking');
+    check((int)$buyerView['rankings']['stores'][0]['id']===$buyerStore && $buyerView['rankings']['stores'][0]['buyer_name']===$buyerName,'leader store and single buyer remain visible in store ranking');
     $buyerDetail=$service->details($buyerFilter+['dimension'=>'store','dimension_id'=>$buyerStore],$admin);
     check($buyerDetail['count']===1 && $buyerDetail['list'][0]['member_name']===$buyerName,'store drilldown shares ranking scope and buyer name');
     echo "R44 PROMOTION ACCEPTANCE COMPLETE\n";

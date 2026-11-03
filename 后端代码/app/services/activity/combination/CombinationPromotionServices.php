@@ -3,36 +3,62 @@ declare(strict_types=1);
 
 namespace app\services\activity\combination;
 
-use app\services\user\UserServices;
 use think\exception\ValidateException;
 use think\facade\Db;
 
 /**
- * 本次分享归属与永久分销上下级独立。只冻结会员与会员所属门店，绝不借用同号员工。
+ * 拼团业绩按团长开团时的分享人或团长归属门店冻结，绝不借用永久分销上下级或同号员工。
  * 大屏、个人推广、下钻及导出共用同一订单粒度查询；金额取支付及成功退款事实。
  */
 class CombinationPromotionServices
 {
-    /** 由订单创建事务调用；资格在服务端验证，重复回调不能改变归属快照。 */
+    /** 由订单创建事务调用；团员继承团长的归属快照，重复回调不能改变既有订单。 */
     public function registerOrderInTx(int $orderId, int $shareUid): void
     {
         $order = Db::name('store_order')->where('id', $orderId)->lock(true)->find();
         if (!$order || (int)$order['activity_id'] <= 0) throw new ValidateException('拼团订单来源无效');
         if (Db::name('combination_promotion_order')->where('order_id', $orderId)->find()) return;
         $activity = Db::name('store_combination')->where('id', $order['activity_id'])->find();
-        $member = $shareUid > 0 ? Db::name('user')->where('uid', $shareUid)->lock(true)->find() : null;
-        $eligible = $member && (int)$member['status'] === 1 && !(int)$member['is_del']
-            && app()->make(UserServices::class)->checkUserPromoter($shareUid, $member);
-        $store = $eligible ? Db::name('system_store')->where('id', (int)$member['belong_store_id'])
-            ->where('is_del', 0)->find() : null;
-        $reason = !$shareUid ? 'no_share' : (!$eligible ? 'not_eligible' : (!$store ? 'missing_store' : 'qualified_share'));
+        $root = (int)$order['pink_id'] > 0
+            ? Db::name('store_pink')->where('id', (int)$order['pink_id'])->lock(true)->find() : null;
+        if ($root && ((int)$root['k_id'] !== 0 || (int)$root['cid'] !== (int)$order['activity_id'])) {
+            throw new ValidateException('拼团团长来源无效');
+        }
+        $isLeaderOrder = !$root || (int)$root['order_id_key'] === $orderId;
+        $rootSnapshot = $root ? Db::name('combination_promotion_order')->where('order_id', (int)$root['order_id_key'])->find() : null;
+        // 参团链接可以由不同会员转发；整团只采用开团时冻结的分享人和门店。
+        if ($rootSnapshot && ((int)$rootSnapshot['store_id'] > 0
+            || $rootSnapshot['attribution_reason'] === 'missing_leader_store')) {
+            $attribution = ['share_uid' => (int)$rootSnapshot['share_uid'],
+                'store_id' => (int)$rootSnapshot['store_id'],
+                'promoter_name' => (string)$rootSnapshot['promoter_name'],
+                'store_name' => (string)$rootSnapshot['store_name'],
+                'reason' => 'group_inherited'];
+        } else {
+            // 没有已冻结的团长归属时，团长本人是后备归属来源；不使用团员的购买门店。
+            $leaderUid = $root ? (int)$root['uid'] : (int)$order['uid'];
+            $leader = Db::name('user')->where('uid', $leaderUid)->lock(true)->find();
+            $member = $isLeaderOrder && $shareUid > 0
+                ? Db::name('user')->where('uid', $shareUid)->lock(true)->find() : null;
+            // 拼团推广资格独立于普通分销的总开关及“推广员权限”。
+            $eligible = $member && (int)$member['status'] === 1 && !(int)$member['is_del']
+                && (int)$member['spread_open'] === 1;
+            $owner = $eligible ? $member : $leader;
+            $store = $owner ? Db::name('system_store')->where('id', (int)$owner['belong_store_id'])
+                ->where('is_del', 0)->find() : null;
+            $attribution = ['share_uid' => $eligible && $store ? $shareUid : 0,
+                'store_id' => $store ? (int)$store['id'] : 0,
+                'promoter_name' => $eligible && $store ? (string)($member['real_name'] ?: $member['nickname']) : '',
+                'store_name' => $store ? (string)$store['name'] : '',
+                'reason' => $eligible && $store ? 'qualified_group_share' : ($store ? 'leader_store' : 'missing_leader_store')];
+        }
         Db::name('combination_promotion_order')->insert([
             'order_id' => $orderId, 'activity_id' => (int)$order['activity_id'],
-            'share_uid' => $store ? $shareUid : 0, 'store_id' => $store ? (int)$store['id'] : 0,
-            'promoter_name' => $store ? (string)($member['real_name'] ?: $member['nickname']) : '',
-            'store_name' => $store ? (string)$store['name'] : '',
+            'share_uid' => $attribution['share_uid'], 'store_id' => $attribution['store_id'],
+            'promoter_name' => $attribution['promoter_name'],
+            'store_name' => $attribution['store_name'],
             'activity_name' => (string)($activity['title'] ?? ''),
-            'attribution_reason' => $reason, 'created_at' => time(),
+            'attribution_reason' => $attribution['reason'], 'created_at' => time(),
         ]);
     }
 
@@ -85,8 +111,8 @@ class CombinationPromotionServices
 
     /**
      * 一行一笔真实已支付拼团订单。虚拟名额不产生销售；未支付排除。
-     * 原单 is_del=1 是待成团隐藏标记，不能误当删除。没有合格推广人时，个人榜不计业绩，
-     * 门店榜仍按原购买门店归集；原单也没有购买门店时才显示未归属。
+     * 原单 is_del=1 是待成团隐藏标记，不能误当删除。新团按团长的归属快照统计；
+     * 旧订单没有该快照时仍沿用原购买门店，绝不回填历史归属。
      * 成团状态改变只移动金额桶；成功退款才扣减，失败待退净额仍归未成团。
      */
     private function query(array $filters, ?array $allowedStores, ?int $ownUid)
@@ -104,31 +130,38 @@ class CombinationPromotionServices
         // Only successful terminal facts (or successful legacy refunds) reduce performance.
         // GREATEST avoids counting the same successful refund from receipt and original row twice.
         $refund = 'LEAST(o.pay_price,GREATEST(COALESCE(' . $refunds . ',0),IF(o.refund_status IN (2,3),o.refund_price,0)))';
+        // 新归属理由让“无推广人但有团长门店”也读取冻结门店；旧单保持原查询回退口径。
+        $groupSnapshot = "a.attribution_reason IN ('qualified_group_share','leader_store','missing_leader_store','group_inherited')";
+        $attributedStore = 'CASE WHEN ' . $groupSnapshot . ' THEN COALESCE(a.store_id,0) '
+            . 'WHEN COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0 THEN a.store_id '
+            . 'ELSE COALESCE(o.store_id,0) END';
+        $attributedName = 'CASE WHEN ' . $groupSnapshot . " THEN COALESCE(NULLIF(a.store_name,''),'未归属') "
+            . "WHEN COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0 THEN COALESCE(NULLIF(a.store_name,''),'未归属') "
+            . "ELSE COALESCE(NULLIF(purchase_store.name,''),'未归属') END";
         $base = Db::name('store_order')->alias('o')
             ->join('store_pink g', 'g.id=' . $group)->leftJoin('combination_promotion_order a', 'a.order_id=o.id')
             ->leftJoin('store_combination c', 'c.id=o.activity_id')->leftJoin('user u', 'u.uid=o.uid')
             ->leftJoin('system_store purchase_store', 'purchase_store.id=o.store_id')
             ->where('o.paid', 1)->whereIn('o.type', [0, 3])
             ->field('o.id,o.order_id AS order_no,o.uid AS member_id,o.activity_id,g.id AS group_id,o.pay_time AS paid_at,'
-                . 'COALESCE(a.share_uid,0) AS promoter_id,IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,COALESCE(o.store_id,0)) AS store_id,'
-                // 有推广人时沿用创建订单时冻结的归属；无推广人时以原单购买门店归集门店业绩。
-                // 购买门店从原单读取，不从会员当前门店倒推，避免调店改写历史排行。
+                . 'COALESCE(a.share_uid,0) AS promoter_id,' . $attributedStore . ' AS store_id,'
+                // 展示名同样以创建订单时冻结的门店为准，不能用会员当前门店回写旧团。
                 . "COALESCE(NULLIF(a.promoter_name,''),'未归属') AS promoter_name,"
-                . "CASE WHEN COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0 THEN COALESCE(NULLIF(a.store_name,''),'未归属') ELSE COALESCE(NULLIF(purchase_store.name,''),'未归属') END AS store_name,"
+                . $attributedName . ' AS store_name,'
                 . "COALESCE(NULLIF(a.activity_name,''),c.title,'历史活动') AS activity_name,COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),'会员') AS member_name,"
                 . "CASE WHEN g.status=2 THEN 'formed' WHEN g.status=3 THEN 'failed' ELSE 'pending' END AS group_status,"
                 . 'ROUND(o.pay_price*100) AS paid_cents,ROUND(' . $refund . '*100) AS refund_cents,'
                 . 'GREATEST(0,ROUND((o.pay_price-(' . $refund . '))*100)) AS net_cents');
         // 空授权必须拒绝全部，不能用IN(0)误放行历史未归属且购买门店也为0的订单。
         if ($allowedStores === []) $base->whereRaw('1=0');
-        elseif ($allowedStores !== null) $base->whereRaw('IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,o.store_id) IN ('
+        elseif ($allowedStores !== null) $base->whereRaw($attributedStore . ' IN ('
             . implode(',', array_map('intval', $allowedStores)) . ')');
         if ($ownUid !== null) {
             if ($ownUid <= 0) throw new ValidateException('请先登录');
             $base->where('a.share_uid', $ownUid);
         }
         $stores = $this->ids($filters['store_ids'] ?? []);
-        if ($stores) $base->whereRaw('IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,COALESCE(o.store_id,0)) IN ('
+        if ($stores) $base->whereRaw($attributedStore . ' IN ('
             . implode(',', $stores) . ')');
         $ids = $this->ids($filters['activity_ids'] ?? (($filters['activity_id'] ?? '') !== '' ? [$filters['activity_id']] : []));
         if ($ids) $base->whereIn('o.activity_id', $ids);
