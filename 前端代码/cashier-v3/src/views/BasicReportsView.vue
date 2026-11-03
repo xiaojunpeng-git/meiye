@@ -265,7 +265,9 @@ function display(row, field) {
   // 矩阵单位由后端逐行声明，同一门店列可以分别显示金额、客数与比例。
   const unit = field.value_unit === 'row' ? row.value_unit : field.value_unit
   if (unit === 'percent_integer') return String(row[field.key]) + '%'
-  if (unit === 'money_yuan' || field.money || field.key === 'amount') return formatReportMoney(row[field.key])
+  // PK 表仅隐藏货币符号，数值和导出仍沿用后端的元金额。
+  if (unit === 'money_yuan' || field.money || field.key === 'amount') return active.value?.code === 'basic_sales_pk'
+    ? formatReportMoney(row[field.key]).replace(/^¥/, '') : formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
   if (field.type === 'decimal') return formatReportCount(row[field.key], field)
   if (['project_count','xiangmushu',...(salaryReport.value ? ['haoqingshu','zhidingke'] : [])].includes(field.key) && row[field.key] != null) return String(Number(row[field.key]))
