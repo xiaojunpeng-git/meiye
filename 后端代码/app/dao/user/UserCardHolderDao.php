@@ -14,6 +14,7 @@ namespace app\dao\user;
 
 use app\dao\BaseDao;
 use app\model\user\UserCardHolder;
+use app\model\order\StoreOrderTerminalOperation;
 
 /**
  *
@@ -34,7 +35,17 @@ class UserCardHolderDao extends BaseDao
 
 	public function search(array $where = [])
 	{
-		return parent::search($where)->when(isset($where['product_type']) && $where['product_type'], function ($query) use ($where) {
+        // Only the member card-pack read requests this scope. Filter at SQL level so
+        // both the page and its total exclude rights from voided source orders.
+        $excludeVoidSourceOrder = !empty($where['exclude_void_source_order']);
+        unset($where['exclude_void_source_order']);
+		return parent::search($where)->when($excludeVoidSourceOrder, function ($query) {
+            $query->whereNotIn('oid', function ($orders) {
+                $orders->name('store_order')
+                    ->where('terminal_action', StoreOrderTerminalOperation::ACTION_VOID)
+                    ->field('id');
+            });
+        })->when(isset($where['product_type']) && $where['product_type'], function ($query) use ($where) {
             $query->where('product_type', $where['product_type']);
         });
 	}

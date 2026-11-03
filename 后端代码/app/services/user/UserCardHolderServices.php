@@ -61,6 +61,9 @@ class UserCardHolderServices extends BaseServices
         [$page, $limit] = $this->getPageValue();
         $where['is_del'] = 0;
         $where['uid'] = $uid;
+        // A voided purchase keeps its historical holder row for audit, but it
+        // must not appear as a spendable project in either member list tab.
+        $where['exclude_void_source_order'] = 1;
         if(isset($where['store_id']) && $where['store_id'] <= 0) unset($where['store_id']);
         // Staff scope must be evaluated before pagination, or a page can lose
         // rows and its total will describe only the already sliced page.
