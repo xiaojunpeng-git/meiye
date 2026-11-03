@@ -114,8 +114,9 @@ async function openCell(row, field) {
     }, snapshot.storeIds)
     const documentNos = result.navigation_document_nos || []
     if (result.navigation_error) throw new Error(result.navigation_error)
-    const selection = result.navigation_selection
-    if (!selection || !Number.isInteger(selection.storeId) || !selection.methodCode || !selection.from || !selection.to) throw new Error('对账定位条件缺失，请刷新后重试。')
+    // 请求中的单元格条件与响应中的完整导航条件分开命名，避免块级遮蔽在请求前触发暂时性死区。
+    const navigationSelection = result.navigation_selection
+    if (!navigationSelection || !Number.isInteger(navigationSelection.storeId) || !navigationSelection.methodCode || !navigationSelection.from || !navigationSelection.to) throw new Error('对账定位条件缺失，请刷新后重试。')
     if (!Array.isArray(documentNos) || documentNos.some(no => typeof no !== 'string')) throw new Error('对账原单身份无效，请刷新后重试。')
     if (!documentNos.length) throw new Error('这格没有可定位的订单，请刷新对账单后重试。')
     if (documentNos.length > 100) throw new Error('本格涉及超过 100 张订单，请缩小对账日期范围后再跳转。')
@@ -126,7 +127,7 @@ async function openCell(row, field) {
       scrollTop: resultsScroll.value?.scrollTop || 0, scrollLeft: resultsScroll.value?.scrollLeft || 0
     }
     sessionStorage.setItem(`reconciliation-navigation:${token}`, JSON.stringify({
-      returnState, documentNos, selection,
+      returnState, documentNos, selection: navigationSelection,
       storeId: Number(result.detail_context?.store_id || 0), storeLabel: result.detail_context?.store_name || '',
       paymentName: row.payment_name
     }))
