@@ -48,6 +48,7 @@ try {
     $product['is_show'] = 0; $product['is_verify'] = 1; $product['is_del'] = 0;
     $id = (int)Db::name('store_product')->insertGetId($product); $createdIds[] = $id;
     $sku['product_id'] = $id; $sku['unique'] = $token; $sku['price'] = '100.00'; $sku['ot_price'] = '100.00'; $sku['cost'] = '0.00';
+    $sku['price_range_min'] = '100.00'; $sku['price_range_max'] = '200.00';
     $sid = (int)Db::name('store_product_attr_value')->insertGetId($sku);
     $ids = static function (array $rows): array { return array_map('intval', array_column($rows,'sku_id')); };
     $check(!in_array($sid,$ids($authority->listStoreItems($store)),true), 'warehouse project excluded from normal sale directory');
@@ -56,6 +57,7 @@ try {
     $dto = $catalog->catalog($operator,$scope);
     $match = array_values(array_filter($dto['customCardProjects'],static function ($row) use ($sid): bool { return (int)$row['id'] === $sid; }));
     $check(count($match)===1 && $match[0]['saleStatus']==='warehouse' && !$match[0]['disabled'], 'service exposes selectable warehouse status separately');
+    $check($match[0]['salePriceRange'] === ['minimumCents'=>10000,'maximumCents'=>20000], 'custom project candidate carries authoritative unit price range');
     $catalog->discoverCustomCardComponentResources($sid,$operator,$scope);
     $line = $catalog->selectCustomCardComponentAfterGatewayLocksInTx($sid,$token,$operator,$scope);
     $check((int)$line['catalog_sku_id']===$sid && (int)$line['catalog_product_type']===6, 'warehouse component locks and builds authoritative line');
@@ -76,6 +78,20 @@ try {
     $check(in_array($sid,$ids($authority->listStoreItems($store)),true), 'selling project remains in normal sale directory');
     Db::name('store_product')->where('id',$id)->update(['is_show'=>0]);
     // 使用已有本店定制卡壳完成配置落库/重放；缺少壳时显式失败，不冒充完整业务验证。
+    // 设置金额覆盖全部次数；锁定 SKU 后按单次售价区间拒绝越界，失败不能生成配置。
+    foreach ([['amount'=>'298','label'=>'below'], ['amount'=>'601','label'=>'above']] as $invalidAmount) {
+        $invalidPayload = $payload;
+        $invalidPayload['components'][0]['amount'] = $invalidAmount['amount'];
+        try {
+            $configuration->createSaleLineAfterGatewayLocksInTx($invalidPayload,$token,$token,$token.'-range',[],$operator,$scope,1,true,$token.'-range');
+            throw new RuntimeException('Out-of-range custom project was accepted');
+        } catch (CashierV3CommandException $error) {
+            $check(str_contains($error->getMessage(), '的售价区间是:最低100元,最高200元'),
+                'custom project unit price '.$invalidAmount['label'].' locked SKU range rejected');
+        }
+        $check(Db::name(CashierV3CustomCardConfigurationServices::TABLE)->where('created_command_idempotency_key',$token.'-range')->count()===0,
+            'rejected custom project range leaves no configuration');
+    }
     $sale = $configuration->createSaleLineAfterGatewayLocksInTx($payload,$token,$token,$token,[],$operator,$scope,1,true,$token);
     $row = (array)Db::name(CashierV3CustomCardConfigurationServices::TABLE)->where('created_command_idempotency_key',$token)->find();
     $snapshot = json_decode((string)$row['configuration_snapshot_json'],true);

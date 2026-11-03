@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
+use app\services\cashier\v3\cashier\CashierV3CashierMoreActionServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use think\facade\Db;
 
@@ -108,6 +109,15 @@ final class CashierV3CustomCardConfigurationServices
             }
             $authority = is_array($line['authority_snapshot'] ?? null) ? $line['authority_snapshot'] : [];
             $display = is_array($line['display_snapshot'] ?? null) ? $line['display_snapshot'] : [];
+            // 前端的“设置金额”覆盖全部次数；事务内以锁定 SKU 的单次售价区间重验，防止跳过“下一步”直接提交。
+            $salePriceRange = (array)($display['salePriceRange'] ?? []);
+            CashierV3CashierMoreActionServices::assertSalePriceRangeCents(
+                (int)($salePriceRange['minimumCents'] ?? 0),
+                (int)($salePriceRange['maximumCents'] ?? 0),
+                (string)($display['name'] ?? ''),
+                $component['amountCents'],
+                $component['times']
+            );
             $categoryId = (int)($display['categoryId'] ?? 0);
             $categoryName = trim((string)($display['category'] ?? ''));
             if ($categoryId <= 0) {

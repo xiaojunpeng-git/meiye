@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { salePriceRangeMessage } from '@/services/cashierV3SalePriceRange'
 
 const props = defineProps({
   mode: { type: String, required: true },
@@ -74,6 +75,8 @@ watch(() => props.catalogItems, (items) => {
         name: item.name,
         specification: item.specification || '',
         saleStatus: item.saleStatus || 'selling',
+        // 卡内项目的设置金额覆盖全部次数；保留同一 SKU 的售价区间，按单次价格校验。
+        salePriceRange: item.salePriceRange || null,
         times: previous?.times || 1,
         amount: previous?.amount ?? Number(item.price || 0)
       }
@@ -100,7 +103,41 @@ function clearSelectedCustomItems() {
 
 function nextStep() {
   customError.value = ''
+  if (!isGift.value && step.value === 2 && !validateCustomProjectPriceRanges()) return
   if (step.value < 3) step.value += 1
+}
+
+function selectStep(target) {
+  customError.value = ''
+  if (!isGift.value && target === 3 && !validateCustomProjectPriceRanges()) return
+  step.value = target
+}
+
+function validateCustomProjectPriceRanges() {
+  customError.value = ''
+  for (const item of selectedCustomItems.value) {
+    const times = Number(item.times)
+    const amount = Number(item.amount)
+    if (!Number.isInteger(times) || times <= 0 || !Number.isSafeInteger(amount) || amount < 0
+      || !Number.isSafeInteger(amount * 100)) {
+      showCustomProjectPriceError(`「${item.name}」的次数和设置金额必须是有效整数。`)
+      return false
+    }
+    // 区间是单次售价，设置金额是全部次数的合计；用整数分比较，避免除法的小数误差。
+    const rangeMessage = salePriceRangeMessage(item.name, amount * 100, times, item.salePriceRange)
+    if (rangeMessage) {
+      showCustomProjectPriceError(`「${item.name}」设置金额${amount}元、次数${times}；${rangeMessage}`)
+      return false
+    }
+  }
+  return true
+}
+
+function showCustomProjectPriceError(message) {
+  // 沿用收银台统一的操作提示弹窗；保留当前项目输入，不在底部挤出易被遮挡的行内错误。
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: { status: 'failed', message }
+  }))
 }
 
 function confirm() {
@@ -111,6 +148,10 @@ function confirm() {
     }
     if (!selectedCustomItems.value.length) {
       customError.value = '请至少选择一项卡内项目'
+      return
+    }
+    if (!validateCustomProjectPriceRanges()) {
+      step.value = 2
       return
     }
     if (!expiryDate.value || new Date(`${expiryDate.value}T23:59:59+08:00`).getTime() <= Date.now()) {
@@ -161,7 +202,7 @@ function confirm() {
     </header>
 
     <nav class="cashier-guided-panel__steps" aria-label="办理步骤">
-      <button v-for="(label, index) in steps" :key="label" type="button" :class="{ 'is-active': step === index + 1, 'is-done': step > index + 1 }" @click="step = index + 1">
+      <button v-for="(label, index) in steps" :key="label" type="button" :class="{ 'is-active': step === index + 1, 'is-done': step > index + 1 }" @click="selectStep(index + 1)">
         <span>{{ index + 1 }}</span>{{ label }}
       </button>
     </nav>
