@@ -5,6 +5,8 @@ namespace app\services\report;
 use app\services\order\ValidCashOrderServices;
 use app\services\member\MemberOrderAccounting;
 use app\services\cashier\v3\report\CashierV3EffectivePaymentMethodSql;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
+use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementKernel;
 use app\services\report\query\BasicRegistrationQueryProvider;
 use think\facade\Db;
 
@@ -26,7 +28,7 @@ final class StoreReconciliationReceiptReader
             ->order('add_time', 'desc')->order('id', 'desc')->field('id,name')->select()->toArray();
     }
 
-    /** 原支付目录保留停用但有历史意义的类型；新系统独有方式追加，不按显示文字匹配身份。 */
+    /** 历史现金/每日汇总仍需原完整目录，停用不改历史收款；门店对账的展示目录使用 checkoutMethods。 */
     public function methods(): array
     {
         $rows = [];
@@ -48,13 +50,51 @@ final class StoreReconciliationReceiptReader
     }
 
     /**
-     * 旧支付枚举在历史迁移中的固定语义；银行转账及充值赠送不猜作其他收款。
-     * 新支付宝没有对应旧枚举，保留独立行；目录名称变化不改变收款归属。
+     * 门店对账与收银共用启用配置、显示名和配置顺序；刷单是独立登记行，
+     * 不加入实际收款目录。旧渠道只在读取边界映射，不能按名称合并历史事实。
+     */
+    public function checkoutMethods(): array
+    {
+        $catalog = (new CashierV3BusinessConfigServices())->checkoutCatalog();
+        $supported = array_fill_keys(CashierV3CheckoutSettlementKernel::paymentMethods(), true);
+        $enabledCodes = array_fill_keys(array_column($catalog['accountingMethods'], 'code'), true);
+        $rows = [];
+        foreach ($catalog['accountingMethods'] as $method) {
+            $paymentCode = (string)$method['code'];
+            if (!isset($supported[$paymentCode])) continue;
+            $code = self::methodCode($paymentCode);
+            // 已上线站点未启用新企微/其他收入时，旧渠道4/8仍归原有微信/其他收款；
+            // 010切换为企微/其他收入后才由新代码承接，不能因共用源码漏掉旧站金额。
+            if ($paymentCode === 'wechat' && !isset($enabledCodes['enterprise_wechat'])) $code = 'legacy_4';
+            if ($paymentCode === 'other_collection' && !isset($enabledCodes['other_income'])) $code = 'legacy_8';
+            $rows[] = ['code' => $code,
+                'name' => trim((string)$method['displayName']) ?: (string)$method['defaultName'],
+                'legacy_id' => strpos($code, 'legacy_') === 0 ? (int)substr($code, 7) : 0,
+                'payment_code' => $paymentCode];
+        }
+        // 会员端第三方支付是自动收款分类，使用同一记账配置，但不能成为人工收银按钮。
+        foreach ((new CashierV3BusinessConfigServices())->accountingMethods(true) as $method) {
+            if ((string)$method['code'] !== MemberOrderAccounting::CODE) continue;
+            $rows[] = ['code' => self::methodCode(MemberOrderAccounting::CODE),
+                'name' => (string)$method['displayName'], 'legacy_id' => 0];
+            break;
+        }
+        // 007刷单登记不是收银支付方式；只在对账表末尾展示，供逐笔核对。
+        $rows[] = ['code' => 'brush_douyin', 'name' => '抖音刷单', 'legacy_id' => 0];
+        $rows[] = ['code' => 'brush_dianping', 'name' => '大众刷单', 'legacy_id' => 0];
+        return $rows;
+    }
+
+    /**
+     * 007旧枚举4是企微，不是普通微信；8是010当前的实际“其他收入”，
+     * 不是非现金的other_collection。普通微信/支付宝保留独立历史代码，
+     * 停用时仅从当前对账展示目录消失，已记事实不改写。
      */
     public static function methodCode(string $code): string
     {
         $ids = ['unionpay' => 1, 'dianping_voucher' => 2, 'douyin_voucher' => 3,
-            'wechat' => 4, 'bank_transfer' => 5, 'partner_collection' => 6, 'cash' => 7, 'other_collection' => 8];
+            'enterprise_wechat' => 4, 'bank_transfer' => 5, 'partner_collection' => 6,
+            'cash' => 7, 'other_income' => 8];
         return isset($ids[$code]) ? 'legacy_' . $ids[$code] : 'v3_' . $code;
     }
 
@@ -87,10 +127,15 @@ final class StoreReconciliationReceiptReader
         $this->verifiedArchivedIds = $this->archivedLegacyOrderIds($stores, $times, $tenant,
             $businessDateMode ? array_keys($businessDates) : null);
         $archived = function ($query, string $alias): void { $this->legacyVisibility($query, $alias); };
+        $hasThirdParty = in_array(self::methodCode(MemberOrderAccounting::CODE), array_column($methods, 'code'), true);
         foreach ($methods as $method) {
             if (empty($method['legacy_id'])) continue;
             $where = ['time' => $businessDateMode ? [] : $times, 'cash_choose' => (int)$method['legacy_id']];
             $directQuery = ValidCashOrderServices::storeCashIncomeByCashChooseQuery($where, $archived)->whereIn('store_id', $stores);
+            // 新会员订单以创建时冻结的分类归列，不再按旧cash_choose重复归入人工渠道。
+            if ($hasThirdParty) $directQuery->where(static function ($normal): void {
+                $normal->whereNull('accounting_method')->whereOr('accounting_method', '<>', MemberOrderAccounting::CODE);
+            });
             if ($businessDateMode) $directQuery->whereIn('id', array_keys($businessDates) ?: [0]);
             $direct = $directQuery->field('id,id source_order_id,order_id,store_id,add_time,uid,accounting_method')->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
@@ -98,10 +143,36 @@ final class StoreReconciliationReceiptReader
                 $out[] = $this->legacy($row, $method['code'], false, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             }
             $combinedQuery = ValidCashOrderServices::combinationCashByCashChooseQuery($where, $archived)->whereIn('b.store_id', $stores);
+            if ($hasThirdParty) $combinedQuery->where(static function ($normal): void {
+                $normal->whereNull('b.accounting_method')->whereOr('b.accounting_method', '<>', MemberOrderAccounting::CODE);
+            });
             if ($businessDateMode) $combinedQuery->whereIn('b.id', array_keys($businessDates) ?: [0]);
             $combined = $combinedQuery->field('a.id,b.id source_order_id,b.order_id,b.store_id,b.add_time,b.uid,b.accounting_method')->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
                 ->limit(self::LIMIT + 1)->select()->toArray();
             foreach ($combined as $row) $out[] = $this->legacy($row, $method['code'], true, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
+            $this->bounded($out);
+        }
+
+        if ($hasThirdParty) {
+            // 手机订单通常没有人工cash_choose编号；沿用同一旧单收款资格及金额表达式，
+            // 以冻结的third_party分类单列。余额、旧卡、退款仍由原资格查询排除。
+            $where = ['time' => $businessDateMode ? [] : $times];
+            $directQuery = ValidCashOrderServices::storeCashIncomeByCashChooseQuery($where, $archived)
+                ->whereIn('store_id', $stores)->where('accounting_method', MemberOrderAccounting::CODE);
+            if ($businessDateMode) $directQuery->whereIn('id', array_keys($businessDates) ?: [0]);
+            $direct = $directQuery->field('id,id source_order_id,order_id,store_id,add_time,uid,accounting_method')
+                ->fieldRaw(ValidCashOrderServices::buildAmountExpr('', 'cash_pay_price') . ' AS reconciliation_amount')
+                ->limit(self::LIMIT + 1)->select()->toArray();
+            foreach ($direct as $row) $out[] = $this->legacy($row, self::methodCode(MemberOrderAccounting::CODE),
+                false, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
+            $combinedQuery = ValidCashOrderServices::combinationCashByCashChooseQuery($where, $archived)
+                ->whereIn('b.store_id', $stores)->where('b.accounting_method', MemberOrderAccounting::CODE);
+            if ($businessDateMode) $combinedQuery->whereIn('b.id', array_keys($businessDates) ?: [0]);
+            $combined = $combinedQuery->field('a.id,b.id source_order_id,b.order_id,b.store_id,b.add_time,b.uid,b.accounting_method')
+                ->fieldRaw(ValidCashOrderServices::buildCombinationLineAmountExpr('b', 'a.price') . ' AS reconciliation_amount')
+                ->limit(self::LIMIT + 1)->select()->toArray();
+            foreach ($combined as $row) $out[] = $this->legacy($row, self::methodCode(MemberOrderAccounting::CODE),
+                true, $timezone, $businessDateMode ? $businessDates[(int)$row['source_order_id']] : null);
             $this->bounded($out);
         }
 
@@ -147,11 +218,16 @@ final class StoreReconciliationReceiptReader
             })->fieldRaw('p.fact_id,p.store_id,p.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
             ->limit(self::LIMIT + 1)->select()->toArray();
         $this->bounded($originals); $this->bounded($independent);
+        $legacyOwners = array_column($methods, 'payment_code', 'code');
         foreach (array_merge($originals, $independent) as $row) {
             $amount = self::integerCents($row['amount_cents']);
             if ($amount < 0) throw new \InvalidArgumentException('正向收款事实金额异常，请核对原单');
+            $methodCode = self::methodCode((string)$row['payment_method']);
+            // 统一收款事实也跟随本站旧渠道归属；只看静态编号会使4/8在未迁移站点掉行。
+            if ($row['payment_method'] === 'wechat' && ($legacyOwners['legacy_4'] ?? '') === 'wechat') $methodCode = 'legacy_4';
+            if ($row['payment_method'] === 'other_collection' && ($legacyOwners['legacy_8'] ?? '') === 'other_collection') $methodCode = 'legacy_8';
             $out[] = ['receipt_id' => 'v3:' . $row['fact_id'], 'store_id' => (int)$row['store_id'],
-                'business_date' => $row['business_date'], 'method_code' => self::methodCode((string)$row['payment_method']),
+                'business_date' => $row['business_date'], 'method_code' => $methodCode,
                 'amount_cents' => $amount, 'document_no' => (string)$row['order_no_snapshot'],
                 'member_id' => (int)$row['member_id'], 'source_kind' => '统一收款', 'combined' => false];
         }

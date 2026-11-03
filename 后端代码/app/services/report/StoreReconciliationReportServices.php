@@ -56,9 +56,15 @@ final class StoreReconciliationReportServices
             if ($this->source) $source = ($this->source)($ids, $sourceRange, $context);
             else {
                 $reader = new StoreReconciliationReceiptReader();
-                $storeRows = $reader->stores($ids); $methods = $reader->methods();
+                $storeRows = $reader->stores($ids); $methods = $reader->checkoutMethods();
+                $receipts = $reader->receipts(array_map('intval', array_column($storeRows, 'id')), $methods, $sourceRange, (string)$context['tenant_id']);
+                $methodScope = array_fill_keys(array_column($methods, 'code'), true);
+                // 当前收银方式和两项刷单登记各占独立行；停用方式不混入其他渠道。
+                // 历史Reader仍返回原事实，其他现金/每日汇总范围与金额保持不变。
                 $source = ['stores' => $storeRows, 'methods' => $methods,
-                    'receipts' => $reader->receipts(array_map('intval', array_column($storeRows, 'id')), $methods, $sourceRange, (string)$context['tenant_id'])];
+                    'receipts' => array_values(array_filter($receipts, static function (array $receipt) use ($methodScope): bool {
+                        return isset($methodScope[$receipt['method_code']]);
+                    }))];
             }
             if ($mode === 'days' && !in_array($selected, array_map('intval', array_column($source['stores'], 'id')), true)) {
                 throw new \InvalidArgumentException('该门店未启用对账统计');
@@ -141,13 +147,23 @@ final class StoreReconciliationReportServices
                 'row_id' => $receipt['receipt_id'], 'document_no' => $receipt['document_no'], 'business_date' => $receipt['business_date'],
                 'store_name' => $names[$receipt['store_id']], 'payment_name' => $methodIndex[$method]['name'],
                 'source_kind' => $receipt['source_kind'], 'amount' => self::yuan($receipt['amount_cents'])];
+            // 跳到订单中心时使用同一格已经核实的原单号集合；这只是查询身份，
+            // 不把收款金额当作订单金额，也不修改原单或扩充下钻权限。
+            $navigationDocuments = array_values(array_unique(array_filter(array_column($records, 'document_no'), static function ($number): bool {
+                return is_string($number) && $number !== '' && strpos($number, '登记-') !== 0;
+            })));
             $columnLabel = array_column($fields, 'label', 'key')[$key];
             $fields = self::detailFields();
             $detailQuery = ['page' => $payload['detail_page'] ?? 1, 'summaries' => [['field' => 'amount', 'aggregation' => 'sum']],
                 'sorts' => [['field' => 'business_date', 'direction' => 'desc']]];
             if (isset($payload['export'])) $detailQuery['export'] = $payload['export'];
             $result = $this->execute($fields, $records, $detailQuery, $context);
-            $result['detail_context'] = $cells[$key] + ['payment_name' => $methodIndex[$method]['name'], 'column_label' => $columnLabel];
+            $result['detail_context'] = $cells[$key] + [
+                'payment_name' => $methodIndex[$method]['name'], 'column_label' => $columnLabel,
+                // 单店逐日矩阵的列名是日期；订单中心门店范围必须使用原门店名称。
+                'store_name' => $names[$cells[$key]['store_id']] ?? '',
+            ];
+            $result['navigation_document_nos'] = $navigationDocuments;
         }
         $sources = [];
         foreach ($fields as $field) $sources[$field['key']] = self::sourceDescription($field['key']);
@@ -158,9 +174,9 @@ final class StoreReconciliationReportServices
             'range' => $range, 'reconciliation_mode' => $mode,
             'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => $detail === null ? 'none' : 'first_row'],
             'source_kind' => 'legacy_receipt_compatibility_and_unified_collections', 'complete' => true,
-            'coverage_start' => null, 'coverage' => '历史订单沿用原收款口径，新业务读取成功收款；刷单为独立人工登记。',
+            'coverage_start' => null, 'coverage' => '按收银当前启用方式核对实际收款，会员订单第三方支付单列，另列抖音和大众刷单登记；历史订单沿用原收款资格，新业务读取成功收款，赠送不计入。',
             'data_as_of' => $context['data_as_of'] ?? time(), 'aggregation_caught_up' => true,
-            'metric_version' => 'store-reconciliation-007-receipts-v1'];
+            'metric_version' => 'store-reconciliation-channel-and-brush-v3'];
     }
 
     /** 仅从本次已授权列生成查询白名单，动态门店编号不能成为任意SQL或越权导出字段。 */
@@ -217,13 +233,13 @@ final class StoreReconciliationReportServices
     /** 用户可见来源只表达业务语义，不把内部表名、字段名或SQL暴露成使用说明。 */
     public static function sourceDescription(string $key): string
     {
-        if ($key === 'payment_name') return '原支付配置的名称；抖音刷单、大众刷单来自独立人工登记，不等于实际到账。';
+        if ($key === 'payment_name') return '实际收款行与收银当前启用方式共用名称和顺序；会员端第三方支付按创建时冻结分类单列。末尾抖音、大众刷单来自人工登记，不是结账收款方式。';
         if ($key === 'total_amount') return '本行当前查询范围内全部门店或日期的金额合计，按原始分精度汇总。';
-        if ($key === 'business_date') return '历史单取原下单日，新销售取原单业务日，刷单取原登记日；补交及充值等独立单据取各自业务日。';
-        if ($key === 'document_no') return '解释所点金额的原单据号或刷单登记编号。';
+        if ($key === 'business_date') return '历史单取原下单日，新销售取原单业务日；补交及充值等独立单据取各自业务日。';
+        if ($key === 'document_no') return '解释所点收款金额的原单据号。';
         if ($key === 'store_name') return '当前查询中已获授权且启用统计的门店。';
-        if ($key === 'source_kind') return '该笔金额来自历史订单、历史组合支付、新成功收款或人工刷单登记。';
-        return '对应门店或日期的有效收款；历史单排除未支付、退款、删除、旧卡和余额，组合支付按实际通道拆分。刷单行单独汇总登记金额。';
+        if ($key === 'source_kind') return '该笔金额来自历史订单、历史组合支付、新成功收款或独立的刷单登记；刷单不是实际到账。';
+        return '对应门店或日期的实际收款，或末尾独立刷单行的登记金额；历史单排除未支付、退款、删除、旧卡和余额，组合支付按实际通道拆分；不把刷单并入收款。';
     }
 
     /** 转换只在输出边界进行，禁止二进制浮点参与金额统计。 */
