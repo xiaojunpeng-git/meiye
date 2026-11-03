@@ -4324,7 +4324,6 @@ onBeforeUnmount(() => {
                   @click="openSalesOrderNoteEditor(record)"
                 >备注</button>
                 <button v-if="recordVoidAction(record)" type="button" class="button button--text button--danger" @click="openRecordDetail(record, recordVoidAction(record))">作废</button>
-                <button v-if="recordType(record) === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常' && canUseCashierV3Operation('cashier.v3.order.refund')" type="button" class="button button--text" @click="openRecordDetail(record, 'refund')">退款</button>
               </span>
             </td>
           </tr>

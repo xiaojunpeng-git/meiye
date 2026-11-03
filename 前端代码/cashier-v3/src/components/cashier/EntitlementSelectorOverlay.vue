@@ -499,7 +499,68 @@ function operationProjectSelected(source = {}, project = {}) {
       </div>
 
       <section class="cashier-entitlement-selector__content" aria-label="可使用权益">
-        <div v-if="visibleSources.length" class="cashier-entitlement-table" role="table" aria-label="会员权益项目">
+        <!-- 普通用权益时把每项数值与字段名放在一起，避免窄面板的九列表格横向滚动后看错列。卡操作沿用原表格。 -->
+        <div v-if="visibleSources.length && !operationMode" class="cashier-entitlement-cards" aria-label="会员权益项目">
+          <section
+            v-for="source in visibleSources"
+            :key="source.id || source.entitlementInstanceId"
+            class="cashier-entitlement-card"
+            :class="{ 'is-unavailable': !isSourceAvailable(source) }"
+            :aria-label="`${source.name || '卡项'}的权益项目`"
+          >
+            <div class="cashier-entitlement-card__header">
+              <div class="cashier-entitlement-card__identity">
+                <div class="cashier-entitlement-card__name">
+                  <span v-if="source.isCustomCard === true" class="cashier-entitlement-table__custom-tag" title="定制卡" aria-label="定制卡">定</span>
+                  <strong :title="source.name || '卡项'">{{ source.name || '卡项' }}</strong>
+                  <span class="cashier-entitlement-table__type-tag">{{ sourceTypeLabel(source) }}</span>
+                </div>
+                <small :title="sourceOperationDescription(source)">{{ sourceOperationDescription(source) }}</small>
+              </div>
+              <div class="cashier-entitlement-card__expiry"><span>有效期</span><strong>{{ sourceExpiryDate(source) }}</strong></div>
+            </div>
+            <div class="cashier-entitlement-card__metrics" aria-label="卡信息">
+              <div><span>余次</span><strong>{{ displaySourceRemainingTimes(source) }}</strong></div>
+              <div><span>剩余余额</span><strong>{{ displayAmount(sourceRemainingAmount(source)) }}</strong></div>
+              <div><span>欠款</span><strong>{{ displayAmount(source.outstandingDebtAmount) }}</strong></div>
+              <div><span>取消欠款</span><strong>{{ displayAmount(source.cancelledDebtAmount) }}</strong></div>
+              <div><span>购买金额</span><strong>{{ displayAmount(source.purchaseAmount) }}</strong></div>
+              <div><span>单价</span><strong>{{ displayAmount(source.unitPrice) }}</strong></div>
+            </div>
+            <div
+              v-for="project in source.projects || []"
+              :key="project.id || project.projectId"
+              class="cashier-entitlement-card__project"
+              :class="{
+                'is-added': addedProjectKey === projectKey(source, project),
+                'is-unavailable': projectDisabled(source, project) && pendingProjectKey !== projectKey(source, project)
+              }"
+            >
+              <div class="cashier-entitlement-card__project-top">
+                <div class="cashier-entitlement-card__project-name">
+                  <span>项目</span>
+                  <strong :title="displayProjectName(project)">{{ displayProjectName(project) }}</strong>
+                </div>
+                <button
+                  type="button"
+                  class="cashier-entitlement-table__add"
+                  :class="{ 'is-added': addedProjectKey === projectKey(source, project) }"
+                  :disabled="projectDisabled(source, project)"
+                  :title="projectDisabled(source, project) ? (project.disabledReason || project.unavailableReason || '当前权益不可使用') : '添加到购物车'"
+                  @click="addProject(source, project)"
+                >{{ addButtonLabel(source, project) }}</button>
+              </div>
+              <small v-if="project.disabledReason || project.unavailableReason" class="cashier-entitlement-card__project-reason">{{ project.disabledReason || project.unavailableReason }}</small>
+              <div class="cashier-entitlement-card__project-metrics" aria-label="项目权益">
+                <div><span>余次</span><strong>{{ displayProjectRemainingTimes(source, project) }}</strong></div>
+                <div><span>剩余余额</span><strong>{{ displayProjectRemainingAmount(source, project) }}</strong></div>
+                <div><span>购买金额</span><strong>{{ displayAmount(project.purchaseAmount) }}</strong></div>
+                <div><span>单价</span><strong>{{ displayAmount(project.unitPrice) }}</strong></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div v-else-if="visibleSources.length" class="cashier-entitlement-table" role="table" aria-label="会员权益项目">
           <div class="cashier-entitlement-table__head" role="row">
             <span>操作按钮</span>
             <span>卡名称</span>

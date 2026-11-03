@@ -45,7 +45,7 @@ const actionError = ref('')
 const detailBody = ref(null)
 
 onMounted(async () => {
-  if (activeForm.value !== 'replacement-void') return
+  if (!['replacement-void', 'void'].includes(activeForm.value)) return
   await nextTick()
   if (detailBody.value) detailBody.value.scrollTop = 0
 })
@@ -61,9 +61,10 @@ const rows = computed(() => props.fields.map((field) => {
   }
 }))
 
-// 补交、赠送与项目替换的作废操作置于详情最上方，打开弹窗即可看到表单；
-// 其余业务记录沿用原先先展示详情、再展示操作的顺序。
-const detailSectionOrder = computed(() => ['supplement-void', 'gift-void', 'replacement-void'].includes(activeForm.value)
+// 作废表单放在详情最上方，列表直达操作时无需先滚过整张记录；
+// 退款仍先展示订单信息，供操作人核对金额和对象。
+const topLifecycleForms = ['supplement-void', 'gift-void', 'replacement-void', 'void']
+const detailSectionOrder = computed(() => topLifecycleForms.includes(activeForm.value)
   ? ['lifecycle', 'fields']
   : ['fields', 'lifecycle'])
 
@@ -83,6 +84,13 @@ async function openSupplementVoidForm() {
 // 从详情底栏进入项目替换作废时，表单已在顶部，滚动位置必须同步复位。
 async function openReplacementVoidForm() {
   activeForm.value = 'replacement-void'
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = 0
+}
+
+// 详情底栏切入充值作废时，表单要出现在视口顶部，而不是保留原详情滚动位置。
+async function openRechargeVoidForm() {
+  activeForm.value = 'void'
   await nextTick()
   if (detailBody.value) detailBody.value.scrollTop = 0
 }
@@ -159,7 +167,7 @@ async function submitLifecycleAction() {
             </div>
           </dl>
           <section v-else-if="activeForm" class="business-record-detail__lifecycle"
-            :class="{ 'business-record-detail__lifecycle--top': ['supplement-void', 'gift-void', 'replacement-void'].includes(activeForm) }">
+            :class="{ 'business-record-detail__lifecycle--top': topLifecycleForms.includes(activeForm) }">
             <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : activeForm === 'replacement-void' ? '作废项目替换' : activeForm === 'refund-record-void' ? '作废退款记录' : '作废充值订单' }}</h3>
             <template v-if="activeForm === 'refund'">
               <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
@@ -198,7 +206,7 @@ async function submitLifecycleAction() {
 
       <footer class="business-record-detail__footer">
         <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
-        <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
+        <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="openRechargeVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="openSupplementVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('replacement-void') && activeForm !== 'replacement-void'" type="button" class="button button--secondary" :disabled="pending" @click="openReplacementVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('refund-record-void') && activeForm !== 'refund-record-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund-record-void'">作废</button>
