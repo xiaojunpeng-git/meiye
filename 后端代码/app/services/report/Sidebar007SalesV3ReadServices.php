@@ -85,9 +85,21 @@ final class Sidebar007SalesV3ReadServices
             : (new Sidebar007SourceMappingReadServices())->read();
         if (!is_array($sourceMapping) || !is_bool($sourceMapping['complete'] ?? null))
             throw new \LogicException('007 客源映射结果无效');
+        // 客源分组与合作方业绩都需核同一批旧分配事实。正式查询在同一
+        // 只读事务、同一门店和日期范围内复用结果，避免重复扫描历史表。
+        $historicalPartnerReader = null;
+        if ($report === 'sales_data' && $sourceCategoryReader === null && $partnerFactQuery === null) {
+            $historicalPartnerCache = null;
+            $historicalPartnerReader = static function (array $scope, array $period) use (&$historicalPartnerCache): array {
+                if ($historicalPartnerCache === null) {
+                    $historicalPartnerCache = (new HistoricalPartnerSales007ReadServices())->read($scope, $period);
+                }
+                return $historicalPartnerCache;
+            };
+        }
         $sourceCategories = $sourceCategoryReader
             ? $sourceCategoryReader($storeIds,['start'=>$startDate,'end'=>$endDate],$sourceMapping)
-            : (new Sidebar007SalesCategoryReadServices())->read($storeIds,
+            : (new Sidebar007SalesCategoryReadServices(null, null, null, $historicalPartnerReader))->read($storeIds,
                 ['start'=>$startDate,'end'=>$endDate],$sourceMapping);
         if (!is_array($sourceCategories) || !is_array($sourceCategories['by_store'] ?? null))
             throw new \LogicException('007 客源分类结果无效');
@@ -140,10 +152,18 @@ final class Sidebar007SalesV3ReadServices
                 $day=(string)($entry['business_date']??'');
                 $order=(string)($entry['order_id']??'');
                 $friend=$entry['friend']??null;
-                if(!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$day)||!is_bool($friend)
-                    ||$order===''||isset($entryIds[$order]))
-                    throw new \LogicException('售后客原行身份无效或重复');
-                $entryIds[$order]=true;
+                if(!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$day)||!is_bool($friend)||$order==='')
+                    throw new \LogicException('售后客原行身份无效');
+                // 一张服务单可有多条项目事实，也可同时服务本人和朋友。
+                // 本人按会员当日去重、朋友按服务单去重；同对象的身份冲突仍拒绝。
+                $entryKey=$order.'|'.($friend?'friend':'self');
+                $identity=[$store,$day,$member,$friend];
+                if(isset($entryIds[$entryKey])){
+                    if($entryIds[$entryKey]!==$identity)
+                        throw new \LogicException('售后客同单身份冲突');
+                    continue;
+                }
+                $entryIds[$entryKey]=$identity;
                 $key=$friend?'record:'.$order:'member:'.$day.':'.$member;
                 if(!isset($seen[$key])){$seen[$key]=true;++$count;}
             }
@@ -176,7 +196,7 @@ final class Sidebar007SalesV3ReadServices
             // 007 第 18 行“合作项目业绩”按本轮产品定义仅展示真正分配给
             // partner 人员的销售业绩；不能复用按商品分类比例生成的合作金额。
             $partner = (new Sidebar007PartnerAllocationReadServices())->read($storeIds,
-                ['start'=>$startDate,'end'=>$endDate],$partnerFactQuery);
+                ['start'=>$startDate,'end'=>$endDate],$partnerFactQuery,$historicalPartnerReader);
             foreach ($storeIds as $id) if ($partner['by_store'][$id] !== null) {
                 $certifiedByStore[$id][17] = $partner['by_store'][$id];
             }

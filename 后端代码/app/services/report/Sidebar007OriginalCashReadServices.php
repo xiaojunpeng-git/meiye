@@ -121,7 +121,9 @@ final class Sidebar007OriginalCashReadServices
                 $byNo[$match]=$key;
             }
             foreach(($this->receiptReader)($stores,$range,array_map(static fn(array $old):int=>(int)$old['source_order_id'],array_values($historicalCandidates))) as $receipt){
-                if(!in_array($receipt['source_kind']??'', ['历史订单收款','历史组合收款'],true))continue;
+                // 会员端第三方支付也沿用同一旧单资格、金额和业务日认证，
+                // 不能因其展示标签不同就把已付原单误判为缺收款。
+                if(!in_array($receipt['source_kind']??'', ['历史订单收款','历史组合收款','会员订单收款'],true))continue;
                 $match=($receipt['store_id']??0).'|'.($receipt['document_no']??'');
                 $key=$byNo[$match]??null;if($key===null)continue;
                 $old=$historicalCandidates[$key];$id=(string)($receipt['receipt_id']??'');

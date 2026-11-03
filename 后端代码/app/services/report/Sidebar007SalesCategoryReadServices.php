@@ -105,19 +105,33 @@ final class Sidebar007SalesCategoryReadServices
                 $date=(string)($row['business_date']??'');
                 $member=(int)($row['member_id']??-1);
                 $friend=$row['friend']??null;
+                $mixed=($row['mixed_service_object']??false)===true;
+                $split=$row['mixed_cash_split']??null;
+                $splitKnown=is_array($split)&&count($split)===2
+                    &&is_int($split['self']??null)&&is_int($split['friend']??null)
+                    &&$split['self']>=0&&$split['friend']>=0
+                    &&$split['self']+$split['friend']===$amount;
                 if($row===null||!is_int($amount)||$amount<0||$old===null||$member<0
                     ||($row['cash_identity_verified']??false)!==true
                     ||($row['legacy_source_id']??$old)!==$old
-                    ||!is_bool($friend)||$date<$range['start']||$date>$range['end']){
+                    // 混合新单只有零现金或“全现金且逐行销售事实同额”时可拆分；
+                    // 部分现金无法证明两种服务对象各收多少，继续留缺口。
+                    ||(!is_bool($friend)&&!($mixed&&($amount===0||$splitKnown)))
+                    ||$date<$range['start']||$date>$range['end']){
                     $unknown=true;$identityGaps[]=['order_id'=>(string)$order,'reason'=>'order_source_or_cash_identity',
                         'order_present'=>$row!==null,'source_id'=>$row['source_id']??null,
                         'legacy_source_id'=>$row['legacy_source_id']??null,'mapped_source_id'=>$old,
                         'cash_identity_verified'=>$row['cash_identity_verified']??null,
-                        'friend_identity_known'=>is_bool($friend),'business_date'=>$date];continue;
+                        'friend_identity_known'=>is_bool($friend),'mixed_service_object'=>$mixed,
+                        'business_date'=>$date];continue;
                 }
-                $group[]=['order_id'=>(string)$order,'source007_id'=>(int)$old,'amount_cents'=>$amount,
-                    'member_id'=>$member,'friend'=>$friend,'business_date'=>$date,
-                    'partner'=>isset($partner[$id][(string)$order])];
+                foreach($mixed?[false,true]:[$friend] as $serviceFriend){
+                    $group[]=['order_id'=>(string)$order.($mixed?($serviceFriend?':friend':':self'):''),
+                        'source007_id'=>(int)$old,
+                        'amount_cents'=>$mixed?($amount===0?0:$split[$serviceFriend?'friend':'self']):$amount,
+                        'member_id'=>$member,'friend'=>$serviceFriend,'business_date'=>$date,
+                        'partner'=>isset($partner[$id][(string)$order])];
+                }
             }
             if($unknown){$gaps[]=['store_id'=>$id,'code'=>'SOURCE_007_ORDER_IDENTITY_UNVERIFIED',
                 'source_count'=>count($identityGaps),'orders'=>array_slice($identityGaps,0,100)];continue;}
@@ -226,15 +240,20 @@ final class Sidebar007SalesCategoryReadServices
                 ->where('line_status','settled')->where('line_direction','forward')
                 ->fieldRaw("store_id,order_id,MAX(CASE WHEN LOWER(TRIM(service_object))='friend' THEN 1 ELSE 0 END) friend,MAX(CASE WHEN LOWER(TRIM(service_object))='self' THEN 1 ELSE 0 END) self_line")
                 ->group('store_id,order_id')->select()->toArray();
-            $friendMap=[];
+            $friendMap=[];$mixedIds=[];
             foreach($friends as $friend){
                 $isFriend=(int)$friend['friend']===1;
                 $isSelf=(int)$friend['self_line']===1;
-                // 一笔旧销售单只有一个服务对象；混合自用与朋友的
-                // 新订单无旧字段可等价，留缺口而不是逐行猜去重方式。
-                $friendMap[(int)$friend['store_id'].'|'.$friend['order_id']]
-                    =$isFriend&&$isSelf?null:$isFriend;
+                // 旧销售单只有一个服务对象；新单允许自用和朋友项目并存。
+                // 此处仅冻结两种对象均存在的证据，是否可拆分要等现金认证。
+                $friendMap[(int)$friend['store_id'].'|'.$friend['order_id']]=[
+                    'friend'=>$isFriend&&$isSelf?null:$isFriend,
+                    'mixed'=>$isFriend&&$isSelf];
+                if($isFriend&&$isSelf)$mixedIds[]=(string)$friend['order_id'];
             }
+            // 只为混合对象的新单读取逐行销售事实。原收款覆盖整单销售额时，
+            // 核对每行事实与结账行同额，才可将现金按本人/朋友精确拆分。
+            $mixedSplit=$this->mixedFullCashSplits($stores,$mixedIds);
             $oldIds=[];
             foreach($headers as $head)if(($head['source_document_type']??'')==='legacy_store_order')
                 $oldIds[]=(int)($head['source_document_id']??0);
@@ -265,10 +284,15 @@ final class Sidebar007SalesCategoryReadServices
                 $cashVerified=!$isOld||($old!==null&&(int)$old['paid']===1
                     &&(int)$old['refund_status']===0&&in_array((int)$old['order_type'],[0,1],true)
                     &&$oldCash===($savedCash??($zeroCash?0:null)));
+                $split=$mixedSplit[$key]??null;
+                if($split!==null&&($savedCash??0)!==(int)$head['sale_amount_cents'])$split=null;
                 $out[]=['store_id'=>(int)$head['store_id'],'order_id'=>(string)$head['order_id'],
                     'business_date'=>(string)$head['business_date'],'member_id'=>(int)$head['member_id'],
                     'source_id'=>(int)$head['business_source_primary_id'],
-                    'friend'=>$friendMap[$key]??null,'cash_identity_verified'=>$cashVerified,
+                    'friend'=>$friendMap[$key]['friend']??null,
+                    'mixed_service_object'=>$friendMap[$key]['mixed']??false,
+                    'mixed_cash_split'=>$split,
+                    'cash_identity_verified'=>$cashVerified,
                     'zero_cash_certified'=>$zeroCash,
                     'old_card_entry_excluded'=>$isOld&&$old!==null&&(string)$old['pay_type']!=='combination'&&(int)$old['cash_choose']===9,
                     'legacy_source_id'=>$isOld&&$old!==null?(int)$old['source']:null];
@@ -293,6 +317,64 @@ final class Sidebar007SalesCategoryReadServices
             $id=(int)$recharge['store_id'];$order='RCH:'.$recharge['id'];
             if(!array_key_exists($order,$cashByOrder[$id]??[]))
                 $out[]=['store_id'=>$id,'order_id'=>$order,'cash_identity_verified'=>false];
+        }
+        return $out;
+    }
+
+    /**
+     * 仅返回两种服务对象的逐行销售事实与结账行一一对应时的分额。
+     * 调用方还要核对整单原收款等于销售额；部分现金不能按项目售价猜分摊。
+     *
+     * @param int[] $stores
+     * @param string[] $orderIds
+     * @return array<string,array{self:int,friend:int}>
+     */
+    private function mixedFullCashSplits(array $stores,array $orderIds):array
+    {
+        if(!$orderIds)return [];
+        $lines=Db::name('cashier_v3_sales_order_line')->where('tenant_id','0')
+            ->whereIn('store_id',$stores)->whereIn('order_id',$orderIds)
+            ->where('line_status','settled')->where('line_direction','forward')
+            ->field('store_id,order_id,order_line_id,service_object,sale_amount_cents')
+            ->limit(50001)->select()->toArray();
+        $facts=Db::name('cashier_v3_sale_fact')->where('tenant_id','0')
+            ->whereIn('store_id',$stores)->whereIn('order_id',$orderIds)
+            ->where('status','effective')->where('fact_direction','forward')
+            ->where('fact_type','sale_completed')
+            ->field('store_id,order_id,source_line_id,sale_amount_cents')
+            ->limit(50001)->select()->toArray();
+        if(count($lines)>50000||count($facts)>50000)
+            throw new \RuntimeException('混合服务对象销售事实超过安全范围');
+        $expected=[];$actual=[];$invalid=[];
+        foreach($lines as $line){
+            $key=(int)$line['store_id'].'|'.$line['order_id'];
+            $lineId=(string)$line['order_line_id'];$object=(string)$line['service_object'];
+            $amount=(string)$line['sale_amount_cents'];
+            if($lineId===''||!in_array($object,['self','friend'],true)
+                ||!ctype_digit($amount)||isset($expected[$key][$lineId])){
+                $invalid[$key]=true;continue;
+            }
+            $expected[$key][$lineId]=['object'=>$object,'amount'=>(int)$amount];
+        }
+        foreach($facts as $fact){
+            $key=(int)$fact['store_id'].'|'.$fact['order_id'];
+            $lineId=(string)$fact['source_line_id'];$amount=(string)$fact['sale_amount_cents'];
+            if($lineId===''||!ctype_digit($amount)||isset($actual[$key][$lineId])){
+                $invalid[$key]=true;continue;
+            }
+            $actual[$key][$lineId]=(int)$amount;
+        }
+        $out=[];
+        foreach($expected as $key=>$items){
+            if(isset($invalid[$key])||count($items)!==count($actual[$key]??[]))continue;
+            $split=['self'=>0,'friend'=>0];$valid=true;
+            foreach($items as $lineId=>$item){
+                if(!array_key_exists($lineId,$actual[$key])||$actual[$key][$lineId]!==$item['amount']){
+                    $valid=false;break;
+                }
+                $split[$item['object']]+=$item['amount'];
+            }
+            if($valid)$out[$key]=$split;
         }
         return $out;
     }

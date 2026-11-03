@@ -70,6 +70,30 @@ $withCertifiedZero=(new Sidebar007SalesCategoryReadServices($cash,$certifiedZero
 checkCategory($withCertifiedZero['by_store'][7]['sales_data'][0]===2
     &&$withCertifiedZero['by_store'][7]['sales_data'][1]===30000,
     '已证明纯余额或全额优惠的零现金销售须计客、不增现金');
+$mixedZero=static function()use($orders):array {
+    $rows=$orders();$rows[]=['store_id'=>7,'order_id'=>'MIXED','source_id'=>20,
+        'business_date'=>'2026-10-10','member_id'=>12,'friend'=>null,
+        'mixed_service_object'=>true,'cash_identity_verified'=>true,'zero_cash_certified'=>true];
+    return $rows;
+};
+$mixed=(new Sidebar007SalesCategoryReadServices($cash,$mixedZero,$partner))->read([7,8],$period,$mapping);
+checkCategory($mixed['by_store'][7]['sales_data'][0]===3
+    &&$mixed['by_store'][7]['sales_data'][1]===30000,
+    '零现金混合本人和朋友项目分别计客，不能重复计现金');
+$mixedCash=$cash();$mixedCash['by_order'][7]['MIXED']=10000;
+$mixedUnknown=(new Sidebar007SalesCategoryReadServices(static fn():array=>$mixedCash,$mixedZero,$partner))
+    ->read([7,8],$period,$mapping);
+checkCategory(!isset($mixedUnknown['by_store'][7])&&!$mixedUnknown['complete'],
+    '混合服务对象有现金而无逐行现金归属时仍保留缺口');
+$mixedFull=static function()use($mixedZero):array{
+    $rows=$mixedZero();$rows[count($rows)-1]['mixed_cash_split']=['self'=>5000,'friend'=>5000];
+    return $rows;
+};
+$mixedCertified=(new Sidebar007SalesCategoryReadServices(static fn():array=>$mixedCash,$mixedFull,$partner))
+    ->read([7,8],$period,$mapping);
+checkCategory($mixedCertified['by_store'][7]['sales_data'][0]===3
+    &&$mixedCertified['by_store'][7]['sales_data'][1]===40000,
+    '全现金且逐行同额的混合服务单按对象分额计客，金额只计一次');
 
 $oldNoSource=static function()use($orders):array{
     $rows=$orders();$rows[]=['store_id'=>7,'order_id'=>'OLD-NO-SOURCE','source_id'=>0,

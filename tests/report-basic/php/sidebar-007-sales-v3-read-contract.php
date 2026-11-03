@@ -81,6 +81,17 @@ $after=$reader->read('sales_data',[7,8],$stores,'2026-10-01','2026-10-30',[],
 check($after['rows'][14]['cells']['store_7']===3
     &&$after['rows'][15]['cells']['store_7']===400,
     '售后客合并来源11现金销售及合格服务子单，会员同日去重、朋友逐笔');
+// 同一服务单的不同项目只贡献一次售后客；同单身份冲突仍须拒绝。
+$twoProjects=$afterServices();
+$twoProjects['qualified_entries'][]=$twoProjects['qualified_entries'][1]+['service_fact_id'=>'second-project'];
+$afterTwoProjects=$reader->read('sales_data',[7,8],$stores,'2026-10-01','2026-10-30',[],
+    $coverage,$partner,$sourceMap,$afterCategories,static fn():array=>$twoProjects);
+check($afterTwoProjects['rows'][14]['cells']['store_7']===3,'同单多项目不可重复计售后客');
+$conflicting=$twoProjects;
+$conflicting['qualified_entries'][4]['member_id']=999;
+reject(static fn()=>$reader->read('sales_data',[7,8],$stores,'2026-10-01','2026-10-30',[],
+    $coverage,$partner,$sourceMap,$afterCategories,static fn():array=>$conflicting),
+    '同单客户身份冲突必须拒绝');
 
 $analysis = $reader->read('sales_analysis', [7,8], $stores, '2026-10-01', '2026-10-30',
     [7=>['new_customer_count'=>12,'casual_customer_count'=>49]],

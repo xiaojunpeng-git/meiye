@@ -18,11 +18,18 @@ final class HistoricalPartnerSales007ReadServices
         foreach(['start','end'] as $key){$day=\DateTimeImmutable::createFromFormat('!Y-m-d',(string)($range[$key]??''));
             if(!$day||$day->format('Y-m-d')!==$range[$key])throw new \InvalidArgumentException('历史合作方业务日无效');}
         if($range['start']>$range['end'])throw new \InvalidArgumentException('历史合作方日期倒置');
+        // 原先先扫描全历史人员分配，再逐批回查数万张订单；本报表只需
+        // 查询期内原支付日或迁入头业务日的订单。无支付日的旧单仍作为
+        // 未知日期候选保留，防止性能优化把应报缺口静默丢掉。
+        $candidateIds=$this->periodOrderIds($stores,$range);
+        if(!$candidateIds)return ['rows'=>[],'gaps'=>[],'complete'=>true];
         $people=Db::name('staff_yeji')->alias('y')->leftJoin('system_store_staff s','s.id=y.staff_id')
             ->whereIn('y.store_id',$stores)->whereIn('y.type',[1,2])->where('y.status',0)
             ->where(static function($q):void{$q->where('s.is_hezuofang',1)->whereOrRaw('s.is_hezuofang IS NULL');})
-            ->field('y.id,y.type,y.store_id,y.staff_id,y.order_id,y.link_id,y.yeji,s.employee_id,s.is_hezuofang')
-            ->limit(100001)->select()->toArray();
+            ->field('y.id,y.type,y.store_id,y.staff_id,y.order_id,y.link_id,y.yeji,s.employee_id,s.is_hezuofang');
+        // 极端长区间退回原有扫描路径，避免巨型 IN 参数表反而拖慢查询。
+        if(count($candidateIds)<=5000)$people->whereIn('y.order_id',$candidateIds);
+        $people=$people->limit(100001)->select()->toArray();
         if(count($people)>100000)throw new \RuntimeException('原合作方分配超过安全范围');
         $ids=array_values(array_unique(array_map(static fn(array $r):int=>(int)$r['order_id'],$people)));
         $orders=[];$facts=[];
@@ -53,6 +60,36 @@ final class HistoricalPartnerSales007ReadServices
             foreach($rows as $row)$facts[$row['fact_id']]=$row;
         }
         return $this->project($people,$orders,$facts,$stores,$range);
+    }
+
+    /**
+     * 只缩小待核旧订单身份，不直接决定其统计资格。正式的归档、冲销、
+     * 人员类型及业务日判断仍由下方原路径执行。
+     */
+    private function periodOrderIds(array $stores,array $range):array
+    {
+        $zone=new \DateTimeZone('Asia/Shanghai');
+        $from=(new \DateTimeImmutable($range['start'].' 00:00:00',$zone))->getTimestamp();
+        $until=(new \DateTimeImmutable($range['end'].' 23:59:59',$zone))->getTimestamp();
+        $orders=Db::name('store_order')->whereIn('store_id',$stores)
+            ->where('paid',1)->where('refund_status',0)->whereIn('order_type',[0,1])
+            ->where(static function($q)use($from,$until):void{
+                $q->whereBetween('pay_time',[$from,$until])
+                    ->whereOrRaw('pay_time IS NULL')->whereOr('pay_time','<=',0);
+            })->field('id')->limit(50001)->select()->toArray();
+        $heads=Db::name('cashier_v3_sales_order')->where('tenant_id','0')
+            ->whereIn('store_id',$stores)->where('source_document_type','legacy_store_order')
+            ->whereBetween('business_date',[$range['start'],$range['end']])
+            ->field('source_document_id')->limit(50001)->select()->toArray();
+        if(count($orders)>50000||count($heads)>50000)
+            throw new \RuntimeException('历史合作方候选原单超过安全范围');
+        $ids=[];
+        foreach($orders as $row)$ids[(int)$row['id']]=true;
+        foreach($heads as $row){
+            $raw=(string)$row['source_document_id'];
+            if(ctype_digit($raw)&&(int)$raw>0)$ids[(int)$raw]=true;
+        }
+        return array_keys($ids);
     }
 
     /** Shared projection: existing certified V3 allocations win; mismatches never double-count. */

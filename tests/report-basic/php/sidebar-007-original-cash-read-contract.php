@@ -111,6 +111,10 @@ $h=$readHistorical([$receipt]);
 if(!$h['complete']||$h['by_order'][2]['historical:order:10']!==9000
     ||$h['historical_orders'][0]['source_kind']!=='historical_007_original_receipt')
     throw new RuntimeException('已认证原单收款须保留原来源，不伪造V3订单');
+// 会员端微信等第三方支付的展示标签不同，原单身份和金额认证仍相同。
+$memberReceipt=$receipt;$memberReceipt['source_kind']='会员订单收款';
+if(!$readHistorical([$memberReceipt])['complete'])
+    throw new RuntimeException('会员订单原收款不能因展示标签不同被误判缺失');
 $bad=$receipt;$bad['amount_cents']=8999;
 if($readHistorical([$bad])['complete'])throw new RuntimeException('旧金额差异不能被兜底隐藏');
 $bad=$receipt;$bad['source_kind']='刷单登记';
