@@ -20,6 +20,7 @@ use app\model\yeji\StaffYeji;
 use app\services\BaseServices;
 use mohe\services\CacheService;
 use mohe\exceptions\AdminException;
+use think\facade\Db;
 
 /**
  * 用户余额
@@ -263,7 +264,28 @@ class UserMoneyServices extends BaseServices
     {
         $where = ['uid' => $uid, 'pm' => 1, 'status' => 1, 'type' => ['system_add', 'recharge', 'extract', 'lottery_add', 'newcomer_add', 'level_add']];
         if ($time) $where['add_time'] = $time;
-        return $this->dao->sum($where, 'number', true);
+        $total = $this->dao->sum($where, 'number', true);
+        // 作废充值保留原入账与冲正流水供审计；累计值只扣一次原入账。
+        // 旧流程写充值作废标记，收银 V3 以成功的生命周期操作为权威，二者均须识别。
+        $voidedRecharge = Db::name('user_money')->alias('money')
+            ->join('user_recharge recharge', 'recharge.id = money.link_id')
+            ->where('money.uid', $uid)->where('money.pm', 1)->where('money.status', 1)
+            ->where('money.type', 'recharge')
+            ->where('recharge.uid', $uid)
+            ->where(function ($query) {
+                $query->where('recharge.terminal_action', \app\model\order\StoreOrderTerminalOperation::ACTION_VOID)
+                    ->whereOr('recharge.id', 'in', function ($operations) {
+                        $operations->name('cashier_v3_order_lifecycle_operation')
+                            ->field('source_order_id')->where('source_type', 'recharge')
+                            ->where('operation_type', 'void')->where('status', 'succeeded');
+                    });
+            });
+        if (is_array($time) && count($time) === 2) {
+            $voidedRecharge->whereTime('money.add_time', 'between', $time);
+        } elseif (is_string($time) && $time !== '') {
+            $voidedRecharge->whereTime('money.add_time', $time);
+        }
+        return bcsub((string)$total, (string)$voidedRecharge->sum('money.number'), 2);
     }
 
     /**

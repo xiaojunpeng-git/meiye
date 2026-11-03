@@ -93,6 +93,9 @@ class StoreOrderDao extends BaseDao
         // 先从通用搜索参数移除，再由本 DAO 精确落入订单表字段。
         $terminalAction = $where['terminal_action'] ?? null;
         unset($where['terminal_action']);
+        // 会员端只隐藏已作废原单；退款单仍按原有状态展示，历史事实不删除。
+        $excludeTerminalVoid = !empty($where['exclude_terminal_void']);
+        unset($where['exclude_terminal_void']);
         // 数据权限：先取出再手动 where，避免通用 searcher 误解析
         $employeeDataScope = $where['employee_data_scope'] ?? null;
         unset(
@@ -112,6 +115,9 @@ class StoreOrderDao extends BaseDao
             $query->whereIn('pid', $pidFilter);
         })->when($terminalAction !== null && $terminalAction !== '', function ($query) use ($terminalAction) {
             $query->where('terminal_action', (int)$terminalAction);
+        })->when($excludeTerminalVoid, function ($query) {
+            // 迁移前的空标记等同未作废，不能因 SQL 的 NULL 比较丢掉正常旧单。
+            $query->whereRaw('IFNULL(terminal_action, 0) <> ' . \app\model\order\StoreOrderTerminalOperation::ACTION_VOID);
         })->when(is_array($employeeDataScope), function ($query) use ($employeeDataScope) {
             $mode = (string)($employeeDataScope['mode'] ?? '');
             if ($mode === 'none') {

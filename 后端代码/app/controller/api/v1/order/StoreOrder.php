@@ -676,6 +676,8 @@ class StoreOrder
         }
         $where['is_del'] = 0;
         $where['is_system_del'] = 0;
+        // 会员“全部订单”与状态页共用此查询，作废原单保留审计但不对会员展示。
+        $where['exclude_terminal_void'] = true;
         if (in_array($where['status'], [-1, -2, -3])) {
             $where['not_pid'] = 1;
         } else {

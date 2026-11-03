@@ -580,6 +580,10 @@ class StoreOrderServices extends BaseServices
      */
     public function getOrderData(int $uid = 0, int $store_id = -1, int $plat_type = -1, array $where = [])
     {
+        // 个人中心角标必须与会员订单列表同口径，不能计入已作废原单。
+        if ($uid > 0) {
+            $where['exclude_terminal_void'] = true;
+        }
         if ($uid > 0 && \app\services\member\MemberCommerceSettingsServices::configured()) {
             $where['exclude_member_commerce_carriers_uid'] = $uid;
         }
