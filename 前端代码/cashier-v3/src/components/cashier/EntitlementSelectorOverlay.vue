@@ -520,12 +520,12 @@ function operationProjectSelected(source = {}, project = {}) {
               <div class="cashier-entitlement-card__expiry"><span>有效期</span><strong>{{ sourceExpiryDate(source) }}</strong></div>
             </div>
             <div class="cashier-entitlement-card__metrics" aria-label="卡信息">
-              <div><span>余次</span><strong>{{ displaySourceRemainingTimes(source) }}</strong></div>
+              <div><span>剩余次数</span><strong>{{ displaySourceRemainingTimes(source) }}</strong></div>
               <div><span>剩余余额</span><strong>{{ displayAmount(sourceRemainingAmount(source)) }}</strong></div>
               <div><span>欠款</span><strong>{{ displayAmount(source.outstandingDebtAmount) }}</strong></div>
               <div><span>取消欠款</span><strong>{{ displayAmount(source.cancelledDebtAmount) }}</strong></div>
               <div><span>购买金额</span><strong>{{ displayAmount(source.purchaseAmount) }}</strong></div>
-              <div><span>单价</span><strong>{{ displayAmount(source.unitPrice) }}</strong></div>
+              <div><span>购买单价</span><strong>{{ displayAmount(source.unitPrice) }}</strong></div>
             </div>
             <div
               v-for="project in source.projects || []"
@@ -552,10 +552,10 @@ function operationProjectSelected(source = {}, project = {}) {
               </div>
               <small v-if="project.disabledReason || project.unavailableReason" class="cashier-entitlement-card__project-reason">{{ project.disabledReason || project.unavailableReason }}</small>
               <div class="cashier-entitlement-card__project-metrics" aria-label="项目权益">
-                <div><span>余次</span><strong>{{ displayProjectRemainingTimes(source, project) }}</strong></div>
+                <div><span>剩余次数</span><strong>{{ displayProjectRemainingTimes(source, project) }}</strong></div>
                 <div><span>剩余余额</span><strong>{{ displayProjectRemainingAmount(source, project) }}</strong></div>
                 <div><span>购买金额</span><strong>{{ displayAmount(project.purchaseAmount) }}</strong></div>
-                <div><span>单价</span><strong>{{ displayAmount(project.unitPrice) }}</strong></div>
+                <div><span>购买单价</span><strong>{{ displayAmount(project.unitPrice) }}</strong></div>
               </div>
             </div>
           </section>
@@ -564,12 +564,12 @@ function operationProjectSelected(source = {}, project = {}) {
           <div class="cashier-entitlement-table__head" role="row">
             <span>操作按钮</span>
             <span>卡名称</span>
-            <span>余次</span>
+            <span>剩余次数</span>
             <span>剩余余额</span>
             <span>欠款</span>
             <span>取消欠款</span>
             <span>购买金额</span>
-            <span>单价</span>
+            <span>购买单价</span>
             <span>有效期</span>
           </div>
 
