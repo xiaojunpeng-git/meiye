@@ -196,10 +196,8 @@ class PublicController extends BaseController
         }
         $auth = [];
         $auth['/pages/users/user_vip/index'] = !$vipOpen;
-        // “我的推广”入口由后台展示配置和会员推广资格决定，不随全局佣金开关隐藏；
-        // 入口可见不授予分销身份，推广员资格仍由 UserServices 按原业务开关校验。
-        $auth['/pages/users/user_spread_user/index'] = $uid == 0
-            || (isset($userInfo['spread_open']) && !$userInfo['spread_open']);
+        // “我的推广”是否展示只读取后台个人中心装修配置。菜单接口允许无身份预加载；
+        // 推广资格与佣金权限仍由进入页面后的业务接口校验，不能在此过滤入口。
 		$auth['/pages/users/distributor/apply'] = !$brokerageFuncStatus || $isUserPromoter || $uid == 0 || !$storeBrokerageApply;
         $auth['/pages/users/user_money/index'] = !$balanceFuncStatus;
 		$auth['/pages/admin/order/index'] = true;
