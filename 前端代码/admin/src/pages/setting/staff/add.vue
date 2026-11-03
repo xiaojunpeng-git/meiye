@@ -297,14 +297,6 @@
             </Row>
             <Row :gutter="24">
               <Col :span="12">
-                <FormItem label="可被预约：">
-                  <i-switch v-model="formInline.is_reservable" :true-value="1" :false-value="0" size="large">
-                    <span slot="open">是</span>
-                    <span slot="close">否</span>
-                  </i-switch>
-                </FormItem>
-              </Col>
-              <Col :span="12">
                 <FormItem label="工号：">
                   <Input v-model="formInline.employee_number" placeholder="请输入工号" />
                 </FormItem>
@@ -313,12 +305,12 @@
             <Row :gutter="24">
               <Col :span="12">
                 <FormItem label="身份证号：">
-                  <Input v-model="formInline.id_card" placeholder="请输入身份证号" />
+                  <Input v-model="formInline.id_card" placeholder="请输入身份证号" @on-change="onIdCardChange" />
                 </FormItem>
               </Col>
               <Col :span="12">
                 <FormItem label="年龄：">
-                  <Input v-model="formInline.age" placeholder="请输入年龄" />
+                  <Input :value="ageDisplay" placeholder="根据生日自动计算" readonly />
                 </FormItem>
               </Col>
             </Row>
@@ -435,8 +427,8 @@
                 </FormItem>
               </Col>
               <Col :span="12">
-                <FormItem label="部门：">
-                  <Input v-model="formInline.department" placeholder="请输入部门" />
+                <FormItem label="在司工龄：">
+                  <Input :value="tenureDisplay" placeholder="根据入职日期自动计算" readonly />
                 </FormItem>
               </Col>
             </Row>
@@ -722,6 +714,26 @@ export default {
   computed: {
     ...mapState('admin/layout', ['isMobile']),
     ...mapState('admin/user', { userInfo: 'info' }),
+    // 两项随日期变化的展示值不落库；后端仍按同一日期独立重算。
+    ageDisplay() {
+      const birth = this.parseProfileDate(this.formInline.birthday_date);
+      if (!birth) return Number(this.formInline.age) > 0 ? String(this.formInline.age) : '';
+      const today = new Date();
+      let years = today.getFullYear() - birth.getFullYear();
+      if (today.getMonth() < birth.getMonth()
+        || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) years -= 1;
+      return years >= 0 ? String(years) : '';
+    },
+    tenureDisplay() {
+      const join = this.parseProfileDate(this.formInline.join_date);
+      if (!join) return '';
+      const today = new Date();
+      let years = today.getFullYear() - join.getFullYear();
+      let months = today.getMonth() - join.getMonth();
+      if (today.getDate() < join.getDate()) months -= 1;
+      if (months < 0) { years -= 1; months += 12; }
+      return years >= 0 ? `${years}年${months}个月` : '';
+    },
     canSaveStaff() {
       if (!this.canSave) return false;
       // fail-closed：access 缺失/空/异常默认不可保存；仅明确总部超管或具备人员维护权限
@@ -851,6 +863,26 @@ export default {
     this.workMember();
   },
   methods: {
+    /** 身份证仅在完整校验通过后派生公历生日，避免错误证件污染生日。 */
+    onIdCardChange(value) {
+      const card = String(value || '').trim().toUpperCase();
+      if (!/^\d{17}[\dX]$/.test(card)) return;
+      const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+      const sum = weights.reduce((acc, weight, index) => acc + Number(card[index]) * weight, 0);
+      if ('10X98765432'[sum % 11] !== card[17]) return;
+      const date = `${card.slice(6, 10)}-${card.slice(10, 12)}-${card.slice(12, 14)}`;
+      const birth = this.parseProfileDate(date);
+      if (!birth) return;
+      this.formInline.birthday_date = date;
+      this.formInline.birthday_type = 2;
+    },
+    parseProfileDate(value) {
+      const match = String(value || '').match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+      if (!match) return null;
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1
+        && date.getDate() === Number(match[3]) ? date : null;
+    },
     /**
      * 父组件同一轮会更新弹窗开关、employee_id 和 staff_id，
      * 将多个 watcher 合并到一次 nextTick，避免并发重复请求同一员工档案。
@@ -884,7 +916,9 @@ export default {
       return val;
     },
     setDateField(field, val) {
-      this.formInline[field] = val || '';
+      // 日期组件展示斜杠，保存契约统一使用 ISO 日期，避免直属人员校验与门店任职不一致。
+      this.formInline[field] = (field === 'join_date' || field === 'birthday_date')
+        ? String(val || '').replace(/\//g, '-') : (val || '');
     },
     resolveStaffAvatar,
     onStaffAvatarError,
@@ -1349,6 +1383,10 @@ export default {
       delete payload.position_level;
       delete payload.staff_id;
       delete payload.employee_id;
+      // 隐藏的旧控件不参与保存，避免默认值覆盖既有预约和部门资料。
+      delete payload.is_reservable;
+      delete payload.department;
+      delete payload.age;
 
       payload.org_id = Number(this.formInline.org_id) || 0;
       payload.store_id = Number(this.formInline.store_id) || 0;
