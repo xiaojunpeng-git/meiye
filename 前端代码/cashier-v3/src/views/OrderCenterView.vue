@@ -473,8 +473,8 @@ if (reconciliationToken) {
   try { reconciliationNavigation = JSON.parse(sessionStorage.getItem(`reconciliation-navigation:${reconciliationToken}`) || 'null') }
   catch (_) { reconciliationNavigation = null }
 }
-const reconciliationDocumentNos = Array.isArray(reconciliationNavigation?.documentNos)
-  ? reconciliationNavigation.documentNos.filter(no => typeof no === 'string' && no !== '') : []
+// 旧令牌只有单号，无法区分同号载体；必须重新从对账单生成完整来源条件。
+const reconciliationSelection = reconciliationNavigation?.selection || null
 // 平台只增加组织/门店范围上下文；页面、字段、页签和动作仍走同一份权限投影。
 const isPlatformContext = computed(() => route.meta.platformOrderContext === true)
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
@@ -2894,6 +2894,12 @@ function businessDateRangeFromQuery(query = {}) {
 }
 
 function normalizeOrderCenterDateQuery(query = {}) {
+  // 对账主周期是来源收款日期，不能被通用适配器再复制成订单业务日期。
+  if (query.reconciliationDrilldown) {
+    const result = { ...query }
+    for (const key of ['dateFrom','dateTo','businessDateFrom','businessDateTo']) delete result[key]
+    return result
+  }
   const { from, to } = businessDateRangeFromQuery(query)
   return {
     ...query,
@@ -2959,11 +2965,11 @@ function reportSalesDateQuery() {
 }
 
 function initialOrderCenterQuery() {
-  // 对账按收款来源日归集，订单业务日可能不同；用已核实的原单号精确筛选，
-  // 不伪造订单日期、金额或支付方式，也不继承默认“今天”条件。
-  if (isPlatformContext.value && activeTabKey.value === 'all' && reconciliationDocumentNos.length) {
+  // 对账来源条件由后端重新定位到稳定记录ID；不按相同单号把历史载体也带出来。
+  if (isPlatformContext.value && activeTabKey.value === 'all' && reconciliationToken) {
     return { dataScope: 'normal', businessStatus: '', filterRelation: 'all',
-      filters: [{ field: 'order_no', operator: 'in', value: reconciliationDocumentNos }],
+      ...(reconciliationSelection ? { reconciliationDrilldown: { ...reconciliationSelection } }
+        : { filters: [{ field: 'order_no', operator: 'eq', value: '__INVALID_RECONCILIATION_NAVIGATION__' }] }),
       topFilters: [], page: 1, pageSize: 20 }
   }
   // 首屏复用本地规则，但不恢复过去的日期或人员输入；默认业务日仍是当天。
@@ -4160,7 +4166,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="order-center-page" aria-label="订单中心">
     <p v-if="isPlatformContext && reconciliationToken" class="order-center-notice" role="status">
-      正在查看对账单对应订单；订单金额及其他字段保持原值。
+      {{ reconciliationSelection ? '正在查看对账单对应订单；查询周期沿用对账下单时间，订单业务日期可能不同，金额及原日期保持不变。' : '对账定位已失效，请返回门店对账单重新点击金额。' }}
       <button type="button" class="button button--text" @click="returnToReconciliation">返回门店对账单</button>
     </p>
     <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
@@ -4329,7 +4335,6 @@ onBeforeUnmount(() => {
                   @click="openSalesOrderNoteEditor(record)"
                 >备注</button>
                 <button v-if="recordVoidAction(record)" type="button" class="button button--text button--danger" @click="openRecordDetail(record, recordVoidAction(record))">作废</button>
-                <button v-if="recordType(record) === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常' && canUseCashierV3Operation('cashier.v3.order.refund')" type="button" class="button button--text" @click="openRecordDetail(record, 'refund')">退款</button>
               </span>
             </td>
           </tr>

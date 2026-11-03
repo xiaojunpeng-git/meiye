@@ -216,6 +216,8 @@ final class CashierV3OrderCenterRecordQueryServices
             'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
             'allowedStoreIds' => $this->canonicalStoreIds($dataScope->narrowVisibleStores($requestedStores)),
             'tenantId' => $dataScope->tenantId(),
+            // 内部已核实来源主键仅收窄授权记录，空集合明确无结果。
+            '_reconciliationRecordIds' => $payload['_reconciliationRecordIds'] ?? null,
         ];
     }
 
@@ -292,6 +294,15 @@ final class CashierV3OrderCenterRecordQueryServices
         }
     }
 
+    /** 每种来源单独按主键下推，不扫描全历史补交/充值，也不把同号记录视为同一笔业务。 */
+    private function applyReconciliationIdentity($query, array $criteria, string $prefix, string $column): void
+    {
+        if (!is_array($criteria['_reconciliationRecordIds'] ?? null)) return;
+        $ids = [];
+        foreach ($criteria['_reconciliationRecordIds'] as $id) if (is_string($id) && strpos($id, $prefix) === 0) $ids[] = substr($id, strlen($prefix));
+        $query->whereIn($column, $ids ?: ['__NO_RECONCILIATION_ORDER__']);
+    }
+
     private function readRecharge(array $criteria): array
     {
         $tenantId = (string)($criteria['tenantId'] ?? '');
@@ -300,6 +311,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyReconciliationIdentity($query, $criteria, 'recharge:recharge:', 'r.id');
         // 历史充值用原支付/创建时间承接日期；不回写业务表，不产生 V3 资金事实。
         $dateExpression = CashierV3HistoricalRechargeDate::sql();
         foreach (['businessDateFrom' => '>=', 'businessDateTo' => '<='] as $key => $comparison) {
@@ -555,6 +567,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 else $q->where('r.status', 'succeeded');
             });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyReconciliationIdentity($query, $criteria, 'supplement:v3-sales-supplement:', 'r.repayment_id');
         $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'r.debt_no', 'r.sales_order_no_snapshot',
@@ -647,6 +660,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 else $q->where('r.status', 'succeeded');
             });
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
+        $this->applyReconciliationIdentity($query, $criteria, 'supplement:v3-supplement:', 'r.repayment_id');
         $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repayment_no', 'd.debt_no', 'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
@@ -722,6 +736,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.pay_store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.pay_store_id', $criteria['allowedStoreIds']);
+        $this->applyReconciliationIdentity($query, $criteria, 'supplement:legacy-supplement:', 'r.id');
         $this->applyTimestampBusinessDateRange($query, 'r.add_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.repay_no', 'bd.document_no', 'd.debt_no', 'r.order_sn', 'u.real_name', 'u.nickname', 'u.phone',

@@ -153,13 +153,17 @@ final class CashierV3BusinessPaymentCorrectionSource
             $balances[$identities[$b['repayment_id']]['record']][] = $b;
         }
         $corrections = new CashierV3PaymentMethodCorrectionServices();
+        // 经营列表按权威渠道代码读取本站配置名；原收款/更正快照原样保留供审计和并发比较。
+        // 含历史“现金”误命名的非现金方式仍由原更正服务解释，不能被当前别名掩盖。
+        $displayNames = array_column((new \app\services\cashier\v3\config\CashierV3BusinessConfigServices())->accountingMethods(), 'displayName', 'code');
         foreach ($records as &$r) {
             $collections = $byRecord[$r['id']] ?? [];
             if (!$collections) continue;
             $collections = $corrections->effectiveCollections($collections, $tenant);
-            $r['paymentDetails'] = array_map(static function (array $c): array {
+            $r['paymentDetails'] = array_map(static function (array $c) use ($displayNames): array {
                 return ['id' => $c['collection_id'], 'paymentMethodCode' => $c['payment_method'],
-                    'methodName' => $c['payment_method_name_snapshot'],
+                    'methodName' => $c['payment_method'] === 'other_collection'
+                        ? $c['payment_method_name_snapshot'] : ($displayNames[$c['payment_method']] ?? $c['payment_method_name_snapshot']),
                     'amount' => bcdiv((string)$c['amount_cents'], '100', 2)];
             }, $collections);
             $editable = ($r['orderStatus'] ?? '') === '正常' || ($r['paymentStatus'] ?? '') === '补交成功';

@@ -338,7 +338,7 @@ class UnifiedQueryExecutionServices
             'domain_scope' => [
                 'data_scope' => (string)($query['dataScope'] ?? 'normal'),
                 'business_status' => (string)($query['businessStatus'] ?? ''),
-            ],
+            ] + $this->reconciliationDomainScope($pageCode, $query),
             // 冻结的任务只保存已白名单化的条件，worker 不能重新解释 UI 展示对象。
             'quick_filters' => $quickFilters,
             'visible_fields' => $visibleFields,
@@ -346,9 +346,15 @@ class UnifiedQueryExecutionServices
         ];
     }
 
-    /**
-     * 前端查询页、导出和 worker 共用的唯一 UI payload 规范化入口。
-     */
+    /** 对账范围是来源条件，不是自定义表达式；非订单页面拒收，权限仍由provider在执行时重新裁剪。 */
+    private function reconciliationDomainScope(string $pageCode, array $query): array
+    {
+        if (!array_key_exists('reconciliationDrilldown', $query)) return [];
+        if ($pageCode !== 'order_center_all' || !is_array($query['reconciliationDrilldown'])) throw $this->invalidQuery('对账订单来源条件无效。');
+        return ['reconciliation_drilldown'=>\app\services\report\StoreReconciliationOrderNavigation::normalize($query['reconciliationDrilldown'])];
+    }
+
+    /** 前端查询页、导出和 worker 共用的唯一 UI payload 规范化入口。 */
     public function normalizeUiQuery(
         string $pageCode,
         array $raw,
@@ -369,7 +375,7 @@ class UnifiedQueryExecutionServices
             'topFilters', 'querySettings', 'filters', 'filterRelation', 'sorts',
             'groups', 'groupBy', 'summaries', 'dataScope', 'businessStatus',
             'quickFilters', 'visibleFields', 'export', 'fieldVersions',
-            'keywordFilters', 'topFilterConditions',
+            'keywordFilters', 'topFilterConditions', 'reconciliationDrilldown',
         ];
         foreach (array_keys($raw) as $key) {
             if (!in_array($key, $uiKeys, true)) {
@@ -452,6 +458,9 @@ class UnifiedQueryExecutionServices
                 ? $raw['topFilterConditions']
                 : [],
         ];
+        // 只有全部订单支持此来源范围；列表、导出创建和worker使用同一规范化条件。
+        $domain = $this->reconciliationDomainScope($pageCode, $raw);
+        if ($domain) $normalized['reconciliationDrilldown'] = $domain['reconciliation_drilldown'];
         $topFilters = $raw['topFilters'] ?? [];
         if (!is_array($topFilters)) {
             throw $this->invalidQuery('topFilters 必须是结构化数组');
@@ -1205,7 +1214,7 @@ class UnifiedQueryExecutionServices
             'page', 'limit', 'filters', 'filterRelation', 'sorts', 'groups', 'groupBy',
             'summaries', 'export', 'dataScope', 'businessStatus', 'quickFilters', 'visibleFields',
             'fieldVersions', 'keywordFilters',
-            'topFilterConditions',
+            'topFilterConditions', 'reconciliationDrilldown',
             'queryCutoffDate',
         ];
         foreach (array_keys($query) as $key) {
