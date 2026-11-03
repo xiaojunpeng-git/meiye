@@ -5537,12 +5537,18 @@ html.group-dashboard-document #app {
   gap: 5px;
 }
 
+/* 仅放大卡片内的卡类型标记；表格模式继续使用原字号。 */
+.cashier-entitlement-card .cashier-entitlement-table__type-tag,
+.cashier-entitlement-card .cashier-entitlement-table__custom-tag {
+  font-size: 15px;
+}
+
 .cashier-entitlement-card__name > strong,
 .cashier-entitlement-card__project-name > strong {
   overflow: hidden;
   min-width: 0;
   color: #1f2329;
-  font-size: 12px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5550,7 +5556,7 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__identity > small {
   overflow: hidden;
   color: #7b8797;
-  font-size: 10px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5566,13 +5572,13 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__metrics span,
 .cashier-entitlement-card__project-metrics span {
   color: #65758a;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 500;
 }
 
 .cashier-entitlement-card__expiry > strong {
   color: #34465a;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .cashier-entitlement-card__metrics {
@@ -5602,7 +5608,7 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__project-metrics strong {
   overflow: hidden;
   color: #25364a;
-  font-size: 11px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5640,7 +5646,7 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__project-name > span {
   flex: none;
   color: #1677cc;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -5653,7 +5659,7 @@ html.group-dashboard-document #app {
   height: 32px;
   min-width: 54px;
   margin: auto 0;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .cashier-entitlement-card__project-top .cashier-entitlement-table__add:not(:disabled) {
@@ -5672,7 +5678,7 @@ html.group-dashboard-document #app {
   margin-bottom: 5px;
   padding-right: 64px;
   color: #8c5a2b;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .cashier-entitlement-card__project-metrics {
