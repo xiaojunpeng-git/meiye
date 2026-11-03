@@ -106,6 +106,9 @@ function currentQuery() {
 
 const scopeLabel = computed(() => scopePicker.value.label || dashboard.value?.scope?.label || dashboard.value?.scope?.scope_label || '当前权限范围')
 const cards = computed(() => Array.isArray(dashboard.value?.cards) ? dashboard.value.cards : [])
+// Backend has already applied the six new cards' nonzero visibility and
+// authorized category scope; the browser only renders the returned values.
+const beautyCards = computed(() => Array.isArray(dashboard.value?.beauty_cards) ? dashboard.value.beauty_cards : [])
 // Sale mix is already grouped by the backend's authorized fact reader; the
 // browser only renders the four returned quantities and receipt amounts.
 const saleTypeCards = computed(() => Array.isArray(dashboard.value?.sale_type_cards) ? dashboard.value.sale_type_cards : [])
@@ -129,6 +132,7 @@ const fieldExplanations = computed(() => {
   const source = dashboard.value || {}
   return Object.fromEntries(Object.entries({
     ...(source.field_explanations || {}),
+    ...Object.fromEntries((source.beauty_cards || []).map((card) => [card.metric_code, card.source_explanation])),
     trend: source.trend?.source_explanation,
     categories: source.categories?.[0]?.source_explanation,
     sources: source.sources?.source_explanation,
@@ -427,6 +431,21 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <section v-if="beautyCards.length" class="group-dashboard__section" aria-label="生美与服务效率">
+        <div class="group-dashboard__section-title"><div><h2>生美与服务效率</h2><span>仅显示当前筛选范围内有值的指标</span></div></div>
+        <div class="group-dashboard__metric-grid">
+          <div v-for="metric in beautyCards" :key="metric.metric_code" class="dashboard-card-wrap">
+            <div class="dashboard-metric" :class="`dashboard-metric--${metricTone(metric)}`">
+              <span class="dashboard-metric__icon"><component :is="metricIcon(metric)" :size="17" aria-hidden="true" /></span>
+              <span>{{ metric.name }}</span>
+              <strong>{{ metric.value_type === 'money' ? formatMoney(metric.value_cents) : metric.value }}</strong>
+              <small>{{ metric.source_explanation }}</small>
+            </div>
+            <button type="button" class="dashboard-card-guide" :aria-label="`${metric.name}列名取值来源`" @click="openFieldGuide(metric.metric_code)"><BookOpen :size="14" aria-hidden="true" /></button>
+          </div>
+        </div>
+      </section>
+
       <section class="group-dashboard__section dashboard-trend-panel"><div class="group-dashboard__section-title"><div><h2>经营业绩趋势</h2><span>{{ trendChart.rangeLabel }}</span></div><div class="dashboard-trend-panel__tools"><span class="dashboard-trend-legend dashboard-trend-legend--actual">实际业绩</span><span class="dashboard-trend-legend dashboard-trend-legend--consumption">消耗业绩</span><button type="button" class="dashboard-guide" @click="openFieldGuide('trend')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div></div><div v-if="trendChart.labels.length" class="dashboard-trend-chart"><svg viewBox="0 0 768 148" role="img" aria-label="实际业绩与消耗业绩趋势图" preserveAspectRatio="none"><line v-for="y in [13, 52, 91, 131]" :key="y" x1="24" x2="744" :y1="y" :y2="y" class="dashboard-trend-chart__grid" /><polyline :points="trendChart.consumptionPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--consumption" /><polyline :points="trendChart.actualPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--actual" /><g v-for="point in trendChart.actualNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--actual" /><text :x="point.x" :y="Math.max(10, Number(point.y) - 8)" class="dashboard-trend-chart__value dashboard-trend-chart__value--actual">{{ point.label }}</text></g><g v-for="point in trendChart.consumptionNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--consumption" /><text :x="point.x" :y="Number(point.y) + 15" class="dashboard-trend-chart__value dashboard-trend-chart__value--consumption">{{ point.label }}</text></g></svg><div class="dashboard-trend-chart__labels" :style="{ '--label-count': trendChart.labels.length }"><span v-for="label in trendChart.labels" :key="label">{{ label }}</span></div></div><p v-else class="dashboard-empty">当前筛选范围暂无趋势数据。</p></section>
 
       <section class="group-dashboard__section">
@@ -443,6 +462,7 @@ onBeforeUnmount(() => {
               <div v-for="type in category.sale_types" :key="type.code" class="dashboard-category-sale-type">
                 <span>{{ type.title }}</span>
                 <span class="dashboard-category-sale-type__quantity">销售量 {{ Number(type.sales_quantity || 0).toLocaleString('zh-CN') }}</span>
+                <span>平均单价 {{ formatMoney(type.average_unit_price_cents) }}</span>
                 <strong :aria-label="`现金业绩 ${formatMoney(type.cash_performance_cents)}`">{{ formatMoney(type.cash_performance_cents) }}</strong>
               </div>
             </div>
@@ -453,7 +473,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交人数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">实际业绩 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
+      <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交人数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">实际业绩 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span><span class="source-metric source-metric--amount">客单价 <b>{{ formatMoney(source.average_order_value_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
 
       <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">查看明细</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
 

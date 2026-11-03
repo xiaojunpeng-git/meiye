@@ -98,7 +98,7 @@ async function startExport() {
 <template>
   <UnifiedReportQueryToolbar ref="toolbar" :fields="fields" :page-code="pageCode" :executed-query="panelQuery" :is-query-loading="isQueryLoading" @query="query" @clear="cleared = true">
     <template #leading-controls>
-      <UnifiedQueryDateRange v-model="date" :allow-clear="false" />
+      <UnifiedQueryDateRange v-model="date" :label="executedQuery?.reconciliationDrilldown ? '下单时间' : '查询周期'" :allow-clear="false" />
     </template>
     <template #primary-actions>
       <div class="order-report-scope" role="group" aria-label="订单范围">

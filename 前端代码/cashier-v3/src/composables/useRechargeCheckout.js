@@ -1,5 +1,5 @@
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
-import { configuredActualAccountingMethods } from '@/services/configuredAccountingMethods'
+import { configuredActualAccountingMethods, filterConfiguredAccountingMethods } from '@/services/configuredAccountingMethods'
 import { ref } from 'vue'
 import { createCashierV3CommandId, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { cashierV3ResponseEnvelope } from '@/services/cashierV3CheckoutResultContract'
@@ -28,15 +28,16 @@ export function useRechargeCheckout() {
   let rechargeCheckoutMutationTail = Promise.resolve()
   let originalLocalSubmit = null
   // 充值确认只编辑浏览器快照；非现金结算不可充值，服务端最终重验实际收款方式。
-  let localMethods = [
+  const baseLocalMethods = [
     ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款']
   ]
+  let localMethods = baseLocalMethods.slice()
 
   function acceptLocalRechargeCheckout(input = {}, session = {}) {
     // 每次打开重新读取本站配置，旧弹窗的异步结果不得污染新快照。
-    localMethods = localMethods.filter(([id]) => !['bank_transfer', 'other_income'].includes(id))
+    localMethods = baseLocalMethods.slice()
     const memberId = Number(input.memberId || 0)
     const packageItem = (session.rechargeOptions?.packages || [])
       .find((item) => Number(item.id) === Number(input.rechargePackageId))
@@ -96,9 +97,16 @@ export function useRechargeCheckout() {
     originalLocalSubmit = null
     Promise.resolve().then(() => loadCheckoutBusinessCatalog()).then((catalog) => {
       if (rechargeCheckout.value?.orderLines?.[0]?.id !== localId) return
-      const methods = configuredActualAccountingMethods(catalog)
-      localMethods.push(...methods.map((method) => [method.id, method.name]))
-      rechargeCheckout.value.payment.methods.push(...methods)
+      // 充值与销售共用本站记账配置：企微独立，停用的微信/支付宝不可再选。
+      const methods = filterConfiguredAccountingMethods([
+        ...baseLocalMethods.map(([id, name]) => ({ id, name, canAdd: true })),
+        ...configuredActualAccountingMethods(catalog)
+      ], catalog)
+      localMethods = methods.map((method) => [method.id, method.name])
+      rechargeCheckout.value.payment.methods = methods.map((method) => ({ ...method,
+        canAdd: method.id !== 'unionpay' }))
+      rechargeCheckout.value.payment.selectedLines = (rechargeCheckout.value.payment.selectedLines || [])
+        .map((line) => ({ ...line, name: methods.find((method) => method.id === line.method)?.name || line.name }))
     }).catch(() => { /* 配置不可用时不开放新渠道，最终事务仍重验启用状态。 */ })
     return rechargeCheckout.value
   }

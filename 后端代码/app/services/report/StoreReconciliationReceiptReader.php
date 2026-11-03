@@ -213,13 +213,13 @@ final class StoreReconciliationReceiptReader
                 'original_sale.tenant_id=p.tenant_id AND original_sale.order_id=p.order_id AND original_sale.store_id=p.store_id')
             ->where('original_sale.order_status', 'settled')->where('original_sale.order_direction', 'forward')
             ->whereBetween('original_sale.business_date', [$range['start_date'], $range['end_date']])
-            ->fieldRaw('p.fact_id,p.store_id,original_sale.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
+            ->fieldRaw('p.fact_id,p.order_id,p.source_document_type,p.store_id,original_sale.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
             ->limit(self::LIMIT + 1)->select()->toArray();
         $independent = (clone $query)->whereBetween('p.business_date', [$range['start_date'], $range['end_date']])
             ->whereNotExists(static function ($sale): void {
                 $sale->name('cashier_v3_sales_order')->alias('reconciliation_original_sale')
                     ->whereRaw('reconciliation_original_sale.tenant_id=p.tenant_id')->whereRaw('reconciliation_original_sale.order_id=p.order_id');
-            })->fieldRaw('p.fact_id,p.store_id,p.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
+            })->fieldRaw('p.fact_id,p.order_id,p.source_document_type,p.store_id,p.business_date,' . $effectiveMethod . ' payment_method,p.amount_cents,p.order_no_snapshot,p.member_id')
             ->limit(self::LIMIT + 1)->select()->toArray();
         $this->bounded($originals); $this->bounded($independent);
         $legacyOwners = array_column($methods, 'payment_code', 'code');
@@ -233,6 +233,8 @@ final class StoreReconciliationReceiptReader
             $out[] = ['receipt_id' => 'v3:' . $row['fact_id'], 'store_id' => (int)$row['store_id'],
                 'business_date' => $row['business_date'], 'method_code' => $methodCode,
                 'amount_cents' => $amount, 'document_no' => (string)$row['order_no_snapshot'],
+                // 原始来源主键随收款证据传递；跳转不能再按可能重复的显示单号扩展人口。
+                'order_reference' => ['type' => (string)$row['source_document_type'], 'id' => (string)$row['order_id']],
                 'member_id' => (int)$row['member_id'], 'source_kind' => '统一收款', 'combined' => false];
         }
         $this->bounded($out);
@@ -372,6 +374,8 @@ final class StoreReconciliationReceiptReader
             'business_date' => $businessDate ?? (new \DateTimeImmutable('@' . (int)$row['add_time']))->setTimezone($timezone)->format('Y-m-d'),
             'amount_cents' => BasicRegistrationQueryProvider::cents($row['reconciliation_amount']),
             'document_no' => (string)$row['order_id'], 'member_id' => (int)$row['uid'],
+            // 组合行自身ID不同于原订单ID，必须保存已查询到的原单主键。
+            'order_reference' => ['type' => 'legacy_store_order', 'id' => (string)$row['source_order_id']],
             'source_kind' => $memberOrder ? '会员订单收款' : ($combined ? '历史组合收款' : '历史订单收款'), 'combined' => $combined];
     }
 

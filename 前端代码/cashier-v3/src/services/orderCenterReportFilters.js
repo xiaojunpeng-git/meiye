@@ -45,6 +45,8 @@ export function orderReportFields(fields = [], sourceOptions = null) {
 
 /** 日期优先读取宿主别名，兼容仅有业务日期 topFilters 的已执行查询。 */
 export function orderReportDate(query = {}, fallback = '') {
+  // 对账周期与订单业务日是两个时间维度，只恢复来源条件，不把今天伪装成已执行日期。
+  if (query.reconciliationDrilldown) return { min: query.reconciliationDrilldown.from, max: query.reconciliationDrilldown.to }
   const top = filters(query.topFilters)
   const date = (operator) => top.find(item => item.field === 'business_date' && item.operator === operator)?.value
   return {
@@ -76,12 +78,18 @@ export function buildOrderReportQuery(original, panel, date, scope, limit, clear
     top.push(item.field === 'source' && item.value === EMPTY_ORDER_SOURCE
       ? { field: 'source', operator: 'is_null', value: null } : clone(item))
   }
-  if (date.min) top.push({ field: 'business_date', operator: 'gte', value: date.min })
-  if (date.max) top.push({ field: 'business_date', operator: 'lte', value: date.max })
+  if (!query.reconciliationDrilldown) {
+    if (date.min) top.push({ field: 'business_date', operator: 'gte', value: date.min })
+    if (date.max) top.push({ field: 'business_date', operator: 'lte', value: date.max })
+  } else {
+    // 修改周期后由后端重新读取同渠道收款；清空附加筛选不能解除对账来源约束。
+    query.reconciliationDrilldown = { ...query.reconciliationDrilldown, from: date.min, to: date.max }
+    for (const key of ['dateFrom','dateTo','businessDateFrom','businessDateTo']) delete query[key]
+  }
   // 清空仅重置高级筛选；权限和组织范围仍由宿主与后端掌握。
   return { ...query, pageCode, page: 1, limit,
     keyword: '', dataScope: scope, businessStatus: scope === 'normal' ? '' : (query.businessStatus || ''), topFilters: top,
-    dateFrom: date.min, businessDateFrom: date.min, dateTo: date.max, businessDateTo: date.max,
+    ...(!query.reconciliationDrilldown ? { dateFrom: date.min, businessDateFrom: date.min, dateTo: date.max, businessDateTo: date.max } : {}),
     filters: cleared ? [] : filters(query.filters), filterRelation: cleared ? 'all' : (query.filterRelation || 'all') }
 }
 

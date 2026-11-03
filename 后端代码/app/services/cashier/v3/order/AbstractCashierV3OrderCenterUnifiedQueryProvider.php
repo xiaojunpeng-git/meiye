@@ -140,6 +140,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     /** 普通查询只允许已下推的日期、状态和门店条件；其他条件继续走统一执行器。 */
     private function isOrdinaryPageQuery(array $payload, array $definitions): bool
     {
+        // 对账人口须先重新核实收款来源，不能走只按订单业务日的普通分页捷径。
+        if (isset($payload['reconciliationDrilldown'])) return false;
         if ($definitions || trim((string)($payload['keyword'] ?? '')) !== '') return false;
         foreach (['filters','quickFilters','keywordFilters','groups','groupBy','summaries'] as $key) {
             if (!empty($payload[$key])) return false;
@@ -307,6 +309,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 'fields' => array_values(array_unique(array_map('strval', $fieldKeys))),
             ],
         ];
+        // 冻结条件仍由同一收款Reader重新核实；不能在导出时退回普通无日期订单人口。
+        if (isset($plan['domain_scope']['reconciliation_drilldown'])) $query['reconciliationDrilldown'] = $plan['domain_scope']['reconciliation_drilldown'];
         // Worker context 已取创建时组织范围与当前权限的交集；将它传给同一个
         // 领域 Reader，使分页和全量导出均不扩大到管理员的其他门店。
         if (array_key_exists('visible_store_ids', $context) && $context['visible_store_ids'] !== null) {
@@ -338,6 +342,13 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     /** @return array<string,mixed> */
     protected function run(array $context, array $payload, array $definitions): array
     {
+        // 同一次只读事务覆盖收款定位及订单装配，防止并发更正渠道造成半旧半新的结果。
+        $read = function () use ($context, $payload, $definitions): array { return $this->runQuery($context, $payload, $definitions); };
+        return isset($payload['reconciliationDrilldown']) ? Db::transaction($read) : $read();
+    }
+
+    private function runQuery(array $context, array $payload, array $definitions): array
+    {
         // 在领域 Reader 下推前撤下关闭的来源筛选，不能只在最终分页引擎中移除。
         $policy = (new CashierV3BusinessSourcePolicyServices())->read();
         if (($policy['enabled'] ?? true) === false) $payload = CashierV3OrderCenterQueryExecutionServices::withoutBusinessSource($payload);
@@ -345,11 +356,24 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         unset($payload['queryCutoffDate'], $payload['query_cutoff_date']);
         $memberInitials = $this->memberInitialKeyword($payload);
         $this->sourcePayload = $this->sourceQuery($payload);
+        if (isset($payload['reconciliationDrilldown'])) {
+            if ($this->pageCode() !== 'order_center_all' || !is_array($payload['reconciliationDrilldown'])) throw new \InvalidArgumentException('对账订单查询入口无效。');
+            [$operator, $scope] = $this->liveScopes ?? $this->authoritativeScopes($context);
+            $store = (int)($payload['reconciliationDrilldown']['storeId'] ?? 0);
+            $navigationContext = $context;
+            $navigationContext['visible_store_ids'] = $scope->narrowVisibleStores([$store]);
+            $selection = (new \app\services\report\StoreReconciliationOrderNavigation())->selection($navigationContext, $payload['reconciliationDrilldown']);
+            // 来源日期仅约束对账收款；订单仍展示其真实业务日，不能再叠加业务日筛选漏掉跨日成交。
+            foreach (['dateFrom','dateTo','businessDateFrom','businessDateTo'] as $key) unset($this->sourcePayload[$key]);
+            $this->sourcePayload['_reconciliationRecordIds'] = $selection['ids'];
+            $this->sourcePayload['_orderNumberConditions'][] = ['operator'=>'in', 'value'=>$selection['documents'] ?: ['__NO_RECONCILIATION_ORDER__']];
+        }
         // 领域日期/权限/下钻参数由源 Reader 消费；不传入通用表达式白名单。
         $payload = array_intersect_key($payload, array_flip([
             'pageCode','page','pageSize','limit','keyword','topFilters','filters','filterRelation',
             'sorts','groups','groupBy','summaries','dataScope','businessStatus','quickFilters',
             'visibleFields','export','fieldVersions','keywordFilters','topFilterConditions',
+            'reconciliationDrilldown',
         ]));
         $rows = $this->authorizedSourceBatches($context, $memberInitials);
         $payload = $this->identityFilters($payload);
@@ -365,8 +389,11 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             $numberField = $this->pageCode() === 'order_center_all' ? 'order_no' : 'sales_order_no';
             foreach ($conditions as $condition) {
                 if (($condition['field_key'] ?? '') === $numberField
-                    && in_array($condition['operator'] ?? '', ['equal','contains','starts_with'], true)
-                    && is_scalar($condition['value'] ?? null)) {
+                    && ((in_array($condition['operator'] ?? '', ['equal','contains','starts_with'], true)
+                            && is_scalar($condition['value'] ?? null))
+                        || (($condition['operator'] ?? '') === 'in' && is_array($condition['value'] ?? null)))) {
+                    // 对账单多原单号使用标准“多选”筛选；只下推已验证的 AND 条件，
+                    // 最终结果仍由统一查询执行器按原筛选计划判定。
                     $this->sourcePayload['_orderNumberConditions'][] = $condition;
                 }
             }
@@ -454,6 +481,10 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             if ($pageType === 'all' && isset($this->sourcePayload['_allOrderTypes'])
                 && !in_array($labels[$type], $this->sourcePayload['_allOrderTypes'], true)) continue;
             $source = array_replace($this->sourcePayload, ['recordType'=>$type]);
+            if (isset($source['_reconciliationRecordIds'])) {
+                $source['_reconciliationRecordIds'] = array_values(array_filter($source['_reconciliationRecordIds'], static function ($id) use ($type): bool { return strpos($id, $type.':') === 0; }));
+                if (!$source['_reconciliationRecordIds']) continue;
+            }
             $source['status'] = ($source['dataScope'] ?? 'normal') === 'normal' ? 'normal' : ($source['businessStatus'] ?? '');
             if ($pageType === 'sales') $this->sourcePage = $this->salesQueries->indexPageMetadata($source, $operator, $scope);
             $batches = $type === 'sales' ? $this->salesQueries->scanBatches($source, $operator, $scope)
@@ -468,6 +499,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                     $row = self::mixedDisplayFields($type, $row);
                 }
                 unset($row);
+                // 同号并不代表同一来源；最终稳定身份筛选也覆盖列表、合计和导出。
+                if (isset($source['_reconciliationRecordIds'])) $rows = array_values(array_filter($rows, static function ($r) use ($source): bool { return in_array($r['record_id'], $source['_reconciliationRecordIds'], true); }));
                 yield $this->attachMemberInitials($rows, $memberInitials);
             }
         }

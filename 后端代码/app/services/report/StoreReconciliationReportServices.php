@@ -164,6 +164,15 @@ final class StoreReconciliationReportServices
                 'store_name' => $names[$cells[$key]['store_id']] ?? '',
             ];
             $result['navigation_document_nos'] = $navigationDocuments;
+            // 正式跳转使用同一格收款的来源主键，排除同号历史壳单；离线投影测试不访问业务库。
+            $result['navigation_record_ids'] = [];
+            if (!$this->source && strpos($method, 'brush_') !== 0) {
+                // 未能证明来源时只阻止订单跳转；原有逐笔明细及其导出仍完整保留，不能因定位失败丢账。
+                try { $result['navigation_record_ids'] = (new StoreReconciliationOrderNavigation())->recordIds($cellReceipts[$method][$key], (string)$context['tenant_id']); }
+                catch (\InvalidArgumentException $error) { $result['navigation_error'] = $error->getMessage(); }
+            }
+            $result['navigation_selection'] = ['storeId'=>$cells[$key]['store_id'], 'methodCode'=>$method,
+                'from'=>$cells[$key]['start_date'], 'to'=>$cells[$key]['end_date']];
         }
         $sources = [];
         foreach ($fields as $field) $sources[$field['key']] = self::sourceDescription($field['key']);

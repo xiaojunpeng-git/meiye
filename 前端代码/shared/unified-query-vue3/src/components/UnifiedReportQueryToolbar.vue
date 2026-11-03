@@ -12,6 +12,8 @@ const props = defineProps({
   // 元数据尚未返回也可保留入口；不因此生成或授权任何筛选字段。
   keepFilterToggle: { type: Boolean, default: false },
   filterMessage: { type: String, default: '' },
+  // 只把后端已声明的日期区间移到主栏；仍共用同一草稿与 filters，不生成第二套日期条件。
+  primaryDateKeys: { type: Array, default: () => [] },
   executedQuery: { type: Object, default: () => ({}) }
 })
 const emit = defineEmits(['query', 'clear'])
@@ -20,6 +22,9 @@ const errorMessage = ref('')
 const draft = ref({})
 const snapshot = ref({})
 const filterFields = computed(() => reportFilterFields(props.fields))
+const primaryDateFields = computed(() => filterFields.value.filter(field => props.primaryDateKeys.includes(field.key)
+  && reportFilterType(field) === 'date' && reportFilterIsRange(field)))
+const secondaryFields = computed(() => filterFields.value.filter(field => !primaryDateFields.value.includes(field)))
 
 // 切报表先丢弃上一页草稿与快照；仅接收本页外部查询，阻止旧响应串入新页面。
 // 字段元数据更新时保留已编辑字段；首次返回元数据时再恢复对应的外部筛选。
@@ -46,7 +51,10 @@ watch([() => props.pageCode, () => JSON.stringify(props.executedQuery), filterFi
 
 // 清空只影响面板草稿，不动宿主组织/日期，不发请求也不改已执行查询。
 function clearFilters() {
+  // “清空筛选”仅清附加条件；主栏日期只有它自己的清空按钮可以移除。
+  const primary = cloneUnifiedQuerySnapshot(draft.value)
   draft.value = reportFilterDraft(props.fields)
+  for (const field of primaryDateFields.value) draft.value[field.key] = primary[field.key]
   errorMessage.value = ''
   emit('clear')
 }
@@ -70,15 +78,20 @@ defineExpose({ submitQuery })
 <template>
   <section class="unified-report-query-toolbar" aria-label="报表查询条件">
     <div class="unified-report-query-toolbar__primary">
-      <div v-if="$slots['leading-controls']" class="unified-report-query-toolbar__leading"><slot name="leading-controls" /></div>
-      <button v-if="filterFields.length || keepFilterToggle" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
+      <div v-if="$slots['leading-controls'] || primaryDateFields.length" class="unified-report-query-toolbar__leading">
+        <slot name="leading-controls" />
+        <div v-for="field in primaryDateFields" :key="field.key" class="unified-report-query-toolbar__primary-date">
+          <span>{{ field.label }}：</span><UnifiedQueryDateRange v-model="draft[field.key]" :label="`${field.label}周期`" />
+        </div>
+      </div>
+      <button v-if="secondaryFields.length || keepFilterToggle" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary unified-report-query-toolbar__query" :disabled="isQueryLoading" :aria-busy="isQueryLoading" @click="submitQuery">{{ isQueryLoading ? '查询中' : '查询' }}</button>
       <div v-if="$slots['primary-actions']" class="unified-report-query-toolbar__actions" aria-label="报表操作"><slot name="primary-actions" /></div>
     </div>
-    <p v-if="expanded && !filterFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
-    <div v-if="expanded && filterFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
+    <p v-if="expanded && !secondaryFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
+    <div v-if="expanded && secondaryFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
       <div class="unified-report-query-toolbar__fields" @keydown.enter.prevent="submitQuery">
-        <label v-for="field in filterFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterType(field) === 'number' }">
+        <label v-for="field in secondaryFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterType(field) === 'number' }">
           <span>{{ field.label || field.key }}</span>
           <UnifiedQueryDateRange v-if="reportFilterType(field) === 'date' && reportFilterIsRange(field)" v-model="draft[field.key]" :label="`${field.label || field.key}周期`" />
           <span v-else-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
@@ -103,6 +116,7 @@ defineExpose({ submitQuery })
 .unified-report-query-toolbar { min-width: 0; border: 1px solid #dde4ed; border-radius: 8px; background: #fff; color: #252a34; }
 .unified-report-query-toolbar__primary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; padding: 13px 16px; }
 .unified-report-query-toolbar__leading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; max-width: 100%; }
+.unified-report-query-toolbar__primary-date { display: flex; flex: none; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
 .unified-report-query-toolbar__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin-left: auto; }
 .unified-report-query-toolbar :deep(.button) { display: inline-flex; justify-content: center; align-items: center; flex: none; gap: 6px; min-height: 34px; box-sizing: border-box; font-size: 13px; white-space: nowrap; }
 .unified-report-query-toolbar__panel { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; min-height: 0; max-height: min(38vh, 340px); overflow-y: auto; padding: 2px 16px 13px; }

@@ -17,6 +17,9 @@ final class Sidebar007PkEfficiencyV3ReadServices
         'sharing_cents', 'actual_cents', 'growth_cents', 'completion_percent',
     ];
 
+    /** 报表列身份与旧版来源标签保持一一对应，供新投影按键选择而非按位置猜测。 */
+    public static function pkKeys(): array { return self::PK_KEYS; }
+
     /**
      * 007 PK 按门店纵行，旧目标从已持久化 yeji_pk 只读接入；这里不写目标。
      * $certifiedByStore 只允许服务端测试注入目标、底标及现金业绩，分成由本类
@@ -39,8 +42,15 @@ final class Sidebar007PkEfficiencyV3ReadServices
         ?callable $originalLegacyReader = null,
         ?callable $goalRowsReader = null,
         ?string $cutoffDate = null,
-        ?callable $bottomReader = null
+        ?callable $bottomReader = null,
+        ?array $visibleKeys = null
     ): array {
+        $selectedKeys = $visibleKeys ?? self::PK_KEYS;
+        if (!$selectedKeys || count($selectedKeys) !== count(array_unique($selectedKeys))
+            || array_diff($selectedKeys, self::PK_KEYS) || !in_array('store_name', $selectedKeys, true))
+            throw new \InvalidArgumentException('PK 展示列无效');
+        // 只读四项经营值时跳过已经不展示的目标、六个月底标、覆盖诊断及原子指标扫描。
+        $cashOnly = $selectedKeys === ['store_name','month_cash_cents','sharing_cents','actual_cents'];
         [$columns, $ids] = $this->stores($authorizedStoreIds, $stores);
         if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $month)) throw new \InvalidArgumentException('PK 月份无效');
         $first = \DateTimeImmutable::createFromFormat('!Y-m-d', $month . '-01');
@@ -61,35 +71,36 @@ final class Sidebar007PkEfficiencyV3ReadServices
             ['start'=>$start,'end'=>$end],$partnerFactQuery);
         // 真实 V3 销售收款、现金、消耗等原子指标单独带来源返回；
         // 007 月现金仍需原单付款资格证明，不把宽口径指标静默填入。
-        $atoms = (new Sidebar007V3AtomicReadServices($atomicReader))->read($ids,
+        $atoms = $cashOnly ? [] : (new Sidebar007V3AtomicReadServices($atomicReader))->read($ids,
             ['start'=>$start,'end'=>$end]);
         $original=(new Sidebar007OriginalCashReadServices(
             $originalPaymentReader,$originalLegacyReader))->read($ids,['start'=>$start,'end'=>$end]);
-        $legacyGoal=(new Sidebar007PkGoalReadServices($goalRowsReader))->read($ids,$month);
+        $legacyGoal=$cashOnly ? ['by_store'=>[]] : (new Sidebar007PkGoalReadServices($goalRowsReader))->read($ids,$month);
         // 六个月前覆盖不足时底标与增长同时留空；历史调整仅按本店
         // 手录记录读取，避免 007 旧全店求和越过门店授权边界。
-        $bottom=$bottomReader?$bottomReader($ids,$month)
-            :(new Sidebar007PkBottomReadServices())->read($ids,$month);
+        $bottom=$cashOnly ? ['by_store'=>[],'complete'=>true] : ($bottomReader?$bottomReader($ids,$month)
+            :(new Sidebar007PkBottomReadServices())->read($ids,$month));
         if(!is_array($bottom)||!is_array($bottom['by_store']??null)
             ||!is_bool($bottom['complete']??null))
             throw new \LogicException('PK 底标来源无效');
-        foreach($ids as $id)if(!array_key_exists('bottom_cents',$certifiedByStore[$id]??[]))
+        foreach($cashOnly ? [] : $ids as $id)if(!array_key_exists('bottom_cents',$certifiedByStore[$id]??[]))
             $certifiedByStore[$id]['bottom_cents']=$bottom['by_store'][$id]??null;
-        foreach($ids as $id)if(!array_key_exists('goal_cents',$certifiedByStore[$id]??[]))
+        foreach($cashOnly ? [] : $ids as $id)if(!array_key_exists('goal_cents',$certifiedByStore[$id]??[]))
             $certifiedByStore[$id]['goal_cents']=$legacyGoal['by_store'][$id];
         foreach($ids as $id) if(!array_key_exists('month_cash_cents',$certifiedByStore[$id]??[])
             &&($original['by_store'][$id]['complete']??false))
             $certifiedByStore[$id]['month_cash_cents']=$original['by_store'][$id]['amount_cents'];
         foreach ($ids as $id) $certifiedByStore[$id]['sharing_cents'] = $partner['by_store'][$id];
-        $coverage = $coverageReader ? $coverageReader($ids, $start, $end) : $this->paymentCoverage($ids, $start, $end);
-        $coverage = $this->coverage($coverage, $ids, 'payment_fact_rows');
+        $coverage = $cashOnly ? [] : ($coverageReader ? $coverageReader($ids, $start, $end) : $this->paymentCoverage($ids, $start, $end));
+        if (!$cashOnly) $coverage = $this->coverage($coverage, $ids, 'payment_fact_rows');
 
         $labels = Sidebar007ParityPlanServices::layout('sales_pk')['columns'];
+        $labelsByKey = array_combine(self::PK_KEYS, $labels);
         $fields = [];
-        foreach (self::PK_KEYS as $i => $key) $fields[] = [
-            'key' => $key, 'label' => $labels[$i],
-            'unit' => $i === 0 ? 'text' : ($i === 7 ? 'percent_integer' : 'money_cents'),
-            'manual' => $i === 1,
+        foreach ($selectedKeys as $key) $fields[] = [
+            'key' => $key, 'label' => $labelsByKey[$key],
+            'unit' => $key === 'store_name' ? 'text' : ($key === 'completion_percent' ? 'percent_integer' : 'money_cents'),
+            'manual' => $key === 'goal_cents',
         ];
         $rows = []; $gaps = [];
         foreach ($columns as $store) {
@@ -105,11 +116,12 @@ final class Sidebar007PkEfficiencyV3ReadServices
             // 默认 bcscale=0；完成率按整倍数截断后乘100，而非普通百分比。
             $rate = $goal === null || $actual === null ? null
                 : ($goal === 0 ? 0 : intdiv($actual,$goal)*100);
-            $cells = [$store['label'], $goal, $bottom, $cash, $share, $actual, $growth, $rate];
+            $cells = array_combine(self::PK_KEYS, [$store['label'], $goal, $bottom, $cash, $share, $actual, $growth, $rate]);
             $row = ['row_id' => 'sales_pk:' . $month . ':' . $id, 'store_id' => $id, 'cells' => []];
-            foreach (self::PK_KEYS as $i => $key) {
-                $row['cells'][$key] = $cells[$i];
-                if ($i > 0 && $cells[$i] === null) $gaps[] = ['store_id' => $id, 'metric' => $labels[$i],
+            foreach ($selectedKeys as $key) {
+                $i = array_search($key, self::PK_KEYS, true);
+                $row['cells'][$key] = $cells[$key];
+                if ($i > 0 && $cells[$key] === null) $gaps[] = ['store_id' => $id, 'metric' => $labelsByKey[$key],
                     'reason' => $i === 1 ? '旧手录目标存在重复或金额无效，不能任取一条；新编辑尚待版本化迁移'
                         : ($i === 4 ? '人员类型快照缺失，合作方实际分配业绩不能核实'
                             : ($i === 7 ? '目标或实际分成缺少已认证基础值，完成率不能计算'

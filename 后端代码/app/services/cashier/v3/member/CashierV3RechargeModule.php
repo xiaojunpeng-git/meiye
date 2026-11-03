@@ -35,7 +35,7 @@ final class CashierV3RechargeModule
     // Recharge creates spendable principal only from real collected money;
     // non-cash checkout settlement must never mint member balance.
     private const PAYMENT_METHODS = [
-        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
+        'cash', 'unionpay', 'enterprise_wechat', 'wechat', 'alipay', 'dianping_voucher',
         'douyin_voucher', 'bank_transfer', 'other_income', 'third_party', 'partner_collection',
     ];
 

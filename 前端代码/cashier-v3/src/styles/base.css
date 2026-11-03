@@ -1450,6 +1450,20 @@ html.group-dashboard-document #app {
   color: #d48806 !important;
 }
 
+/* 异常商品保留可读原因；不能以零价格或裁掉的库存提示冒充正常商品。 */
+.product-card--unavailable:disabled .product-card__name {
+  color: #4a5568;
+}
+
+.product-card__unavailable-reason {
+  display: block;
+  margin-top: 4px;
+  color: #9c4221;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
 .catalog-empty-state,
 .cart-empty-state {
   display: grid;
@@ -5523,12 +5537,18 @@ html.group-dashboard-document #app {
   gap: 5px;
 }
 
+/* 仅放大卡片内的卡类型标记；表格模式继续使用原字号。 */
+.cashier-entitlement-card .cashier-entitlement-table__type-tag,
+.cashier-entitlement-card .cashier-entitlement-table__custom-tag {
+  font-size: 15px;
+}
+
 .cashier-entitlement-card__name > strong,
 .cashier-entitlement-card__project-name > strong {
   overflow: hidden;
   min-width: 0;
   color: #1f2329;
-  font-size: 12px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5536,7 +5556,7 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__identity > small {
   overflow: hidden;
   color: #7b8797;
-  font-size: 10px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5552,13 +5572,13 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__metrics span,
 .cashier-entitlement-card__project-metrics span {
   color: #65758a;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 500;
 }
 
 .cashier-entitlement-card__expiry > strong {
   color: #34465a;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .cashier-entitlement-card__metrics {
@@ -5577,18 +5597,27 @@ html.group-dashboard-document #app {
   gap: 3px;
 }
 
+/* 卡摘要与项目明细的名称和值都紧邻成组，避免等宽列把“余次”和数值推到两端。 */
+.cashier-entitlement-card__metrics > div,
+.cashier-entitlement-card__project-metrics > div {
+  justify-content: flex-start;
+  gap: 5px;
+}
+
 .cashier-entitlement-card__metrics strong,
 .cashier-entitlement-card__project-metrics strong {
   overflow: hidden;
   color: #25364a;
-  font-size: 11px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cashier-entitlement-card__project {
-  padding: 7px 10px 8px 15px;
+  position: relative;
+  /* 与卡摘要共用左右内边距，剩余余额落在同一列起点。 */
+  padding: 7px 10px 8px;
   border-top: 1px solid #e2eaf3;
   background: #fff;
 }
@@ -5601,10 +5630,10 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__project-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
   margin-bottom: 5px;
+  padding-right: 64px;
 }
 
 .cashier-entitlement-card__project-name {
@@ -5617,15 +5646,20 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__project-name > span {
   flex: none;
   color: #1677cc;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .cashier-entitlement-card__project-top .cashier-entitlement-table__add {
-  flex: none;
-  height: 24px;
-  min-width: 42px;
-  font-size: 11px;
+  /* 固定在项目块右侧，用上下 auto margin 居中且不干扰添加动效。 */
+  position: absolute;
+  top: 0;
+  right: 10px;
+  bottom: 0;
+  height: 32px;
+  min-width: 54px;
+  margin: auto 0;
+  font-size: 16px;
 }
 
 .cashier-entitlement-card__project-top .cashier-entitlement-table__add:not(:disabled) {
@@ -5642,14 +5676,24 @@ html.group-dashboard-document #app {
 .cashier-entitlement-card__project-reason {
   display: block;
   margin-bottom: 5px;
+  padding-right: 64px;
   color: #8c5a2b;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .cashier-entitlement-card__project-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px 14px;
+  /* 与卡摘要使用同宽三列；项目的四项仍占前两列、分两行显示。 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px 8px;
+}
+
+.cashier-entitlement-card__project-metrics > div:nth-child(3) {
+  grid-column: 1;
+}
+
+.cashier-entitlement-card__project-metrics > div:nth-child(4) {
+  grid-column: 2;
 }
 
 .cashier-entitlement-card__project.is-added {

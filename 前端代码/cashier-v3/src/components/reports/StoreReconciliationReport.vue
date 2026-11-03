@@ -1,6 +1,7 @@
 <script setup>
 import { saveReportWorkbook } from '@/services/reportWorkbookDownload'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { UnifiedReportQueryToolbar, UnifiedQueryDateRange, cloneUnifiedQuerySnapshot, formatReportMoney } from '@mohe/unified-query-vue3'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
@@ -11,9 +12,12 @@ const props = defineProps({ platform: Boolean })
 const emit = defineEmits(['modal-change'])
 const code = 'basic_store_reconciliation'
 const state = useCashierV3State()
+const route = useRoute()
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-const dates = ref({ start_date: today.slice(0, 7) + '-01', end_date: today })
-const month = ref(today.slice(0, 7))
+// 对账默认核对上一个完整营业日；按上海日历日计算，避免客户端时区及月初跨月造成偏差。
+const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+const dates = ref({ start_date: yesterday, end_date: yesterday })
+const month = ref(yesterday.slice(0, 7))
 const storeIds = ref([])
 const storeScope = ref({ tree: [], allowed_store_ids: [] })
 const label = ref('全部门店')
@@ -96,6 +100,42 @@ async function openDetail(row, field, page = 1) {
   } catch (e) { if (ticket === detailRequest && e.name !== 'AbortError') detailError.value = e.message }
   finally { if (ticket === detailRequest) detailLoading.value = false }
 }
+/** 跳转携带后端声明的日期/渠道/门店条件，订单中心重新核实来源身份；刷单仍查看登记明细。 */
+async function openCell(row, field) {
+  if (!props.platform || String(row.method_code).startsWith('brush_')) { await openDetail(row, field); return }
+  if (!executed.value || loading.value) return
+  const snapshot = cloneUnifiedQuerySnapshot(executed.value)
+  const selection = { method_code: row.method_code, column_key: field.drilldown.column_key }
+  detailLoading.value = true
+  error.value = ''
+  try {
+    const result = await loadBasicReport(true, {
+      ...snapshot.query, detail: selection, detail_page: 1, expected_fingerprint: snapshot.fingerprint
+    }, snapshot.storeIds)
+    const documentNos = result.navigation_document_nos || []
+    if (result.navigation_error) throw new Error(result.navigation_error)
+    // 请求中的单元格条件与响应中的完整导航条件分开命名，避免块级遮蔽在请求前触发暂时性死区。
+    const navigationSelection = result.navigation_selection
+    if (!navigationSelection || !Number.isInteger(navigationSelection.storeId) || !navigationSelection.methodCode || !navigationSelection.from || !navigationSelection.to) throw new Error('对账定位条件缺失，请刷新后重试。')
+    if (!Array.isArray(documentNos) || documentNos.some(no => typeof no !== 'string')) throw new Error('对账原单身份无效，请刷新后重试。')
+    if (!documentNos.length) throw new Error('这格没有可定位的订单，请刷新对账单后重试。')
+    if (documentNos.length > 100) throw new Error('本格涉及超过 100 张订单，请缩小对账日期范围后再跳转。')
+    const token = crypto.randomUUID()
+    const returnState = {
+      query: snapshot.query, storeIds: snapshot.storeIds, label: label.value,
+      dates: { ...dates.value }, month: month.value,
+      scrollTop: resultsScroll.value?.scrollTop || 0, scrollLeft: resultsScroll.value?.scrollLeft || 0
+    }
+    sessionStorage.setItem(`reconciliation-navigation:${token}`, JSON.stringify({
+      returnState, documentNos, selection: navigationSelection,
+      storeId: Number(result.detail_context?.store_id || 0), storeLabel: result.detail_context?.store_name || '',
+      paymentName: row.payment_name
+    }))
+    const parentOrigin = document.referrer ? new URL(document.referrer).origin : window.location.origin
+    window.parent.postMessage({ type: 'mohe:reconciliation-open-orders', token }, parentOrigin)
+  } catch (e) { error.value = e.message || '对账订单定位失败，请重试。' }
+  finally { detailLoading.value = false }
+}
 function closeDetail() {
   detailRequest++; detailController?.abort(); detail.value = null; detailLoading.value = false
   void nextTick(() => returnFocus?.focus())
@@ -121,7 +161,9 @@ function style(field, columns) {
     position: 'sticky', left: columns.slice(0, columns.indexOf(field)).filter(item => item.fixed === 'left').reduce((sum, item) => sum + item.width, 0) + 'px'
   } : {}) }
 }
-function value(row, field) { return field.money ? formatReportMoney(row[field.key]) : (row[field.key] ?? '-') }
+/** 对账页面仅去掉币符，整数舍入仍复用统一报表格式化；计算、筛选及XLSX保留原值。 */
+function money(value) { return formatReportMoney(value).replace(/^¥/, '') }
+function value(row, field) { return field.money ? money(row[field.key]) : (row[field.key] ?? '-') }
 function trap(event) {
   if (event.key !== 'Tab') return
   const buttons = [...event.currentTarget.querySelectorAll('button:not(:disabled)')]
@@ -131,7 +173,21 @@ function trap(event) {
 onMounted(async () => {
   try {
     if (props.platform) storeScope.value = await loadBasicReportScope(code)
-    await run()
+    const token = typeof route.query.reconciliation_return === 'string' ? route.query.reconciliation_return : ''
+    let saved = null
+    if (/^[0-9a-f-]{36}$/i.test(token)) {
+      try { saved = JSON.parse(sessionStorage.getItem(`reconciliation-navigation:${token}`) || 'null')?.returnState }
+      catch (_) { saved = null }
+    }
+    if (saved?.query && Array.isArray(saved.storeIds)) {
+      dates.value = saved.dates || dates.value
+      month.value = saved.month || month.value
+      storeIds.value = saved.storeIds
+      label.value = saved.label || label.value
+      await run(saved.query, saved.storeIds)
+      await nextTick()
+      if (resultsScroll.value) resultsScroll.value.scrollTo({ top: saved.scrollTop || 0, left: saved.scrollLeft || 0 })
+    } else await run()
   } catch (e) { error.value = e.message }
 })
 // 模态框在body中展示，宿主及表格同时停止键盘交互；关闭时恢复原按钮焦点。
@@ -161,7 +217,7 @@ onBeforeUnmount(() => { request++; detailRequest++; controller?.abort(); detailC
     <section class="store-reconciliation__results" :aria-busy="loading">
       <div ref="resultsScroll" class="store-reconciliation__scroll">
         <table><thead><tr><th v-for="field in fields" :key="field.key" :style="style(field, fields)" :class="{ fixed: field.fixed === 'left' }">{{ field.label }}</th></tr></thead>
-          <tbody><tr v-for="row in data.rows" :key="row.row_id"><td v-for="field in fields" :key="field.key" :style="style(field, fields)" :class="{ fixed: field.fixed === 'left', money: field.money }"><button v-if="field.drilldown" type="button" class="store-reconciliation__cell" :disabled="loading" :aria-label="row.payment_name + '，' + field.label + '，查看明细'" @click="openDetail(row, field)">{{ value(row, field) }}</button><template v-else>{{ value(row, field) }}</template></td></tr></tbody>
+          <tbody><tr v-for="row in data.rows" :key="row.row_id"><td v-for="field in fields" :key="field.key" :style="style(field, fields)" :class="{ fixed: field.fixed === 'left', money: field.money }"><button v-if="field.drilldown" type="button" class="store-reconciliation__cell" :disabled="loading || detailLoading" :aria-label="row.payment_name + '，' + field.label + (platform && !String(row.method_code).startsWith('brush_') ? '，查看对应订单' : '，查看明细')" @click="openCell(row, field)">{{ value(row, field) }}</button><template v-else>{{ value(row, field) }}</template></td></tr></tbody>
         </table>
         <p v-if="!data.rows.length" class="store-reconciliation__empty">{{ loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
       </div>
@@ -173,7 +229,7 @@ onBeforeUnmount(() => { request++; detailRequest++; controller?.abort(); detailC
       <section class="store-reconciliation__dialog" role="dialog" aria-modal="true" aria-labelledby="reconciliation-detail-title">
         <header><h2 id="reconciliation-detail-title">{{ detail.detail_context?.payment_name || detail.row.payment_name }} · {{ detail.detail_context?.column_label || detail.field.label }}</h2><button type="button" class="button button--secondary" @click="closeDetail">关闭</button></header>
         <p v-if="detailError" class="store-reconciliation__error" role="alert">{{ detailError }}</p>
-        <div class="store-reconciliation__detail-actions"><span v-if="detail.detail_context">{{ detail.detail_context.start_date }} 至 {{ detail.detail_context.end_date }}　合计：{{ formatReportMoney(detail.summaries['amount:sum']) }}</span><button type="button" class="button button--secondary" :disabled="detailLoading || detailExporting || !detail.queryFields.length" @click="exportData(true)">导出明细</button></div>
+        <div class="store-reconciliation__detail-actions"><span v-if="detail.detail_context">{{ detail.detail_context.start_date }} 至 {{ detail.detail_context.end_date }}　合计：{{ money(detail.summaries['amount:sum']) }}</span><button type="button" class="button button--secondary" :disabled="detailLoading || detailExporting || !detail.queryFields.length" @click="exportData(true)">导出明细</button></div>
         <div ref="detailsScroll" class="store-reconciliation__scroll"><table><thead><tr><th v-for="field in detail.queryFields" :key="field.key">{{ field.label }}</th></tr></thead><tbody><tr v-for="row in detail.rows" :key="row.row_id"><td v-for="field in detail.queryFields" :key="field.key" :class="{ money: field.money }">{{ value(row, field) }}</td></tr></tbody></table><p v-if="!detail.rows.length" class="store-reconciliation__empty">{{ detailLoading ? '正在查询…' : detailError ? '查询未完成' : '暂无符合条件的记录' }}</p></div>
         <TablePagination :total="detail.pagination.total" :page="detail.pagination.page" :page-size="20" :page-size-options="[20]" show-page-count @change="openDetail(detail.row, detail.field, $event.page)" />
       </section>
@@ -195,7 +251,7 @@ th,td{padding:12px;border-bottom:1px solid #e7edf4;text-align:left;background:#f
 th{position:sticky;top:0;z-index:3;background:#edf3fa;color:#526981;font-weight:600}
 .fixed{z-index:2;background:#f8faff}th.fixed{z-index:4;background:#edf3fa}
 .money{color:#1f5f8b;font-variant-numeric:tabular-nums}
-.store-reconciliation__cell{font:inherit;color:#1675c9;background:transparent;border:0;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px}
+.store-reconciliation__cell{font:inherit;color:#1675c9;background:transparent;border:0;cursor:pointer;padding:0;text-decoration:none}
 .store-reconciliation__cell:focus-visible{outline:2px solid #1675c9;outline-offset:4px}
 .store-reconciliation__empty{padding:48px 16px;text-align:center;color:#789}
 .store-reconciliation__error{color:#bd3030;margin:0;line-height:1.6}

@@ -20,8 +20,8 @@ final class Sidebar007ReportServices
         'basic_sales_data' => 'sales_data', 'basic_sales_pk' => 'sales_pk',
         'basic_sales_analysis' => 'sales_analysis', 'basic_store_efficiency' => 'store_efficiency',
     ];
-    private const PK_KEYS = ['store_name','goal_cents','bottom_cents','month_cash_cents',
-        'sharing_cents','actual_cents','growth_cents','completion_percent'];
+    /** PK 仅展示能直接解释本月收款与合作方分成的四列；移除的目标指标不再进入查询或导出。 */
+    private const PK_KEYS = ['store_name','month_cash_cents','sharing_cents','actual_cents'];
     private $source;
     private $storeReader;
 
@@ -38,9 +38,11 @@ final class Sidebar007ReportServices
         if ($code !== 'basic_sales_pk') return [self::field('metric','项目','text',true)];
         $labels = Sidebar007ParityPlanServices::layout('sales_pk')['columns'];
         $fields = [];
+        $allKeys = Sidebar007PkEfficiencyV3ReadServices::pkKeys();
+        $names = array_combine($allKeys, $labels);
         foreach (self::PK_KEYS as $i => $key) {
-            $fields[] = self::field($key, $labels[$i], $i === 0 ? 'text' : 'decimal', $i === 0,
-                $i > 0 && $i < 7 ? 'money_yuan' : ($i === 7 ? 'percent_integer' : 'text'));
+            $fields[] = self::field($key, $names[$key], $i === 0 ? 'text' : 'decimal', $i === 0,
+                $i === 0 ? 'text' : 'money_yuan');
         }
         return $fields;
     }
@@ -79,7 +81,8 @@ final class Sidebar007ReportServices
             if (!$stores) $source = ['rows'=>[], 'columns'=>[], 'gaps'=>[], 'complete'=>true];
             elseif ($this->source) $source = ($this->source)($report,$allowed,$stores,$range,$context);
             elseif ($report === 'sales_pk') $source = (new Sidebar007PkEfficiencyV3ReadServices())->readPk(
-                $allowed,$stores,substr($range['start_date'],0,7),[],null,null,null,null,null,null,(string)$context['query_cutoff_date']);
+                $allowed,$stores,substr($range['start_date'],0,7),[],null,null,null,null,null,null,
+                (string)$context['query_cutoff_date'],null,self::PK_KEYS);
             elseif ($report === 'store_efficiency') $source = (new Sidebar007PkEfficiencyV3ReadServices())->readEfficiency(
                 $allowed,$stores,$range['start_date'],$range['end_date']);
             else $source = (new Sidebar007SalesV3ReadServices())->read($report,$allowed,$stores,$range['start_date'],$range['end_date']);
@@ -107,7 +110,7 @@ final class Sidebar007ReportServices
             if ($pk && !in_array((int)($item['store_id']??0),$storeIds,true)) throw new \LogicException('报表行超出授权范围');
             $cells=$item['cells']??[];
             $expected=$pk?$keys:array_slice($keys,1);
-            if (array_diff(array_keys($cells),$expected)||array_diff($expected,array_keys($cells)))
+            if ((!$pk && array_diff(array_keys($cells),$expected))||array_diff($expected,array_keys($cells)))
                 throw new \LogicException('报表单元格不属于已登记列');
             $row=['row_id'=>$id,'sort_order'=>$index];
             if (!$pk) {
@@ -116,8 +119,9 @@ final class Sidebar007ReportServices
                 if (!in_array($row['value_unit'],['money_cents','count','percent_integer','ratio'],true))
                     throw new \LogicException('指标单位未登记');
             }
-            foreach ($cells as $key=>$value) {
-                $money=$pk?in_array($key,array_slice(self::PK_KEYS,1,6),true):$row['value_unit']==='money_cents';
+            foreach ($expected as $key) {
+                $value=$cells[$key];
+                $money=$pk?$key!=='store_name':$row['value_unit']==='money_cents';
                 if ($key !== 'store_name' && $value !== null && !is_int($value) && !is_float($value))
                     throw new \LogicException('报表指标值格式异常');
                 if ($money && $value !== null && !is_int($value)) throw new \LogicException('金额必须为分整数');
@@ -182,12 +186,10 @@ final class Sidebar007ReportServices
     /** 页面说明仅使用业务语言；源表名、迁移诊断与内部字段不作为用户帮助内容。 */
     private function guides(string $code,array $fields): array
     {
-        $pk=['store_name'=>'当前查询权限内启用统计的门店。','goal_cents'=>'该门店所选月份保存的业绩目标。',
-            'bottom_cents'=>'前六个月的现金业绩减合作方分配业绩，加已确认历史调整后计算月平均。',
+        $pk=['store_name'=>'当前查询权限内启用统计的门店。',
             'month_cash_cents'=>'所选业务月内有效原销售和原充值的现金收款，不重复计入欠款后补收款。',
             'sharing_cents'=>'业务发生时人员类型为合作方的销售人实际分配业绩。',
-            'actual_cents'=>'本月业绩减业绩分成款。','growth_cents'=>'本月实际分成减本月底标。',
-            'completion_percent'=>'本月实际分成占本月目标的比例；目标为零时显示0%。'];
+            'actual_cents'=>'本月业绩减业绩分成款。'];
         $out=[];
         foreach ($fields as $field) $out[$field['key']]=$code==='basic_sales_pk'?$pk[$field['key']]
             :($field['key']==='metric'?'各行分别表示金额、客数或使用率，单位随指标显示。':'该门店在所选业务日期内、符合本行统计条件的有效业务；缺少计算依据时显示“-”。');

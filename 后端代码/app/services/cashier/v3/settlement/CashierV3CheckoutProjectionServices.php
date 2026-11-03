@@ -19,6 +19,7 @@ final class CashierV3CheckoutProjectionServices
     private const PAYMENT_NAMES = [
         'cash' => '现金',
         'unionpay' => '银联',
+        'enterprise_wechat' => '企微收款',
         'wechat' => '微信',
         'alipay' => '支付宝',
         'dianping_voucher' => '大众验券',

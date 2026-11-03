@@ -872,6 +872,8 @@ class UnifiedQueryExportTaskServices
             }
         }
         $validationContext = $context;
+        // 冻结任务必须重建同一个对账来源范围，不能丢失后退化为全部订单导出。
+        if (array_key_exists('reconciliation_drilldown', $domainScope)) $query['reconciliationDrilldown'] = $domainScope['reconciliation_drilldown'];
         $validationContext['query_cutoff_date'] = (string)($plan['query_cutoff_date'] ?? '');
         $rebuilt = $this->execution->validatedPlan(
             $pageCode,

@@ -465,6 +465,16 @@ const FIELD_ALIASES = {
 const state = useCashierV3State()
 const router = useRouter()
 const route = useRoute()
+/** 对账跳转令牌只从同一 Vue3 来源的会话存储读取，URL 不携带原单号或金额。 */
+const reconciliationToken = typeof route.query.reconciliation_token === 'string' && /^[0-9a-f-]{36}$/i.test(route.query.reconciliation_token)
+  ? route.query.reconciliation_token : ''
+let reconciliationNavigation = null
+if (reconciliationToken) {
+  try { reconciliationNavigation = JSON.parse(sessionStorage.getItem(`reconciliation-navigation:${reconciliationToken}`) || 'null') }
+  catch (_) { reconciliationNavigation = null }
+}
+// 旧令牌只有单号，无法区分同号载体；必须重新从对账单生成完整来源条件。
+const reconciliationSelection = reconciliationNavigation?.selection || null
 // 平台只增加组织/门店范围上下文；页面、字段、页签和动作仍走同一份权限投影。
 const isPlatformContext = computed(() => route.meta.platformOrderContext === true)
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
@@ -577,8 +587,8 @@ const salesReportReturnLocation = computed(() => {
     query: { start_date: drill.from, end_date: drill.to }
   }
 })
-const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: '当前权限范围' })
-const platformScopeStoreIds = ref([])
+const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: reconciliationNavigation?.storeLabel || '当前权限范围' })
+const platformScopeStoreIds = ref(reconciliationNavigation?.storeId > 0 ? [reconciliationNavigation.storeId] : [])
 const orderCenter = computed(() => state.orderCenter || {})
 const requestedPlatformTab = String(route.query.tab || route.query.recordType || '').trim()
 const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : 'all')
@@ -2742,24 +2752,29 @@ function orderPaymentDetails(record) {
 }
 
 function canCorrectSalesPaymentMethod(record, payment) {
-  return recordType(record) === 'sales' && !record?.entitlementOnly
+  // Recharge and repayments use the same editor and command; only the server
+  // can expose a stable collection identity and confirm its business state.
+  const type = recordType(record)
+  return ['sales', 'recharge', 'supplement'].includes(type) && !record?.entitlementOnly
     && payment?.id && canUseCashierV3Feature('cashier.v3.order_center')
-    && salesOrderActionAvailable(record, 'correct-sales-payment-method')
+    && (type === 'sales' ? salesOrderActionAvailable(record, 'correct-sales-payment-method') : record.paymentMethodEditable === true && Number(payment.amount) > 0)
     && !['other_collection', 'old_card_entry', 'member_balance'].includes(String(payment.paymentMethodCode || ''))
 }
 
 async function openSalesPaymentMethodEditor(record, payment) {
   if (!canCorrectSalesPaymentMethod(record, payment)) return
-  const orderId = salesOrderLifecycleId(record)
+  const type = recordType(record)
+  const orderId = type === 'sales' ? salesOrderLifecycleId(record) : String(record.id || '')
   if (!orderId) return
-  paymentMethodEditor.value = { orderId, collectionId: String(payment.id), orderNo: String(record.orderNo || record.order_no || '') }
+  const identity = type === 'sales' ? { orderId } : { recordId: orderId, recordType: type }
+  paymentMethodEditor.value = { orderId, identity, collectionId: String(payment.id), orderNo: String(record.orderNo || record.rechargeOrderNo || record.supplementOrderNo || record.order_no || '') }
   paymentMethodEntry.value = null
   paymentMethodSelection.value = String(payment.paymentMethodCode || '')
   paymentMethodReason.value = ''
   paymentMethodError.value = ''
   paymentMethodLoading.value = true
   try {
-    const result = await requestAction('open-sales-payment-method-correction', { orderId, collectionId: String(payment.id) })
+    const result = await requestAction('open-sales-payment-method-correction', { ...identity, collectionId: String(payment.id) })
     const entry = actionData(result).paymentMethodCorrection
     if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
       paymentMethodError.value = result?.result?.message || result?.data?.result?.message || '记账收款读取失败，请刷新后重试。'
@@ -2827,7 +2842,7 @@ async function submitSalesPaymentMethod() {
   paymentMethodError.value = ''
   try {
     const result = await requestAction('correct-sales-payment-method', {
-      orderId: editor.orderId, collectionId: editor.collectionId,
+      ...editor.identity, collectionId: editor.collectionId,
       expectedMethod: current.paymentMethodCode, paymentMethod: next, reason, idempotencyKey
     })
     const status = actionStatus(result)
@@ -2879,6 +2894,12 @@ function businessDateRangeFromQuery(query = {}) {
 }
 
 function normalizeOrderCenterDateQuery(query = {}) {
+  // 对账主周期是来源收款日期，不能被通用适配器再复制成订单业务日期。
+  if (query.reconciliationDrilldown) {
+    const result = { ...query }
+    for (const key of ['dateFrom','dateTo','businessDateFrom','businessDateTo']) delete result[key]
+    return result
+  }
   const { from, to } = businessDateRangeFromQuery(query)
   return {
     ...query,
@@ -2944,6 +2965,13 @@ function reportSalesDateQuery() {
 }
 
 function initialOrderCenterQuery() {
+  // 对账来源条件由后端重新定位到稳定记录ID；不按相同单号把历史载体也带出来。
+  if (isPlatformContext.value && activeTabKey.value === 'all' && reconciliationToken) {
+    return { dataScope: 'normal', businessStatus: '', filterRelation: 'all',
+      ...(reconciliationSelection ? { reconciliationDrilldown: { ...reconciliationSelection } }
+        : { filters: [{ field: 'order_no', operator: 'eq', value: '__INVALID_RECONCILIATION_NAVIGATION__' }] }),
+      topFilters: [], page: 1, pageSize: 20 }
+  }
   // 首屏复用本地规则，但不恢复过去的日期或人员输入；默认业务日仍是当天。
   // 首屏与工具栏共用配置归一化，空配置/旧 and 不能绕过 all/any 契约；不修改本地偏好或业务命令。
   const settings = normalizeUnifiedQuerySettings(querySettings.value)
@@ -2953,6 +2981,12 @@ function initialOrderCenterQuery() {
     sorts: settings.sorts || [], visibleFields: settings.visibleFields || [],
     groupBy: settings.groupBy || [], summaries: settings.summaries || []
   }
+}
+
+function returnToReconciliation() {
+  if (!reconciliationToken) return
+  const parentOrigin = document.referrer ? new URL(document.referrer).origin : window.location.origin
+  window.parent.postMessage({ type: 'mohe:reconciliation-return', token: reconciliationToken }, parentOrigin)
 }
 
 function leaveServiceReportDrilldown() {
@@ -4131,6 +4165,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="order-center-page" aria-label="订单中心">
+    <p v-if="isPlatformContext && reconciliationToken" class="order-center-notice" role="status">
+      {{ reconciliationSelection ? '正在查看对账单对应订单；查询周期沿用对账下单时间，订单业务日期可能不同，金额及原日期保持不变。' : '对账定位已失效，请返回门店对账单重新点击金额。' }}
+      <button type="button" class="button button--text" @click="returnToReconciliation">返回门店对账单</button>
+    </p>
     <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
     <p v-if="servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
     <p v-if="activeTabKey === 'refund' && refundAttributionError && !refundAttributionEditorOpen && !refundAttributionPending" class="order-center-page__inline-error" role="alert">{{ refundAttributionError }}</p>
@@ -4315,7 +4353,15 @@ onBeforeUnmount(() => {
             <!-- Keep the non-sales placeholders aligned with the same debt switch used by headers and sales lines. -->
             <td>—</td><td v-if="debtPaymentEnabled">—</td><td>—</td>
             <td>{{ recordType(record) === 'recharge' ? displayMoneyField(record, 'actual_received_amount') : '—' }}</td>
-            <td>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</td>
+            <td>
+              <template v-if="['recharge', 'supplement'].includes(recordType(record)) && orderPaymentDetails(record).length">
+                <div v-for="payment in orderPaymentDetails(record)" :key="payment.id">
+                  <button v-if="canCorrectSalesPaymentMethod(record, payment)" type="button" class="order-link" title="更正收款方式" @click="openSalesPaymentMethodEditor(record, payment)">{{ payment.methodName }} {{ itemMoney(payment.amount) }}</button>
+                  <span v-else>{{ payment.methodName }} {{ itemMoney(payment.amount) }}</span>
+                </div>
+              </template>
+              <template v-else>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</template>
+            </td>
             <td>{{ displayRecordField(record, 'store') }}</td>
             <!-- 汇总行与消费明细共用状态样式映射，只统一标签外观，不修改后端状态。 -->
             <td><span class="order-status" :class="statusClass(recordFieldValue(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status'))">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status') }}</span></td>
@@ -4418,6 +4464,12 @@ onBeforeUnmount(() => {
               >
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
+              <div v-else-if="fieldItem.key === 'payment_method' && ['recharge', 'supplement'].includes(recordType(record)) && orderPaymentDetails(record).length">
+                <div v-for="payment in orderPaymentDetails(record)" :key="payment.id">
+                  <button v-if="canCorrectSalesPaymentMethod(record, payment)" type="button" class="order-link" title="更正收款方式" @click="openSalesPaymentMethodEditor(record, payment)">{{ payment.methodName }} {{ itemMoney(payment.amount) }}</button>
+                  <span v-else>{{ payment.methodName }} {{ itemMoney(payment.amount) }}</span>
+                </div>
+              </div>
               <button
                 v-else-if="fieldItem.key === 'salesperson' && ['recharge', 'supplement', 'refund'].includes(activeTabKey) && (activeTabKey !== 'refund' || editableRefundPersonnelSourceTypes.has(record.refundSourceType)) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
