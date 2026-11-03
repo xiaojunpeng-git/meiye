@@ -23,6 +23,27 @@ class EmployeePersonCompleteWriteServices extends BaseServices
     /** 学历只接受产品确认的六档；空串表示尚未填写，不自动推断。 */
     public const EDUCATION_LEVELS = ['本科以上', '本科', '大专', '高中', '高中以下', '其他'];
 
+    /** 身份证中的公历出生日期只在证件校验通过时用于生日和年龄，防止错误号码污染员工档案。 */
+    private function birthFromCard(string $card): string
+    {
+        $card = strtoupper(trim($card));
+        if (!preg_match('/^\d{17}[\dX]$/', $card) || !check_card($card)) return '';
+        $birth = substr($card, 6, 4) . '-' . substr($card, 10, 2) . '-' . substr($card, 12, 2);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $birth);
+        return $date && $date->format('Y-m-d') === $birth ? $birth : '';
+    }
+
+    /** 年龄和在司工龄均从日期实时投影，不保存会随时间过期的数字。 */
+    private function profileDateMetrics($birthday, $joinDate): array
+    {
+        $today = new \DateTimeImmutable('today');
+        $birth = $birthday ? \DateTimeImmutable::createFromFormat('!Y-m-d', (string)$birthday) : false;
+        $join = $joinDate ? \DateTimeImmutable::createFromFormat('!Y-m-d', (string)$joinDate) : false;
+        $age = $birth && $birth <= $today ? $birth->diff($today)->y : null;
+        $tenure = $join && $join <= $today ? $join->diff($today) : null;
+        return ['age' => $age, 'tenure_text' => $tenure ? $tenure->y . '年' . $tenure->m . '个月' : ''];
+    }
+
     /**
      * @return array{msg:string,data:array,replay:bool}
      */
@@ -464,7 +485,17 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             ] as $field) {
                 $result[$field] = $staff[$field] ?? null;
             }
+        } else {
+            // 无店直属没有 staff 行，个人证件和入职资料从唯一员工主档回显。
+            foreach (['id_card', 'join_date', 'birthday_date'] as $field) {
+                $result[$field] = $emp[$field] ?? null;
+            }
+            $result['birthday_type'] = 2;
         }
+        $metrics = $this->profileDateMetrics($result['birthday_date'] ?? null, $result['join_date'] ?? null);
+        // 历史任职可能只存了年龄而尚无生日；暂保留旧回显，生日补齐后改用实时年龄。
+        $result['age'] = $metrics['age'] ?? ($staff ? (int)($staff['age'] ?? 0) : null);
+        $result['tenure_text'] = $metrics['tenure_text'];
         if ($source === 'hq' && $includeEmploymentType) {
             /** @var EmployeeTypeAuthorityServices $typeAuthority */
             $typeAuthority = app()->make(EmployeeTypeAuthorityServices::class);
@@ -510,6 +541,23 @@ class EmployeePersonCompleteWriteServices extends BaseServices
     ): array {
         /** @var EmployeeStaffWriteServices $staffWrite */
         $staffWrite = app()->make(EmployeeStaffWriteServices::class);
+        foreach (['join_date', 'birthday_date'] as $dateField) {
+            if (isset($input[$dateField]) && $input[$dateField] !== '') {
+                $input[$dateField] = str_replace('/', '-', trim((string)$input[$dateField]));
+            }
+        }
+        // 证件生日是公历权威值；年龄由生日计算，客户端提交的年龄不能覆盖它。
+        if (array_key_exists('id_card', $input) && trim((string)$input['id_card']) !== ''
+            && empty($input['birthday_date'])) {
+            $birth = $this->birthFromCard((string)$input['id_card']);
+            if ($birth !== '') {
+                $input['birthday_date'] = $birth;
+                $input['birthday_type'] = 2;
+            }
+        }
+        if (array_key_exists('birthday_date', $input)) {
+            $input['age'] = $this->profileDateMetrics($input['birthday_date'], null)['age'];
+        }
         $phone = $staffWrite->assertStrictPhone($phone);
         if ($staffName === '') {
             throw new AdminException('请填写员工姓名');
@@ -739,6 +787,38 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             }
         } elseif ($staffIdHint > 0 && !$clearCurrentStore) {
             throw new AdminException('无店直属不可绑定伪造门店任职');
+        }
+
+        if ($storeId === 0) {
+            // 直属员工没有门店任职；仅更新本次明确提交的资料，并记录可追溯差异。
+            $profile = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->lock(true)->find();
+            if (!$profile) throw new AdminException('员工不存在');
+            $changes = [];
+            foreach (['id_card', 'join_date', 'birthday_date'] as $field) {
+                if (!array_key_exists($field, $input)) continue;
+                $value = trim((string)($input[$field] ?? ''));
+                if ($field !== 'id_card' && $value !== '') {
+                    $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+                    if (!$date || $date->format('Y-m-d') !== $value) throw new AdminException('日期格式无效');
+                }
+                $value = $field === 'id_card' ? strtoupper($value) : ($value === '' ? null : $value);
+                if ((string)($profile[$field] ?? '') !== (string)$value) $changes[$field] = $value;
+            }
+            if ($changes) {
+                $before = [];
+                foreach ($changes as $field => $_) $before[$field] = $profile[$field] ?? null;
+                Db::name('employee')->where('id', $employeeId)->update($changes + ['update_time' => time()]);
+                Db::name('employee_change_log')->insert([
+                    'employee_id' => $employeeId, 'action' => 'employee_direct_profile_update',
+                    'target_type' => 'employee', 'target_id' => $employeeId, 'source' => 'admin',
+                    'before_data' => json_encode($before, JSON_UNESCAPED_UNICODE),
+                    'after_data' => json_encode($changes, JSON_UNESCAPED_UNICODE),
+                    'reason' => '更新直属员工个人资料', 'operator_type' => 'admin',
+                    'operator_id' => (int)($auditMeta['operator_id'] ?? 0),
+                    'operator_name' => (string)($auditMeta['operator_name'] ?? ''),
+                    'request_id' => (string)($auditMeta['request_id'] ?? ''), 'add_time' => time(),
+                ]);
+            }
         }
 
         $employmentTypeOut = null;
