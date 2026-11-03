@@ -93,7 +93,11 @@ class CombinationPromotionServices
     {
         // 先由订单日期/活动/授权归属缩小候选，再按订单索引查名额与退款；不能每30秒全表聚合历史名额。
         $group = Db::name('store_pink')->where('is_virtual', 0)->where('uid', '>', 0)
-            ->whereRaw('order_id_key=o.id')->field('MAX(IF(k_id>0,k_id,id))')->buildSql();
+            ->whereRaw('order_id_key=o.id')
+            // 旧成团流程把原拼团订单 type 改为 0；仅凭活动 ID 不足以辨认原单，
+            // 必须同时核对参团记录的活动、业务单号和会员，避免普通订单混入业绩。
+            ->whereRaw('(o.type=3 OR (o.type=0 AND cid=o.activity_id AND order_id=o.order_id AND uid=o.uid))')
+            ->field('MAX(IF(k_id>0,k_id,id))')->buildSql();
         $refunds = Db::name('store_order_terminal_operation')->where('business_type', 1)
             ->where('action_type', 1)->where('state', 4)->whereRaw('store_order_id=o.id')
             ->field('SUM(refund_amount)')->buildSql();
@@ -104,7 +108,7 @@ class CombinationPromotionServices
             ->join('store_pink g', 'g.id=' . $group)->leftJoin('combination_promotion_order a', 'a.order_id=o.id')
             ->leftJoin('store_combination c', 'c.id=o.activity_id')->leftJoin('user u', 'u.uid=o.uid')
             ->leftJoin('system_store purchase_store', 'purchase_store.id=o.store_id')
-            ->where('o.paid', 1)->where('o.type', 3)
+            ->where('o.paid', 1)->whereIn('o.type', [0, 3])
             ->field('o.id,o.order_id AS order_no,o.uid AS member_id,o.activity_id,g.id AS group_id,o.pay_time AS paid_at,'
                 . 'COALESCE(a.share_uid,0) AS promoter_id,IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,COALESCE(o.store_id,0)) AS store_id,'
                 // 有推广人时沿用创建订单时冻结的归属；无推广人时以原单购买门店归集门店业绩。

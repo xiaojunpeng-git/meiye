@@ -47,6 +47,21 @@ try {
     Db::name('store_pink')->where('id|k_id',$one['pinkId'])->update(['status'=>2]);
     $view=$service->dashboard($filters,$admin);
     check($view['metrics']['formed_amount']==='300.00' && $view['metrics']['pending_amount']==='0.00' && $view['metrics']['total_amount']==='300.00','completion transfers bucket without duplicating total');
+    // 旧成团会把订单 type 改成 0；同一查询供概览、明细和导出复用，不能漏单或重复。
+    Db::name('store_order')->where('id',$one['oid'])->update(['type'=>0]);
+    $view=$service->dashboard($filters,$admin);
+    $legacyDetails=$service->details($filters,$admin);
+    check($view['metrics']['formed_amount']==='300.00' && $view['metrics']['order_count']===3
+        && $legacyDetails['count']===3,
+        'legacy type-zero paid group appears once across dashboard and detail');
+    $originalOrderNo=(string)Db::name('store_pink')->where('id',$one['pinkId'])->value('order_id');
+    Db::name('store_pink')->where('id',$one['pinkId'])->update(['order_id'=>'unrelated-order']);
+    check($service->dashboard($filters,$admin)['metrics']['formed_amount']==='200.00',
+        'type-zero order requires matching participant identity and cannot leak ordinary sales');
+    Db::name('store_pink')->where('id',$one['pinkId'])->update(['order_id'=>$originalOrderNo]);
+    check($service->dashboard($filters,$admin)['metrics']['formed_amount']==='300.00',
+        'restored participant identity restores the original group total');
+    Db::name('store_order')->where('id',$one['oid'])->update(['type'=>3]);
     seed('store_order_terminal_operation',['store_order_id'=>$one['oid'],'business_type'=>1,'action_type'=>1,'state'=>2,'refund_amount'=>100,'operation_no'=>'R44-PENDING-'.$one['oid'],'request_token'=>'R44-pending-'.$one['oid']]);
     check($service->dashboard($filters,$admin)['metrics']['total_amount']==='300.00','pending refund does not prematurely reduce net sales');
     Db::name('store_order_terminal_operation')->where('store_order_id',$one['oid'])->update(['state'=>4]);
