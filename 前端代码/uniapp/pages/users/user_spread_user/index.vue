@@ -203,11 +203,11 @@
 			agentLevelList() {
 				agentLevelList().then(res => {
 					const {
-						level_info,
-						level_list,
+						level_info = {},
+						level_list = [],
 						task,
-						user
-					} = res.data;
+						user = {}
+					} = res.data || {};
 					this.levelInfo = level_info;
 					this.userInfo = user;
 					this.levelList = level_list;
@@ -221,10 +221,11 @@
 					if (index !== -1) {
 						this.swiperIndex = index === -1 ? 0 : (index + 1);
 					}
+					// 未开启分销等级时接口可能返回空数组；推广入口仍须可打开。
 					let info = this.levelList[index === -1 ? 0 : (index + 1)];
-					this.levelInfo.icon = info.icon;
+					if (info) this.levelInfo.icon = info.icon;
 					this.level_id = (info !== undefined ? info.id : 0) || 0;
-					this.getTask()
+					if (this.level_id) this.getTask()
 				});
 			},
 			/**
