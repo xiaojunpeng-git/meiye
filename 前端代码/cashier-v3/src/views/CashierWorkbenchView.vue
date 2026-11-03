@@ -38,6 +38,7 @@ import { combinationChoicePreflightFailure } from '@/services/cashierV3Combinati
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 import CashierGuidedBusinessPanel from '@/components/cashier/CashierGuidedBusinessPanel.vue'
+import CustomCardCartDetailDialog from '@/components/cashier/CustomCardCartDetailDialog.vue'
 import RechargeOverlay from '@/components/member/RechargeOverlay.vue'
 import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelectorOverlay.vue'
 import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
@@ -70,6 +71,21 @@ const selectedType = ref('项目')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
 const activeCartLineId = ref(null)
+const customCardDetailLine = ref(null)
+let customCardDetailReturnFocus = null
+
+// 详情只读取这条购物车的定制配置；关闭后把焦点还给触发按钮。
+function openCustomCardDetail(line, event) {
+  customCardDetailReturnFocus = event?.currentTarget || null
+  customCardDetailLine.value = line
+}
+
+function closeCustomCardDetail() {
+  customCardDetailLine.value = null
+  const returnFocus = customCardDetailReturnFocus
+  customCardDetailReturnFocus = null
+  nextTick(() => returnFocus?.isConnected && returnFocus.focus())
+}
 // 结账校验只引导第一条缺少手艺人的项目；提示不弹阻断框，也不改变人员业务值。
 const craftsmanGuidanceLineId = ref(null)
 const craftsmanGuidanceMessage = ref('')
@@ -8343,7 +8359,10 @@ onBeforeUnmount(() => {
               <div class="cart-line__header">
                 <div class="cart-line__title-block">
                   <div class="cart-line__title-row">
+                    <!-- 定制卡只标识父卡购买行，不把卡内项目误标成定制卡。 -->
+                    <span v-if="isCustomCardPurchase(line)" class="cart-line__custom-card-tag" title="定制卡" aria-label="定制卡">定</span>
                     <strong>{{ line.name }}</strong>
+                    <button v-if="isCustomCardPurchase(line)" type="button" class="cart-line__custom-card-detail" :aria-label="`查看${line.name}定制卡详情`" @click.stop="openCustomCardDetail(line, $event)">详情</button>
                     <span v-if="isEntitlementLine(line)" class="cart-line__role" :class="`cart-line__role--${cartLineRole(line)}`">{{ cartLineRoleLabel(line) }}</span>
                     <span
                       v-if="!isEntitlementLine(line) && line.serviceSource && line.serviceSource !== '本次购买'"
@@ -8646,6 +8665,13 @@ onBeforeUnmount(() => {
       />
     </Teleport>
 
+    <CustomCardCartDetailDialog
+      v-if="customCardDetailLine"
+      :line="customCardDetailLine"
+      :project-items="catalog.customCardProjects || []"
+      @close="closeCustomCardDetail"
+    />
+
     <Teleport to="body">
       <div
         v-if="checkoutReservationPrompt"
@@ -8936,6 +8962,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 购物车定制卡身份与只读详情入口挨着名称，避免与金额和数量操作混在一起。 */
+.cart-line__custom-card-tag { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: #eaf3ff; color: #1769cf; font-size: 12px; font-weight: 700; }
+.cart-line__custom-card-detail { flex: none; padding: 2px 4px; border: 0; background: transparent; color: #1769cf; font-size: 12px; cursor: pointer; }
+.cart-line__custom-card-detail:hover { text-decoration: underline; }
+.cart-line__custom-card-detail:focus-visible { outline: 2px solid #1769cf; outline-offset: 2px; border-radius: 3px; }
 /* Only the newly authorized ordinary-card editor follows the visible viewport. */
 .cashier-card-operation-editor--ordinary-sale {
   position: fixed;
