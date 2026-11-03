@@ -366,9 +366,12 @@ final class Sidebar007OriginalCashReadServices
     /** 旧单资格在已迁和无头两分支共用，避免拆查询后漏掉作废、付款或类型过滤。 */
     private function legacyBaseQuery(array $stores)
     {
-        return Db::name('store_order')->whereIn('store_id',$stores)->where('paid',1)
+        $query=Db::name('store_order')->whereIn('store_id',$stores)->where('paid',1)
             ->where('refund_status',0)->whereIn('order_type',[0,1])
             ->whereIn('pay_type',['weixin','alipay','cash','offline','combination']);
+        // 迁入充值已有正式收款事实时，旧订单只是同笔收款的壳单，不进入旧单缺口与历史补算。
+        LegacyRechargeCarrierScope::excludeCovered($query,'0');
+        return $query;
     }
 
     /**

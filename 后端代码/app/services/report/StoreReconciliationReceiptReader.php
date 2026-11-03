@@ -126,7 +126,11 @@ final class StoreReconciliationReceiptReader
         // 一次核实归档证明，后续通道查询复用ID白名单，避免每格/每单重复运行关联子查询。
         $this->verifiedArchivedIds = $this->archivedLegacyOrderIds($stores, $times, $tenant,
             $businessDateMode ? array_keys($businessDates) : null);
-        $archived = function ($query, string $alias): void { $this->legacyVisibility($query, $alias); };
+        $archived = function ($query, string $alias) use ($tenant, $originalOrderIds): void {
+            $this->legacyVisibility($query, $alias);
+            // 完整收款人口只保留迁入充值事实；原单限定读取仍用于历史身份审计。
+            if ($originalOrderIds === null) LegacyRechargeCarrierScope::excludeCovered($query, $tenant, $alias);
+        };
         $hasThirdParty = in_array(self::methodCode(MemberOrderAccounting::CODE), array_column($methods, 'code'), true);
         foreach ($methods as $method) {
             if (empty($method['legacy_id'])) continue;

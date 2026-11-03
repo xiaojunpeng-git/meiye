@@ -60,7 +60,7 @@ final class StoreReconciliationReportServices
                 $receipts = $reader->receipts(array_map('intval', array_column($storeRows, 'id')), $methods, $sourceRange, (string)$context['tenant_id']);
                 $methodScope = array_fill_keys(array_column($methods, 'code'), true);
                 // 当前收银方式和两项刷单登记各占独立行；停用方式不混入其他渠道。
-                // 历史Reader仍返回原事实，其他现金/每日汇总范围与金额保持不变。
+                // 收款Reader已在共同来源排除由正式事实覆盖的旧充值壳单；这里只按启用渠道投影。
                 $source = ['stores' => $storeRows, 'methods' => $methods,
                     'receipts' => array_values(array_filter($receipts, static function (array $receipt) use ($methodScope): bool {
                         return isset($methodScope[$receipt['method_code']]);
@@ -239,7 +239,7 @@ final class StoreReconciliationReportServices
         if ($key === 'document_no') return '解释所点收款金额的原单据号。';
         if ($key === 'store_name') return '当前查询中已获授权且启用统计的门店。';
         if ($key === 'source_kind') return '该笔金额来自历史订单、历史组合支付、新成功收款或独立的刷单登记；刷单不是实际到账。';
-        return '对应门店或日期的实际收款，或末尾独立刷单行的登记金额；历史单排除未支付、退款、删除、旧卡和余额，组合支付按实际通道拆分；不把刷单并入收款。';
+        return '对应门店或日期的实际收款，或末尾独立刷单行的登记金额；历史单排除未支付、退款、删除、旧卡和余额，组合支付按实际通道拆分；已迁入的充值按正式收款事实计一次，旧充值壳单不再叠加；刷单不并入收款。';
     }
 
     /** 转换只在输出边界进行，禁止二进制浮点参与金额统计。 */
