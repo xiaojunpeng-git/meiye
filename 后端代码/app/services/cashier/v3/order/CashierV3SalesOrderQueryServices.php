@@ -1173,6 +1173,12 @@ final class CashierV3SalesOrderQueryServices
         foreach (($criteria['_orderNumberConditions'] ?? []) as $condition) {
             $operator = $condition['operator'] ?? '';
             $value = $condition['value'] ?? null;
+            if ($operator === 'in' && is_array($value) && $value && count($value) <= 100) {
+                // 仅将统一查询已验证的原单号集合用于窄索引候选；列表与导出
+                // 仍经过原权限和最终筛选，不把对账金额回写到销售订单。
+                $query->whereIn($column, array_values(array_map('strval', $value)));
+                continue;
+            }
             if (!is_scalar($value) || !in_array($operator, ['equal','contains','starts_with'], true)) continue;
             if ($operator === 'equal') {
                 $query->whereRaw('LOWER(CONVERT('.$column.' USING utf8mb4)) = LOWER(CONVERT(? USING utf8mb4))', [(string)$value]);
@@ -3615,6 +3621,7 @@ final class CashierV3SalesOrderQueryServices
         $labels = [
             'cash' => '现金',
             'unionpay' => '银联',
+            'enterprise_wechat' => '企微收款',
             'wechat' => '微信',
             'alipay' => '支付宝',
             'dianping_voucher' => '大众验券',

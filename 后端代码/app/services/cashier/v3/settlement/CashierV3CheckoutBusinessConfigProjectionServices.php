@@ -65,10 +65,12 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
     private function applyAccountingMethodNames(array $projection): array
     {
         $names = [];
-        foreach ($this->businessConfig->accountingMethods(false) as $method) {
+        foreach ($this->businessConfig->accountingMethods(false) as $index => $method) {
             $names[(string)$method['code']] = [
                 'name' => (string)$method['displayName'],
                 'enabled' => (int)$method['status'] === 1,
+                'sort' => (int)$method['sort'],
+                'index' => $index,
             ];
         }
         $payment = (array)($projection['payment'] ?? []);
@@ -78,6 +80,11 @@ final class CashierV3CheckoutBusinessConfigProjectionServices
             $method['name'] = $configured['name'];
             return $method;
         }, (array)($payment['methods'] ?? []))));
+        // 服务端投影与本地预览均按记账配置排序，两个结账入口不能显示不同顺序。
+        usort($payment['methods'], static function (array $a, array $b) use ($names): int {
+            return ($names[$a['id']]['sort'] <=> $names[$b['id']]['sort'])
+                ?: ($names[$a['id']]['index'] <=> $names[$b['id']]['index']);
+        });
         foreach ((array)($payment['selectedLines'] ?? []) as $index => $line) {
             $configured = $names[(string)($line['method'] ?? '')] ?? null;
             if ($configured !== null) $payment['selectedLines'][$index]['name'] = $configured['name'];

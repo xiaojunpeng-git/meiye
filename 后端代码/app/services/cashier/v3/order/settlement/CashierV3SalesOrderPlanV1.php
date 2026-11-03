@@ -33,7 +33,7 @@ final class CashierV3SalesOrderPlanV1
     private const ENTITLEMENT_KINDS = ['count_card', 'time_card', 'custom_card', 'gift', 'unknown'];
     // 销售订单快照只接受正式记账收款代码；旧卡录入保留独立迁入语义。
     private const PAYMENT_METHODS = [
-        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+        'cash', 'unionpay', 'enterprise_wechat', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'bank_transfer', 'other_income', 'third_party', 'partner_collection', 'other_collection',
     ];
 

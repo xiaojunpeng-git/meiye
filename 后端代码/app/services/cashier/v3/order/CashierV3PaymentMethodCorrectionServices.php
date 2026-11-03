@@ -13,7 +13,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use think\facade\Db;
 
 /**
- * 更正已到账销售收款的记账方式。金额、时间、结账草稿及初始指纹均不变；
+ * 更正已到账消费、充值及补交收款的记账方式。金额、时间、结账草稿及初始指纹均不变；
  * 有效方式由可重建投影提供；原收款、payment_collected 和销售分摊事实保持原样。
  */
 final class CashierV3PaymentMethodCorrectionServices
@@ -21,7 +21,7 @@ final class CashierV3PaymentMethodCorrectionServices
     private const TABLE = 'cashier_v3_payment_method_correction';
     private const CURRENT_TABLE = 'cashier_v3_payment_method_current';
     private const ACTUAL_METHODS = [
-        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+        'cash', 'unionpay', 'enterprise_wechat', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'bank_transfer', 'other_income', 'partner_collection',
     ];
 
@@ -35,7 +35,12 @@ final class CashierV3PaymentMethodCorrectionServices
             ->where('sales_order_id', $orderId)->where('collection_direction', 'forward')
             ->where('collection_status', 'settled');
         if ($collectionId !== '') $query->where('collection_id', $collectionId);
-        $collections = $this->effectiveCollections($query->order('payment_line_no', 'asc')->select()->toArray(), $scope->tenantId());
+        // Non-sales documents share the correction transaction/projection, with their own authoritative identity.
+        $collections = CashierV3BusinessPaymentCorrectionSource::identity($orderId)
+            ? (new CashierV3BusinessPaymentCorrectionSource())->collections($orderId, $operator, $scope, false)
+            : $query->order('payment_line_no', 'asc')->select()->toArray();
+        if ($collectionId !== '') $collections = array_values(array_filter($collections, static function (array $row) use ($collectionId): bool { return $row['collection_id'] === $collectionId; }));
+        $collections = $this->effectiveCollections($collections, $scope->tenantId());
         $history = Db::name(self::TABLE)->where('tenant_id', $scope->tenantId())
             ->where('sales_order_id', $orderId)->order('id', 'desc')->limit(100)->select()->toArray();
         $methods = array_values(array_filter((new CashierV3BusinessConfigServices())->accountingMethods(true),
@@ -126,10 +131,17 @@ final class CashierV3PaymentMethodCorrectionServices
             return ['operationId' => (string)$replay['operation_id'], 'orderId' => $orderId, 'replayed' => true];
         }
         $order = $this->order($orderId, $operator, $scope, true);
-        $collection = Db::name('cashier_v3_payment_collection')->where('tenant_id', $scope->tenantId())
-            ->where('sales_order_id', $orderId)->where('collection_id', $collectionId)
-            ->where('collection_direction', 'forward')->where('collection_status', 'settled')
-            ->lock(true)->find();
+        $businessSource = CashierV3BusinessPaymentCorrectionSource::identity($orderId);
+        $collection = null;
+        if ($businessSource) {
+            $candidates = (new CashierV3BusinessPaymentCorrectionSource())->collections($orderId, $operator, $scope, true);
+            $collection = null;
+            foreach ($candidates as $candidate) if ($candidate['collection_id'] === $collectionId) $collection = $candidate;
+        } else {
+            $collection = Db::name('cashier_v3_payment_collection')->where('tenant_id', $scope->tenantId())
+                ->where('sales_order_id', $orderId)->where('collection_id', $collectionId)
+                ->where('collection_direction', 'forward')->where('collection_status', 'settled')->lock(true)->find();
+        }
         if (!$collection || (int)$collection['amount_cents'] <= 0) {
             throw CashierV3CommandException::invalidContext('该订单没有可更正的正式收款，请刷新列表。');
         }
@@ -145,27 +157,30 @@ final class CashierV3PaymentMethodCorrectionServices
             throw CashierV3CommandException::invalidContext('收款方式投影与原始金额不一致，不能更正。');
         }
         // 初始结账草稿仍是原始业务证据；即使本笔多次更正，也不能篡改其付款快照。
-        $original = Db::name('cashier_v3_checkout_payment_draft')->where('tenant_id', $scope->tenantId())
-            ->where('payment_draft_id', (string)$collection['checkout_payment_draft_id'])
-            ->where('request_id', (string)$order['checkout_request_id'])->find();
+        $original = $businessSource ? ['payment_method' => $collection['payment_method']] : Db::name('cashier_v3_checkout_payment_draft')->where('tenant_id', $scope->tenantId())
+            ->where('payment_draft_id', (string)($collection['checkout_payment_draft_id'] ?? ''))
+            ->where('request_id', (string)($order['checkout_request_id'] ?? ''))->find();
+        // Recharge/repayment original tender is the linked immutable payment fact; no checkout draft is fabricated.
         if (!$original || !in_array((string)$original['payment_method'], self::ACTUAL_METHODS, true)) {
             throw CashierV3CommandException::invalidContext('原始收款凭据缺失，不能更正。');
         }
         $method = (new CashierV3BusinessConfigServices())->resolveAccountingMethodSnapshot($after, true);
-        $fact = Db::name('cashier_v3_payment_fact')->where('tenant_id', $scope->tenantId())
-            ->where('order_id', $orderId)->where('source_line_id', $collectionId)
-            ->where('fact_type', 'payment_collected')->where('fact_direction', 'forward')
-            ->where('status', 'effective')->lock(true)->find();
+        $factQuery = Db::name('cashier_v3_payment_fact')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', $businessSource['factOrder'] ?? $orderId)->where('source_line_id', $collection['source_line_id'] ?? $collectionId)
+            ->whereIn('fact_type', ['payment_collected', 'payment_received'])->where('fact_direction', 'forward')
+            ->where('status', 'effective');
+        if ($businessSource) $factQuery->where('fact_id', $collection['fact_id'])->where('source_document_type', $businessSource['document'])->where('store_id', $operator->storeId());
+        $fact = $factQuery->lock(true)->find();
         if (!$fact || (string)$fact['payment_method'] !== (string)$collection['payment_method']
             || (int)$fact['amount_cents'] !== (int)$collection['amount_cents']) {
             throw CashierV3CommandException::invalidContext('统一收款事实与正式收款不一致，不能更正。');
         }
         // 反向事实保持原方式；统一 Reader 通过 reversal_of 找到此笔有效方式后抵销。
-        $facts = Db::name('cashier_v3_payment_fact')->where('tenant_id', $scope->tenantId())
-            ->where(function ($query) use ($fact): void {
-                $query->where('fact_id', (string)$fact['fact_id'])
-                    ->whereOr('reversal_of', (string)$fact['fact_id']);
-            })->lock(true)->select()->toArray();
+        // The forward fact is already locked by its unique identity. Read reversals
+        // through their dedicated index: an OR scan could lock unrelated receipts.
+        $facts = array_merge([$fact], Db::name('cashier_v3_payment_fact')->force('idx_reversal')
+            ->where('tenant_id', $scope->tenantId())->where('reversal_of', (string)$fact['fact_id'])
+            ->order('id', 'asc')->lock(true)->select()->toArray());
         $factIds = [];
         foreach ($facts as $row) {
             if ((string)$row['payment_method'] !== (string)$collection['payment_method']) {
@@ -242,6 +257,9 @@ final class CashierV3PaymentMethodCorrectionServices
             || !$scope->allowsStore($operator->storeId())) {
             throw CashierV3CommandException::invalidContext('当前账号无权更正该门店的收款。');
         }
+        if (CashierV3BusinessPaymentCorrectionSource::identity($orderId)) {
+            return (new CashierV3BusinessPaymentCorrectionSource())->order($orderId, $operator, $scope, $lock);
+        }
         $query = Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())
             ->where('store_id', $operator->storeId())->where('order_id', $orderId)
             ->where('order_status', 'settled')->where('order_direction', 'forward');
@@ -257,7 +275,8 @@ final class CashierV3PaymentMethodCorrectionServices
 
     private function orderId(array $payload): string
     {
-        $id = trim((string)($payload['orderId'] ?? ''));
+        $id = trim((string)($payload['recordId'] ?? $payload['orderId'] ?? ''));
+        if (CashierV3BusinessPaymentCorrectionSource::identity($id)) return $id;
         if (!preg_match('/^CSO-[a-f0-9]{40}$/Di', $id)) {
             throw CashierV3CommandException::invalidContext('订单标识无效，请刷新列表后重试。');
         }

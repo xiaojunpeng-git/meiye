@@ -28,6 +28,8 @@ final class CashierV3BusinessConfigServices extends BaseServices
     public const PAYMENT_METHODS = [
         'cash' => '现金',
         'unionpay' => '银联',
+        // 007历史企微收款是独立渠道；不得与普通微信支付共用代码或历史编号。
+        'enterprise_wechat' => '企微收款',
         'wechat' => '微信',
         'alipay' => '支付宝',
         'dianping_voucher' => '大众验券',

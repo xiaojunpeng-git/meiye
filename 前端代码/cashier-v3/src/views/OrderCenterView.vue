@@ -2752,24 +2752,29 @@ function orderPaymentDetails(record) {
 }
 
 function canCorrectSalesPaymentMethod(record, payment) {
-  return recordType(record) === 'sales' && !record?.entitlementOnly
+  // Recharge and repayments use the same editor and command; only the server
+  // can expose a stable collection identity and confirm its business state.
+  const type = recordType(record)
+  return ['sales', 'recharge', 'supplement'].includes(type) && !record?.entitlementOnly
     && payment?.id && canUseCashierV3Feature('cashier.v3.order_center')
-    && salesOrderActionAvailable(record, 'correct-sales-payment-method')
+    && (type === 'sales' ? salesOrderActionAvailable(record, 'correct-sales-payment-method') : record.paymentMethodEditable === true && Number(payment.amount) > 0)
     && !['other_collection', 'old_card_entry', 'member_balance'].includes(String(payment.paymentMethodCode || ''))
 }
 
 async function openSalesPaymentMethodEditor(record, payment) {
   if (!canCorrectSalesPaymentMethod(record, payment)) return
-  const orderId = salesOrderLifecycleId(record)
+  const type = recordType(record)
+  const orderId = type === 'sales' ? salesOrderLifecycleId(record) : String(record.id || '')
   if (!orderId) return
-  paymentMethodEditor.value = { orderId, collectionId: String(payment.id), orderNo: String(record.orderNo || record.order_no || '') }
+  const identity = type === 'sales' ? { orderId } : { recordId: orderId, recordType: type }
+  paymentMethodEditor.value = { orderId, identity, collectionId: String(payment.id), orderNo: String(record.orderNo || record.rechargeOrderNo || record.supplementOrderNo || record.order_no || '') }
   paymentMethodEntry.value = null
   paymentMethodSelection.value = String(payment.paymentMethodCode || '')
   paymentMethodReason.value = ''
   paymentMethodError.value = ''
   paymentMethodLoading.value = true
   try {
-    const result = await requestAction('open-sales-payment-method-correction', { orderId, collectionId: String(payment.id) })
+    const result = await requestAction('open-sales-payment-method-correction', { ...identity, collectionId: String(payment.id) })
     const entry = actionData(result).paymentMethodCorrection
     if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
       paymentMethodError.value = result?.result?.message || result?.data?.result?.message || '记账收款读取失败，请刷新后重试。'
@@ -2837,7 +2842,7 @@ async function submitSalesPaymentMethod() {
   paymentMethodError.value = ''
   try {
     const result = await requestAction('correct-sales-payment-method', {
-      orderId: editor.orderId, collectionId: editor.collectionId,
+      ...editor.identity, collectionId: editor.collectionId,
       expectedMethod: current.paymentMethodCode, paymentMethod: next, reason, idempotencyKey
     })
     const status = actionStatus(result)
@@ -4343,7 +4348,15 @@ onBeforeUnmount(() => {
             <!-- Keep the non-sales placeholders aligned with the same debt switch used by headers and sales lines. -->
             <td>—</td><td v-if="debtPaymentEnabled">—</td><td>—</td>
             <td>{{ recordType(record) === 'recharge' ? displayMoneyField(record, 'actual_received_amount') : '—' }}</td>
-            <td>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</td>
+            <td>
+              <template v-if="['recharge', 'supplement'].includes(recordType(record)) && orderPaymentDetails(record).length">
+                <div v-for="payment in orderPaymentDetails(record)" :key="payment.id">
+                  <button v-if="canCorrectSalesPaymentMethod(record, payment)" type="button" class="order-link" title="更正收款方式" @click="openSalesPaymentMethodEditor(record, payment)">{{ payment.methodName }} {{ itemMoney(payment.amount) }}</button>
+                  <span v-else>{{ payment.methodName }} {{ itemMoney(payment.amount) }}</span>
+                </div>
+              </template>
+              <template v-else>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</template>
+            </td>
             <td>{{ displayRecordField(record, 'store') }}</td>
             <!-- 汇总行与消费明细共用状态样式映射，只统一标签外观，不修改后端状态。 -->
             <td><span class="order-status" :class="statusClass(recordFieldValue(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status'))">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status') }}</span></td>
@@ -4446,6 +4459,12 @@ onBeforeUnmount(() => {
               >
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
+              <div v-else-if="fieldItem.key === 'payment_method' && ['recharge', 'supplement'].includes(recordType(record)) && orderPaymentDetails(record).length">
+                <div v-for="payment in orderPaymentDetails(record)" :key="payment.id">
+                  <button v-if="canCorrectSalesPaymentMethod(record, payment)" type="button" class="order-link" title="更正收款方式" @click="openSalesPaymentMethodEditor(record, payment)">{{ payment.methodName }} {{ itemMoney(payment.amount) }}</button>
+                  <span v-else>{{ payment.methodName }} {{ itemMoney(payment.amount) }}</span>
+                </div>
+              </div>
               <button
                 v-else-if="fieldItem.key === 'salesperson' && ['recharge', 'supplement', 'refund'].includes(activeTabKey) && (activeTabKey !== 'refund' || editableRefundPersonnelSourceTypes.has(record.refundSourceType)) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"

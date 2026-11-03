@@ -27,6 +27,7 @@ final class CashierV3CheckoutSettlementKernel
     // 旧数据录入沿用历史代码，卡项和产品都可走独立非现金结算。
     public const PAYMENT_CASH = 'cash';
     public const PAYMENT_UNIONPAY = 'unionpay';
+    public const PAYMENT_ENTERPRISE_WECHAT = 'enterprise_wechat';
     public const PAYMENT_WECHAT = 'wechat';
     public const PAYMENT_ALIPAY = 'alipay';
     public const PAYMENT_DIANPING_VOUCHER = 'dianping_voucher';
@@ -43,6 +44,7 @@ final class CashierV3CheckoutSettlementKernel
     private const PAYMENT_METHODS = [
         self::PAYMENT_CASH,
         self::PAYMENT_UNIONPAY,
+        self::PAYMENT_ENTERPRISE_WECHAT,
         self::PAYMENT_WECHAT,
         self::PAYMENT_ALIPAY,
         self::PAYMENT_DIANPING_VOUCHER,

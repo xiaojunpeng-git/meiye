@@ -365,8 +365,11 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             $numberField = $this->pageCode() === 'order_center_all' ? 'order_no' : 'sales_order_no';
             foreach ($conditions as $condition) {
                 if (($condition['field_key'] ?? '') === $numberField
-                    && in_array($condition['operator'] ?? '', ['equal','contains','starts_with'], true)
-                    && is_scalar($condition['value'] ?? null)) {
+                    && ((in_array($condition['operator'] ?? '', ['equal','contains','starts_with'], true)
+                            && is_scalar($condition['value'] ?? null))
+                        || (($condition['operator'] ?? '') === 'in' && is_array($condition['value'] ?? null)))) {
+                    // 对账单多原单号使用标准“多选”筛选；只下推已验证的 AND 条件，
+                    // 最终结果仍由统一查询执行器按原筛选计划判定。
                     $this->sourcePayload['_orderNumberConditions'][] = $condition;
                 }
             }

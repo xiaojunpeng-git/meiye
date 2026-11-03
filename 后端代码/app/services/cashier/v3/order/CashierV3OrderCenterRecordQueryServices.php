@@ -76,6 +76,8 @@ final class CashierV3OrderCenterRecordQueryServices
             $total = max(0, (int)($result['total'] ?? count($records)));
         } else {
             [$records, $total] = $this->readType($criteria, $operatorScope);
+            // One shared readback supplies corrected methods to list, detail and export.
+            $records = (new CashierV3BusinessPaymentCorrectionSource())->decorate($records, (string)$criteria['tenantId'], !$dataScope->isReadOnlySession());
         }
         return $this->pagePayload($criteria, $records, $total, 'authoritative_business_records');
     }
@@ -344,7 +346,7 @@ final class CashierV3OrderCenterRecordQueryServices
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
             $lifecycleOperation = (string)($rechargeLifecycleOperations[(int)$row['id']] ?? '');
             return [
-                'id' => 'recharge:' . $row['id'],
+                'id' => 'recharge:' . $row['id'], 'storeId' => (int)$row['store_id'],
                 'rechargeId' => (int)$row['id'],
                 'memberId' => (int)$row['uid'],
                 'rechargeOrderNo' => (string)$row['order_id'],
@@ -600,7 +602,7 @@ final class CashierV3OrderCenterRecordQueryServices
         return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions, $productNames, $productCategories): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
-                'id' => 'v3-sales-supplement:' . $repaymentId,
+                'id' => 'v3-sales-supplement:' . $repaymentId, 'storeId' => (int)$row['store_id'],
                 'supplementOrderNo' => (string)$row['repayment_no'],
                 'source' => $this->businessSourceLabel($row),
                 'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
@@ -682,7 +684,7 @@ final class CashierV3OrderCenterRecordQueryServices
         return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions, $balanceCategories): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
-                'id' => 'v3-supplement:' . $repaymentId,
+                'id' => 'v3-supplement:' . $repaymentId, 'storeId' => (int)$row['store_id'],
                 'supplementOrderNo' => (string)$row['repayment_no'],
                 'source' => $this->businessSourceLabel($row),
                 'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
@@ -2742,6 +2744,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'cash' => '现金',
             'weixin' => '微信',
             'wechat' => '微信',
+            'enterprise_wechat' => '企微收款',
             'alipay' => '支付宝',
             'unionpay' => '银联刷卡',
             'dianping_voucher' => '大众验券',

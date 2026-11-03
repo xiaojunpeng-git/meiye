@@ -29,6 +29,7 @@ final class CashierV3CheckoutFactPlanV1
     private const PAYMENT_METHODS = [
         'cash',
         'unionpay',
+        'enterprise_wechat',
         'wechat',
         'alipay',
         'dianping_voucher',
