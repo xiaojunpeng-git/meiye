@@ -122,8 +122,9 @@ export default {
     this.scrollTimer = setInterval(this.scrollRanks, 60);
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) this.paused = { members: true, stores: true, activities: true };
     document.addEventListener('keydown', this.onEscape);
+    document.addEventListener('fullscreenchange', this.syncFullscreen);
   },
-  beforeDestroy() { clearInterval(this.refreshTimer); clearInterval(this.scrollTimer); document.removeEventListener('keydown', this.onEscape); this.exitFullscreen(); this.dashboardRequest = (this.dashboardRequest || 0) + 1; this.detailRequest = (this.detailRequest || 0) + 1; },
+  beforeDestroy() { clearInterval(this.refreshTimer); clearInterval(this.scrollTimer); document.removeEventListener('keydown', this.onEscape); document.removeEventListener('fullscreenchange', this.syncFullscreen); this.exitFullscreen(); this.dashboardRequest = (this.dashboardRequest || 0) + 1; this.detailRequest = (this.detailRequest || 0) + 1; },
   methods: {
     money: formatBusinessMoney,
     metricValue(key) { return this.loaded ? this.money((this.dashboard.metrics || {})[key]) : '—'; },
@@ -177,13 +178,20 @@ export default {
       if (document.hidden || this.settingsOpen || this.detailsOpen || this.notesOpen) return;
       this.rankingPanels.forEach(panel => { const refs = this.$refs[panel.key]; const node = Array.isArray(refs) ? refs[0] : refs; if (!node || this.paused[panel.key] || this.hovered === panel.key || node.scrollHeight <= node.clientHeight) return; node.scrollTop = node.scrollTop + node.clientHeight >= node.scrollHeight - 1 ? 0 : node.scrollTop + 1; });
     },
-    /**
-     * 大屏展示只切换页面沉浸式布局，直接覆盖后台导航。内嵌浏览器可能自动
-     * 退出原生全屏，因此这里不请求 Fullscreen API，避免刚展开又被收回。
-     */
-    toggleFullscreen() { this.fullscreen = !this.fullscreen; },
-    exitFullscreen() { this.fullscreen = false; },
-    onEscape(event) { if (event.key === 'Escape') { this.settingsOpen = false; this.detailsOpen = false; this.notesOpen = false; this.exitFullscreen(); } }
+    /** 系统全屏以大屏节点为目标，浏览器导航也退出屏幕；实际状态由浏览器事件确认。 */
+    async toggleFullscreen() {
+      const screen = this.$refs.screen;
+      if (document.fullscreenElement === screen) return this.exitFullscreen();
+      if (!screen || !screen.requestFullscreen) { this.$Message.error('当前浏览器不支持全屏展示'); return; }
+      try { await screen.requestFullscreen(); }
+      catch (error) { this.$Message.error('浏览器未允许全屏，请检查浏览器设置'); }
+    },
+    syncFullscreen() { this.fullscreen = document.fullscreenElement === this.$refs.screen; },
+    exitFullscreen() {
+      if (document.fullscreenElement === this.$refs.screen && document.exitFullscreen) document.exitFullscreen();
+      this.fullscreen = false;
+    },
+    onEscape(event) { if (event.key === 'Escape') { this.settingsOpen = false; this.detailsOpen = false; this.notesOpen = false; } }
   }
 };
 </script>

@@ -138,6 +138,29 @@ class CombinationGroupListServices
             })->where('p.is_virtual', 0)->where('p.is_refund', 0)->where('paid_order.paid', 1)->field('p.id,p.k_id')->select()->toArray() : [];
         $joined = [];
         foreach ($counts as $seat) { $id = (int)$seat['k_id'] ?: (int)$seat['id']; $joined[$id] = ($joined[$id] ?? 0) + 1; }
+        // Refund state belongs to each real participant's settled order and channel receipt.
+        // A group is fully refunded only when every real order is fully refunded; pending or
+        // partial results must still expose the existing query/retry entry.
+        $refundSeats = $groupIds ? Db::name('store_pink')->alias('p')
+            ->leftJoin('store_order refund_order', 'refund_order.id=p.order_id_key')
+            ->leftJoin('combination_order_refund receipt', 'receipt.order_id=p.order_id_key')
+            ->where(function ($q) use ($groupIds) {
+                $q->whereIn('p.id', $groupIds)->whereOr('p.k_id', 'in', $groupIds);
+            })->where('p.is_virtual', 0)->where('p.uid', '>', 0)
+            ->field('p.id,p.k_id,refund_order.id as refund_order_id,refund_order.refund_status,refund_order.pay_price,refund_order.refund_price,receipt.state as receipt_state')
+            ->select()->toArray() : [];
+        $refunds = [];
+        foreach ($refundSeats as $seat) {
+            $id = (int)$seat['k_id'] ?: (int)$seat['id'];
+            if (!isset($refunds[$id])) $refunds[$id] = ['total' => 0, 'settled' => 0, 'processing' => 0];
+            $refunds[$id]['total']++;
+            $settled = (int)($seat['refund_order_id'] ?? 0) > 0
+                && (int)$seat['refund_status'] === 2
+                && bccomp((string)$seat['refund_price'], (string)$seat['pay_price'], 2) === 0
+                && in_array((string)($seat['receipt_state'] ?? ''), ['', 'success'], true);
+            if ($settled) $refunds[$id]['settled']++;
+            elseif (in_array((string)($seat['receipt_state'] ?? ''), ['sending', 'pending', 'confirmed'], true)) $refunds[$id]['processing']++;
+        }
         $items = $orderIds ? Db::name('store_order_cart_info')->whereIn('oid', $orderIds)->field('oid,cart_info')->select()->toArray() : [];
         $names = [];
         foreach ($items as $item) {
@@ -162,6 +185,12 @@ class CombinationGroupListServices
             $row['joined_people'] = $joined[(int)$row['id']] ?? 0;
             $row['deadline'] = $row['expires_at'] !== null ? (int)$row['expires_at'] : ((int)$row['status'] === 2 ? 0 : (int)$row['stop_time']);
             $row['status_name'] = [1 => '拼团中', 2 => '拼团成功', 3 => '拼团失败'][(int)$row['status']] ?? '未知';
+            $refund = $refunds[(int)$row['id']] ?? ['total' => 0, 'settled' => 0, 'processing' => 0];
+            $row['refund_state'] = (int)$row['status'] === 2 && $refund['total'] > 0 && $refund['settled'] === $refund['total']
+                ? 'fully_refunded' : ($refund['processing'] > 0 ? 'processing' : ($refund['settled'] > 0 ? 'partially_refunded' : 'none'));
+            if ($row['refund_state'] === 'fully_refunded') $row['status_name'] = '整团已退款';
+            elseif ($row['refund_state'] === 'processing') $row['status_name'] = '退款处理中';
+            elseif ($row['refund_state'] === 'partially_refunded') $row['status_name'] = '部分退款';
         }
         unset($row);
         $columns = $this->columns();
@@ -183,7 +212,7 @@ class CombinationGroupListServices
             ['手机号码','phone',120,'开团订单预留手机，缺失时读取团长档案。'], ['拼团名称','group_name',190,'开团时保存的活动名称，旧记录缺失时读取当前活动名称。'],
             ['品项名称','product_name',180,'团长原订单保存的品项名称；无快照不按现商品猜测。'], ['拼团单价','price',85,'开团记录保存的单价；展示整元，导出保留原精度。'],
             ['拼团总数','people',75,'该团成团所需人数。'], ['参加人数','joined_people',80,'当前团内未退款的真实成员数，不含虚拟名额。'],
-            ['到期时间','deadline',140,'开团时保存的到期时间，旧已成团记录缺失时留空。'], ['状态','status_name',90,'拼团业务保存的当前状态。'],
+            ['到期时间','deadline',140,'开团时保存的到期时间，旧已成团记录缺失时留空。'], ['状态','status_name',90,'拼团状态叠加团内真实订单的成功退款结果；全部原路退完显示整团已退款。'],
         ];
         return array_map(static function ($s) { return ['title'=>$s[0], 'key'=>$s[1], 'minWidth'=>$s[2], 'source'=>$s[3],
             'fixed' => $s[1] === 'store_name' ? 'left' : '']; }, $specs);

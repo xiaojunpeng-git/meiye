@@ -8,7 +8,7 @@
                     <Option v-for="activity in activities" :key="activity.cid" :value="activity.cid">{{ activity.title || ('拼团' + activity.cid) }}</Option>
                 </Select></FormItem>
                 <FormItem label="拼团状态：" class="query-field query-status"><Select v-model="formValidate.status" clearable placeholder="全部状态">
-                    <Option :value="1">拼团中</Option><Option :value="2">拼团成功</Option><Option :value="3">拼团失败</Option>
+                    <Option :value="1">拼团中</Option><Option :value="2">已成团（含退款）</Option><Option :value="3">拼团失败</Option>
                 </Select></FormItem>
                 <FormItem label="会员搜索：" class="query-field query-member"><Input v-model.trim="formValidate.keyword" clearable placeholder="团长/团员姓名或手机号" @on-enter="userSearchs" /></FormItem>
                 <div class="combination-search-actions"><Button type="primary" @click="userSearchs">搜索</Button><Button @click="resetSearch">重置</Button><Button :loading="exporting" :disabled="loading || !total" @click="exportList"><Icon type="ios-download-outline" /> 导出</Button></div>
@@ -20,12 +20,13 @@
                 <Table :columns="columns1" :data="tableList" :loading="loading" :max-height="tableFixed ? tableHeight : undefined" highlight-row no-data-text="暂无拼团记录">
                     <template slot-scope="{ row }" slot="price">{{ money(row.price) }}</template>
                     <template slot-scope="{ row }" slot="deadline">{{ row.deadline | formatDate }}</template>
-                    <template slot-scope="{ row }" slot="status_name"><span :class="'combination-status-' + row.status">{{ row.status_name }}</span></template>
+                    <template slot-scope="{ row }" slot="status_name"><span :class="row.refund_state === 'none' ? 'combination-status-' + row.status : 'combination-status-refund'">{{ row.status_name }}</span></template>
                     <template slot-scope="{ row }" slot="action">
                         <a @click="Info(row)">查看详情</a>
                         <a class="combination-action" @click="openLeaderReward(row)">团长奖励</a>
                         <a v-if="row.status === 1" class="combination-action" @click="completeGroup(row)">立即成团</a>
-                        <a v-if="row.status === 2" class="combination-action" @click="openGroupRefund(row)">整团退款</a>
+                        <!-- 已全退的团只可查看历史；未完成的退款仍可进入原查询及重试流程。 -->
+                        <a v-if="row.status === 2 && row.refund_state !== 'fully_refunded'" class="combination-action" @click="openGroupRefund(row)">{{ row.refund_state === 'none' ? '整团退款' : '查看退款' }}</a>
                     </template>
                 </Table>
             </div>
@@ -378,6 +379,7 @@
 .combination-list-error { padding: 8px 0 12px; color: #c53b37; }
 .combination-status-2 { color: #299548; }
 .combination-status-3 { color: #c53b37; }
+.combination-status-refund { color: #ba6d17; }
 .tabBox_img { width: 36px; height: 36px; border-radius: 4px; cursor: pointer; }
 .tabBox_img img { width: 100%; height: 100%; }
 @media (max-width: 1100px) { .query-store, .query-activity, .query-status, .query-member { width: calc(50% - 8px); } }
