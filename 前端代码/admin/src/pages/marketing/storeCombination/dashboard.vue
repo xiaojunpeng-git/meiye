@@ -37,7 +37,7 @@
           <p v-else-if="!rankRows(rank.key).length" class="screen-empty">当前范围暂无业绩</p>
           <button v-for="(row, index) in rankRows(rank.key)" :key="row.id" type="button" class="rank-row" :class="{ 'rank-row--first': index === 0 }" @click="openDetails(rank.dimension, row.id, row.name)">
             <span class="rank-number" :class="'rank-number--' + (index + 1)">{{ index + 1 }}</span>
-            <span class="rank-identity"><strong>{{ row.name || '未归属' }}</strong><small v-if="rank.key === 'members'">{{ row.store_name || '未归属门店' }}</small><small>{{ row.order_count }} 笔 · {{ row.group_count }} 团</small></span>
+            <span class="rank-identity"><strong>{{ row.name || '未归属' }}</strong><small v-if="rank.key === 'members'">{{ row.store_name || '未归属门店' }}</small><small v-if="rank.key === 'stores' && row.buyer_name">购买会员：{{ row.buyer_name }}</small><small>{{ row.order_count }} 笔 · {{ row.group_count }} 团</small></span>
             <span class="rank-money"><strong>¥{{ money(row.total_amount) }}</strong><small>成团 ¥{{ money(row.formed_amount) }}</small></span>
           </button>
         </div>

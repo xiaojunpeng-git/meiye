@@ -85,7 +85,8 @@ class CombinationPromotionServices
 
     /**
      * 一行一笔真实已支付拼团订单。虚拟名额不产生销售；未支付排除。
-     * 原单 is_del=1 是待成团隐藏标记，不能误当删除。历史无分享快照只显示未归属。
+     * 原单 is_del=1 是待成团隐藏标记，不能误当删除。没有合格推广人时，个人榜不计业绩，
+     * 门店榜仍按原购买门店归集；原单也没有购买门店时才显示未归属。
      * 成团状态改变只移动金额桶；成功退款才扣减，失败待退净额仍归未成团。
      */
     private function query(array $filters, ?array $allowedStores, ?int $ownUid)
@@ -102,24 +103,29 @@ class CombinationPromotionServices
         $base = Db::name('store_order')->alias('o')
             ->join('store_pink g', 'g.id=' . $group)->leftJoin('combination_promotion_order a', 'a.order_id=o.id')
             ->leftJoin('store_combination c', 'c.id=o.activity_id')->leftJoin('user u', 'u.uid=o.uid')
+            ->leftJoin('system_store purchase_store', 'purchase_store.id=o.store_id')
             ->where('o.paid', 1)->where('o.type', 3)
             ->field('o.id,o.order_id AS order_no,o.uid AS member_id,o.activity_id,g.id AS group_id,o.pay_time AS paid_at,'
-                . 'COALESCE(a.share_uid,0) AS promoter_id,COALESCE(a.store_id,0) AS store_id,'
-                . "COALESCE(NULLIF(a.promoter_name,''),'未归属') AS promoter_name,COALESCE(NULLIF(a.store_name,''),'未归属') AS store_name,"
-                . "COALESCE(NULLIF(a.activity_name,''),c.title,'历史活动') AS activity_name,COALESCE(NULLIF(u.real_name,''),u.nickname,'会员') AS member_name,"
+                . 'COALESCE(a.share_uid,0) AS promoter_id,IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,COALESCE(o.store_id,0)) AS store_id,'
+                // 有推广人时沿用创建订单时冻结的归属；无推广人时以原单购买门店归集门店业绩。
+                // 购买门店从原单读取，不从会员当前门店倒推，避免调店改写历史排行。
+                . "COALESCE(NULLIF(a.promoter_name,''),'未归属') AS promoter_name,"
+                . "CASE WHEN COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0 THEN COALESCE(NULLIF(a.store_name,''),'未归属') ELSE COALESCE(NULLIF(purchase_store.name,''),'未归属') END AS store_name,"
+                . "COALESCE(NULLIF(a.activity_name,''),c.title,'历史活动') AS activity_name,COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),'会员') AS member_name,"
                 . "CASE WHEN g.status=2 THEN 'formed' WHEN g.status=3 THEN 'failed' ELSE 'pending' END AS group_status,"
                 . 'ROUND(o.pay_price*100) AS paid_cents,ROUND(' . $refund . '*100) AS refund_cents,'
                 . 'GREATEST(0,ROUND((o.pay_price-(' . $refund . '))*100)) AS net_cents');
         // 空授权必须拒绝全部，不能用IN(0)误放行历史未归属且购买门店也为0的订单。
         if ($allowedStores === []) $base->whereRaw('1=0');
-        elseif ($allowedStores !== null) $base->whereRaw('IF(COALESCE(a.store_id,0)>0,a.store_id,o.store_id) IN ('
+        elseif ($allowedStores !== null) $base->whereRaw('IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,o.store_id) IN ('
             . implode(',', array_map('intval', $allowedStores)) . ')');
         if ($ownUid !== null) {
             if ($ownUid <= 0) throw new ValidateException('请先登录');
             $base->where('a.share_uid', $ownUid);
         }
         $stores = $this->ids($filters['store_ids'] ?? []);
-        if ($stores) $base->whereIn('a.store_id', $stores);
+        if ($stores) $base->whereRaw('IF(COALESCE(a.share_uid,0)>0 AND COALESCE(a.store_id,0)>0,a.store_id,COALESCE(o.store_id,0)) IN ('
+            . implode(',', $stores) . ')');
         $ids = $this->ids($filters['activity_ids'] ?? (($filters['activity_id'] ?? '') !== '' ? [$filters['activity_id']] : []));
         if ($ids) $base->whereIn('o.activity_id', $ids);
         foreach (['start_date' => '>=', 'end_date' => '<='] as $field => $op) {
@@ -180,8 +186,12 @@ class CombinationPromotionServices
         $query = $this->query($filters, (new CombinationGroupListServices())->allowedStores($admin), null);
         $ranks = [];
         foreach (['members' => ['promoter_id', 'promoter_name'], 'stores' => ['store_id', 'store_name'], 'activities' => ['activity_id', 'activity_name']] as $key => $spec) {
-            $rows = (clone $query)->field($spec[0] . ' AS id,MAX(' . $spec[1] . ') AS name,'
+            // 没有推广人时仍计入总业绩、购买门店和活动，但绝不虚构个人推广业绩。
+            $rankQuery = clone $query;
+            if ($key === 'members') $rankQuery->where('promoter_id', '>', 0);
+            $rows = $rankQuery->field($spec[0] . ' AS id,MAX(' . $spec[1] . ') AS name,'
                 . ($key === 'members' ? "IF(COUNT(DISTINCT store_id)=1,MAX(store_name),'多个归属门店') AS store_name," : '')
+                . ($key === 'stores' ? "IF(COUNT(DISTINCT member_id)=1,MAX(member_name),'') AS buyer_name," : '')
                 . $this->aggregateSql())->group($spec[0])->order('total_amount desc,id asc')->limit(50)->select()->toArray();
             $ranks[$key] = array_map([$this, 'metricRow'], $rows);
         }
@@ -331,7 +341,8 @@ class CombinationPromotionServices
         return ['统计按支付日期筛选，仅真实已支付拼团订单；未支付、虚拟名额、赠送奖励不计业绩。',
             '成团业绩为当前已成团订单实付扣成功退款；未成团业绩包含拼团中及失败待退款净额；总业绩等于两项合计。',
             '成功退款冲减原支付日期对应业绩；待处理退款不提前扣除；成团只转移金额分类，不重复增加总业绩。',
-            '推广人及门店取新订单创建时本次分享快照，与永久推荐人、购买门店无关；历史未留证据的订单列为未归属。',
+            '个人排行只统计有合格推广人的订单；无推广人的订单仍计入总业绩、活动及原单购买门店，个人排行不列未归属。',
+            '有推广人的门店取订单创建时本次分享快照；无推广人的门店取原单购买门店，不按会员当前归属倒推。原单也无门店时列为未归属。',
             '每笔订单只归一个推广人；团数按团编号去重，同一团可出现在不同推广人的明细中，个人团数不能直接相加。'];
     }
 

@@ -77,5 +77,14 @@ try {
     check($service->dashboard([],$admin)['metrics']['total_amount']==='200.00','saved activity selection drives backend totals');
     $unqualified=fixture(6,3,'yue');$service->registerOrderInTx($unqualified['oid'],$unqualified['uid']);
     check((int)Db::name('combination_promotion_order')->where('order_id',$unqualified['oid'])->value('share_uid')===0,'non-promoter cannot gain attribution through forged link');
+    // 无推广人的购买订单保留总业绩，门店榜取原单门店，个人榜不得生成“未归属推广人”。
+    $buyerStore=(int)Db::name('store_order')->where('id',$unqualified['oid'])->value('store_id');
+    $buyerName=(string)Db::name('user')->where('uid',$unqualified['uid'])->value('real_name');
+    $buyerFilter=['activity_ids'=>[$unqualified['cid']]];
+    $buyerView=$service->dashboard($buyerFilter,$admin);
+    check($buyerView['metrics']['total_amount']==='100.00' && $buyerView['rankings']['members']===[],'unpromoted purchase stays in totals but not personal performance');
+    check((int)$buyerView['rankings']['stores'][0]['id']===$buyerStore && $buyerView['rankings']['stores'][0]['buyer_name']===$buyerName,'purchase store and single buyer remain visible in store ranking');
+    $buyerDetail=$service->details($buyerFilter+['dimension'=>'store','dimension_id'=>$buyerStore],$admin);
+    check($buyerDetail['count']===1 && $buyerDetail['list'][0]['member_name']===$buyerName,'store drilldown shares ranking scope and buyer name');
     echo "R44 PROMOTION ACCEPTANCE COMPLETE\n";
 } finally { Db::rollback(); }
