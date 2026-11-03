@@ -367,6 +367,7 @@ onBeforeUnmount(() => { requestId++; clearTimeout(asyncPollTimer); controller?.a
     <StoreReconciliationReport v-else-if="active?.available && reconciliationReport" :platform="platform" @modal-change="reconciliationModal = $event" />
     <template v-else-if="active?.available">
       <UnifiedReportQueryToolbar :fields="fields" :page-code="active.code"
+        :primary-date-keys="active.code === 'basic_brush_registration' ? ['registered_date'] : []"
         :is-query-loading="loading || salarySaving" :executed-query="executedQuery" @query="submitQuery">
         <template #leading-controls>
           <OrganizationStoreScopePicker v-if="platform" v-model="stores" :tree="scope.tree" :allowed-store-ids="scope.allowed_store_ids" :label="scopeLabel" @change="selectScope" />

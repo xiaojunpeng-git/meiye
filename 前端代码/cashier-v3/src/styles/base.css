@@ -1450,6 +1450,20 @@ html.group-dashboard-document #app {
   color: #d48806 !important;
 }
 
+/* 异常商品保留可读原因；不能以零价格或裁掉的库存提示冒充正常商品。 */
+.product-card--unavailable:disabled .product-card__name {
+  color: #4a5568;
+}
+
+.product-card__unavailable-reason {
+  display: block;
+  margin-top: 4px;
+  color: #9c4221;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
 .catalog-empty-state,
 .cart-empty-state {
   display: grid;

@@ -687,7 +687,7 @@ function completedPaymentResultLines(payment = {}, selectedLines = [], response 
   const submission = envelope?.data?.checkoutSubmission
   const order = submission?.salesOrder
   const collection = submission?.paymentCollection
-  const methods = new Set(['cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher', 'bank_transfer', 'other_income', 'partner_collection'])
+  const methods = new Set(['cash', 'unionpay', 'enterprise_wechat', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher', 'bank_transfer', 'other_income', 'partner_collection'])
   const collectedLines = selectedLines.filter((line) => line.lineRole === 'payment' && methods.has(line.method))
   const cents = collectedLines.map((line) => Number(line.amount) * 100)
   const totalCents = cents.reduce((total, amount) => total + amount, 0)

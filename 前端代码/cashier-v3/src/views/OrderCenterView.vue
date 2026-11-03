@@ -465,6 +465,16 @@ const FIELD_ALIASES = {
 const state = useCashierV3State()
 const router = useRouter()
 const route = useRoute()
+/** 对账跳转令牌只从同一 Vue3 来源的会话存储读取，URL 不携带原单号或金额。 */
+const reconciliationToken = typeof route.query.reconciliation_token === 'string' && /^[0-9a-f-]{36}$/i.test(route.query.reconciliation_token)
+  ? route.query.reconciliation_token : ''
+let reconciliationNavigation = null
+if (reconciliationToken) {
+  try { reconciliationNavigation = JSON.parse(sessionStorage.getItem(`reconciliation-navigation:${reconciliationToken}`) || 'null') }
+  catch (_) { reconciliationNavigation = null }
+}
+const reconciliationDocumentNos = Array.isArray(reconciliationNavigation?.documentNos)
+  ? reconciliationNavigation.documentNos.filter(no => typeof no === 'string' && no !== '') : []
 // 平台只增加组织/门店范围上下文；页面、字段、页签和动作仍走同一份权限投影。
 const isPlatformContext = computed(() => route.meta.platformOrderContext === true)
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
@@ -577,8 +587,8 @@ const salesReportReturnLocation = computed(() => {
     query: { start_date: drill.from, end_date: drill.to }
   }
 })
-const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: '当前权限范围' })
-const platformScopeStoreIds = ref([])
+const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: reconciliationNavigation?.storeLabel || '当前权限范围' })
+const platformScopeStoreIds = ref(reconciliationNavigation?.storeId > 0 ? [reconciliationNavigation.storeId] : [])
 const orderCenter = computed(() => state.orderCenter || {})
 const requestedPlatformTab = String(route.query.tab || route.query.recordType || '').trim()
 const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : 'all')
@@ -2944,6 +2954,13 @@ function reportSalesDateQuery() {
 }
 
 function initialOrderCenterQuery() {
+  // 对账按收款来源日归集，订单业务日可能不同；用已核实的原单号精确筛选，
+  // 不伪造订单日期、金额或支付方式，也不继承默认“今天”条件。
+  if (isPlatformContext.value && activeTabKey.value === 'all' && reconciliationDocumentNos.length) {
+    return { dataScope: 'normal', businessStatus: '', filterRelation: 'all',
+      filters: [{ field: 'order_no', operator: 'in', value: reconciliationDocumentNos }],
+      topFilters: [], page: 1, pageSize: 20 }
+  }
   // 首屏复用本地规则，但不恢复过去的日期或人员输入；默认业务日仍是当天。
   // 首屏与工具栏共用配置归一化，空配置/旧 and 不能绕过 all/any 契约；不修改本地偏好或业务命令。
   const settings = normalizeUnifiedQuerySettings(querySettings.value)
@@ -2953,6 +2970,12 @@ function initialOrderCenterQuery() {
     sorts: settings.sorts || [], visibleFields: settings.visibleFields || [],
     groupBy: settings.groupBy || [], summaries: settings.summaries || []
   }
+}
+
+function returnToReconciliation() {
+  if (!reconciliationToken) return
+  const parentOrigin = document.referrer ? new URL(document.referrer).origin : window.location.origin
+  window.parent.postMessage({ type: 'mohe:reconciliation-return', token: reconciliationToken }, parentOrigin)
 }
 
 function leaveServiceReportDrilldown() {
@@ -4131,6 +4154,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="order-center-page" aria-label="订单中心">
+    <p v-if="isPlatformContext && reconciliationToken" class="order-center-notice" role="status">
+      正在查看对账单对应订单；订单金额及其他字段保持原值。
+      <button type="button" class="button button--text" @click="returnToReconciliation">返回门店对账单</button>
+    </p>
     <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
     <p v-if="servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
     <p v-if="activeTabKey === 'refund' && refundAttributionError && !refundAttributionEditorOpen && !refundAttributionPending" class="order-center-page__inline-error" role="alert">{{ refundAttributionError }}</p>

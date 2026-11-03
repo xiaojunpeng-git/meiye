@@ -1,5 +1,5 @@
 <script setup>
-import { configuredActualAccountingMethods } from '@/services/configuredAccountingMethods'
+import { configuredActualAccountingMethods, filterConfiguredAccountingMethods } from '@/services/configuredAccountingMethods'
 import { computed, ref, watch } from 'vue'
 import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
@@ -73,6 +73,7 @@ let repaymentSourceLoadToken = 0
 let otherSalespersonSearchToken = 0
 // 欠款补交使用同一套记账收款代码；这里只提供可选项，落账权限和事实由最终提交重验。
 const additionalAccountingMethods = ref([])
+const accountingCatalog = ref(null)
 const basePaymentMethods = [
   { code: 'cash', label: '现金' },
   { code: 'unionpay', label: '银联' },
@@ -83,11 +84,13 @@ const basePaymentMethods = [
   { code: 'partner_collection', label: '合作方收款' }
 ]
 // 可选渠道只在本站配置启用后加入；历史标签不随启停丢失。
-const paymentMethods = computed(() => [...basePaymentMethods, ...additionalAccountingMethods.value
-  .map((method) => ({ code: method.id, label: method.name }))])
+const paymentMethods = computed(() => filterConfiguredAccountingMethods([
+  ...basePaymentMethods.map((method) => ({ id: method.code, name: method.label })),
+  ...additionalAccountingMethods.value
+], accountingCatalog.value).map((method) => ({ code: method.id, label: method.name })))
 // Prior receipts retain their historical label even though the non-cash
 // method is no longer selectable for a new debt repayment.
-const historicalPaymentMethods = [...basePaymentMethods, { code: 'bank_transfer', label: '银行转账' }, { code: 'other_income', label: '其他收入' }, { code: 'other_collection', label: '其他收款' }]
+const historicalPaymentMethods = [...basePaymentMethods, { code: 'enterprise_wechat', label: '企微收款' }, { code: 'bank_transfer', label: '银行转账' }, { code: 'other_income', label: '其他收入' }, { code: 'other_collection', label: '其他收款' }]
 let paymentLineSequence = 0
 
 const records = computed(() => {
@@ -202,6 +205,7 @@ function selectRepayment(record) {
   isRepaymentRewardOpen.value = false
   // 渠道开关独立于业务来源开关；来源关闭时仍须读取本站转账配置。
   additionalAccountingMethods.value = []
+  accountingCatalog.value = null
   loadRepaymentSources()
   validationMessage.value = ''
 }
@@ -215,11 +219,13 @@ async function loadRepaymentSources() {
     if (token === repaymentSourceLoadToken) {
       repaymentSources.value = catalog.sources
       additionalAccountingMethods.value = configuredActualAccountingMethods(catalog)
+      accountingCatalog.value = catalog
     }
   } catch (error) {
     if (token === repaymentSourceLoadToken) {
       repaymentSources.value = []
       additionalAccountingMethods.value = []
+      accountingCatalog.value = null
       repaymentSourcesError.value = error instanceof Error ? error.message : '来源加载失败，请重试。'
     }
   } finally {

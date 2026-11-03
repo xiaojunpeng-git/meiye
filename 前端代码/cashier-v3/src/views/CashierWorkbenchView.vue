@@ -2238,6 +2238,13 @@ function reportCheckoutEntryFailure(result, fallback = '结账资料保存失败
 }
 
 async function selectCatalogItem(item) {
+  // 异常目录项只供定位资料问题，不能进入本地购买或卡升级快照。
+  if (item?.disabled) {
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'warning', message: item.disabledReason || '当前商品不可加入。' }
+    }))
+    return
+  }
   if (activeCardOperationUpgrade.value) {
     reportEntitlementContractError({ message: '当前只能完成本次升级结账；如需重新选择，请先清空购物车。' })
     return
@@ -5696,7 +5703,7 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false, catalog
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
   ].map(([id, name]) => ({ id, name, canAdd: true, cashPerformanceEligible: id !== 'other_collection' }))
-  // 新渠道按本站配置开放，目录失败或其他实例未启用时不显示。
+  // 企微、转账和其他收入按本站配置开放；停用不改变历史收款事实。
   methods.splice(2, 0, ...configuredActualAccountingMethods(catalog || {}))
   // 历史补录仅用于卡项和产品销售；仍须单独结算且不形成现金业绩。
   if (oldCardEnabled && lines.length > 0
@@ -8161,7 +8168,7 @@ onBeforeUnmount(() => {
               :key="item.id"
               type="button"
               class="product-card"
-              :class="{ 'product-card--selected': catalogItemSelectedQuantity(item) > 0 }"
+              :class="{ 'product-card--selected': catalogItemSelectedQuantity(item) > 0, 'product-card--unavailable': item.catalogUnavailable }"
               :disabled="item.disabled"
               :title="item.disabled ? (item.disabledReason || '当前不可加入') : `加入${item.name}`"
               @click="selectCatalogItem(item)"
@@ -8175,15 +8182,17 @@ onBeforeUnmount(() => {
               <span v-if="item.cardRuleLabel || item.specification" class="product-card__specification">
                 {{ [item.cardRuleLabel, item.specification].filter(Boolean).join(' · ') }}
               </span>
-              <strong class="product-card__price">{{ formatMoney(item.price) }}</strong>
+              <strong v-if="!item.catalogUnavailable" class="product-card__price">{{ formatMoney(item.price) }}</strong>
+              <span v-if="item.catalogUnavailable" class="product-card__unavailable-reason">{{ item.disabledReason }}</span>
               <span v-if="item.stockText" class="product-card__stock" :class="{ 'product-card__stock--warning': item.stockWarning }">
                 {{ item.stockText }}
               </span>
             </button>
           </div>
+          <!-- 全目录故障必须显示真实原因，不能误导用户修改搜索或分类。 -->
           <div v-else class="catalog-empty-state">
-            <strong>暂无可售商品</strong>
-            <span>请修改搜索条件或商品分类后再试。</span>
+            <strong>{{ catalog.availability?.status === 'unavailable' ? '商品目录暂不可用' : '暂无可售商品' }}</strong>
+            <span>{{ catalog.availability?.status === 'unavailable' ? catalog.availability.message : '请修改搜索条件或商品分类后再试。' }}</span>
           </div>
           </div>
         </template>
