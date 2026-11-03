@@ -1254,8 +1254,11 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     ->order('id asc')
                     ->lock(true)
                     ->select());
+                // Final settlement must reuse the same stable whole-yuan card
+                // component allocation as the selector. Reporting cents are
+                // weights only and may never become a writeoff fact.
                 $actualSaleAmountsByOrder[$originOrderId] = (new CashierV3CardSaleActualAmountServices())
-                    ->forOrders([$originOrderId], $orderCartRowsByOrder[$originOrderId]);
+                    ->wholeYuanForOrders([$order], $orderCartRowsByOrder[$originOrderId]);
             }
             $orderCartRows = $orderCartRowsByOrder[$originOrderId];
             // Match the selector's immutable sale allocation. Configured project
@@ -1295,10 +1298,6 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $amount = $this->centsToMoney((int)$actualSaleAmountCents);
                 $amountCalculationVersion = 'card-sale-actual-amount-'
                     . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
-                if ((int)$actualSaleAmountCents % 100 !== 0) {
-                    $amountCalculationVersion = 'operation-cent-' . $amountCalculationVersion;
-                    $decoded['amountCalculationVersion'] = $amountCalculationVersion;
-                }
             }
             $remainingAmount = $sharedPurchase
                 ? $sharedAmounts['remainingAmount']
