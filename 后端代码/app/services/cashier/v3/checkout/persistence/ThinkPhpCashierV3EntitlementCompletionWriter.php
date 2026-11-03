@@ -6,6 +6,7 @@ use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\checkout\CashierV3IndependentGiftAuthority;
 use app\services\report\CustomerLifecycleFactServices;
 use app\services\report\StoreReportServiceCategorySnapshotServices;
 use think\facade\Db;
@@ -268,7 +269,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $orderIds[$deduction['origin_order_id']] = $deduction['origin_order_id'];
             $holderId = $deduction['holder_id'];
             if ($deduction['entitlement_instance_type'] === 'independent_gift') {
-                // 独立赠送只扣导入明细，不参与卡规则和卡实例余额。
+                // 独立赠送只扣原赠送明细，不参与卡规则和卡实例余额。
                 continue;
             }
             $holderIds[$holderId] = $holderId;
@@ -351,15 +352,11 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             if (!$detail || !$order || (!$directSnapshot && !$version)
                 || (int)($detail['oid'] ?? 0) !== $deduction['origin_order_id']
                 || (int)($detail['product_id'] ?? 0) !== $deduction['project_id']
-                || (int)($detail['cart_type'] ?? 0) !== 2
+                || (!$independentGift && (int)($detail['cart_type'] ?? -1) !== 2)
                 || (int)($detail['product_type'] ?? 0) !== 6
                 || ($independentGift && ((int)($detail['uid'] ?? 0) !== $context['member_id']
                     || (int)($order['uid'] ?? 0) !== $context['member_id']
-                    || (int)($detail['is_gift'] ?? 0) !== 1
-                    || (string)($detail['source_type'] ?? '') !== 'migration'
-                    || strpos((string)($detail['cart_id'] ?? ''), 'RH-PG-') !== 0
-                    || (int)($detail['is_writeoff'] ?? 1) !== 0
-                    || !$this->activeOrder($order)))
+                    || !CashierV3IndependentGiftAuthority::isSupported($detail, $order)))
                 || (!$directSnapshot && $legacyRemainingMustMatch
                     && (int)($detail['write_surplus_times'] ?? -1)
                         !== $deduction['expected_physical_remaining_times'])
@@ -407,7 +404,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
                 ->where('id', $deduction['source_detail_id'])
                 ->where('oid', $deduction['origin_order_id'])
                 ->where('product_id', $deduction['project_id'])
-                ->where('cart_type', 2)
+                ->where('cart_type', $sourceCartType)
                 ->where('product_type', 6)
                 ->where('write_surplus_times', $legacyBefore)
                 ->update([

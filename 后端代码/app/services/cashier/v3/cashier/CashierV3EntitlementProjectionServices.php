@@ -13,6 +13,7 @@ use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\checkout\CashierV3IndependentGiftAuthority;
 use app\services\order\store\WriteOffOrderServices;
 use think\facade\Db;
 
@@ -164,7 +165,7 @@ final class CashierV3EntitlementProjectionServices
             return $versions;
         });
         $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false, true);
-        // 历史项目赠送没有卡实例；以导入明细自身作为独立权益展示，不补造卡。
+        // 历史项目赠送没有卡实例；以原订单明细作为独立权益展示，不补造卡。
         // 最终结账仍须在事务内锁定这条明细并复核剩余次数。
         $sources = array_merge($sources, $this->legacyGiftSources($memberId, $operatorScope));
         // 展示行不能充当并发版本来源。选择器把本次读取时签发的 holder
@@ -1245,8 +1246,8 @@ final class CashierV3EntitlementProjectionServices
     }
 
     /**
-     * 历史导入项目赠送的剩余次数以原明细为权威；来源单仅证明发放仍有效。
-     * 这里只投影仍可用的明细，不把赠送伪装为销售卡项或购买金额。
+     * 历史独立项目赠送的剩余次数以原明细为权威；来源单证明发放仍有效。
+     * 兼容迁入赠送和旧问卷奖励，不把赠送伪装为销售卡项或购买金额。
      */
     private function legacyGiftSources(int $memberId, CashierV3OperatorScope $operatorScope): array
     {
@@ -1272,10 +1273,39 @@ final class CashierV3EntitlementProjectionServices
         if (!$this->crossStoreEnabled()) {
             $query->where('o.store_id', $operatorScope->storeId());
         }
-        $rows = $this->rows($query->field('ci.id,ci.oid,ci.product_id,ci.cart_info,ci.write_times,ci.write_surplus_times,o.order_id,o.store_id')
+        $giftFields = 'ci.id,ci.uid,ci.oid,ci.cart_id,ci.cart_type,ci.product_id,ci.product_type,ci.is_gift,ci.source_type,ci.is_writeoff,ci.write_start,ci.write_end,ci.cart_info,ci.write_times,ci.write_surplus_times,o.id AS source_order_id,o.uid AS order_uid,o.order_id,o.store_id,o.mark,o.paid,o.is_del,o.is_system_del,o.is_user_del,o.refund_status,o.terminal_action,o.card_upgrade_use_oid';
+        $rows = $this->rows($query->field($giftFields)
             ->order('ci.id desc')->select());
+        // 旧问卷奖励是 cart_type=0 的独立项目，订单被系统隐藏但未作废。
+        // 按明确的赠送来源补读，最终仍由同一权威规则复核原单和有效期。
+        $surveyQuery = Db::name('store_order_cart_info')->alias('ci')
+            ->join('store_order o', 'o.id = ci.oid AND o.uid = ci.uid')
+            ->where('ci.uid', $memberId)->where('o.uid', $memberId)
+            ->where('ci.cart_type', 0)->where('ci.product_type', 6)
+            ->where('ci.is_gift', 1)->where('ci.is_writeoff', 0)
+            ->where('ci.write_surplus_times', '>', 0)
+            ->where('o.mark', 'like', '完成问卷赠送·任务#%')
+            ->where('o.paid', 1)->where('o.is_del', 0)
+            ->where('o.is_user_del', 0)->where('o.refund_status', 0)
+            ->where('o.terminal_action', 0)->where('o.card_upgrade_use_oid', 0);
+        if (!$this->crossStoreEnabled()) {
+            $surveyQuery->where('o.store_id', $operatorScope->storeId());
+        }
+        $rows = array_merge($rows, $this->rows($surveyQuery->field($giftFields)
+            ->order('ci.id desc')->select()));
         $sources = [];
         foreach ($rows as $row) {
+            $order = [
+                'id' => $row['source_order_id'], 'uid' => $row['order_uid'],
+                'mark' => $row['mark'], 'paid' => $row['paid'],
+                'is_del' => $row['is_del'], 'is_system_del' => $row['is_system_del'],
+                'is_user_del' => $row['is_user_del'], 'refund_status' => $row['refund_status'],
+                'terminal_action' => $row['terminal_action'],
+                'card_upgrade_use_oid' => $row['card_upgrade_use_oid'],
+            ];
+            if (!CashierV3IndependentGiftAuthority::isSupported($row, $order)) {
+                continue;
+            }
             $detailId = (int)$row['id'];
             $remaining = (int)$row['write_surplus_times'];
             $total = (int)$row['write_times'];
@@ -1288,17 +1318,22 @@ final class CashierV3EntitlementProjectionServices
                 continue;
             }
             $sourceNo = (string)$row['order_id'];
+            $projectSourceType = (int)$row['cart_type'] === 0
+                ? 'historical_survey_project_gift' : 'migrated_project_gift';
+            $end = (int)$row['write_end'];
+            $expiryDate = $end > 0 ? $this->expiryDate($end) : '';
+            $validThroughLabel = $expiryDate !== '' ? $expiryDate : '长期有效';
             $project = [
                 'id' => $detailId, 'projectId' => (int)$row['product_id'],
                 'entitlementSourceDetailId' => $detailId,
-                'sourceType' => 'migrated_project_gift', 'name' => $name,
+                'sourceType' => $projectSourceType, 'name' => $name,
                 'remainingTimes' => $remaining, 'purchaseTimes' => $total,
                 'purchaseAmount' => '0.00', 'remainingAmount' => '0.00',
                 'totalPurchaseTimes' => $total, 'consumedTimesAtSelection' => $total - $remaining,
                 'amountCalculationVersion' => 'independent-gift-'
                     . \app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel::AMOUNT_CALCULATION_VERSION,
                 'occupiedTimes' => 0, 'availableTimes' => $remaining, 'debtBlockedTimes' => 0,
-                'debtRestrictionLabel' => '', 'validThroughLabel' => '长期有效', 'expiryDate' => '',
+                'debtRestrictionLabel' => '', 'validThroughLabel' => $validThroughLabel, 'expiryDate' => $expiryDate,
                 'orderRemark' => '', 'isGift' => true, 'selectable' => true,
                 'disabled' => false, 'disabledReason' => '', 'unitPrice' => '0',
                 'serviceObject' => '本人', 'craftsmen' => [], 'craftsmenSummary' => '待分配',
@@ -1316,7 +1351,7 @@ final class CashierV3EntitlementProjectionServices
                 'occupiedTimes' => 0, 'availableTimes' => $remaining,
                 'selectable' => true, 'disabled' => false, 'disabledReason' => '',
                 'statusCode' => 'enabled', 'status' => '可用',
-                'expiryText' => '长期有效', 'expiryDate' => '', 'orderRemark' => '',
+                'expiryText' => $validThroughLabel, 'expiryDate' => $expiryDate, 'orderRemark' => '',
                 'projects' => [$project],
             ];
         }

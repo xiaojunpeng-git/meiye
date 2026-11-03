@@ -1353,8 +1353,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
     }
 
     /**
-     * 导入项目赠送的 cart 明细本身是剩余次数权威。身份、原单有效性和
-     * 来源门店在每次最终结账事务中重读；不把旧赠送映射成虚构卡实例。
+     * 独立项目赠送的原明细是剩余次数权威。导入赠送和历史问卷奖励共用
+     * 来源准入规则，最终事务重读身份、原单、有效期与门店，不虚构卡实例。
      */
     private function loadLegacyGiftAuthority(
         array $line,
@@ -1370,16 +1370,15 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         $detail = $this->row(Db::name('store_order_cart_info')
             ->where('id', $detailId)->where('uid', $memberId)
             ->where('product_id', (int)$line['project_id'])
-            ->where('cart_type', 2)->where('product_type', 6)
-            ->where('is_gift', 1)->where('source_type', 'migration')
-            ->where('cart_id', 'like', 'RH-PG-%')->where('is_writeoff', 0)
+            ->whereIn('cart_type', [0, 2])->where('product_type', 6)
+            ->where('is_gift', 1)->where('is_writeoff', 0)
             ->lock(true)->find());
         if (!$detail || (int)$detail['write_surplus_times'] <= 0) {
             throw self::failure('authority_gift_not_active', ['lineId' => $lineId]);
         }
         $order = $this->row(Db::name('store_order')->where('id', (int)$detail['oid'])
             ->where('uid', $memberId)->lock(true)->find());
-        if (!$this->activeOrder($order)) {
+        if (!CashierV3IndependentGiftAuthority::isSupported($detail, $order)) {
             throw self::failure('authority_gift_order_not_active', ['lineId' => $lineId]);
         }
         $this->assertOriginStoreAllowed((int)$order['store_id'], $operatorScope, $dataScope);

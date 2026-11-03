@@ -123,7 +123,8 @@ final class CashierV3EntitlementOccupationGuardVersionProvider implements Cashie
     {
         $query = Db::name('store_order_cart_info')
             ->where('id', $detailId)
-            ->where('cart_type', 2)
+            // 独立问卷赠送保留旧明细 cart_type=0；来源身份由结账权威复核。
+            ->whereIn('cart_type', [0, 2])
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
             ->where('write_surplus_times', '>', 0)
