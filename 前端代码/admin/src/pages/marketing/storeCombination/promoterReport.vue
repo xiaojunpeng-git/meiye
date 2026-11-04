@@ -58,8 +58,8 @@ export default {
     async loadScope() { if (!this.options) await this.loadOptions(); return (this.options && this.options.scope) || { tree: [] }; },
     filters() { return { ...this.applied, activity_ids: this.applied.activity_ids.join(','), store_ids: this.applied.store_ids.join(',') }; },
     detailParams() { return { ...this.filters(), ...this.detailFilter }; },
-    // 提交筛选后重置页码与下钻；翻页只改变页码，绝不丢失已提交的条件。
-    applyQuery() { this.applied = { ...this.draft, store_ids: [...this.draft.store_ids], activity_ids: [...this.draft.activity_ids] }; this.tab = 'summary'; this.detailFilter = {}; this.drillLabel = ''; this.data = {}; this.load(1); },
+    // 提交筛选保留当前报表页签，只重置页码与旧下钻；查询、导出继续使用同一份已提交条件。
+    applyQuery() { this.applied = { ...this.draft, store_ids: [...this.draft.store_ids], activity_ids: [...this.draft.activity_ids] }; this.detailFilter = {}; this.drillLabel = ''; this.data = {}; this.load(1); },
     refresh() { this.load(this.page); },
     async load(page) {
       this.page = page; this.loading = true; this.error = ''; const id = ++this.requestId;
