@@ -152,13 +152,20 @@ class MiniProgram extends BaseApplication
      * @param string $scene
      * @param string $path
      * @param int $width
+     * @param string $environment 服务端确定的打开环境；旧调用保持正式版行为。
      * @return array|Collection|object|ResponseInterface|string
      */
-    public static function appCodeUnlimit(string $scene, string $path = '', int $width = 0)
+    public static function appCodeUnlimit(string $scene, string $path = '', int $width = 0, string $environment = 'release')
     {
+        // 不允许错误配置悄悄落回正式版，否则共享 AppID 的体验实例会打开另一套接口。
+        if (!in_array($environment, ['release', 'trial', 'develop'], true)) {
+            throw new \InvalidArgumentException('小程序码环境配置无效');
+        }
         $optional = [
             'page' => $path,
-            'width' => $width
+            'width' => $width,
+            'env_version' => $environment,
+            'check_path' => $environment === 'release'
         ];
         if (!$optional['page']) {
             unset($optional['page']);

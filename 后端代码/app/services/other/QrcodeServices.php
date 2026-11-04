@@ -294,22 +294,29 @@ class QrcodeServices extends BaseServices
 		if (!$page || !$namePath) {
 			return false;
 		}
+		// 微信码本身绑定打开环境；新海报必须按环境使用独立文件和附件键，不能命中旧正式码。
+		$environment = (string)config('member_qrcode.env_version', 'release');
+		if (!in_array($environment, ['release', 'trial', 'develop'], true)) {
+			throw new ValidateException('小程序码环境配置无效');
+		}
+		$namePath = $environment . '_' . $namePath;
+		$attachmentName = $savePath . '/' . $namePath;
 		try {
 			/** @var SystemAttachmentServices $systemAttachmentService */
 			$systemAttachmentService = app()->make(SystemAttachmentServices::class);
 			if (!$isSaveAttach) {
 				$imageInfo = "";
 			} else {
-				$imageInfo = $systemAttachmentService->getOne(['name' => $savePath . '/' . $namePath]);
+				$imageInfo = $systemAttachmentService->getOne(['name' => $attachmentName]);
 				//检测远程文件是否存在
 				if (isset($imageInfo['att_dir']) && strstr($imageInfo['att_dir'], 'http') !== false && curl_file_exist($imageInfo['att_dir']) === false) {
 					$imageInfo = '';
-					$systemAttachmentService->delete(['name' => $savePath . '/' . $namePath]);
+					$systemAttachmentService->delete(['name' => $attachmentName]);
 				}
 			}
 			$siteUrl = sys_config('site_url');
 			if (!$imageInfo) {
-				$res = MiniProgram::appCodeUnlimit($data, $page, 280);
+				$res = MiniProgram::appCodeUnlimit($data, $page, 280, $environment);
 				if (!$res) return false;
 				$uploadType = (int)sys_config('upload_type', 1);
 				$upload = UploadService::init($uploadType);
@@ -325,7 +332,8 @@ class QrcodeServices extends BaseServices
 				if (!$remoteImage['status']) return false;
 				if ($isSaveAttach) {
 					$systemAttachmentService->save([
-						'name' => $imageInfo['name'],
+						// 与读取、失效清理使用同一完整键；文件名和附件标识不可混用。
+						'name' => $attachmentName,
 						'att_dir' => $imageInfo['dir'],
 						'satt_dir' => $imageInfo['thumb_path'],
 						'att_size' => $imageInfo['size'],
