@@ -231,7 +231,7 @@ final class CashierV3OrderLifecycleServices
             );
             (new StoreReportPaymentSaleAllocationFactServices())->persistLifecycleReversalsInTx([
                 'tenant_id' => $dataScope->tenantId(),
-                'organization_id' => $dataScope->organizationId(),
+                'organization_id' => (string)$source['sourceOrganizationId'],
                 'store_id' => (int)$source['storeId'],
                 'member_id' => (int)$source['memberId'],
                 'order_id' => (string)$source['sourceId'],
@@ -530,11 +530,14 @@ final class CashierV3OrderLifecycleServices
         $type = trim((string)($payload['sourceType'] ?? $payload['source_type'] ?? 'sales'));
         $id = trim((string)($payload['orderId'] ?? $payload['salesOrderId'] ?? $payload['sourceOrderId'] ?? ''));
         if ($type !== 'sales' || $id === '') throw self::failure('order_lifecycle_sales_source_required');
-        $q = Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())->where('organization_id', $scope->organizationId())->where('store_id', $operator->storeId())->where('order_id', $id);
+        // A store can change organization after an order was settled. The frozen
+        // order keeps its original organization; current store ownership and
+        // tenant isolation authorize this command, not a rewritten history.
+        $q = Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->where('order_id', $id);
         if ($lock) $q->lock(true);
         $row = (array)$q->find();
         if (!$row || (string)($row['order_status'] ?? '') !== 'settled' || (string)($row['order_direction'] ?? '') !== 'forward') throw self::failure('sales_order_not_mutable');
-        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'businessDate' => (string)$row['business_date'], 'amountCents' => (int)$row['sale_amount_cents'], 'orderNote' => (string)($row['order_note'] ?? ''), 'tenantId' => $scope->tenantId()];
+        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'sourceOrganizationId' => (string)$row['organization_id'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'businessDate' => (string)$row['business_date'], 'amountCents' => (int)$row['sale_amount_cents'], 'orderNote' => (string)($row['order_note'] ?? ''), 'tenantId' => $scope->tenantId()];
     }
 
     private function input(string $action, array $payload, array $source): array
@@ -1308,7 +1311,7 @@ final class CashierV3OrderLifecycleServices
     private function updateSalesOrderNote(array $source, string $note, int $now, CashierV3DataScopeContext $scope): void
     {
         $updated = (int)Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())
-            ->where('organization_id', $scope->organizationId())->where('store_id', (int)$source['storeId'])
+            ->where('organization_id', (string)$source['sourceOrganizationId'])->where('store_id', (int)$source['storeId'])
             ->where('order_id', (string)$source['sourceId'])->where('order_status', 'settled')->where('order_direction', 'forward')
             ->update(['order_note' => mb_substr($note, 0, 500), 'update_time' => $now]);
         if ($updated !== 1) throw self::failure('sales_order_note_update_failed');
@@ -1350,7 +1353,7 @@ final class CashierV3OrderLifecycleServices
         }
         $name = mb_substr(trim((string)$employee['name']), 0, 128);
         $common = [
-            'tenant_id' => $scope->tenantId(), 'organization_id' => $scope->organizationId(), 'store_id' => $operator->storeId(),
+            'tenant_id' => $scope->tenantId(), 'organization_id' => (string)$source['sourceOrganizationId'], 'store_id' => $operator->storeId(),
             'member_id' => (int)$source['memberId'], 'order_id' => $source['sourceId'], 'source_line_id' => $sourceLineId,
             'business_date' => $businessDate, 'operator_id' => $operator->operatorId(), 'business_event_no' => (string)$event['event_no'],
             'command_idempotency_key' => $commandKey, 'occurred_at' => $now, 'recorded_at' => $now, 'status' => 'effective',

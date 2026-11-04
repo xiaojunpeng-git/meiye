@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3;
 
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
+use app\services\cashier\v3\order\CashierV3SalesVoidFailureMessages;
 use think\facade\Log;
 
 /**
@@ -16,9 +17,17 @@ final class CashierV3CommandFailureEnvelopeServices
 {
     public function fromException(array $body, CashierV3CommandException $exception): array
     {
+        $action = (string)($body['action'] ?? (($body['command']['action'] ?? '') ?: ''));
+        // A rejected void keeps the server's exact reason code for audit, but
+        // the operator sees the affected business record and next step.
+        $message = $action === 'void-sales-order'
+            ? CashierV3SalesVoidFailureMessages::forReason(
+                (string)($exception->getDetail()['reason'] ?? ''), $exception->getMessage()
+            )
+            : $exception->getMessage();
         try {
             Log::error('[cashier_v3_command_rejected] ' . json_encode([
-                'action' => (string)($body['action'] ?? (($body['command']['action'] ?? '') ?: '')),
+                'action' => $action,
                 'correlationId' => (string)($body['correlationId'] ?? $body['correlation_id'] ?? ''),
                 'code' => $exception->getResultCode(),
                 'status' => $exception->getResultStatus(),
@@ -32,7 +41,7 @@ final class CashierV3CommandFailureEnvelopeServices
             'result' => [
                 'status' => $exception->getResultStatus(),
                 'code' => $exception->getResultCode(),
-                'message' => $exception->getMessage(),
+                'message' => $message,
             ],
             'conflict' => $exception->getResultStatus() === CashierV3ResultCode::STATUS_CONFLICT
                 ? $exception->getDetail()
@@ -83,6 +92,11 @@ final class CashierV3CommandFailureEnvelopeServices
             : '操作失败，请稍后重试。';
         $code = CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE;
         $raw = $exception->getMessage();
+        if ($action === 'void-sales-order') {
+            // Only a known presale close race is business-readable. Unknown
+            // exceptions retain the safe technical failure wording below.
+            $message = CashierV3SalesVoidFailureMessages::forUnexpected($raw) ?? $message;
+        }
         $contractDetail = [];
         if ($exception instanceof \app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException) {
             $contractDetail = [

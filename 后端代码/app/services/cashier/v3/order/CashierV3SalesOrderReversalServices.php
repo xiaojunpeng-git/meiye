@@ -25,6 +25,18 @@ final class CashierV3SalesOrderReversalServices
     public function prepare(array $source, string $action, array $input, CashierV3DataScopeContext $scope, int $entitlementCreditCents = 0): array
     {
         CashierV3TransactionGuard::assertInTransaction('salesOrderReversal.prepare');
+        if ($action === 'void-sales-order' && preg_match('/^IMP007-[1-9][0-9]*-sale$/D', (string)$source['sourceId'])) {
+            // Imported product sales lack native outbound receipts. Returning
+            // money while silently skipping stock restoration would break the
+            // inventory ledger, so keep these orders blocked until reconciled.
+            $productCount = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+                ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
+                ->where('line_status', 'settled')->where('item_type', 'product')->count();
+            if ($productCount > 0 && !Db::name('cashier_v3_sale_inventory_receipt')
+                ->where('tenant_id', $scope->tenantId())->where('sales_order_id', (string)$source['sourceId'])->find()) {
+                throw self::failure('sales_historical_product_inventory_unverified');
+            }
+        }
         $balanceFacts = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$source['sourceId'])->where('fact_direction', 'forward')
             ->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
@@ -73,6 +85,13 @@ final class CashierV3SalesOrderReversalServices
         $expectedCardCount = (int)Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
             ->where('line_status', 'settled')->where('item_type', 'card')->sum('quantity');
+        // The sealed historical import kept the original paid order and holder,
+        // but never emitted a V3 issuance receipt. Use that frozen source only
+        // when its one-to-one identity can be proved; other gaps still block.
+        if ($action === 'void-sales-order' && !$receipts && $expectedCardCount === 1) {
+            $historicalReceipt = $this->legacyImportedCardEvidence($source, $scope);
+            if ($historicalReceipt !== null) $receipts = [$historicalReceipt];
+        }
         if (count($receipts) !== $expectedCardCount) throw self::failure('sales_reversal_card_issuance_incomplete');
         $cards = [];
         foreach ($receipts as $receipt) $cards[] = $this->lockUnusedCard((array)$receipt, $source, $scope);
@@ -85,7 +104,15 @@ final class CashierV3SalesOrderReversalServices
         foreach ($projectLines as $projectLine) {
             $technicalNo = 'v3p' . substr(hash('sha256', $projectLine['order_line_id']), 0, 28);
             $carrier = Db::name('store_order')->where('order_id', $technicalNo)->lock(true)->find();
-            if (!$carrier) continue; // Store immediate-service sales have no deferred carrier.
+            if (!$carrier) {
+                // Native immediate service sales have no deferred carrier.
+                // Imported projects need their original rights/service graph
+                // reconciled before a whole-sale void may discard the sale.
+                if (preg_match('/^IMP007-[1-9][0-9]*-sale$/D', (string)$source['sourceId'])) {
+                    throw self::failure('sales_historical_project_rights_unverified');
+                }
+                continue;
+            }
             $holders = Db::name('user_card_holder')->where('oid', (int)$carrier['id'])->lock(true)->select()->toArray();
             $detail = Db::name('store_order_cart_info')->where('oid', (int)$carrier['id'])->where('cart_type', 2)->lock(true)->find();
             $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
@@ -430,6 +457,57 @@ final class CashierV3SalesOrderReversalServices
             }
         }
         return ['receipt' => $receipt, 'holder' => $holder, 'order' => $order, 'details' => $details, 'rule' => $rule, 'components' => $components];
+    }
+
+    /**
+     * Return a traceable legacy evidence reference, never a fabricated issuance
+     * event. Exact order, card line, source cart and holder identities must all
+     * agree before the ordinary unused-card and downstream-use checks run.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function legacyImportedCardEvidence(array $source, CashierV3DataScopeContext $scope): ?array
+    {
+        $orderId = (string)$source['sourceId'];
+        if (!preg_match('/^IMP007-([1-9][0-9]*)-sale$/D', $orderId, $match)) return null;
+        $legacyId = (int)$match[1];
+        $header = (array)Db::name('cashier_v3_sales_order')->where('id', (int)$source['sourceRecordId'])
+            ->where('tenant_id', $scope->tenantId())->where('store_id', (int)$source['storeId'])
+            ->where('order_id', $orderId)->lock(true)->find();
+        if (!$header || (string)$header['source_document_type'] !== 'legacy_store_order'
+            || (string)$header['source_document_id'] !== (string)$legacyId
+            || (string)$header['organization_id'] !== (string)$source['sourceOrganizationId']
+            || (string)$header['order_no'] !== (string)$source['sourceNo']) {
+            throw self::failure('sales_reversal_card_issuance_incomplete');
+        }
+        $legacy = (array)Db::name('store_order')->where('id', $legacyId)->lock(true)->find();
+        $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', $orderId)->where('line_direction', 'forward')
+            ->where('line_status', 'settled')->where('item_type', 'card')->lock(true)->select()->toArray();
+        $holders = Db::name('user_card_holder')->where('oid', $legacyId)->lock(true)->select()->toArray();
+        if (!$legacy || count($lines) !== 1 || count($holders) !== 1
+            || (int)$legacy['uid'] !== (int)$source['memberId']
+            || (int)$legacy['store_id'] !== (int)$source['storeId']
+            || (string)$legacy['order_id'] !== (string)$source['sourceNo']
+            || (int)$lines[0]['quantity'] !== 1
+            || (int)$holders[0]['uid'] !== (int)$source['memberId']) {
+            throw self::failure('sales_reversal_card_issuance_incomplete');
+        }
+        $lineId = (string)$lines[0]['order_line_id'];
+        if (!preg_match('/^IMP007-' . $legacyId . '-line-([1-9][0-9]*)$/D', $lineId, $lineMatch)) {
+            throw self::failure('sales_reversal_card_issuance_incomplete');
+        }
+        $base = (array)Db::name('store_order_cart_info')->where('id', (int)$lineMatch[1])
+            ->where('oid', $legacyId)->where('cart_type', 0)->lock(true)->find();
+        if (!$base || (int)$base['cart_num'] !== 1) {
+            throw self::failure('sales_reversal_card_issuance_incomplete');
+        }
+        return [
+            'receipt_id' => 'HIST-' . strtoupper(substr(hash('sha256', $orderId . '|' . $lineId . '|' . $holders[0]['id']), 0, 40)),
+            'member_id' => (int)$source['memberId'], 'store_id' => (int)$source['storeId'],
+            'sales_order_line_id' => $lineId, 'card_holder_id' => (int)$holders[0]['id'],
+            'legacy_order_id' => $legacyId,
+        ];
     }
 
     /**
