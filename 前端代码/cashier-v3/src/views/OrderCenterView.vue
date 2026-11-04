@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
+import GiftCouponUsageOverlay from '@/components/order/GiftCouponUsageOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
 import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
@@ -369,7 +370,7 @@ const ORDER_TABS = [
     fields: [
       field('gift_record_no', '赠送记录号', 'text', { quickFilterHidden: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
-      field('member_name', '会员姓名'), field('gift_source', '赠送来源'),
+      field('member_name', '会员姓名'), field('phone', '手机号码'), field('gift_source', '赠送来源'),
       field('gift_type', '赠送类型'), field('gift_content', '赠送内容'), field('gift_quantity', '赠送数量', 'number'),
       field('effective_at', '生效时间', 'date'), field('expires_at', '到期时间', 'date'),
       field('gift_status', '赠送状态', 'status'), field('store', '办理门店', 'store'),
@@ -618,6 +619,9 @@ const isSalesDetailLoading = ref(false)
 const salesDetailLoadError = ref('')
 const SALES_DETAIL_REQUEST_TIMEOUT_MS = 15000
 const genericDetailRecord = ref(null)
+const giftCouponUsageRecordId = ref('')
+// 详情跟随当前会话和组织范围；旧范围弹窗不得留在新范围下继续翻页。
+watch([activeTabKey, platformScopeStoreIds, () => state.stateContextId], () => { giftCouponUsageRecordId.value = '' }, { deep: true })
 const initialDetailLifecycleAction = ref('')
 const salesPrintLoading = ref({})
 const salesOrderActionIds = ref({})
@@ -1643,6 +1647,17 @@ function giftVoidRecordId(record) {
     if (markerIndex >= 0) return value.slice(markerIndex)
   }
   return ''
+}
+
+function openGiftCouponUsage(record) {
+  const id = String(record?.couponUsageRecordId || '')
+  if (/^v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+$/.test(id)) giftCouponUsageRecordId.value = id
+}
+function loadGiftCouponUsage(payload) {
+  // 与列表共用当前组织收窄条件；只读详情回包不替换根工作台状态。
+  return requestAction('query-gift-coupon-usage', {
+    ...applyPlatformScope(payload), silent: true, preserveRootState: true
+  })
 }
 
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
@@ -4520,6 +4535,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <button v-if="activeTabKey === 'gift' && record.couponUsageRecordId" type="button"
+                class="button button--text" @click="openGiftCouponUsage(record)">使用情况</button>
               <button v-if="canPrintBusinessRecord(record)" type="button" class="button button--text"
                 :disabled="Boolean(salesPrintLoading[String(record.id || '')])"
                 @click="printBusinessRecord(record)"
@@ -4684,6 +4701,9 @@ onBeforeUnmount(() => {
       @close="closeRefundAttributionEditor"
       @confirm="prepareRefundAttributionReason"
     />
+
+    <GiftCouponUsageOverlay v-if="giftCouponUsageRecordId" :record-id="giftCouponUsageRecordId"
+      :load-usage="loadGiftCouponUsage" @close="giftCouponUsageRecordId = ''" />
 
     <BusinessRecordDetailOverlay
       v-if="genericDetailRecord"

@@ -83,10 +83,10 @@ final class CashierV3OrderCenterUnifiedQueryContract
             ], ['supplement_order_no', 'debt_no', 'source_order_no', 'member_name', 'phone']],
             'gift' => ['赠送记录', [
                 ['gift_record_no', '赠送记录号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
-                ['member_name', '会员姓名'], ['gift_source', '赠送来源'], ['gift_type', '赠送类型'], ['gift_content', '赠送内容'],
+                ['member_name', '会员姓名'], ['phone', '手机号码'], ['gift_source', '赠送来源'], ['gift_type', '赠送类型'], ['gift_content', '赠送内容'],
                 ['gift_quantity', '赠送数量', 'integer'], ['effective_at', '生效时间', 'datetime'], ['expires_at', '到期时间', 'datetime'],
                 ['gift_status', '赠送状态'], ['store', '办理门店'], ['operator', '操作人'], ['gift_reason', '赠送原因'], ['created_at', '创建时间', 'datetime'],
-            ], ['gift_record_no', 'member_name', 'gift_source', 'gift_content']],
+            ], ['gift_record_no', 'member_name', 'phone', 'gift_source', 'gift_content']],
             'card_operation' => ['卡操作记录', [
                 ['card_operation_no', '操作单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
                 ['member_name', '会员姓名'], ['operation_type', '操作类型', 'text', true, true], ['source_card', '原卡项／原项目'],

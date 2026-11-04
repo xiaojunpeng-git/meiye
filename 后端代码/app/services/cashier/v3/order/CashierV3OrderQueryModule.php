@@ -19,7 +19,7 @@ final class CashierV3OrderQueryModule
         $queries = $queries ?: new CashierV3SalesOrderQueryServices();
         $recordQueries = $recordQueries ?: new CashierV3OrderCenterRecordQueryServices();
         $handlers = $dispatcher->handlers();
-        foreach (['query-sales-orders', 'query-order-center-records', 'open-sales-order-detail'] as $action) {
+        foreach (['query-sales-orders', 'query-order-center-records', 'query-gift-coupon-usage', 'open-sales-order-detail'] as $action) {
             if ($handlers->hasProjection($action)) {
                 throw new \LogicException('C5 order query module duplicate handler: ' . $action);
             }
@@ -75,6 +75,13 @@ final class CashierV3OrderQueryModule
                     ->salesOrderPublicVersions(['salesOrderDetail' => $detail], $scope['data_scope']),
                 'message' => '销售订单详情已读取。',
             ];
+        });
+
+        // 平台和门店使用同一赠送事实授权与券实例读取器；只返回详情，不替换收银根状态。
+        $handlers->registerProjection('query-gift-coupon-usage', static function(array $scope):array {
+            return ['data'=>['giftCouponUsage'=>(new CashierV3GiftCouponUsageQueryServices())->query(
+                (array)($scope['payload'] ?? []),$scope['operator_scope'],$scope['data_scope'])],
+                'message'=>'赠券使用情况已读取。'];
         });
 
         $assembler->registerPartitionProvider(new CashierV3OrderCenterPartitionProvider($queries, $recordQueries));

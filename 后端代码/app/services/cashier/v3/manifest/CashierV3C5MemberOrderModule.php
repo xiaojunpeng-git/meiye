@@ -81,6 +81,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         foreach ([
             'query-sales-orders' => self::FEATURE_ORDER_CENTER,
             'query-order-center-records' => self::FEATURE_ORDER_CENTER,
+            'query-gift-coupon-usage' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-sources' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-changes' => self::FEATURE_ORDER_CENTER,
             // 门店与平台共用正式收款更正入口；平台仅额外选择组织范围。
