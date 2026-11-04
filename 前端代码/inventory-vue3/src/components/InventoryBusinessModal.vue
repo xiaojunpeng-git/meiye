@@ -9,7 +9,8 @@ import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorks
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 import { formatBatchNumber } from '../batchNumberDisplay.js'
-import { requestReopenDraft } from '../requestReopenDraft.js'
+import { availableRequestCopySelection, requestReopenDraft } from '../requestReopenDraft.js'
+import { documentCopyLines } from '../documentCopyDraft.js'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -123,7 +124,8 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
-const isRequestReopen = computed(() => props.modalKind === 'request-reopen')
+const isRequestReopen = computed(() => props.modalKind === 'request-copy')
+const isCopy = computed(() => props.modalKind.endsWith('-copy'))
 const isTransferEdit = computed(() => props.modalKind === 'transfer-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
@@ -208,7 +210,7 @@ const title = computed(() => {
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
   if (isRequestEdit.value) return '编辑请货单'
-  if (isRequestReopen.value) return '重开请货单'
+  if (isCopy.value) return `复制${pageLabel.value}`
   if (isTransferEdit.value) return '编辑调拨草稿'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
@@ -225,8 +227,10 @@ const primarySubmitDisabled = computed(() => {
   if (isPlatformHeadquarters.value && props.pageKey === 'usage' && !usageWarehouseOptions.value.some((item) => item.key === usageWarehouseSelection.value)) return true
   if (isPlatformHeadquarters.value && ['inbound', 'outbound'].includes(props.pageKey) && !documentWarehouseOptions.value.some((item) => item.key === documentWarehouseSelection.value)) return true
   // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
-  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0)) return true
+  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0 || (isPlatformHeadquarters.value && !requestPartyOptions.value.some((party) => party.key === requestPartySelection.value)))) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
+  // 复制单据的旧调拨方可能已退出当前授权范围；留空等待重选，禁止借旧快照提交。
+  if (isCopy.value && props.pageKey === 'transfer' && (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value) || (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
 const primarySubmitLabel = computed(() => {
@@ -447,22 +451,19 @@ async function hydrateRequestEditor(detail) {
   await loadSupplyParties()
 }
 
-/** 作废单只提供新建表单的业务初值；日期、请货人、单号和幂等键均重新生成。 */
+/** 正常与作废单只提供新建表单初值；日期、请货人、单号和幂等键均重新生成。 */
 function seedReopenedRequest() {
   if (!isRequestReopen.value) return
   try {
     const draft = requestReopenDraft(props.detail)
-    if (!supplyParties.value.some((party) => party.key === draft.supplyParty)) {
-      throw new Error('原供货方当前不可选，请核对授权和仓库状态后重新新建。')
-    }
-    supplyPartySelection.value = draft.supplyParty
+    // 原供货方若已不可选就留空；商品、数量和备注仍按各自有效性独立回填。
+    supplyPartySelection.value = availableRequestCopySelection(draft.supplyParty, supplyParties.value)
     requestRemark.value = draft.remark
     selectedRows.value = draft.lines
-    catalogError.value = ''
   } catch (error) {
     supplyPartySelection.value = ''
     selectedRows.value = []
-    catalogError.value = error instanceof Error ? error.message : '重开请货单失败。'
+    catalogError.value = error instanceof Error ? error.message : '复制请货单失败。'
   }
 }
 
@@ -524,9 +525,10 @@ function selectUsageProject() {
   usageProjectName.value = selected ? String(selected.name || '') : ''
 }
 
-/** 仓库变动会改变可用库存与项目资格；旧仓的已选行不能进入新仓命令。 */
+/** 普通新建切仓重选商品；复制表单保留商品身份供新仓提交校验，不沿用原单库存事实。 */
 function onDocumentWarehouseChanged() {
-  selectedRows.value = []
+  // 复制单据切仓仍展示已识别的商品；最终可用性由新仓的提交接口校验。
+  if (!isCopy.value) selectedRows.value = []
   selectedLineIndexes.value = []
   productSelectorVisible.value = false
   scannerVisible.value = false
@@ -543,7 +545,79 @@ function onUsageWarehouseChanged() {
 
 watch(() => props.pageKey, (pageKey) => {
   if (pageKey === 'usage') loadUsageProjects()
-  if (pageKey === 'transfer') loadTransferContext()
+  if (pageKey === 'transfer' && !isCopy.value) loadTransferContext()
+}, { immediate: true })
+
+/** 复制从授权详情形成全新表单；仓库须仍可选，日期、操作人、事实与幂等键全部使用新建流程。 */
+watch(() => props.detail, async (detail) => {
+  if (!isCopy.value || isRequestReopen.value || !detail) return
+  try {
+    const document = detail.document || detail
+    const kind = props.pageKey
+    if (kind === 'count') {
+      // 旧盘点的账面数和实盘数已过时；只复制 SKU 选择，重新获取当前仓的账面库存。
+      const catalog = await allCountCatalog(false, true)
+      const bySku = new Map(catalog.map((item) => [Number(item.sku_id), item]))
+      const copiedBySku = new Map()
+      for (const line of Array.isArray(detail.lines) ? detail.lines : []) {
+        const current = bySku.get(Number(line.sku_id))
+        if (!current || Number(current.product_id) !== Number(line.product_id) || String(current.sku_unique) !== String(line.sku_unique)) continue
+        // 已确认单不保存原盘点模式；同一规格可能分批出现，新单只带规格并重新盘点。
+        copiedBySku.set(Number(line.sku_id), { ...countDraftRow(current), count_mode: 'SKU', counted_quantity: '' })
+      }
+      countRemark.value = String(document.remark || '')
+      replaceCountRows([...copiedBySku.values()])
+      countProgress.value = copiedBySku.size ? '已带入商品规格；请按当前库存重新填写实盘数，原批次需重新选择。' : ''
+      return
+    }
+    const copied = documentCopyLines(kind, detail)
+    if (kind === 'inbound' || kind === 'outbound') {
+      if (isPlatformHeadquarters.value) {
+        const key = `HQ:${Number(detail.document?.location_id || props.hqLocationId)}`
+        documentWarehouseSelection.value = documentWarehouseOptions.value.some((item) => item.key === key) ? key : ''
+      }
+      if (kind === 'inbound') {
+        inboundRemark.value = String(document.remark || '')
+        // 历史入库未保存具体类型，保留新建默认值供用户确认。
+      } else {
+        outboundRemark.value = String(document.remark || '')
+        outboundRecipient.value = String(document.outbound_recipient || '')
+        if (outboundTypes.includes(String(document.order_type_name))) outboundType.value = String(document.order_type_name)
+      }
+    } else if (kind === 'transfer') {
+      transferRemark.value = String(detail.remark || '')
+      const originalSource = warehouseSelection(String(detail.from_party_type), detail.from_party_id, detail.from_location_id)
+      const originalTarget = warehouseSelection(String(detail.to_party_type), detail.to_party_id, detail.to_location_id)
+      transferSourceSelection.value = !isPlatformHeadquarters.value || transferSourceOptions.value.some((item) => item.key === originalSource) ? originalSource : ''
+      transferTargetSelection.value = ''
+      requestDocumentId.value = 0
+      if (transferSourceSelection.value) await loadTransferContext()
+      transferTargetSelection.value = transferTargetOptions.value.some((item) => item.key === originalTarget) ? originalTarget : ''
+      if (transferTargetSelection.value) await loadTransferStaffs()
+    } else if (kind === 'usage') {
+      if (document.operation_type !== 'ISSUE') throw new Error('退回单不能复制为领用单。')
+      usageRemark.value = String(document.remark || '')
+      usageProjectId.value = document.project_id > 0 ? String(document.project_id) : ''
+      usageProjectName.value = String(document.project_name_snapshot || '')
+      usageProjectKeyword.value = usageProjectId.value ? usageProjectName.value : ''
+      if (isPlatformHeadquarters.value) {
+        const key = Number(document.store_id) > 0 ? `STORE:${Number(document.store_id)}` : `HQ:${Number(document.location_id)}`
+        usageWarehouseSelection.value = usageWarehouseOptions.value.some((item) => item.key === key) ? key : ''
+      }
+      if (!isPlatformHeadquarters.value || usageWarehouseSelection.value) await loadUsageProjects()
+      else usageProjects.value = []
+      if (usageProjectId.value && !usageProjects.value.some((item) => Number(item.id) === Number(usageProjectId.value))) {
+        usageProjectId.value = ''
+        usageProjectName.value = ''
+        usageProjectKeyword.value = ''
+      }
+    }
+    selectedRows.value = copied
+    catalogError.value = ''
+  } catch (error) {
+    selectedRows.value = []
+    catalogError.value = error instanceof Error ? error.message : '复制单据失败，请手工新建。'
+  }
 }, { immediate: true })
 
 async function submitImport() {
@@ -894,8 +968,11 @@ async function loadRequestParties() {
     const response = await platformInventoryApi.hqRequestParties({ hq_location_id: Number(commandHqLocationId.value) })
     requestPartyOptions.value = Array.isArray(response?.list) ? response.list : []
     const sourceParty = isRequestReopen.value ? requestReopenDraft(props.detail).requestParty : ''
-    if (sourceParty && !requestPartyOptions.value.some((party) => party.key === sourceParty)) {
-      catalogError.value = '原请货方当前不可选，请核对授权后重新新建。'
+    if (sourceParty && !availableRequestCopySelection(sourceParty, requestPartyOptions.value)) {
+      // 不把原请货方静默换成首个可选门店；有效商品仍显示，用户可自行选择新主体。
+      requestPartySelection.value = ''
+      supplyPartySelection.value = ''
+      seedReopenedRequest()
       return
     }
     requestPartySelection.value = sourceParty || String(response?.default || requestPartyOptions.value[0]?.key || 'HQ:0')
@@ -909,15 +986,15 @@ async function onRequestPartyChanged(value) {
   supplyPartySelection.value = ''
   requesterSelection.value = ''
   requesterOptions.value = []
-  selectedRows.value = []
+  if (!isCopy.value) selectedRows.value = []
   await loadSupplyParties()
   await loadRequester()
 }
 
 function onSupplyPartyChanged(value) {
   supplyPartySelection.value = String(value || '')
-  // 已选商品的库存属于原供货方；切换后要求从新供货方库存重新选择。
-  selectedRows.value = []
+  // 普通新建切换供货方需重新选品；复制单据保留需求明细，提交时由后端重查新供货方。
+  if (!isCopy.value) selectedRows.value = []
 }
 
 async function loadTransferContext() {
@@ -949,7 +1026,7 @@ async function loadTransferContext() {
       incomingRequests.value = []
       catalogError.value = error instanceof Error ? `关联请货单读取失败：${error.message}` : '关联请货单读取失败。'
     }
-    if (isPlatformHeadquarters.value && !transferSourceSelection.value) transferSourceSelection.value = 'HQ:0'
+    if (isPlatformHeadquarters.value && !transferSourceSelection.value && !isCopy.value) transferSourceSelection.value = 'HQ:0'
     await loadTransferStaffs()
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '跨门店调拨对象读取失败。' }
 }
@@ -974,13 +1051,13 @@ async function loadTransferStaffs() {
 }
 
 function onTransferSourceChanged(value) {
-  transferSourceSelection.value = String(value || 'HQ:0')
+  transferSourceSelection.value = String(value || (isCopy.value ? '' : 'HQ:0'))
   requestDocumentId.value = 0
   transferTargetSelection.value = ''
   transferStaffOptions.value = []
   transferStaffId.value = 0
-  selectedRows.value = []
-  if (props.pageKey === 'transfer') loadTransferContext()
+  if (!isCopy.value) selectedRows.value = []
+  if (props.pageKey === 'transfer' && transferSourceSelection.value) loadTransferContext()
 }
 
 function onTransferTargetChanged(value) {
@@ -1242,7 +1319,7 @@ function requestIdempotencyKey() {
 
 async function submitRequest() {
   const supplier = selectedSupplyParty()
-  if (props.pageKey !== 'request' || !selectedRows.value.length || !['HQ', 'STORE'].includes(supplier.type) || (supplier.type === 'STORE' && supplier.id <= 0)) return
+  if (props.pageKey !== 'request' || !selectedRows.value.length || !['HQ', 'STORE'].includes(supplier.type) || (supplier.type === 'STORE' && supplier.id <= 0) || (isPlatformHeadquarters.value && !requestPartyOptions.value.some((party) => party.key === requestPartySelection.value))) return
   // 请货单只记录需求，不预占也不变动库存；供货方零库存不阻止保存，真正发货时再由服务端校验可用批次。
   submitting.value = true
   submitError.value = ''
@@ -1273,6 +1350,7 @@ function transferIdempotencyKey() { return typeof crypto !== 'undefined' && type
 async function submitTransfer() {
   const target = selectedTransferTarget()
   if (submitting.value || props.pageKey !== 'transfer' || !selectedRows.value.length || !['STORE', 'HQ'].includes(target.type) || (target.type === 'STORE' && target.id <= 0)) return
+  if (isCopy.value && (!transferTargetOptions.value.some((item) => item.key === transferTargetSelection.value) || (isPlatformHeadquarters.value && !transferSourceOptions.value.some((item) => item.key === transferSourceSelection.value)))) return
   submitting.value = true; submitError.value = ''
   try {
     // A failed shortcut lookup must never submit an unrelated manual transfer.
