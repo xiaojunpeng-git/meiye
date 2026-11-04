@@ -45,6 +45,12 @@ export default {
       component: () => import('@/pages/marketing/storeCombination/dashboard')
     },
     {
+      path: 'store_combination/promoter_report',
+      name: `${pre}combinationPromoterReport`,
+      meta: { auth: ['marketing-store_combination-promoter_report'], title: '推广人统计表' },
+      component: () => import('@/pages/marketing/storeCombination/promoterReport')
+    },
+    {
       path: 'store_combination/combina_list',
       name: `${pre}combinaList`,
       meta: {

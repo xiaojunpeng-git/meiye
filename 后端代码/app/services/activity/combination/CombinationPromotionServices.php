@@ -148,7 +148,7 @@ class CombinationPromotionServices
                 // 展示名同样以创建订单时冻结的门店为准，不能用会员当前门店回写旧团。
                 . "COALESCE(NULLIF(a.promoter_name,''),'未归属') AS promoter_name,"
                 . $attributedName . ' AS store_name,'
-                . "COALESCE(NULLIF(a.activity_name,''),c.title,'历史活动') AS activity_name,COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),'会员') AS member_name,"
+                . "COALESCE(NULLIF(a.activity_name,''),c.title,'历史活动') AS activity_name,COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),'会员') AS member_name,u.phone AS buyer_phone,"
                 . "CASE WHEN g.status=2 THEN 'formed' WHEN g.status=3 THEN 'failed' ELSE 'pending' END AS group_status,"
                 . 'ROUND(o.pay_price*100) AS paid_cents,ROUND(' . $refund . '*100) AS refund_cents,'
                 . 'GREATEST(0,ROUND((o.pay_price-(' . $refund . '))*100)) AS net_cents');
@@ -161,7 +161,8 @@ class CombinationPromotionServices
             $base->where('a.share_uid', $ownUid);
         }
         $stores = $this->ids($filters['store_ids'] ?? []);
-        if ($stores) $base->whereRaw($attributedStore . ' IN ('
+        // 推广人报表的门店筛选指会员当前归属；普通战报仍按下单时冻结的业绩归属筛选。
+        if ($stores && empty($filters['promoter_report'])) $base->whereRaw($attributedStore . ' IN ('
             . implode(',', $stores) . ')');
         $ids = $this->ids($filters['activity_ids'] ?? (($filters['activity_id'] ?? '') !== '' ? [$filters['activity_id']] : []));
         if ($ids) $base->whereIn('o.activity_id', $ids);
@@ -174,6 +175,25 @@ class CombinationPromotionServices
         }
         if (!empty($filters['start_date']) && !empty($filters['end_date']) && $filters['start_date'] > $filters['end_date']) throw new ValidateException('开始日期不能晚于结束日期');
         $query = Db::table([$base->buildSql() => 'facts']);
+        if (!empty($filters['promoter_report'])) {
+            // 仅当前具备资格的会员列入推广人表；订单金额仍受上面的原归属门店授权约束。
+            $query->join('user promoter', 'promoter.uid=facts.promoter_id')
+                ->leftJoin('system_store current_store', 'current_store.id=promoter.belong_store_id')
+                ->where('promoter.spread_open', 1)->where('promoter.status', 1)->where('promoter.is_del', 0)
+                ->where('facts.promoter_id', '>', 0);
+            // 全额退款事实仍在明细中可追溯，但不构成有效推广人数。
+            if (!empty($filters['people_only'])) $query->where('facts.net_cents', '>', 0);
+            if ($allowedStores === []) $query->whereRaw('1=0');
+            elseif ($allowedStores !== null) $query->whereIn('promoter.belong_store_id', $allowedStores);
+            if ($stores) $query->whereIn('promoter.belong_store_id', $stores);
+            $keyword = trim((string)($filters['promoter_keyword'] ?? ''));
+            if (mb_strlen($keyword) > 80) throw new ValidateException('推广人搜索内容过长');
+            if ($keyword !== '') {
+                $like = '%' . addcslashes($keyword, '\\%_') . '%';
+                $query->whereLike('promoter.real_name|promoter.nickname|promoter.phone', $like);
+            }
+            $query->field('facts.*,promoter.phone AS promoter_phone,current_store.name AS current_store_name');
+        }
         $status = (string)($filters['status'] ?? '');
         if ($status === 'unformed') $query->whereIn('group_status', ['pending', 'failed']);
         elseif ($status !== '') {
@@ -207,6 +227,148 @@ class CombinationPromotionServices
             $row[$field] = bcdiv((string)($row[$field] ?? 0), '100', 2);
         foreach (['order_count', 'group_count', 'formed_count', 'pending_count', 'failed_count'] as $field) $row[$field] = (int)($row[$field] ?? 0);
         return $row;
+    }
+
+    /** 推广报表独立权限；不能靠大屏入口授权推断可查看会员手机号。 */
+    private function assertPromoterReport(array $admin): void
+    {
+        if (empty($admin['id'])) throw new ValidateException('请重新登录');
+        if (app()->make(\app\services\organization\EmployeeDataScopeServices::class)->isSuperAdmin($admin)) return;
+        $grants = app()->make(\app\services\system\SystemRoleServices::class)->getRolesByAuth((array)($admin['roles'] ?? []), 1);
+        foreach ((array)$grants as $grant) if (($grant['unique_auth'] ?? '') === 'marketing-store_combination-promoter_report') return;
+        throw new ValidateException('无推广人统计表权限');
+    }
+
+    /** 活动和组织选择只来自当前账号范围；勾选活动是本报表筛选，不改大屏设置。 */
+    public function promoterOptions(array $admin): array
+    {
+        $this->assertPromoterReport($admin);
+        $allowed = (new CombinationGroupListServices())->allowedStores($admin);
+        $activities = Db::name('store_combination')->where('is_del', 0)->field('id,title');
+        if ($allowed !== null) {
+            $ids = $this->query([], $allowed, null)->distinct(true)->column('activity_id');
+            $activities->whereIn('id', $ids ?: [0]);
+        }
+        $storeIds = Db::name('system_store')->where('is_del', 0);
+        if ($allowed !== null) $storeIds->whereIn('id', $allowed ?: [0]);
+        $visibleStoreIds = array_map('intval', $storeIds->column('id'));
+        return ['activities' => $activities->order('id desc')->select()->toArray(),
+            'scope' => ['tree' => app()->make(\app\services\organization\OrganizationScopeService::class)
+                ->buildPickerTree($visibleStoreIds),
+                'allowed_store_ids' => $visibleStoreIds]];
+    }
+
+    /** 人数按状态内购买会员去重；总人数跨两类再次去重，不把订单笔数误写成人数。 */
+    private function promoterAggregateSql(): string
+    {
+        return "COALESCE(SUM(IF(group_status='formed',net_cents,0)),0) AS formed_amount,"
+            . "COALESCE(SUM(IF(group_status<>'formed',net_cents,0)),0) AS pending_amount,"
+            . 'COALESCE(SUM(net_cents),0) AS total_amount,'
+            . "COUNT(DISTINCT IF(group_status='formed' AND net_cents>0,member_id,NULL)) AS formed_people,"
+            . "COUNT(DISTINCT IF(group_status<>'formed' AND net_cents>0,member_id,NULL)) AS pending_people,"
+            . 'COUNT(DISTINCT IF(net_cents>0,member_id,NULL)) AS total_people';
+    }
+
+    private function promoterMetricRow(array $row): array
+    {
+        foreach (['formed_amount', 'pending_amount', 'total_amount'] as $key)
+            $row[$key] = bcdiv((string)($row[$key] ?? 0), '100', 2);
+        foreach (['formed_people', 'pending_people', 'total_people'] as $key)
+            $row[$key] = (int)($row[$key] ?? 0);
+        return $row;
+    }
+
+    /** 当前有资格的会员构成完整名单，零业绩也展示；事实聚合只在订单授权范围内。 */
+    public function promoterSummary(array $filters, array $admin, bool $export = false): array
+    {
+        $this->assertPromoterReport($admin);
+        // 汇总只接受页面级筛选；明细下钻参数若混入会使名单与合计不再同口径。
+        unset($filters['dimension'], $filters['dimension_id'], $filters['status'], $filters['people_only']);
+        return $this->readSnapshot(function () use ($filters, $admin, $export) {
+            $allowed = (new CombinationGroupListServices())->allowedStores($admin);
+            $stores = $this->ids($filters['store_ids'] ?? []);
+            $users = Db::name('user')->alias('p')->leftJoin('system_store home', 'home.id=p.belong_store_id')
+                ->where('p.spread_open', 1)->where('p.status', 1)->where('p.is_del', 0);
+            if ($allowed === []) $users->whereRaw('1=0');
+            elseif ($allowed !== null) $users->whereIn('p.belong_store_id', $allowed);
+            if ($stores) $users->whereIn('p.belong_store_id', $stores);
+            $keyword = trim((string)($filters['promoter_keyword'] ?? ''));
+            if (mb_strlen($keyword) > 80) throw new ValidateException('推广人搜索内容过长');
+            if ($keyword !== '') $users->whereLike('p.real_name|p.nickname|p.phone', '%' . addcslashes($keyword, '\\%_') . '%');
+            $count = (clone $users)->count('p.uid');
+            $page = min(max(1, (int)($filters['page'] ?? 1)), max(1, (int)ceil($count / 20)));
+            $userFields = "p.uid AS promoter_id,COALESCE(NULLIF(p.real_name,''),NULLIF(p.nickname,''),'会员') AS promoter_name,p.phone AS promoter_phone,p.belong_store_id AS current_store_id,COALESCE(NULLIF(home.name,''),'未归属') AS current_store_name";
+            $filters['promoter_report'] = 1;
+            $facts = $this->query($filters, $allowed, null);
+            $totals = (clone $facts)->field($this->promoterAggregateSql())->select()->toArray();
+            // 全量导出先按推广人聚合一次，再与会员目录逐批匹配；不可对每批会员重扫整月订单。
+            $allMetrics = $export ? (clone $facts)->field('facts.promoter_id,' . $this->promoterAggregateSql())
+                ->group('facts.promoter_id')->select()->toArray() : [];
+            $allById = [];
+            foreach ($allMetrics as $metric) $allById[(int)$metric['promoter_id']] = $this->promoterMetricRow($metric);
+            // 汇总与导出在同一只读快照内读取。导出按 UID 游标分批，不受页面分页影响。
+            $members = [];
+            $exportPath = $export ? tempnam(sys_get_temp_dir(), 'promoter_report_') : null;
+            $exportFile = $exportPath ? fopen($exportPath, 'wb') : null;
+            if ($export && !$exportFile) throw new ValidateException('无法创建导出文件');
+            $exportCount = 0;
+            if ($exportFile) {
+                fwrite($exportFile, "\xEF\xBB\xBF");
+                fputcsv($exportFile, array_column($this->promoterSummaryColumns(), 'title'));
+                $totalMetric = $this->promoterMetricRow($totals[0] ?? []);
+                fputcsv($exportFile, ['合计', '', '', $totalMetric['formed_amount'], $totalMetric['formed_people'],
+                    $totalMetric['pending_amount'], $totalMetric['pending_people'], $totalMetric['total_amount'], $totalMetric['total_people']]);
+            }
+            try {
+            $cursor = null;
+            do {
+                $batchQuery = (clone $users)->field($userFields);
+                if ($cursor !== null) $batchQuery->where('p.uid', '<', $cursor);
+                $batch = $export ? $batchQuery->order('p.uid desc')->limit(500)->select()->toArray()
+                    : $batchQuery->order('p.uid desc')->page($page, 20)->select()->toArray();
+                $ids = array_map('intval', array_column($batch, 'promoter_id'));
+                $metrics = !$export && $ids ? (clone $facts)->whereIn('facts.promoter_id', $ids)
+                    ->field('facts.promoter_id,' . $this->promoterAggregateSql())
+                    ->group('facts.promoter_id')->select()->toArray() : [];
+                $byId = $export ? $allById : [];
+                foreach ($metrics as $metric) $byId[(int)$metric['promoter_id']] = $this->promoterMetricRow($metric);
+                foreach ($batch as &$member) $member = array_merge($member, $byId[(int)$member['promoter_id']] ?? $this->promoterMetricRow([]));
+                unset($member);
+                if ($exportFile) {
+                    foreach ($batch as $member) {
+                        // 文本单元格防止会员姓名或手机号被 Excel 解释为公式。
+                        $values = [];
+                        foreach ($this->promoterSummaryColumns() as $column) {
+                            $value = (string)($member[$column['key']] ?? '');
+                            $values[] = preg_match('/^[=+@-]/u', $value) ? "'" . $value : $value;
+                        }
+                        fputcsv($exportFile, $values);
+                        ++$exportCount;
+                    }
+                } else array_push($members, ...$batch);
+                if ($batch) $cursor = (int)$batch[count($batch) - 1]['promoter_id'];
+            } while ($export && count($batch) === 500);
+            $columns = $this->promoterSummaryColumns();
+            if ($export) {
+                fputcsv($exportFile, []);
+                fputcsv($exportFile, ['筛选条件', '支付日期', ($filters['start_date'] ?? '不限') . ' 至 ' . ($filters['end_date'] ?? '不限')]);
+                fputcsv($exportFile, ['筛选条件', '活动编号', implode(',', $this->ids($filters['activity_ids'] ?? []))]);
+                fputcsv($exportFile, ['筛选条件', '当前归属门店编号', implode(',', $stores)]);
+                foreach ($this->promoterSourceNotes() as $note) fputcsv($exportFile, ['列名取值来源', $note]);
+                fclose($exportFile);
+                if ($exportCount !== $count) { unlink($exportPath); throw new ValidateException('导出人数核对未通过，请刷新后重试'); }
+                return ['path' => $exportPath, 'count' => $count];
+            }
+            return ['list' => $members, 'count' => $count, 'page' => $page, 'limit' => 20,
+                'summary' => $this->promoterMetricRow($totals[0] ?? []), 'columns' => $columns,
+                'table_layout' => ['fixed' => true], 'source_notes' => $this->promoterSourceNotes(),
+                'updated_at' => date('Y-m-d H:i:s')];
+            } catch (\Throwable $error) {
+                if (is_resource($exportFile)) fclose($exportFile);
+                if ($exportPath && is_file($exportPath)) unlink($exportPath);
+                throw $error;
+            }
+        });
     }
 
     /** Settings filter is a convenience, never an authorization boundary. */
@@ -259,27 +421,34 @@ class CombinationPromotionServices
     }
 
     /** Page/count/summary/export share the exact query; stable order ID provides precise attribution drilldown. */
-    public function details(array $filters, ?array $admin = null, ?int $uid = null, bool $export = false): array
+    public function details(array $filters, ?array $admin = null, ?int $uid = null, bool $export = false, bool $promoterReport = false): array
     {
+        // 报表模式只能由独立路由开启，不能相信浏览器传来的内部标记。
+        unset($filters['promoter_report']);
+        if ($promoterReport) $filters['promoter_report'] = 1;
         // 导出自行维持跨批快照；普通分页的总数、合计和当前页同样必须一致。
-        if ($export) return $this->detailsSnapshot($filters, $admin, $uid, true);
-        return $this->readSnapshot(function () use ($filters, $admin, $uid) { return $this->detailsSnapshot($filters, $admin, $uid, false); });
+        if ($export) return $this->detailsSnapshot($filters, $admin, $uid, true, $promoterReport);
+        return $this->readSnapshot(function () use ($filters, $admin, $uid, $promoterReport) { return $this->detailsSnapshot($filters, $admin, $uid, false, $promoterReport); });
     }
 
-    private function detailsSnapshot(array $filters, ?array $admin, ?int $uid, bool $export): array
+    private function detailsSnapshot(array $filters, ?array $admin, ?int $uid, bool $export, bool $promoterReport): array
     {
         if ($admin !== null) {
-            $settings = $this->settings($admin);
-            if (!array_key_exists('activity_ids', $filters)) $filters['activity_ids'] = $settings['activity_ids'];
+            if ($promoterReport) $this->assertPromoterReport($admin);
+            else {
+                $settings = $this->settings($admin);
+                if (!array_key_exists('activity_ids', $filters)) $filters['activity_ids'] = $settings['activity_ids'];
+            }
         } elseif ($uid === null) throw new ValidateException('请先登录');
         $query = $this->query($filters, $admin !== null ? (new CombinationGroupListServices())->allowedStores($admin) : null, $uid);
-        if ($export) return $this->exportDetails($query, $filters);
+        if ($export) return $this->exportDetails($query, $filters, $promoterReport);
         $count = (clone $query)->count();
         $page = min(max(1, (int)($filters['page'] ?? 1)), max(1, (int)ceil($count / 20)));
-        $summary = $this->detailSummary($query);
+        $summary = $this->detailSummary($query, $promoterReport);
         $rows = $this->formatDetailRows($query->order('paid_at desc,id desc')->page($page, 20)->select()->toArray());
         return ['list' => $rows, 'count' => $count, 'page' => $page, 'limit' => 20, 'summary' => $summary,
-            'columns' => $this->columns(), 'table_layout' => ['fixed' => true], 'source_notes' => $this->sourceNotes()];
+            'columns' => $promoterReport ? $this->promoterDetailColumns() : $this->columns(),
+            'table_layout' => ['fixed' => true], 'source_notes' => $promoterReport ? $this->promoterSourceNotes() : $this->sourceNotes()];
     }
 
     /**
@@ -304,11 +473,13 @@ class CombinationPromotionServices
     }
 
     /** 外层派生表可能没有 where/order；ThinkORM find 会直接返回空，聚合须使用 select 的唯一行。 */
-    private function detailSummary($query): array
+    private function detailSummary($query, bool $promoterReport = false): array
     {
-        $rows = (clone $query)->field('COALESCE(SUM(paid_cents),0) AS paid_amount,COALESCE(SUM(refund_cents),0) AS refund_amount,COALESCE(SUM(net_cents),0) AS net_amount')->select()->toArray();
-        $summary = $rows[0] ?? ['paid_amount' => 0, 'refund_amount' => 0, 'net_amount' => 0];
-        foreach ($summary as $key => $value) $summary[$key] = bcdiv((string)$value, '100', 2);
+        $peopleExpr = $promoterReport ? 'IF(net_cents>0,member_id,NULL)' : 'member_id';
+        $rows = (clone $query)->field('COALESCE(SUM(paid_cents),0) AS paid_amount,COALESCE(SUM(refund_cents),0) AS refund_amount,COALESCE(SUM(net_cents),0) AS net_amount,COUNT(DISTINCT ' . $peopleExpr . ') AS promoted_people')->select()->toArray();
+        $summary = $rows[0] ?? ['paid_amount' => 0, 'refund_amount' => 0, 'net_amount' => 0, 'promoted_people' => 0];
+        foreach (['paid_amount', 'refund_amount', 'net_amount'] as $key) $summary[$key] = bcdiv((string)$summary[$key], '100', 2);
+        $summary['promoted_people'] = (int)$summary['promoted_people'];
         return $summary;
     }
 
@@ -332,7 +503,7 @@ class CombinationPromotionServices
      * 查询可见结果全部导出，不设人为条数上限。每批1000条按支付时间/订单ID游标遍历，
      * 在同一连接只读快照内读取总数、合计与明细，避免期间成团/退款改变导致漏行或统计漂移。
      */
-    private function exportDetails($query, array $filters): array
+    private function exportDetails($query, array $filters, bool $promoterReport): array
     {
         $connection = $query->getConnection();
         $pdo = $connection->getPdo();
@@ -341,7 +512,7 @@ class CombinationPromotionServices
         $connection->startTrans();
         try {
             $count = (int)(clone $query)->count();
-            $summary = $this->detailSummary($query);
+            $summary = $this->detailSummary($query, $promoterReport);
             $rows = [];
             $cursor = null;
             do {
@@ -356,10 +527,10 @@ class CombinationPromotionServices
                 }
             } while (count($batch) === 1000);
             if (count($rows) !== $count) throw new ValidateException('导出记录核对未通过，请刷新后重试');
-            $columns = $this->columns();
+            $columns = $promoterReport ? $this->promoterDetailColumns() : $this->columns();
             $result = ['header' => array_column($columns, 'title'), 'filekey' => array_column($columns, 'key'),
-                'filename' => '拼团业绩明细', 'export' => $rows, 'count' => $count, 'summary' => $summary,
-                'columns' => $columns, 'source_notes' => $this->sourceNotes(),
+                'filename' => $promoterReport ? '推广人业绩明细' : '拼团业绩明细', 'export' => $rows, 'count' => $count, 'summary' => $summary,
+                'columns' => $columns, 'source_notes' => $promoterReport ? $this->promoterSourceNotes() : $this->sourceNotes(),
                 'metadata' => ['generated_at' => date('Y-m-d H:i:s'), 'timezone' => date_default_timezone_get(),
                     'date_basis' => '订单支付日期', 'amount_unit' => '元，保留分精度',
                     'scope_note' => '当前账号授权范围内、符合本次查询条件的全部拼团订单',
@@ -390,5 +561,58 @@ class CombinationPromotionServices
             ['promoter_name','推广人',110], ['store_name','业绩归属门店',150], ['status_label','拼团状态',120],
             ['paid_amount','实付金额',110,true], ['refund_amount','成功退款',110,true], ['net_amount','净业绩',110,true], ['paid_at','支付时间',170],
         ]);
+    }
+
+    /** 汇总列由服务端声明；金额保留分精度供导出，页面按统一格式展示整元。 */
+    public function promoterSummaryColumns(): array
+    {
+        $columns = [
+            ['current_store_name', '门店', 150, false, '推广会员当前归属门店'],
+            ['promoter_name', '会员姓名', 120, false, '当前具备推广资格会员的实名，缺失时用昵称'],
+            ['promoter_phone', '会员手机', 135, false, '推广会员当前手机号'],
+            ['formed_amount', '已成团推广业绩', 150, true, '当前已成团订单的实付扣成功退款'],
+            ['formed_people', '已成团推广人数', 145, false, '当前已成团且净额大于零的购买会员去重数'],
+            ['pending_amount', '未成团推广业绩', 150, true, '拼团中或失败待退订单的净额'],
+            ['pending_people', '未成团推广人数', 145, false, '未成团且净额大于零的购买会员去重数'],
+            ['total_amount', '总业绩', 130, true, '已成团与未成团净业绩之和'],
+            ['total_people', '总人数', 110, false, '两类订单购买会员跨状态再次去重'],
+        ];
+        return array_map(static function ($item) {
+            $key = $item[0];
+            $metric = in_array($key, ['formed_amount','formed_people','pending_amount','pending_people','total_amount','total_people'], true);
+            $column = ['key' => $key, 'title' => $item[1], 'width' => $item[2], 'money' => $item[3],
+                'value_source' => $item[4], 'summable' => $metric, 'fixed_left' => !$metric];
+            if ($metric) $column['drill'] = ['dimension' => 'member', 'dimension_id_field' => 'promoter_id',
+                'status' => strpos($key, 'formed_') === 0 ? 'formed' : (strpos($key, 'pending_') === 0 ? 'unformed' : ''),
+                'people_only' => substr($key, -7) === '_people' ? 1 : 0];
+            return $column;
+        }, $columns);
+    }
+
+    /** 明细保留原单与当前归属，便于核对跨门店会员及每笔成功退款。 */
+    public function promoterDetailColumns(): array
+    {
+        return array_map(static function ($item) {
+            $summable = in_array($item[0], ['paid_amount', 'refund_amount', 'net_amount'], true);
+            return ['key' => $item[0], 'title' => $item[1], 'width' => $item[2],
+                'money' => $item[3] ?? false, 'summable' => $summable, 'fixed_left' => !$summable,
+                'value_source' => $item[4] ?? '拼团支付订单及其创建时推广归属快照'];
+        }, [
+            ['order_no', '订单号', 190], ['activity_name', '拼团活动', 190],
+            ['promoter_name', '推广人', 120], ['promoter_phone', '推广人手机', 135], ['current_store_name', '当前归属门店', 150],
+            ['member_name', '购买会员', 120], ['buyer_phone', '购买会员手机', 135], ['store_name', '原业绩归属门店', 150],
+            ['status_label', '拼团状态', 130], ['paid_amount', '实付金额', 120, true, '拼团订单已支付实付金额'],
+            ['refund_amount', '成功退款', 120, true, '原拼团订单已成功退款金额'],
+            ['net_amount', '净业绩', 120, true, '实付金额减成功退款金额'], ['paid_at', '支付时间', 175],
+        ]);
+    }
+
+    public function promoterSourceNotes(): array
+    {
+        return ['只展示当前具备推广资格的会员，包含零业绩会员；门店按会员当前归属门店展示和筛选。',
+            '订单按支付日期筛选；只统计真实已支付拼团订单，每笔订单归创建时冻结的一位推广人。历史没有归属快照的订单不倒推推广人。',
+            '已成团与未成团按拼团当前状态划分；未成团包含拼团中和失败待退款。业绩为实付扣除成功退款，待处理退款不提前扣除。',
+            '推广人数按购买会员去重；全额退款的订单保留在业绩明细，但不计人数，点击人数列只看净额大于零的订单。合计人数在整个筛选范围跨推广人及状态再次去重，可能小于各行或两栏人数相加。',
+            '跨店会员按当前归属门店展示，同时订单仍受创建时业绩归属门店的数据权限限制；转店后可能只显示可授权的部分历史业绩。'];
     }
 }

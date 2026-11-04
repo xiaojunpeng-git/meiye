@@ -943,6 +943,12 @@ Route::group('adminapi', function () {
         Route::get('combination/dashboard/activities', 'v1.marketing.combination.CombinationPromotion/activities')->option(['real_name' => '拼团大屏']);
         Route::get('combination/dashboard/details', 'v1.marketing.combination.CombinationPromotion/details')->option(['real_name' => '拼团大屏']);
         Route::get('combination/dashboard/export', 'v1.marketing.combination.CombinationPromotion/export')->option(['real_name' => '拼团大屏']);
+        // 推广人姓名与手机号需要独立菜单权限；所有查询和导出在同一服务收口。
+        Route::get('combination/promoter-report/options', 'v1.marketing.combination.PromoterReport/options')->option(['real_name' => '推广人统计表']);
+        Route::get('combination/promoter-report/summary', 'v1.marketing.combination.PromoterReport/summary')->option(['real_name' => '推广人统计表']);
+        Route::get('combination/promoter-report/details', 'v1.marketing.combination.PromoterReport/details')->option(['real_name' => '推广人统计表']);
+        Route::get('combination/promoter-report/export-summary', 'v1.marketing.combination.PromoterReport/exportSummary')->option(['real_name' => '推广人统计表']);
+        Route::get('combination/promoter-report/export-details', 'v1.marketing.combination.PromoterReport/exportDetails')->option(['real_name' => '推广人统计表']);
         Route::get('combination/leader-reward/catalog', 'v1.marketing.combination.StoreCombination/leaderRewardCatalog')->option(['real_name' => '团长成团奖励']);
         Route::get('combination/leader-reward/:id', 'v1.marketing.combination.StoreCombination/leaderRewardStatus')->option(['real_name' => '团长成团奖励']);
         Route::post('combination/leader-reward/:id/retry', 'v1.marketing.combination.StoreCombination/retryLeaderReward')->option(['real_name' => '团长成团奖励']);

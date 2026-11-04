@@ -118,6 +118,8 @@ service.interceptors.response.use(
     }
     // 关闭loading
     tryHideFullScreenLoading();
+    // 文件下载不经过业务 JSON 状态解析；由调用页面识别错误 JSON Blob 后展示消息。
+    if (response.config && response.config.responseType === 'blob') return response.data;
     const code = response.data.status;
     switch (code) {
       case 200:
