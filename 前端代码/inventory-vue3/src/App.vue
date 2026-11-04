@@ -1891,7 +1891,18 @@ async function loadDashboard() {
     const result = await client.dashboard(mode.value === 'platform' ? { hq_location_id: Number(dashboardWarehouseId.value) } : {})
     if (requestVersion === dashboardRequestVersion && !dashboardScopeDenied.value) dashboard.value = result
   } catch (error) {
-    if (requestVersion === dashboardRequestVersion) dashboardError.value = error instanceof Error ? error.message : '库存首页读取失败。'
+    if (requestVersion === dashboardRequestVersion) {
+      if (mode.value === 'platform' && error?.code === 'INVENTORY_PLATFORM_ACCESS_DENIED') {
+        // 指标接口是最终权限边界；即使仓库目录曾返回可见，明确拒绝后也不得继续展示总部仓控件或旧指标。
+        platformCanViewHqDashboard.value = false
+        platformDashboardHqLocations.value = []
+        dashboardWarehouseId.value = 0
+        dashboard.value = { stock_amount_cents: null, stock_product_count: 0, expiring_90_batch_count: 0, expiry_risk_buckets: [], count_pending_count: 0, request_pending_count: 0 }
+        dashboardError.value = ''
+      } else {
+        dashboardError.value = error instanceof Error ? error.message : '库存首页读取失败。'
+      }
+    }
   } finally {
     if (requestVersion === dashboardRequestVersion) dashboardLoading.value = false
   }

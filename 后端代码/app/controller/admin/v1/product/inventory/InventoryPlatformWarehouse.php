@@ -33,7 +33,10 @@ final class InventoryPlatformWarehouse extends AuthController
             $access = $this->access();
             $locations = [];
             try {
-                $locations = $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1)['locations'];
+                $resolved = $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1);
+                // 首页能力与仓库目录沿用同一次服务端身份解析，避免目录和指标各自推导出不同范围。
+                $access = $resolved['access'];
+                $locations = $resolved['locations'];
             } catch (\InvalidArgumentException $exception) {
                 // 只有库存查询授权、没有原单据仓范围的账号仍可获得按员工数据权限裁剪的门店目录。
                 (new InventoryPlatformAccessPolicy())->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);
