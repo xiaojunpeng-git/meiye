@@ -8,7 +8,6 @@
     </div>
     <p>关闭时沿用原预约规则；开启后，预约日历只显示当天上班人员，会员端、门店端和商家端统一按上班及休息时间预约，未排班或全天休息不可预约。</p>
     <p v-if="error" class="roster-setting__error" role="status">{{error}}</p>
-    <ul v-if="conflicts.length" class="roster-setting__error"><li v-for="(item,i) in conflicts" :key="i">{{item.staff_name}} · {{item.time}} · {{item.reservation_no}}</li></ul>
   </section>
 </template>
 <script>
@@ -16,7 +15,7 @@ import request from '@/plugins/request';
 // 单独保存一个参数，保留版本、幂等令牌和服务端回读，不提交其他系统设置。
 export default {
   name:'StaffRosterSetting',
-  data:()=>({value:{enabled:0,version:0},loaded:false,saving:false,error:'',conflicts:[],pending:null}),
+  data:()=>({value:{enabled:0,version:0},loaded:false,saving:false,error:'',pending:null}),
   created(){this.read();},
   methods:{
     normalize(data){if(!data||![0,1].includes(data.enabled)||!Number.isSafeInteger(data.version)||data.version<=0)throw new Error('排班参数返回无效');return data;},
@@ -24,11 +23,11 @@ export default {
     save(){
       if(!this.loaded||this.saving)return;
       if(!this.pending)this.pending={enabled:this.value.enabled,version:this.value.version,request_token:crypto.randomUUID()};
-      this.saving=true;this.error='';this.conflicts=[];
+      this.saving=true;this.error='';
       return request({url:'setting/staff-roster',method:'put',data:{...this.pending}}).then(res=>{
         this.value=this.normalize(res.data);this.pending=null;this.$Message.success('启用排班已保存');
       }).catch(e=>{
-        this.error=e.msg||e.message||'保存结果尚未确认，请重试本次保存。';this.conflicts=e.data&&e.data.conflicts||[];
+        this.error=e.msg||e.message||'保存结果尚未确认，请重试本次保存。';
         // 业务拒绝可以刷新重试；网络结果不明时保留同一请求，禁止重复生成变更。
         if(e.status!==undefined){this.pending=null;this.read();}
       }).finally(()=>{this.saving=false;});

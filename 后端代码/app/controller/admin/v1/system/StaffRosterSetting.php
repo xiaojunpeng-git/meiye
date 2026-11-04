@@ -2,8 +2,6 @@
 declare(strict_types=1);
 namespace app\controller\admin\v1\system;
 use app\services\store\roster\StaffRosterSettingServices;
-use app\services\store\roster\StaffRosterPlatformScope;
-use app\services\store\roster\StaffRosterConflict;
 use app\services\system\SystemRoleServices;
 use mohe\exceptions\AuthException;
 use mohe\utils\ApiErrorCode;
@@ -25,9 +23,8 @@ final class StaffRosterSetting extends \app\controller\admin\AuthController
     {
         $this->authorize();
         try {
-            $allowed=(new StaffRosterPlatformScope())->pickerTree((int)$this->adminType,(int)$this->agentId,(array)$this->adminInfo)['allowed_store_ids'];
-            return $this->success('保存成功',(new StaffRosterSettingServices())->save((int)$this->adminId,(array)$this->request->post(),$allowed));
-        } catch(StaffRosterConflict $e) { return $this->fail($e->getMessage(),['conflicts'=>$e->conflicts]); }
-        catch(ValidateException $e) { return $this->fail($e->getMessage()); }
+            // 仍先通过系统设置授权；保存开关不再查询各店预约，也不返回预约冲突名单。
+            return $this->success('保存成功',(new StaffRosterSettingServices())->save((int)$this->adminId,(array)$this->request->post()));
+        } catch(ValidateException $e) { return $this->fail($e->getMessage()); }
     }
 }
