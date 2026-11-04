@@ -22,7 +22,6 @@ function runReturn({ debt, succeeded, refreshFails = false }) {
     checkoutRecoveryActiveStep: ref('final'),
     checkoutLocalOutcome: ref({ status: succeeded ? 'succeeded' : 'editing' }),
     localCheckoutPreview: ref({ memberId: 1136104 }),
-    checkoutReceiptSnapshot: ref({}),
     requestAction: async (action) => {
       calls.push(['refresh', action])
       if (refreshFails) throw new Error('local refresh unavailable')

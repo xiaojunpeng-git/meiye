@@ -51,32 +51,6 @@ export function downloadMemberSurveyTaskExcel(data) {
     `${title}-任务${data.task.id}-导出结果-${data.as_of_text.slice(0, 10)}.xlsx`);
 }
 
-/** 固定目标名单与后台筛选同口径；手机号和 UID 作为文本保留，Excel 不重算资格。 */
-export function downloadMemberSurveyTargetsExcel(data) {
-  const headers = ['会员UID', '会员姓名', '手机号', '现金金额', '到店次数', '来源', '是否完成问卷'];
-  const rows = data.list.map(row => [
-    text(row.uid), text(row.display_name), text(row.phone), text(row.cash_amount),
-    Number(row.visit_count) || 0, row.source === 'manual' ? '手动指定' : '条件筛选',
-    row.completed ? '已完成' : '未完成'
-  ]);
-  const intro = [`任务：${text(data.task_title)}（任务ID：${data.task_id}，第 ${data.send_round} 轮）`,
-    `当前筛选命中：${data.count} 人`];
-  const sheet = makeSheet(headers, rows, [16, 22, 20, 16, 14, 16, 16], intro);
-  for (let index = intro.length + 1; index < intro.length + 1 + rows.length; index++) {
-    for (const column of [0, 2]) {
-      const cell = sheet[XLSX.utils.encode_cell({ r: index, c: column })];
-      if (cell) { cell.t = 's'; cell.z = '@'; }
-    }
-  }
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, '目标会员名单');
-  const output = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
-  const title = fileTitle(data.task_title) || '会员调查任务';
-  const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
-  saveAs(new Blob([output], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    `${title}-任务${data.task_id}-目标名单-${day}.xlsx`);
-}
-
 function statisticsRows(groups) {
   const rows = [];
   groups.forEach((group, groupIndex) => {

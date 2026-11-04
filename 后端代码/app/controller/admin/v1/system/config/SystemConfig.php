@@ -300,6 +300,13 @@ class SystemConfig extends AuthController
                 return $this->fail('服务语音播报配置缺失，请先完成配置升级');
             }
         }
+        // The member selector switch is rendered with an off fallback before its
+        // config definition exists. Reject that incomplete installation before
+        // saving any form fields, instead of reporting success for a lost choice.
+        if (array_key_exists('cashier_member_default_all_switch', $post)
+            && !$this->services->getOne(['menu_name' => 'cashier_member_default_all_switch', 'is_store' => 0])) {
+            return $this->fail('选择会员默认全部配置缺失，请先完成配置升级');
+        }
 
         foreach ($post as $k => $v) {
             if (is_array($v)) {

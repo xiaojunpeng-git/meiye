@@ -334,6 +334,9 @@ const C5_ACTIONS = {
     'open-recharge': FEATURE_RECHARGE,
     'query-sales-orders': FEATURE_ORDER_CENTER,
     'query-order-center-records': FEATURE_ORDER_CENTER,
+    'query-gift-coupon-usage': FEATURE_ORDER_CENTER,
+    // 项目赠送与优惠券使用情况共用订单中心可见范围，详情仍由后端按赠送事实校验。
+    'query-gift-project-usage': FEATURE_ORDER_CENTER,
     'query-order-attribution-sources': FEATURE_ORDER_CENTER,
     'query-order-attribution-changes': FEATURE_ORDER_CENTER,
     'open-sales-payment-method-correction': FEATURE_ORDER_CENTER,

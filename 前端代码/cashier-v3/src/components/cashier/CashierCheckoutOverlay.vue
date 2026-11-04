@@ -1,19 +1,15 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { createCashierV3CommandId, formatMoney } from '@/services/cashierV3Bridge'
+import { createCashierV3CommandId, formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
-  openSalesOrderReceiptPrint,
-  salesOrderReceiptFromCheckout
+  openSalesOrderReceiptPrint
 } from '@/services/salesOrderReceiptPrint'
+import { checkoutReceiptOrderId, readOrderReceipt } from '@/services/orderReceiptQuery'
 
 const props = defineProps({
   checkout: {
     type: Object,
     default: () => ({})
-  },
-  receipt: {
-    type: Object,
-    default: null
   },
   isServiceOrder: {
     type: Boolean,
@@ -989,11 +985,9 @@ async function printReceipt() {
   receiptPrintError.value = ''
   receiptPrintLoading.value = true
   try {
-    const checkoutReceipt = props.receipt && typeof props.receipt === 'object'
-      ? props.receipt
-      : salesOrderReceiptFromCheckout(props.checkout)
-    // 结账成功页只使用本次成功结账时保留的页面快照。打印是读操作，
-    // 不再额外查询订单详情，也不重新进入结账内核，避免预览被无关请求阻塞。
+    // 与全部订单复用同一个只读出口和渲染器；只读取已经落账的身份，绝不重新提交结账。
+    const checkoutReceipt = await readOrderReceipt(requestCashierV3Action,
+      checkoutReceiptOrderId(props.checkout, succeededSubmissionResponse.value))
     const result = openSalesOrderReceiptPrint(checkoutReceipt)
     if (!result.ok) receiptPrintError.value = result.message
   } catch (error) {

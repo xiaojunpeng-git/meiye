@@ -2260,7 +2260,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'reservation_service_voice_mode', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'reservation_service_voice_mode', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'cashier_member_default_all_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2306,6 +2306,8 @@ WSS;
                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
                 // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
                 Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
+                // 开启后收银和预约统一查询全部并隐藏范围切换；本店与全部的服务端权限校验保持原样。
+                Build::switch('cashier_member_default_all_switch', '选择会员默认全部', (int)($data['cashier_member_default_all_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后收银和预约选择会员默认查询全部，并隐藏本店／全部切换；关闭时默认本店，可手动切换'),
                 // 仅控制预约倒计时的两次语音提醒；自动结束服务在两端均由服务端统一执行。
                 Build::radio('reservation_service_voice_mode', '服务语音播报', (int)($data['reservation_service_voice_mode']['value'] ?? 1))->options([['value' => 1, 'label' => '手机端'], ['value' => 2, 'label' => '门店端'], ['value' => 3, 'label' => '全部']])->info('服务剩余五分钟和五秒时播报；手动结束不播报'),
             ])->option('后台设置', $setting)
