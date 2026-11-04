@@ -619,9 +619,10 @@ const isSalesDetailLoading = ref(false)
 const salesDetailLoadError = ref('')
 const SALES_DETAIL_REQUEST_TIMEOUT_MS = 15000
 const genericDetailRecord = ref(null)
-const giftCouponUsageRecordId = ref('')
+const giftUsageRecordId = ref('')
+const giftUsageType = ref('coupon')
 // 详情跟随当前会话和组织范围；旧范围弹窗不得留在新范围下继续翻页。
-watch([activeTabKey, platformScopeStoreIds, () => state.stateContextId], () => { giftCouponUsageRecordId.value = '' }, { deep: true })
+watch([activeTabKey, platformScopeStoreIds, () => state.stateContextId], () => { giftUsageRecordId.value = '' }, { deep: true })
 const initialDetailLifecycleAction = ref('')
 const salesPrintLoading = ref({})
 const salesOrderActionIds = ref({})
@@ -1649,13 +1650,21 @@ function giftVoidRecordId(record) {
   return ''
 }
 
-function openGiftCouponUsage(record) {
-  const id = String(record?.couponUsageRecordId || '')
-  if (/^v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+$/.test(id)) giftCouponUsageRecordId.value = id
+function openGiftUsage(record) {
+  // 动作能力由后端逐行显式给出；不能以显示名称猜测赠送来源或权益身份。
+  const projectId = String(record?.projectUsageRecordId || '')
+  const couponId = String(record?.couponUsageRecordId || '')
+  if (/^(?:v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+|gift:[1-9]\d*)$/.test(projectId)) {
+    giftUsageType.value = 'project'
+    giftUsageRecordId.value = projectId
+  } else if (/^v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+$/.test(couponId)) {
+    giftUsageType.value = 'coupon'
+    giftUsageRecordId.value = couponId
+  }
 }
-function loadGiftCouponUsage(payload) {
+function loadGiftUsage(payload) {
   // 与列表共用当前组织收窄条件；只读详情回包不替换根工作台状态。
-  return requestAction('query-gift-coupon-usage', {
+  return requestAction(giftUsageType.value === 'project' ? 'query-gift-project-usage' : 'query-gift-coupon-usage', {
     ...applyPlatformScope(payload), silent: true, preserveRootState: true
   })
 }
@@ -4535,8 +4544,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
-              <button v-if="activeTabKey === 'gift' && record.couponUsageRecordId" type="button"
-                class="button button--text" @click="openGiftCouponUsage(record)">使用情况</button>
+              <button v-if="activeTabKey === 'gift' && (record.couponUsageRecordId || record.projectUsageRecordId)" type="button"
+                class="button button--text" @click="openGiftUsage(record)">使用情况</button>
               <button v-if="canPrintBusinessRecord(record)" type="button" class="button button--text"
                 :disabled="Boolean(salesPrintLoading[String(record.id || '')])"
                 @click="printBusinessRecord(record)"
@@ -4702,8 +4711,8 @@ onBeforeUnmount(() => {
       @confirm="prepareRefundAttributionReason"
     />
 
-    <GiftCouponUsageOverlay v-if="giftCouponUsageRecordId" :record-id="giftCouponUsageRecordId"
-      :load-usage="loadGiftCouponUsage" @close="giftCouponUsageRecordId = ''" />
+    <GiftCouponUsageOverlay v-if="giftUsageRecordId" :record-id="giftUsageRecordId" :usage-type="giftUsageType"
+      :load-usage="loadGiftUsage" @close="giftUsageRecordId = ''" />
 
     <BusinessRecordDetailOverlay
       v-if="genericDetailRecord"

@@ -2133,6 +2133,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'giftSource' => '充值订单 ' . (string)$row['recharge_order_no_snapshot'],
                 // 逐张券详情仅接收稳定赠送事实身份；不得由名称或数量反推券实例。
                 'couponUsageRecordId' => $kind === 'coupon' ? 'v3-gift:' . (string)$row['gift_fact_id'] : null,
+                // 明细动作使用赠送事实身份，不能用可重复的项目名称或展示单号反查权益。
+                'projectUsageRecordId' => $kind === 'project' ? 'v3-gift:' . (string)$row['gift_fact_id'] : null,
                 'phone' => (string)($row['phone'] ?? ''),
                 'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
                 'giftContent' => (string)$row['content_name_snapshot'],
@@ -2220,6 +2222,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberName' => $this->memberName($row),
                 'giftSource' => '独立赠送',
                 'couponUsageRecordId' => $kind === 'coupon' ? 'v3-direct-gift:' . (string)$row['gift_fact_id'] : null,
+                'projectUsageRecordId' => $kind === 'project' ? 'v3-direct-gift:' . (string)$row['gift_fact_id'] : null,
                 'phone' => (string)($row['phone'] ?? ''),
                 'giftType' => $kind === 'coupon' ? '赠送优惠券' : ($kind === 'project' ? '赠送项目' : '赠送商品'),
                 'giftContent' => (string)$row['content_name_snapshot'],
@@ -2277,6 +2280,7 @@ final class CashierV3OrderCenterRecordQueryServices
             $refunded = (int)$row['refund_status'] > 0 || (int)$row['terminal_action'] > 0;
             return [
                 'id' => 'gift:' . $row['id'],
+                'projectUsageRecordId' => (int)$row['product_type'] === 6 ? 'gift:' . (string)$row['id'] : null,
                 'giftRecordNo' => 'GIFT-' . $row['id'],
                 'businessDate' => $this->date($time),
                 'memberId' => (int)$row['uid'],

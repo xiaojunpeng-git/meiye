@@ -19,7 +19,7 @@ final class CashierV3OrderQueryModule
         $queries = $queries ?: new CashierV3SalesOrderQueryServices();
         $recordQueries = $recordQueries ?: new CashierV3OrderCenterRecordQueryServices();
         $handlers = $dispatcher->handlers();
-        foreach (['query-sales-orders', 'query-order-center-records', 'query-gift-coupon-usage', 'open-sales-order-detail'] as $action) {
+        foreach (['query-sales-orders', 'query-order-center-records', 'query-gift-coupon-usage', 'query-gift-project-usage', 'open-sales-order-detail'] as $action) {
             if ($handlers->hasProjection($action)) {
                 throw new \LogicException('C5 order query module duplicate handler: ' . $action);
             }
@@ -82,6 +82,13 @@ final class CashierV3OrderQueryModule
             return ['data'=>['giftCouponUsage'=>(new CashierV3GiftCouponUsageQueryServices())->query(
                 (array)($scope['payload'] ?? []),$scope['operator_scope'],$scope['data_scope'])],
                 'message'=>'赠券使用情况已读取。'];
+        });
+
+        // 项目赠送沿同一授权范围查准确权益及核销事实，只回传只读详情，不替换收银根投影。
+        $handlers->registerProjection('query-gift-project-usage', static function (array $scope): array {
+            return ['data' => ['giftProjectUsage' => (new CashierV3GiftProjectUsageQueryServices())->query(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '赠送项目使用情况已读取。'];
         });
 
         $assembler->registerPartitionProvider(new CashierV3OrderCenterPartitionProvider($queries, $recordQueries));
