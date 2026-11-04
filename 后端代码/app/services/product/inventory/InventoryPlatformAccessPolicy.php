@@ -5,8 +5,10 @@ namespace app\services\product\inventory;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\organization\OrganizationScopeService;
+use app\services\organization\EmployeeDataScopeServices;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
 use app\services\query\UnifiedQueryException;
+use app\services\report\StoreReportParticipantScopeServices;
 use think\facade\Db;
 
 /**
@@ -17,9 +19,9 @@ use think\facade\Db;
  * inventory menu for its own queries. The inbound page grants only its own
  * void command; existing add/edit nodes authorize only their specific create
  * commands, not warehouse management.
- * Stock and write scopes retain their established grants. Operational page
- * reads may select any active store with a default warehouse; that expansion
- * never grants a store write or bypasses the page permission.
+ * Stock and write scopes retain their established grants. Operational reads
+ * intersect the employee's dashboard data scope with active default store
+ * warehouses; this read derivation never grants a store write.
  */
 final class InventoryPlatformAccessPolicy
 {
@@ -314,22 +316,17 @@ final class InventoryPlatformAccessPolicy
         ];
     }
 
-    /** 库存查询页可读全部有效门店；仅派生查询上下文，不提升原账号的单据或仓库写权限。 */
+    /** 库存查询范围取集团看板数据权限与有效默认门店仓的交集，不提升单据或仓库写权限。 */
     public function forStockRead(array $access): array
     {
         $this->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);
-        // 以实际启用的默认门店仓为目录，避免门店显示状态与库存仓范围漂移。
-        $storeIds = array_values(array_unique(array_filter(array_map('intval', Db::name('inventory_location')
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)
-            ->column('store_id')))));
-        sort($storeIds, SORT_NUMERIC);
+        $storeIds = $this->defaultLocationDashboardStoreIds($access);
         $access['store_ids'] = $storeIds;
-        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|stock-read-all-stores|' . implode(',', $storeIds));
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|stock-read-dashboard-scope|' . implode(',', $storeIds));
         return $access;
     }
 
-    /** 单据页面权限允许跨店只读；不改变原账号的建单、收发货或作废能力。 */
+    /** 单据页的门店范围取集团看板数据权限与有效默认门店仓的交集；写能力仍独立校验。 */
     public function forOperationalRead(array $access, string $pageCode): array
     {
         $allowedPages = [
@@ -340,29 +337,90 @@ final class InventoryPlatformAccessPolicy
             throw $this->denied('当前库存页面不支持跨店查询。');
         }
         $this->assertQueryPage($access, $pageCode);
-        // 目录与统一查询同取有效默认门店仓，避免选到尚未建仓的门店后查询失败。
-        $storeIds = array_values(array_unique(array_filter(array_map('intval', Db::name('inventory_location')
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)
-            ->column('store_id')))));
-        $storeIds = array_values(array_intersect($storeIds, $this->allActiveStoreIds()));
-        sort($storeIds, SORT_NUMERIC);
+        $storeIds = $this->defaultLocationDashboardStoreIds($access);
         $access['store_ids'] = $storeIds;
-        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|operational-read|' . $pageCode . '|' . implode(',', $storeIds));
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|operational-read-dashboard-scope|' . $pageCode . '|' . implode(',', $storeIds));
         return $access;
     }
 
-    /** 预售领用页面授权仅扩展列表、范围树和明细的门店读取；领用及作废仍使用原账号写权限。 */
+    /** 盘点的门店查询虽没有组织控件，仍须遵守同一员工数据范围。 */
+    public function forCountRead(array $access): array
+    {
+        $this->assertQueryPage($access, 'inventory_count');
+        $storeIds = $this->defaultLocationDashboardStoreIds($access);
+        $access['store_ids'] = $storeIds;
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|count-read-dashboard-scope|' . implode(',', $storeIds));
+        return $access;
+    }
+
+    /** 预售领用的列表、范围树和明细复用集团看板的员工数据范围；写操作仍逐门店校验原账号权限。 */
     public function forPresaleRead(array $access): array
     {
         if (empty($access['is_super_admin']) && !$this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'overview')) {
             throw $this->denied('当前岗位无权查看预售领用。');
         }
-        $storeIds = $this->allActiveStoreIds();
+        $storeIds = $this->dashboardReadStoreIds($access);
         sort($storeIds, SORT_NUMERIC);
         $access['store_ids'] = $storeIds;
-        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|presale-read-all-stores|' . implode(',', $storeIds));
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|presale-read-dashboard-scope|' . implode(',', $storeIds));
         return $access;
+    }
+
+    /** 三类库存读取与集团看板使用同一员工权限、个人参与和集团根组织口径。 */
+    private function dashboardReadStoreIds(array $access): array
+    {
+        $adminId = (int)($access['admin_id'] ?? 0);
+        $admin = Db::name('system_admin')->where('id', $adminId)->where('is_del', 0)
+            ->field('id,account,employee_id,level,admin_type')->find();
+        if (!$admin) throw $this->denied('无法确认平台库存登录身份。');
+        // 产品经理明确豁免内置 admin 超管账号；普通账号即使有同名显示名也不能借此绕过数据范围。
+        if ((string)($admin['account'] ?? '') === 'admin' && (int)($admin['level'] ?? 1) === 0) {
+            return $this->allReportStoreIds();
+        }
+        $employeeId = (int)($admin['employee_id'] ?? 0);
+        $scope = app()->make(OrganizationScopeService::class);
+        // 集团看板的权威口径：有员工身份时按总部数据权限；个人模式仅取本人参与门店。
+        // 历史管理员尚未关联员工时沿用看板的全门店兼容范围，不能从旧组织任职猜测新权限。
+        if ($employeeId > 0) {
+            $employeeScope = app()->make(EmployeeDataScopeServices::class);
+            $resolved = $employeeScope->resolveEffectiveStoreIds($employeeId, 0, (array)$admin);
+            $storeIds = $resolved === null ? $this->allReportStoreIds() : (array)$resolved;
+            if ($employeeScope->resolvePrimaryHqScopeMode($employeeId) === EmployeeDataScopeServices::MODE_PERSONAL) {
+                $storeIds = app()->make(StoreReportParticipantScopeServices::class)
+                    ->participatingStoreIds('0', $employeeId);
+            }
+        } else {
+            $storeIds = $this->allReportStoreIds();
+        }
+        $storeIds = $scope->resolveDashboardStoreIds($scope->resolveGroupRootOrgId(), 0, $storeIds);
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', $storeIds))));
+        sort($storeIds, SORT_NUMERIC);
+        return $storeIds;
+    }
+
+    /** 组织选择器、列表与仓库候选均只能返回有有效默认仓的已授权门店。 */
+    private function defaultLocationDashboardStoreIds(array $access): array
+    {
+        $warehouseStoreIds = array_values(array_unique(array_filter(array_map('intval', Db::name('inventory_location')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)
+            ->column('store_id')))));
+        $storeIds = array_values(array_intersect($warehouseStoreIds, $this->dashboardReadStoreIds($access)));
+        sort($storeIds, SORT_NUMERIC);
+        return $storeIds;
+    }
+
+    /** 通用仓库目录只读候选；调用方须先完成平台库存身份验证，不能作为写授权。 */
+    public function readableInventoryStoreIds(array $access): array
+    {
+        return $this->defaultLocationDashboardStoreIds($access);
+    }
+
+    /** 与平台集团看板相同：历史管理员的默认范围是未删除、非总部的业务门店。 */
+    private function allReportStoreIds(): array
+    {
+        return array_values(array_unique(array_filter(array_map('intval', Db::name('system_store')
+            ->where('is_del', 0)->where('name', '<>', '总部')->column('id')))));
     }
 
     /** @param string[] $features */

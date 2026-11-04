@@ -35,7 +35,7 @@ final class InventoryPlatformWarehouse extends AuthController
             try {
                 $locations = $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1)['locations'];
             } catch (\InvalidArgumentException $exception) {
-                // 只有库存查询授权、没有组织任职或总部仓的账号仍可获得查询专用门店目录。
+                // 只有库存查询授权、没有原单据仓范围的账号仍可获得按员工数据权限裁剪的门店目录。
                 (new InventoryPlatformAccessPolicy())->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);
             }
             $stockStoreLocations = [];
@@ -45,7 +45,7 @@ final class InventoryPlatformWarehouse extends AuthController
                     static fn (array $location): bool => (string)$location['location_type'] === 'STORE'
                 ));
             } catch (UnifiedQueryException | \InvalidArgumentException $exception) {
-                // 非库存查询页面不获得全门店目录；原页面权限仍由各自接口验证。
+                // 非库存查询页面不获得库存查询专用门店目录；原页面权限仍由各自接口验证。
             }
             return $this->success([
                 'list' => $locations,

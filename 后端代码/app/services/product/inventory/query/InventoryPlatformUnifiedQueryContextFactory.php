@@ -40,24 +40,23 @@ final class InventoryPlatformUnifiedQueryContextFactory
         // 共用接口的参数只能选择已授权页面，不能借其他库存菜单扩大读取业务域。
         $policy->assertQueryPage($access, $pageCode);
         $hqAccess = $access;
-        if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
-            $access = $policy->forStockRead($access);
-        } elseif ($subject === 'STORE' && ($selectedStoreId > 0 || $selectedOrganizationId !== null)) {
-            // 仅五个单据只读页面采用全店目录；总部视图和写命令维持原授权。
-            $access = $policy->forOperationalRead($access, $pageCode);
-        }
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);
+        if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
+            $access = $policy->forStockRead($access);
+        } elseif ($subject === 'STORE' && $pageCode === 'inventory_count') {
+            $access = $policy->forCountRead($access);
+        } elseif ($subject === 'STORE') {
+            // 门店主体即使未指定组织或门店，也必须使用页面的员工数据范围。
+            $access = $policy->forOperationalRead($access, $pageCode);
+        }
         if (($selectedOrganizationId !== null && $selectedOrganizationId < 0)
             || ($selectedOrganizationId !== null && ($subject !== 'STORE' || $selectedStoreId > 0))) {
             throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '组织和门店筛选不能同时指定。', []);
         }
-        if ($subject === 'STORE' && empty($access['is_super_admin']) && empty($access['store_ids'])) {
-            // 库存查询已通过页面授权；此处的空范围表示实例尚未建立门店默认仓，不是账号无权。
-            if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
-                throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前实例暂无已启用的门店库存仓，暂无门店库存数据。', []);
-            }
-            throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台账号未被授予任何门店库存范围。', []);
+        if ($subject === 'STORE' && empty($access['store_ids'])) {
+            // 空的员工范围不能因超管身份或未传筛选条件回退到全店。
+            throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前权限范围内暂无可用门店库存仓。', []);
         }
         $locationsQuery = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('location_type', $subject);
@@ -71,7 +70,7 @@ final class InventoryPlatformUnifiedQueryContextFactory
             }
             if ($selectedHqLocationId > 0) $hqIds = [$selectedHqLocationId];
             $locationsQuery->whereIn('id', $hqIds);
-        } elseif (empty($access['is_super_admin'])) {
+        } else {
             $locationsQuery->whereIn('store_id', (array)$access['store_ids']);
         }
         $locations = $locationsQuery->field('id,store_id,organization_id')->order('id asc')->select()->toArray();
@@ -85,7 +84,7 @@ final class InventoryPlatformUnifiedQueryContextFactory
         if (!$locationIds) {
             // 超级管理员也不能在空仓范围上继续查询，避免空 scope_dimensions 被解释为无限制。
             $message = $subject === 'STORE' && $pageCode === InventoryBatchStockQueryContract::PAGE_CODE
-                ? '当前实例暂无已启用的门店库存仓，暂无门店库存数据。'
+                ? '当前权限范围内暂无可用门店库存仓。'
                 : '当前平台没有可用库存仓库，查询已停止。';
             throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', $message, []);
         }

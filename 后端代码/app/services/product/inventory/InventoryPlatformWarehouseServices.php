@@ -19,7 +19,7 @@ final class InventoryPlatformWarehouseServices
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);
         $hqAccess = $access;
-        // 仅库存读接口借用全门店范围；通用仓库目录仍按组织任职保护单据操作。
+        // 仓库候选遵守集团看板数据范围；返回的写能力仍取原账号授权。
         if ($stockRead) $access = $policy->forStockRead($access);
         $query = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
@@ -30,27 +30,23 @@ final class InventoryPlatformWarehouseServices
                 });
             });
         if (!$includeInactive) $query->where('location_status', 'ACTIVE');
-        if (empty($access['is_super_admin'])) {
-            $storeIds = array_values(array_filter(array_map('intval', (array)$access['store_ids'])));
-            $hqIds = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($hqAccess, $includeInactive), 'id'));
-            if (!$storeIds && !$hqIds) throw new \InvalidArgumentException('inventory_platform_location_scope_empty');
-            $query->where(function ($scope) use ($storeIds, $hqIds): void {
-                // An HQ-only platform account has no store ids by design. Do
-                // not emit an empty whereIn() branch; it must still resolve
-                // its server-authorized headquarters locations.
-                if ($storeIds) {
-                    $scope->where(function ($stores) use ($storeIds): void {
-                        $stores->where('location_type', 'STORE')->whereIn('store_id', $storeIds);
-                    });
-                }
-                if ($hqIds) {
-                    $method = $storeIds ? 'whereOr' : 'where';
-                    $scope->{$method}(function ($hq) use ($hqIds): void {
-                        $hq->where('location_type', 'HQ')->whereIn('id', $hqIds);
-                    });
-                }
-            });
-        }
+        $storeIds = $policy->readableInventoryStoreIds($hqAccess);
+        $hqIds = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($hqAccess, $includeInactive), 'id'));
+        if (!$storeIds && !$hqIds) throw new \InvalidArgumentException('inventory_platform_location_scope_empty');
+        $query->where(function ($scope) use ($storeIds, $hqIds): void {
+            // 空门店权限仅留下总部仓；空总部权限仅留下当前员工可见门店。
+            if ($storeIds) {
+                $scope->where(function ($stores) use ($storeIds): void {
+                    $stores->where('location_type', 'STORE')->whereIn('store_id', $storeIds);
+                });
+            }
+            if ($hqIds) {
+                $method = $storeIds ? 'whereOr' : 'where';
+                $scope->{$method}(function ($hq) use ($hqIds): void {
+                    $hq->where('location_type', 'HQ')->whereIn('id', $hqIds);
+                });
+            }
+        });
         $locations = $query->field('id,location_code,location_name,location_type,owner_id,store_id,store_name_snapshot,organization_name_snapshot,is_default,location_status,version')
             ->order('location_type asc,is_default desc,id asc')->select()->toArray();
         if (!$locations) {

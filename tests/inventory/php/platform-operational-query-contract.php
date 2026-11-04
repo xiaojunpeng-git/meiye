@@ -29,7 +29,7 @@ platformOperationalAssert('platform store narrowing keeps the selected store id 
 platformOperationalAssert('platform HQ inventory does not require a store appointment while operational STORE remains scope-gated',
     strpos($policy, '$headquartersOnly = !$isSuperAdmin && !$storeIds;') !== false
     && strpos($policy, "'headquarters_only' => \$headquartersOnly") !== false
-    && strpos($context, "if (\$subject === 'STORE' && empty(\$access['is_super_admin']) && empty(\$access['store_ids']))") !== false
+    && strpos($context, "if (\$subject === 'STORE' && empty(\$access['store_ids']))") !== false
     && strpos($hqLocations, "empty(\$access['headquarters_only'])") !== false);
 platformOperationalAssert('stock read alone derives all active stores after page authorization',
     strpos($policy, 'function forStockRead(array $access)') !== false
@@ -38,11 +38,11 @@ platformOperationalAssert('stock read alone derives all active stores after page
     && strpos($context, 'if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE)') !== false
     && strpos($context, '$access = $policy->forStockRead($access);') !== false
     && strpos($context, 'locationsForAccess($hqAccess, true)') !== false);
-platformOperationalAssert('empty stock warehouse directory is reported as missing data without widening scope',
-    strpos($context, "if (\$subject === 'STORE' && empty(\$access['is_super_admin']) && empty(\$access['store_ids']))") !== false
+platformOperationalAssert('empty employee store scope fails closed without widening scope',
+    strpos($context, "if (\$subject === 'STORE' && empty(\$access['store_ids']))") !== false
     && strpos($context, "if (\$pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {") !== false
-    && substr_count($context, '当前实例暂无已启用的门店库存仓，暂无门店库存数据。') === 2
-    && strpos($context, '当前平台账号未被授予任何门店库存范围。') !== false
+    && substr_count($context, '当前权限范围内暂无可用门店库存仓。') === 2
+    && strpos($context, "\$locationsQuery->whereIn('store_id', (array)\$access['store_ids'])") !== false
     && strpos($context, 'if (!$locationIds) {') !== false);
 platformOperationalAssert('stock store picker and legacy stock read use the same read-only scope',
     strpos($warehouse, 'if ($stockRead) $access = $policy->forStockRead($access);') !== false
@@ -59,7 +59,7 @@ platformOperationalAssert('legacy menu compatibility keeps page and write capabi
     strpos($context, '$policy->assertQueryPage($access, $pageCode);') !== false
     && strpos($policy, '$hasNativeView && in_array(self::AUTH_WAREHOUSE_MANAGE, $uniqueAuth, true)') !== false);
 platformOperationalAssert('platform location listing keeps HQ-only accounts on server-derived HQ warehouses',
-    strpos($warehouse, 'not emit an empty whereIn() branch') !== false
+    strpos($warehouse, 'readableInventoryStoreIds($hqAccess)') !== false
     && strpos($warehouse, "\$method = \$storeIds ? 'whereOr' : 'where'") !== false);
 platformOperationalAssert('movement statistics reuse the authenticated location scope without a store staff identity',
     strpos($statistics, 'listForLocations($locationIds') !== false
