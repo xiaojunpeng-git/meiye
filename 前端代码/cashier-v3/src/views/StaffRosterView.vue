@@ -126,7 +126,7 @@ onMounted(async () => {
       <div class="roster-toolbar-actions"><template v-if="tab === 'schedule'"><button :disabled="readOnly || loading || !data.staff.length" @click="openSchedule()">批量设置</button><details><summary>导出</summary><button @click="exportList('page')">当前页</button><button @click="exportList('all')">全部查询结果</button></details></template><button v-else :disabled="readOnly || (platform && selectedStores.length !== 1)" @click="openShift()">新增班次</button></div>
     </div>
     <p v-if="platform && selectedStores.length !== 1" class="roster-note">请选择一个门店查看和安排员工排班。</p>
-    <p v-else class="roster-note">{{ data.enabled ? '未排班沿用原预约规则。上班范围和休息时间同步用于会员、门店及商家预约。' : '排班未启用，预约沿用原规则；可先安排上班和休息，再到系统设置开启。' }}</p>
+    <p v-else class="roster-note">{{ data.enabled ? '预约日历只显示当天上班人员；未排班或全天休息不可预约，部分休息时段不可预约。' : '排班未启用，预约沿用原规则；可先安排上班和休息，再到系统设置开启。' }}</p>
     <p v-if="message" role="status" class="roster-success">{{ message }}</p>
     <p v-if="error && !dialog" role="alert" class="roster-error">{{ error }}</p>
     <div v-if="tab === 'schedule'" class="roster-results" :aria-busy="loading">

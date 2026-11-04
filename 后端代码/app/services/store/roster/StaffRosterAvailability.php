@@ -34,7 +34,41 @@ final class StaffRosterAvailability
             ->whereBetween('schedule_date', [date('Y-m-d', strtotime($date . ' -1 day')), $date])->order('id asc');
         // 等待员工锁后必须当前读；不能让事务早先的RR快照漏掉刚提交的休息。
         if ($current) $query->lock(true);
-        $rows = $query->select()->toArray();
+        return self::resolveShifts($query->select()->toArray());
+    }
+
+    /** 日历与未选时的预约选人共用当天上班名单；只缩小传入的员工范围，不改任职或其他业务选人。 */
+    public function workingStaffIds(array $staffIds, int $storeId, string $date): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $staffIds))));
+        if (!$ids) return [];
+        // 批量解析同一员工跨店任职，避免日历按每个员工反复查询排班和班次模板。
+        $people = Db::name('system_store_staff')->whereIn('id', $ids)->field('id,employee_id')->select()->toArray();
+        $employees = array_values(array_filter(array_column($people, 'employee_id')));
+        $aliases = $employees ? Db::name('system_store_staff')->whereIn('employee_id', $employees)->field('id,employee_id')->select()->toArray() : [];
+        $byEmployee = [];
+        foreach ($aliases as $alias) $byEmployee[(int)$alias['employee_id']][] = (int)$alias['id'];
+        $all = array_values(array_unique(array_merge($ids, array_map('intval', array_column($aliases, 'id')))));
+        $query = Db::name('store_staff_schedule')->whereIn('staff_id', $all)
+            ->whereBetween('schedule_date', [date('Y-m-d', strtotime($date . ' -1 day')), $date])->order('id asc');
+        if (\app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction()) $query->lock(true);
+        $byStaff = [];
+        foreach (self::resolveShifts($query->select()->toArray()) as $row) $byStaff[(int)$row['staff_id']][] = $row;
+        $working = [];
+        foreach ($people as $person) {
+            $rows = [];
+            foreach ($byEmployee[(int)$person['employee_id']] ?? [(int)$person['id']] as $aliasId) $rows = array_merge($rows, $byStaff[$aliasId] ?? []);
+            // 只要当天仍有一段工作时间就保留该列；午休不隐藏整个人，全天休息及未排班隐藏。
+            $blocked = 0;
+            foreach (StaffRosterRules::disabled($rows, $storeId, $date) as [$start, $end]) $blocked += strtotime($end) - strtotime($start);
+            if ($blocked < strtotime($date . ' +1 day') - strtotime($date)) $working[] = (int)$person['id'];
+        }
+        return $working;
+    }
+
+    /** 新记录读取保存时快照，旧记录仅补读原班次；批量与单人预约必须得到相同上班/休息边界。 */
+    private static function resolveShifts(array $rows): array
+    {
         $shiftIds = array_values(array_unique(array_filter(array_column($rows, 'shift_id'))));
         $shifts = $shiftIds ? Db::name('store_staff_shift')->whereIn('id', $shiftIds)->select()->toArray() : [];
         $map = array_column($shifts, null, 'id');

@@ -1215,12 +1215,15 @@ final class CashierV3ReservationModule
         $availability = app()->make(\app\services\store\StoreReservationStaffServices::class);
         $query = Db::name('system_store_staff')->where('store_id', $operator->storeId())->where('is_del', 0)->where('status', 1);
         if ($enabled) $query->where('cashier_craftsman_enabled', 1);
-        return array_map(static function (array $row) use ($operator, $startAt, $endAt, $excludeId, $availability, $enabled): array {
+        $staffRows = self::rows($query->field('id,staff_name')->order('id asc')->select());
+        $date = $startAt > 0 ? date('Y-m-d', $startAt) : (string)($draft['appointmentDate'] ?? date('Y-m-d'));
+        $working = $enabled ? (new \app\services\store\roster\StaffRosterAvailability())->workingStaffIds(array_column($staffRows, 'id'), $operator->storeId(), $date) : [];
+        return array_map(static function (array $row) use ($operator, $startAt, $endAt, $excludeId, $availability, $enabled, $working): array {
             $selectable = !$enabled ? true : ($startAt > 0 && $endAt > $startAt
                 ? $availability->isStaffSelectableForReservation((int)$row['id'], $operator->storeId(), date('Y-m-d', $startAt), date('H:i:s', $startAt), (int)ceil(($endAt - $startAt) / 60), $excludeId)
-                : $availability->isStaffOnDuty((int)$row['id']));
+                : in_array((int)$row['id'], $working, true) && $availability->isStaffOnDuty((int)$row['id']));
             return ['id' => (int)$row['id'], 'staffId' => (int)$row['id'], 'name' => (string)$row['staff_name'], 'selectable' => $selectable, 'disabledReason' => $selectable ? '' : '该时段不可预约'];
-        }, self::rows($query->field('id,staff_name')->order('id asc')->select()));
+        }, $staffRows);
     }
 
     private static function onlyCatalogSku(int $projectId, array $options): int

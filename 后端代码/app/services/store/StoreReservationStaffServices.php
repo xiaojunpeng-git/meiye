@@ -652,7 +652,9 @@ class StoreReservationStaffServices extends BaseServices
         }
         $serviceTime = trim($serviceTime);
         if ($serviceTime === '') {
-            return true;
+            // 尚未选择具体时间时仍须属于当天上班名单；开关关闭不增加新的预约限制。
+            return !\app\services\store\roster\StaffRosterSwitch::enabled()
+                || in_array($staffId, (new StaffRosterAvailability())->workingStaffIds([$staffId], $storeId, $serviceDate ?: date('Y-m-d')), true);
         }
         if (!$serviceDate) {
             $serviceDate = date('Y-m-d');

@@ -27,7 +27,10 @@ try{
  try{(new MemberV3ReservationServices())->create((int)$fixture['uid'],(int)$fixture['id'],$body);throw new RuntimeException('会员预约未拒绝休息');}
  catch(\app\services\cashier\v3\CashierV3CommandException $e){if(strpos($e->getMessage(),'不可预约')===false)throw $e;}
  Db::name('store_staff_schedule')->where('id',$rest)->delete();
+ try{(new MemberV3ReservationServices())->create((int)$fixture['uid'],(int)$fixture['id'],$body);throw new RuntimeException('会员预约未拒绝未排班');}
+ catch(\app\services\cashier\v3\CashierV3CommandException $e){if(strpos($e->getMessage(),'不可预约')===false)throw $e;}
+ Db::name('store_staff_schedule')->insert(['store_id'=>$store,'staff_id'=>$id,'schedule_date'=>$date,'schedule_type'=>1,'start_time'=>'10:00','end_time'=>'18:00']);
  $result=(new MemberV3ReservationServices())->create((int)$fixture['uid'],(int)$fixture['id'],$body);
- if(empty($result['reservationId']))throw new RuntimeException('清除休息后会员预约未成功');
- echo json_encode(['passed'=>2,'checks'=>['真实会员创建拒绝休息员工','未排班恢复原会员预约'],'rolledBack'=>true],JSON_UNESCAPED_UNICODE),PHP_EOL;
+ if(empty($result['reservationId']))throw new RuntimeException('上班后会员预约未成功');
+ echo json_encode(['passed'=>3,'checks'=>['真实会员创建拒绝休息员工','真实会员创建拒绝未排班','排班上班后会员预约成功'],'rolledBack'=>true],JSON_UNESCAPED_UNICODE),PHP_EOL;
 }finally{Db::rollback();}

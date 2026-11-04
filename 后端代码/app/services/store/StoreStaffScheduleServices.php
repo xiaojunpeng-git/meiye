@@ -41,12 +41,8 @@ class StoreStaffScheduleServices extends BaseServices
         $allStaff = $staffServices->getColumn($where, 'id,staff_name,phone');
         if (!$this->isScheduleManageEnabled()) return $allStaff;
         $availability = new \app\services\store\roster\StaffRosterAvailability();
-        return array_values(array_filter($allStaff, static function ($staff) use ($availability, $storeId, $date): bool {
-            $slots = $availability->disabled((int)$staff['id'], $storeId, $date);
-            $from = strtotime($date); $to = strtotime($date . ' +1 day');
-            foreach ($slots as $slot) if (strtotime($slot[0]) <= $from && strtotime($slot[1]) >= $to) return false;
-            return true;
-        }));
+        $working = $availability->workingStaffIds(array_column($allStaff, 'id'), $storeId, $date);
+        return array_values(array_filter($allStaff, static fn($staff): bool => in_array((int)$staff['id'], $working, true)));
     }
 
     /**
@@ -70,7 +66,7 @@ class StoreStaffScheduleServices extends BaseServices
      */
     public function isStaffScheduledForSlot(int $staffId, int $storeId, string $date, int $rangeStart, int $rangeEnd): bool
     {
-        // 旧适配入口也复用新权威规则，不再由历史开关把未排班人员全部拦住。
+        // 预约适配入口与三端共用上班/休息规则；关闭时完全保持原路径。
         if (!$this->isScheduleManageEnabled()) return true;
         return (new \app\services\store\roster\StaffRosterAvailability())->allows($staffId, $storeId, $rangeStart, $rangeEnd);
     }

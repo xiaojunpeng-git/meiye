@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace app\services\store\roster;
 
-/** 三端共享的纯排班规则。使用半开时段，结束时刻可接下一单；未排班不增加限制。 */
+/** 启用排班后的预约专用规则；必须有本店上班时段，未排班不能预约。关闭开关的原预约路径不调用本规则。 */
 final class StaffRosterRules
 {
     public static function range(string $date, string $start, string $end): array
@@ -37,7 +37,7 @@ final class StaffRosterRules
                 if (self::overlaps($start, $end, $c, $d)) return false;
             }
         }
-        if (!$works) return true;
+        if (!$works) return false;
         foreach ($works as [$a, $b]) if ($start >= $a && $end <= $b) return true;
         return false;
     }

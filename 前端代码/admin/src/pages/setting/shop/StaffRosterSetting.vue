@@ -6,7 +6,7 @@
       </i-switch></label>
       <Button type="primary" :loading="saving" :disabled="!loaded || saving" @click="save">{{pending ? '重试本次保存' : '保存'}}</Button>
     </div>
-    <p>关闭时沿用原预约规则；开启后，会员端、门店端和商家端统一按上班及休息时间预约，未排班仍沿用原规则。</p>
+    <p>关闭时沿用原预约规则；开启后，预约日历只显示当天上班人员，会员端、门店端和商家端统一按上班及休息时间预约，未排班或全天休息不可预约。</p>
     <p v-if="error" class="roster-setting__error" role="status">{{error}}</p>
     <ul v-if="conflicts.length" class="roster-setting__error"><li v-for="(item,i) in conflicts" :key="i">{{item.staff_name}} · {{item.time}} · {{item.reservation_no}}</li></ul>
   </section>

@@ -31,7 +31,7 @@ try {
     $snapshot=function()use($id,$store,$date){return StaffRosterServices::fingerprint(Db::name('store_staff_schedule')->where('store_id',$store)->where('staff_id',$id)->where('schedule_date',$date)->order('id asc')->select()->toArray());};
     $write=function(array $body)use($service,$store,$actor){$body['request_token']=$body['request_token']??bin2hex(random_bytes(16));return $service->command($store,$actor,'schedule',$body);};
     $schedule=function(string $kind,array $extras=[])use($write,$id,$date,$snapshot){return $write($extras+['staff_ids'=>[$id],'dates'=>[$date],'kind'=>$kind,'expected'=>[$id=>[$date=>$snapshot()]]]);};
-    check('未排班预约允许', $booking->isStaffSelectableForReservation($id,$store,$date,'10:00',60));
+    check('未排班预约拒绝', !$booking->isStaffSelectableForReservation($id,$store,$date,'10:00',60));
     $shift=$service->command($store,$actor,'shift',['name'=>'排班回滚测试','start_time'=>'10:00','end_time'=>'18:00','request_token'=>bin2hex(random_bytes(16))]);$sid=$shift['id'];
     $schedule('WORK',['shift_id'=>$sid]);
     check('班次内可预约', $booking->isStaffSelectableForReservation($id,$store,$date,'10:00',60));
@@ -47,7 +47,7 @@ try {
     rejects('同请求不能换内容',fn()=>$write(array_replace($input,['kind'=>'CLEAR'])));
     rejects('旧页面不能覆盖新排班',fn()=>$write(array_replace($input,['request_token'=>bin2hex(random_bytes(16))])));
     rejects('跨门店员工写入拒绝',fn()=>$service->command($store+100000,$actor,'schedule',['staff_ids'=>[$id],'dates'=>[$date],'kind'=>'CLEAR','expected'=>[$id=>[$date=>$snapshot()]],'request_token'=>bin2hex(random_bytes(16))]));
-    $schedule('CLEAR');check('清除恢复原规则',$booking->isStaffSelectableForReservation($id,$store,$date,'10:00',60));
+    $schedule('CLEAR');check('开启时清除排班不可预约',!$booking->isStaffSelectableForReservation($id,$store,$date,'10:00',60));
     $schedule('WORK',['shift_id'=>$sid]);
     $shiftRow=Db::name('store_staff_shift')->where('id',$sid)->find();
     $service->command($store,$actor,'shift',['id'=>$sid,'name'=>'改名且改时间','start_time'=>'11:00','end_time'=>'17:00','expected'=>StaffRosterServices::fingerprint([$shiftRow]),'request_token'=>bin2hex(random_bytes(16))]);
@@ -63,7 +63,7 @@ try {
     check('预约未被取消',Db::name('cashier_v3_reservation')->where('id',$reservation)->value('status')==='UNSTARTED');
     Db::name('cashier_v3_reservation')->where('id',$reservation)->update(['status'=>'CANCELLED']);$schedule('REST');check('取消预约不再阻止休息',!$availability->allows($id,$store,$ts('14:00'),$ts('15:00')));
     rejects('事务提交共同校验休息',fn()=>(new CashierV3ReservationLifecycleServices())->assertStaffAvailabilityInTx($store,0,[$id],$ts('10:00'),$ts('11:00')));
-    $schedule('CLEAR');(new CashierV3ReservationLifecycleServices())->assertStaffAvailabilityInTx($store,0,[$id],$ts('10:00'),$ts('11:00'));check('事务提交未排班可通过',true);
+    $schedule('CLEAR');rejects('事务提交拒绝未排班',fn()=>(new CashierV3ReservationLifecycleServices())->assertStaffAvailabilityInTx($store,0,[$id],$ts('10:00'),$ts('11:00')));
     // 同一员工的另一门店任职也读取这份休息，并共享预约占用与锁。
     $aliasStore=(int)Db::name('system_store')->where('is_del',0)->whereNotIn('id',array_column(Db::name('system_store_staff')->whereIn('id',$aliases)->field('store_id')->select()->toArray(),'store_id'))->value('id');
     if (!$aliasStore) throw new RuntimeException('缺少第二门店夹具');
@@ -74,6 +74,7 @@ try {
     Db::name('store_staff_schedule')->where('id',$otherWork)->delete();
     $schedule('REST');check('已有休息在另一门店生效',!$booking->isStaffSelectableForReservation($aliasId,$aliasStore,$date,'10:00',60));
     $schedule('CLEAR');
+    $schedule('WORK',['shift_id'=>$crossShift['id']]);
     $foreignReservation=(int)Db::name('cashier_v3_reservation')->insertGetId(['tenant_id'=>CashierV3ScopeResolver::TENANT_SCOPE_ID,'lifecycle_generation'=>CashierV3ReservationLifecycleServices::GENERATION,'store_id'=>$aliasStore,'status'=>'UNSTARTED','reservation_id'=>'roster-'.bin2hex(random_bytes(10)),'reservation_no'=>'ROSTER-OTHER-STORE','appointment_start_at'=>$ts('14:00'),'appointment_end_at'=>$ts('15:00'),'business_date'=>$date]);
     Db::name('cashier_v3_reservation_staff_schedule')->insert(['tenant_id'=>CashierV3ScopeResolver::TENANT_SCOPE_ID,'reservation_id'=>$foreignReservation,'staff_id'=>$aliasId]);
     check('同员工跨店预约不能撞期',!$booking->isStaffSelectableForReservation($id,$store,$date,'14:00',60));
