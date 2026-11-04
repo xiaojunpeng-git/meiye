@@ -31,7 +31,6 @@ import {
   mergeSalesOrderCenterProjection,
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
-import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
 import { checkoutBalancePreview } from '@/services/cashierV3CheckoutBalancePreview'
 import { salePriceRangeMessage } from '@/services/cashierV3SalePriceRange'
 import { combinationChoicePreflightFailure } from '@/services/cashierV3CombinationChoicePreflight'
@@ -617,10 +616,6 @@ const supplement = computed(() => {
 })
 const checkout = computed(() => cashier.value.checkout || {})
 const checkoutLocalOutcome = ref({})
-// Keep the immutable browser snapshot only while the success overlay is open.
-// The workbench is cleared after settlement, but receipt printing still needs
-// the exact sale/service rows that were submitted in that transaction.
-const checkoutReceiptSnapshot = ref(null)
 // 编辑阶段的结账预览不创建 checkout_request。第三步确认时才把本地购物车
 // 与收款选择一次性写入既有结账流程，由服务端读取最新余额与权益后完成校验。
 const localCheckoutPreview = ref(null)
@@ -1771,8 +1766,7 @@ const checkoutRequestActions = new Set([
 
 const checkoutExternalActions = new Set([
   'prepare-service-completion',
-  'view-sales-order',
-  'print-sales-order-receipt'
+  'view-sales-order'
 ])
 
 function checkoutSourceSelectorError(error) {
@@ -5731,13 +5725,6 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false, catalog
   return filterConfiguredAccountingMethods(methods, catalog)
 }
 
-/** 收银员取本次认证根投影；仅补小票展示上下文，不加入最终结账请求。 */
-function checkoutReceiptFromPreview(preview, submission) {
-  return salesOrderReceiptFromCheckout(preview, submission, {
-    cashierName: String(state.operator?.name || '').trim()
-  })
-}
-
 function localCheckoutPreviewSnapshot() {
   // 行服务设置和人员分配分别保存在浏览器编辑态。只在“立即结账”这
   // 一个入口把它们合并进本次结账草稿；选择按钮本身不能触发服务端写入。
@@ -6220,10 +6207,6 @@ async function openCheckout() {
     return blocked
   }
   localCheckoutPreview.value = preview
-  // Keep the exact page rows before any checkout-step mutation can replace or
-  // clear the workbench projection. The result-page receipt is a pure render
-  // of this browser snapshot; it must never depend on a follow-up order query.
-  checkoutReceiptSnapshot.value = clonePlain(checkoutReceiptFromPreview(preview))
   localCheckoutPaymentOperations.value = []
   checkoutLocalOutcome.value = {}
   checkoutRecoveryActiveStep.value = null
@@ -6519,16 +6502,6 @@ async function finalizeLocalCheckoutPreview(event = {}) {
   // 正确路由到 submit-debt-repayment；不能在发送前清空并误走普通销售。
   try {
     const checkoutSnapshot = buildCheckoutSnapshot(preview || {})
-    // Freeze the printable projection before the single settlement request.
-    // This also covers successful responses whose envelope does not expose a
-    // printable line list; the lines are already the values shown in step 2.
-    checkoutReceiptSnapshot.value = clonePlain(
-      checkoutReceiptFromPreview({
-        ...checkoutSnapshot,
-        lines: Array.isArray(preview?.lines) ? preview.lines : checkoutSnapshot.lines,
-        payment: preview?.payment || checkoutSnapshot.payment
-      })
-    )
     const receivableCents = moneyToCents(checkoutSnapshotReceivableAmount(checkoutSnapshot.lines))
     const selectedCents = checkoutSnapshotPaymentLines(checkoutSnapshot.lines).reduce(
       (total, line) => total + moneyToCents(line?.amount),
@@ -6560,29 +6533,6 @@ async function finalizeLocalCheckoutPreview(event = {}) {
         checkoutSnapshot
       }
     })
-    if (['success', 'succeeded'].includes(resultStatus(submitted))) {
-      // Keep a presentation projection beside the exact command snapshot.
-      // buildCheckoutSnapshot intentionally strips UI/projection metadata for
-      // the server, but the result page still needs the submitted sale,
-      // service and payment rows immediately for printing.
-      const previewLines = Array.isArray(preview?.lines) ? preview.lines : []
-      const fallbackLines = Array.isArray(checkout.value?.orderLines)
-        ? checkout.value.orderLines
-        : (Array.isArray(cartLines.value) ? cartLines.value : [])
-      const receiptPreview = {
-        ...preview,
-        // A hot-reloaded or legacy projection can omit `lines` from the local
-        // preview while the visible cashier cart still has the same rows.
-        // Use that already-rendered page value only as a print projection;
-        // never substitute it into the submitted business snapshot.
-        lines: previewLines.length ? previewLines : fallbackLines
-      }
-      checkoutReceiptSnapshot.value = clonePlain({
-        ...checkoutSnapshot,
-        ...checkoutReceiptFromPreview(receiptPreview,
-          responseDataBlock(submitted).checkoutSubmission || responseDataBlock(submitted).checkoutResult || null)
-      })
-    }
     event?.resolve?.(submitted)
     return submitted
   } finally {
@@ -6704,11 +6654,6 @@ async function enqueueCheckoutAction(event = {}) {
       // A browser-owned preview has no server checkout session. Query only
       // the original command key; never send its cart snapshot as a new write.
       const queried = await requestCheckoutAction({ action, payload })
-      if (['success', 'succeeded'].includes(resultStatus(queried))) {
-        checkoutReceiptSnapshot.value = clonePlain(checkoutReceiptFromPreview(
-          preview, responseDataBlock(queried).checkoutSubmission || responseDataBlock(queried).checkoutResult || null
-        ))
-      }
       event?.resolve?.(queried)
       return queried
     } else if (action === 'query-checkout-result'
@@ -6981,7 +6926,7 @@ async function requestCheckoutAction({ action, payload }) {
     return result
   }
 
-  if (action === 'view-sales-order' || action === 'print-sales-order-receipt') {
+  if (action === 'view-sales-order') {
     const salesOrderId = String(
       payload?.salesOrderId
       || checkoutOverlayState.value.salesOrderId
@@ -7017,10 +6962,7 @@ async function requestCheckoutAction({ action, payload }) {
       }))
       return result
     }
-    // The success overlay itself only has a concise result projection.  Return
-    // the verified authority detail to its local print adapter so its receipt
-    // always includes items, payment rows and the frozen money summary.
-    return { ...result, receiptOrder: detail }
+    return result
   }
 
   const session = checkoutSession.value
@@ -7441,7 +7383,6 @@ async function openPreparedCheckout(event = {}) {
     }
     checkoutLocalOutcome.value = {}
     localCheckoutPaymentOperations.value = []
-    checkoutReceiptSnapshot.value = null
     isCheckoutOpen.value = true
     return
   }
@@ -7576,7 +7517,6 @@ function resetCashierLocalContext() {
   couponSelector.value = null
   isSavingLineCoupon.value = false
   checkoutLocalOutcome.value = {}
-  checkoutReceiptSnapshot.value = null
   restoredHangMemberCheckpoint.value = null
   localCheckoutBusinessDate.value = cashierToday
   localCheckoutBusinessDateReason.value = ''
@@ -7621,7 +7561,6 @@ async function closeCheckoutOverlay(options = {}) {
     // 成功补交先刷新收银根状态，再按被冻结的会员 ID 重新读取欠款；
     // 不能用成功前的欠款金额，也不能让通用结账的整页刷新吞掉返回意图。
     localCheckoutPreview.value = null
-    checkoutReceiptSnapshot.value = null
     if (refreshCommittedDebt) {
       try {
         await requestAction('open-cashier-workbench', { silent: true })
@@ -7670,7 +7609,6 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   }
   checkoutRequiresRootReload.value = false
   await closeCheckoutOverlay()
-  checkoutReceiptSnapshot.value = null
   // Settlement has already completed. Re-read the same workbench so the
   // cashier never returns to a stale cart that could be submitted again.
   // The draft snapshot is only an optimistic local projection. Once the
@@ -8648,7 +8586,6 @@ onBeforeUnmount(() => {
       <CashierCheckoutOverlay
         v-if="isCheckoutOpen"
         :checkout="checkoutOverlayState"
-        :receipt="checkoutReceiptSnapshot"
         :is-service-order="isServiceOrder && !isDebtRepaymentCheckout"
         :business-sources="checkoutInlineBusinessSources"
         :business-sources-loading="isLoadingCheckoutBusinessSources"

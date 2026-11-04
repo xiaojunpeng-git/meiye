@@ -37,6 +37,7 @@ import {
 import {
   openSalesOrderReceiptPrint
 } from '@/services/salesOrderReceiptPrint'
+import { readOrderReceipt } from '@/services/orderReceiptQuery'
 import {
   businessReceiptFromRecord,
   businessReceiptRefreshQuery,
@@ -3444,16 +3445,8 @@ async function printSalesOrderRecord(record = {}) {
   servicePrintError.value = ''
   salesPrintLoading.value = { ...salesPrintLoading.value, [orderId]: true }
   try {
-    const result = await requestAction('open-sales-order-detail', { orderId })
-    if (['failed', 'conflict', 'result_unknown'].includes(actionStatus(result))) {
-      servicePrintError.value = result?.result?.message || result?.message || '销售小票读取失败，请稍后重试。'
-      return
-    }
-    const detail = salesOrderProjectionFromResult(result)?.salesOrderDetail
-    if (!detail || String(detail.id || detail.orderId || detail.salesOrderId) !== orderId) {
-      servicePrintError.value = '销售订单详情尚未完整返回，请稍后重试。'
-      return
-    }
+    // 与收银成功页共用已落账订单详情，不接受列表行或购物车作为打印数据。
+    const detail = await readOrderReceipt(requestAction, orderId)
     const printed = openSalesOrderReceiptPrint(detail)
     if (!printed.ok) servicePrintError.value = printed.message
   } catch (error) {

@@ -132,13 +132,7 @@ function receiptItemRows(item, values) {
   return `<tr${beauticians ? ' class="receipt-item-has-personnel"' : ''}>${cells}</tr>${personnel}`
 }
 
-// Browser and persisted checkout line IDs differ; source identity remains stable.
-function entitlementReceiptSourceKey(line) {
-  const type = line.entitlementInstanceType || 'card_holder'
-  const instance = String(line.entitlementInstanceId || '')
-  const detail = String(line.entitlementSourceDetailId || '')
-  return instance && detail ? `${type}:${instance}:${detail}` : ''
-}
+
 
 function paymentName(line) {
   if (line?.isBalancePayment === true || ['balance', 'member_balance', '余额'].includes(String(pickValue(line, ['paymentSource', 'paymentMethodCode', 'methodCode', 'type']) || '').toLowerCase())) {
@@ -443,87 +437,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
 </html>`
 }
 
-export function salesOrderReceiptFromCheckout(checkout = {}, submission, receiptContext = {}) {
-  const source = checkout && typeof checkout === 'object' ? checkout : {}
-  const snapshot = source.orderSnapshot && typeof source.orderSnapshot === 'object'
-    ? source.orderSnapshot
-    : source.snapshot && typeof source.snapshot === 'object'
-      ? source.snapshot
-      : {}
-  const payment = source.payment && typeof source.payment === 'object' ? source.payment : {}
-  const lines = firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
-    ? firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details'])
-    : firstNonEmptyList(source, ['orderLines', 'lines'])
-  const entitlementRoles = new Set(['entitlement_service'])
-  const serviceRoles = new Set(['service', 'service_line'])
-  const paymentRoles = new Set(['payment', 'balance_payment'])
-  const entitlementLines = lines.filter((line) => entitlementRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()) || line?.businessTag === '权益')
-  // Only the committed receipt owns post-writeoff counts. Never subtract the
-  // displayed quantity or fall back to the pre-checkout count after settlement.
-  const completion = submission?.entitlementCompletion
-  const completed = (submission?.requestStatus || submission?.checkoutRequest?.requestStatus) === 'succeeded'
-    && (completion?.persistenceStatus === 'persisted' || completion?.receiptStatus === 'completed')
-  const committedRows = completed && Array.isArray(completion.receiptEntitlements) ? completion.receiptEntitlements : []
-  const committedRemaining = new Map(committedRows.map((row) => [String(row.lineId), row.remainingTimesAfter]))
-  const remainingBySource = new Map(committedRows
-    .filter((row) => entitlementReceiptSourceKey(row))
-    .map((row) => [entitlementReceiptSourceKey(row), row.remainingTimesAfter]))
-  const serviceLines = lines.filter((line) => serviceRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
-  const paymentLines = lines.filter((line) => paymentRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
-  const salesLines = lines.filter((line) => {
-    const role = String(line?.lineRole || line?.kind || '').toLowerCase()
-    return !entitlementRoles.has(role) && !serviceRoles.has(role) && !paymentRoles.has(role) && line?.businessTag !== '权益'
-  })
-  const serviceRecords = serviceLines
-    .map((line) => ({
-      serviceProject: pickValue(line, ['serviceProject', 'projectName', 'name', 'itemName']),
-      usedTimes: pickValue(line, ['quantity', 'usedTimes', 'count', 'num']),
-      entitlementSource: pickValue(line, ['sourceNameSnapshot', 'sourceName', 'entitlementSource', 'sourceCardName']),
-      serviceAmount: pickValue(line, ['actualAmount', 'payableAmount', 'amountDue', 'amount'])
-    }))
-  const amountSummary = [source.amountSummary, source.summary, source.orderSummary, snapshot.summary, snapshot.amountSummary]
-    .find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {}
-  // 本次结账快照将欠款保存在顶层；小票摘要只搬运该冻结值，不根据收款反推欠款。
-  const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
-    ?? pickValue(snapshot, ['debtAmount', 'debt_amount'])
-  return {
-    ...snapshot,
-    salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
-    storeName: pickValue(source, ['storeName', 'shopName']) || pickValue(snapshot, ['storeName', 'shopName']),
-    storeAddress: pickValue(source, ['storeAddress']) || pickValue(snapshot, ['storeAddress']),
-    member: source.member || snapshot.member,
-    memberName: pickValue(source, ['memberName']) || pickValue(snapshot, ['memberName']),
-    isGuest: source.isGuest === true || snapshot.isGuest === true || !source.member,
-    businessDate: pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt']) || pickValue(snapshot, ['businessDate', 'settledAt', 'paymentCompletedAt']),
-    // 成功页的浏览器快照没有收银员字段时，搬运同一登录会话的权威展示名。
-    // 该上下文只用于打印投影，不写入结账业务快照，也不覆盖订单已有收银员。
-    cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']) || pickValue(receiptContext, ['cashierName']),
-    orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
-    items: [
-      ...salesLines,
-      ...entitlementLines.map((line) => {
-        if (submission === undefined) return { ...line, businessTag: '权益' }
-        const remaining = committedRemaining.get(String(line.lineId || line.id || ''))
-          ?? remainingBySource.get(entitlementReceiptSourceKey(line))
-        return {
-          ...line,
-          businessTag: '权益',
-          remainingTimes: null, remaining_times: null,
-          availableTimes: null, available_times: null, remaining_times_after: null,
-          remainingTimesAfter: Number.isInteger(remaining) && remaining >= 0 ? remaining : null
-        }
-      })
-    ],
-    serviceRecords,
-    receiptMode: serviceRecords.length && !salesLines.length && !entitlementLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
-    paymentDetails: firstNonEmptyList(payment, ['resultLines', 'selectedLines']).length
-      ? firstNonEmptyList(payment, ['resultLines', 'selectedLines'])
-      : firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']).length
-        ? firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
-        : paymentLines,
-    amountSummary: hasValue(debtAmount) ? { ...amountSummary, debtAmount } : amountSummary
-  }
-}
+
 
 /** Mount a snapshot-only preview; native printing temporarily releases the app
  * viewport and restores it on completion/cancel/failure without changing orders. */
