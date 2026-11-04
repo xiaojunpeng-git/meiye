@@ -91,6 +91,7 @@ final class CashierV3MemberModule
                             'status' => (string)($payload['status'] ?? ''),
                             'dateFrom' => (string)($payload['dateFrom'] ?? ''),
                             'dateTo' => (string)($payload['dateTo'] ?? ''),
+                            'transferPage' => (int)($payload['transferPage'] ?? 1),
                         ]
                     );
                     if ((string)($payload['tab'] ?? '') === 'debt') {

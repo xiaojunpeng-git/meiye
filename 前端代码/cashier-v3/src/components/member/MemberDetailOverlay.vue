@@ -193,6 +193,17 @@ const cardHistoryLoading = ref(false)
 const cardHistoryError = ref('')
 const balanceChanges = computed(() => readList(detail.value, ['balanceChanges', 'balanceChangeRecords', 'balanceHistory']))
 const coupons = computed(() => readList(detail.value, ['coupons', 'couponRecords', 'memberCoupons']))
+const couponTransfers = computed(() => readList(detail.value.couponTransfers, ['list']))
+const couponTransferTotal = computed(() => Number(detail.value.couponTransfers?.total || 0))
+const couponTransferView = ref(false)
+const couponTransferPage = ref(1)
+watch(() => detail.value.couponTransfers?.page, (page) => {
+  if (Number(page) > 0) couponTransferPage.value = Number(page)
+})
+watch(memberId, () => {
+  couponTransferView.value = false
+  couponTransferPage.value = 1
+})
 const pointChanges = computed(() => readList(detail.value, ['pointChanges', 'pointChangeRecords', 'pointHistory']))
 const writeoffRecords = computed(() => readList(detail.value, ['writeoffRecords', 'serviceRecords', 'writeoffs']))
 const salesOrders = computed(() => readList(detail.value, ['salesOrders', 'saleOrders', 'orders']))
@@ -432,6 +443,8 @@ function tabIsLoading(tabKey) {
 function switchTab(tab) {
   if (!tab || tab.key === activeTab.value || !tabs.value.some(item => item.key === tab.key)) return
   activeTab.value = tab.key
+  couponTransferView.value = false
+  couponTransferPage.value = 1
   actionError.value = ''
   tabKeyword.value = ''
   tabDateFrom.value = todayDate()
@@ -448,6 +461,23 @@ function switchTab(tab) {
     dateFrom: ['gift', 'coupons'].includes(tab.key) && tabStatus.value === 'active' ? '' : tabDateFrom.value,
     dateTo: ['gift', 'coupons'].includes(tab.key) && tabStatus.value === 'active' ? '' : tabDateTo.value
   })
+}
+
+// 转赠记录始终读取审计表的双向事件；不以当前券归属或优惠券筛选状态裁剪历史。
+function loadCouponTransferPage(page = 1) {
+  couponTransferPage.value = Math.max(1, page)
+  emit('tab-change', {
+    tab: 'coupons', memberId: memberId.value, member: member.value,
+    keyword: tabKeyword.value.trim(), status: tabStatus.value,
+    dateFrom: tabStatus.value === 'active' ? '' : tabDateFrom.value,
+    dateTo: tabStatus.value === 'active' ? '' : tabDateTo.value,
+    transferPage: couponTransferPage.value
+  })
+}
+
+function toggleCouponTransfers() {
+  couponTransferView.value = !couponTransferView.value
+  if (couponTransferView.value) loadCouponTransferPage(1)
 }
 
 function queryActiveTab() {
@@ -907,14 +937,14 @@ async function triggerAction(action, context = {}) {
       </nav>
 
       <form v-if="hasDetail && !isLoading && isSearchableTab" class="member-detail-overlay__query" @submit.prevent="queryActiveTab">
-        <div v-if="showDateRange" class="member-detail-overlay__date-range">
+        <div v-if="!couponTransferView && showDateRange" class="member-detail-overlay__date-range">
           <UnifiedQueryDateRange v-model="tabPeriod" label="会员记录查询周期" />
         </div>
-        <label>
+        <label v-if="!couponTransferView">
           <input v-model="tabKeyword" type="search" maxlength="80" :placeholder="tabKeywordPlaceholder" />
         </label>
-        <button type="submit" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="tabIsLoading(activeTab) || activeActionKey !== ''">查询</button>
-        <label v-if="hasStatusFilter" class="member-detail-overlay__status-filter">
+        <button v-if="!couponTransferView" type="submit" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="tabIsLoading(activeTab) || activeActionKey !== ''">查询</button>
+        <label v-if="hasStatusFilter && !couponTransferView" class="member-detail-overlay__status-filter">
           <select v-model="tabStatus" aria-label="状态筛选" @change="queryActiveTab">
             <template v-if="activeTab === 'care'">
               <option value="unfinished">未完成</option>
@@ -926,6 +956,7 @@ async function triggerAction(action, context = {}) {
             </template>
           </select>
         </label>
+        <button v-if="activeTab === 'coupons'" type="button" class="member-detail-overlay__button member-detail-overlay__button--secondary member-detail-overlay__transfer-toggle" :aria-pressed="couponTransferView" @click="toggleCouponTransfers">{{ couponTransferView ? '返回优惠券' : '转赠记录' }}</button>
       </form>
 
       <main class="member-detail-overlay__body" :aria-busy="isLoading || tabIsLoading(activeTab)">
@@ -1056,7 +1087,28 @@ async function triggerAction(action, context = {}) {
           </section>
 
           <section v-else-if="activeTab === 'coupons'" class="member-detail-overlay__tab-content" aria-label="优惠券">
-            <section class="member-detail-overlay__panel">
+            <section v-if="couponTransferView" class="member-detail-overlay__panel">
+              <header><h3>转赠记录</h3><span>包含本会员转出和转入的优惠券，按转赠时间排序。</span></header>
+              <div class="member-detail-overlay__table-wrap">
+                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
+                  <thead><tr><th>转赠时间</th><th>方向</th><th>对方会员</th><th>优惠券编号</th><th>优惠券名称</th><th>转赠单号</th><th>当前持有人</th><th>券状态</th></tr></thead>
+                  <tbody>
+                    <tr v-for="record in couponTransfers" :key="record.transferNo">
+                      <td>{{ record.occurredAt }}</td><td>{{ record.direction }}</td><td>{{ record.otherMember }}</td>
+                      <td>{{ record.couponNo }}</td><td>{{ record.couponName }}</td><td>{{ record.transferNo }}</td>
+                      <td>{{ record.currentHolder }}</td><td><span class="member-detail-overlay__record-status">{{ record.statusLabel }}</span></td>
+                    </tr>
+                    <tr v-if="!couponTransfers.length"><td colspan="8" class="member-detail-overlay__table-empty">暂无转赠记录</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="member-detail-overlay__transfer-pagination">
+                <span>共 {{ couponTransferTotal }} 条 · 每页 20 条 · 第 {{ couponTransferPage }} / {{ Math.max(1, Math.ceil(couponTransferTotal / 20)) }} 页</span>
+                <button type="button" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="couponTransferPage <= 1" @click="loadCouponTransferPage(couponTransferPage - 1)">上一页</button>
+                <button type="button" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="couponTransferPage * 20 >= couponTransferTotal" @click="loadCouponTransferPage(couponTransferPage + 1)">下一页</button>
+              </div>
+            </section>
+            <section v-else class="member-detail-overlay__panel">
               <header><h3>优惠券</h3></header>
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
@@ -1716,6 +1768,21 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__query .member-detail-overlay__status-filter {
   min-width: 92px;
+}
+
+.member-detail-overlay__transfer-toggle {
+  margin-left: auto;
+}
+
+.member-detail-overlay__transfer-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #eaecf0;
+  color: #667085;
+  font-size: 12px;
 }
 
 .member-detail-overlay__query input {

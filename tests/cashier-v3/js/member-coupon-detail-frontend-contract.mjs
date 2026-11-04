@@ -10,8 +10,9 @@ const shell = readFileSync(new URL('前端代码/cashier-v3/src/layouts/CashierS
 // must not silently return when the member detail layout changes.
 assert.match(overlay, /\{ key: 'coupons', label: '优惠券' \},\s*\{ key: 'sales', label: '销售订单' \}/)
 assert.match(overlay, /<section v-else-if="activeTab === 'coupons'"[^>]*aria-label="优惠券"[\s\S]*?<h3>优惠券<\/h3>/)
-assert.ok(overlay.indexOf('activeTab === \'coupons\'') > overlay.indexOf('activeTab === \'assets\''))
-assert.ok(overlay.indexOf('activeTab === \'coupons\'') < overlay.indexOf('activeTab === \'sales\''))
+// Compare rendered tab sections; the coupon toolbar can mention the tab earlier in the template.
+assert.ok(overlay.indexOf('<section v-else-if="activeTab === \'coupons\'"') > overlay.indexOf('<section v-else-if="activeTab === \'assets\'"'))
+assert.ok(overlay.indexOf('<section v-else-if="activeTab === \'coupons\'"') < overlay.indexOf('<section v-else-if="activeTab === \'sales\'"'))
 assert.match(overlay, /\['assets', 'gift', 'coupons'\]\.includes\(tab\.key\)/)
 assert.match(shell, /\['assets', 'gift', 'coupons'\]\.includes\(memberDetailInitialTab\.value\)/)
 console.log('MEMBER_COUPON_DETAIL_FRONTEND_CONTRACT_OK')

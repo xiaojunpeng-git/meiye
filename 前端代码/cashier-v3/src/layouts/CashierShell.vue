@@ -1595,6 +1595,7 @@ async function loadMemberDetailTab(payload = {}) {
       status: String(payload.status || '').trim(),
       dateFrom: String(payload.dateFrom || '').trim(),
       dateTo: String(payload.dateTo || '').trim(),
+      transferPage: Math.max(1, Number(payload.transferPage) || 1),
       silent: true
     })
     const detail = memberDetailFromResponse(result)

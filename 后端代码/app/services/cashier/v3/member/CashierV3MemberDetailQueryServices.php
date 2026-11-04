@@ -586,6 +586,10 @@ final class CashierV3MemberDetailQueryServices
                 $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '',
                 $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '')
             : [];
+        // 转赠审计以不可变记录为准，既包含转出也包含转入；当前券持有人只用于展示现状。
+        $couponTransfers = $tab === 'coupons'
+            ? $this->couponTransfers($memberId, $detailQuery['transferPage'])
+            : ['list' => [], 'total' => 0, 'page' => 1];
         $cardOperations = ($loadAll || $tab === 'card-operations')
             ? $this->cardOperations($memberId, $operatorScope->tenantId(), $tab === 'card-operations' ? $detailQuery['keyword'] : '')
             : null;
@@ -671,6 +675,7 @@ final class CashierV3MemberDetailQueryServices
             ],
             'cards' => $cards,
             'coupons' => $coupons,
+            'couponTransfers' => $couponTransfers,
             'latestVisit' => $overview['latestVisit'],
             'tabStates' => [
                 'profile' => ['total' => 1, 'dataStatus' => 'authoritative'],
@@ -762,6 +767,53 @@ final class CashierV3MemberDetailQueryServices
                 'statusLabel' => $statusLabel,
             ];
         }, $rows);
+    }
+
+    /**
+     * 会员转赠记录按审计事件分页，而非按当前持券人筛选；转出后仍须可追溯。
+     * 对方手机号只展示脱敏值，不借当前会员详情权限暴露另一会员的完整资料。
+     *
+     * @return array{list:array<int,array<string,mixed>>,total:int,page:int}
+     */
+    private function couponTransfers(int $memberId, int $page): array
+    {
+        $page = max(1, $page);
+        $query = Db::name('store_coupon_transfer')->alias('transfer')
+            ->leftJoin('user sender', 'sender.uid=transfer.from_uid')
+            ->leftJoin('user recipient', 'recipient.uid=transfer.to_uid')
+            ->leftJoin('store_coupon_user coupon', 'coupon.id=transfer.coupon_user_id')
+            ->where(function ($where) use ($memberId): void {
+                $where->where('transfer.from_uid', $memberId)->whereOr('transfer.to_uid', $memberId);
+            });
+        $total = (int)(clone $query)->count('transfer.id');
+        $page = min($page, max(1, (int)ceil($total / 20)));
+        $rows = $query->field('transfer.id,transfer.transfer_no,transfer.coupon_user_id,transfer.coupon_title,transfer.from_uid,transfer.to_uid,transfer.occurred_at,sender.phone AS sender_phone,recipient.phone AS recipient_phone,coupon.uid AS holder_uid,coupon.status AS coupon_status,coupon.is_fail AS coupon_is_fail,coupon.end_time AS coupon_end_time')
+            ->order('transfer.occurred_at desc,transfer.id desc')->page($page, 20)->select()->toArray();
+        $now = time();
+        $list = array_map(function (array $row) use ($memberId, $now): array {
+            $outgoing = (int)$row['from_uid'] === $memberId;
+            $otherPhone = (string)($outgoing ? $row['recipient_phone'] : $row['sender_phone']);
+            $otherMember = preg_match('/^\d{11}$/D', $otherPhone) === 1
+                ? substr($otherPhone, 0, 3) . '****' . substr($otherPhone, -4) : '会员资料不可用';
+            if ($row['holder_uid'] === null) $status = '券记录不存在';
+            elseif ((int)$row['coupon_is_fail'] !== 0) $status = '已作废';
+            elseif ((int)$row['coupon_status'] === 1) $status = '已使用';
+            elseif ((int)$row['coupon_status'] === 2
+                || ((int)$row['coupon_end_time'] > 0 && (int)$row['coupon_end_time'] < $now)) $status = '已过期';
+            else $status = '未使用';
+            return [
+                'transferNo' => (string)$row['transfer_no'],
+                'couponNo' => (string)$row['coupon_user_id'],
+                'couponName' => (string)$row['coupon_title'],
+                'direction' => $outgoing ? '转出' : '转入',
+                'otherMember' => $otherMember,
+                'occurredAt' => $this->dateTime((int)$row['occurred_at']),
+                'currentHolder' => $row['holder_uid'] === null ? '未知'
+                    : ((int)$row['holder_uid'] === $memberId ? '本会员' : '对方会员'),
+                'statusLabel' => $status,
+            ];
+        }, $rows);
+        return compact('list', 'total', 'page');
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -1818,7 +1870,7 @@ final class CashierV3MemberDetailQueryServices
         return $cards;
     }
 
-    /** @return array{tab:string,keyword:string,status:string,dateFrom:string,dateTo:string} */
+    /** @return array{tab:string,keyword:string,status:string,dateFrom:string,dateTo:string,transferPage:int} */
     private function detailQuery(array $raw): array
     {
         $tab = trim((string)($raw['tab'] ?? ''));
@@ -1835,6 +1887,7 @@ final class CashierV3MemberDetailQueryServices
             'status' => $status,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'transferPage' => max(1, min(1000000, (int)($raw['transferPage'] ?? 1))),
         ];
     }
 
@@ -1922,13 +1975,15 @@ final class CashierV3MemberDetailQueryServices
     private function balanceChangeTypeLabel(string $value, string $direction): string
     {
         $normalized = strtolower(trim($value));
-        // Checkout balance deductions use order_payment in immutable facts;
-        // keep that code for reconciliation and translate only the UI label.
+        // 历史导入使用 order_pay，新结账使用 order_payment；两种原始码保留在事实中，
+        // 会员详情只统一展示业务名称，不能靠前端猜测或改写原始流水。
         $labels = [
             'recharge' => '充值', 'recharge_credit' => '充值', 'balance_payment' => '余额支付',
-            'order_payment' => '余额支付',
+            'order_pay' => '余额支付', 'order_payment' => '余额支付',
             'order_void' => '订单作废返还', 'order_refund' => '订单退款返还',
             'balance_restored' => '余额返还', 'recharge_debt_repayment_credit' => '欠款补交转余额',
+            'debt_repayment' => '欠款补交', 'refund_credit' => '退款返还',
+            'manual_adjustment' => '人工调整',
             // 退款仍保留原始类型码用于对账，会员页面只展示可理解的业务名称。
             'manual_refund_credit' => '退款转入余额',
             'manual_refund_debit' => '余额退款扣减',
@@ -1937,7 +1992,8 @@ final class CashierV3MemberDetailQueryServices
             // 人工修正独立于充值及余额消费，继续展示同一权威余额变动事实。
             'system_add' => '系统增加余额', 'system_sub' => '系统减少余额',
         ];
-        $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
+        // 未识别的内部码也不直接显示英文；原始码继续由权威事实保留供追溯。
+        $label = $labels[$normalized] ?? ($normalized === '' ? '余额变动' : '其他余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;
     }
 
