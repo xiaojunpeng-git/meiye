@@ -21,6 +21,11 @@ export default {
   component: BasicLayout,
   children: [
     {
+      path: 'staff-roster', name: `${pre}staff_roster`,
+      meta: { auth: ['admin-staff'], title: '员工排班' },
+      component: () => import('@/pages/position/StaffRosterBridge')
+    },
+    {
       path: 'system/base',
       name: `${pre}systemBase`,
       meta: {

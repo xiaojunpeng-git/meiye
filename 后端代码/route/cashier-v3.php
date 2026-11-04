@@ -48,6 +48,12 @@ Route::group('cashierapi/v3', function () {
      * 需登录、强制门店、按角色校验
      */
     Route::group(function () {
+        // 排班页、班次页与三端预约共用排班服务；权限复用现有人员管理资格。
+        Route::get('staff-roster', 'StaffRoster/index')->option(['real_name' => '员工月排班']);
+        Route::get('staff-roster/export', 'StaffRoster/exportList')->option(['real_name' => '导出员工排班']);
+        Route::post('staff-roster', 'StaffRoster/save')->option(['real_name' => '保存员工排班']);
+        Route::post('staff-roster/shift', 'StaffRoster/shift')->option(['real_name' => '保存班次']);
+        Route::post('staff-roster/shift/delete', 'StaffRoster/deleteShift')->option(['real_name' => '删除班次']);
         Route::get('session/stores', 'StoreLogin/switchableStores')
             ->option(['real_name' => '门店端可切换门店']);
         Route::post('session/switch-store', 'StoreLogin/switchStore')

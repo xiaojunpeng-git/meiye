@@ -406,6 +406,8 @@ function configuredNavigation(items) {
 const topNavigationEntries = computed(() => [
   ...configuredNavigation(menuDefinitions).filter(item => canUseFeature(item.featureCode)),
   ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
+  // 排班复用人员管理资格，保留独立入口名称，避免岗位配置标题覆盖成另一个人员列表。
+  ...(canUseFeature('cashier.v3.management.staff') ? [{ key: 'staff-roster', navigationKey: 'staff.roster', label: '排班管理', featureCode: 'cashier.v3.management.staff', to: { name: 'cashier-v3-staff-roster' } }] : []),
   ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
   // 基础报表独立授权；旧“数据”岗位继续可用，且不因新勾选获得其他数据报表。
   ...(canUseFeature('cashier.v3.basic_reports')
@@ -487,6 +489,7 @@ const headerlessPageNames = new Set([
   'cashier-v3-care',
   'cashier-v3-order-center',
   'cashier-v3-staff-list',
+  'cashier-v3-staff-roster',
   'cashier-v3-store-business-reports',
   'cashier-v3-store-target-dashboard'
 ])

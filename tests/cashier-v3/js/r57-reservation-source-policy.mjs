@@ -9,7 +9,7 @@ const { parse, compileTemplate } = require('@vue/compiler-sfc')
 const { transformSync } = require('esbuild')
 const source = fs.readFileSync(new URL('前端代码/cashier-v3/src/components/reservation/ReservationEditorOverlay.vue', root), 'utf8')
 const props = reactive({ modelValue: { memberId: 1, businessSourcePolicy: { enabled: false } }, businessSources: [{ id: 2, name: 'manual' }], catalogOptions: [], craftsmenOptions: [], craftsmen: [], rooms: [], submission: {} })
-const context = vm.createContext({ ref, computed, watch, nextTick, useModalFocusTrap: () => {}, defineProps: () => props, defineEmits: () => () => {} })
+const context = vm.createContext({ ref, computed, watch, nextTick, setTimeout, clearTimeout, onBeforeUnmount: () => {}, useModalFocusTrap: () => {}, defineProps: () => props, defineEmits: () => () => {} })
 vm.runInContext(source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '') + '\nthis.t = { draft, sourceEnabled, summaryRows, collectMissingFields, chooseMember, chooseBusinessPrimary, submitDraft };', context)
 const t = context.t
 assert.equal(t.sourceEnabled.value, false)

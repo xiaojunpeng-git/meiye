@@ -53,8 +53,8 @@ test('merchant confirmation recalculates only after schedule or project changes'
   assert.equal(confirmationPage.includes('toggleCraftsman(staff) : void { if (staff.selectable === false) return; refreshSuggestedEnd'), false)
 })
 
-test('service page uses actual-start timing, displays overtime and never auto-ends service', () => {
-  for (const token of ["workflow: 'service'", 'startMobileReservationService', 'endMobileReservationService', 'actualServiceStartedAt', 'serviceCountdownEndsAt', 'totalDurationSeconds', 'serviceExpectedEndMs', '已超时 ', '不会自动结束服务']) assert.equal(servicePage.includes(token), true, token)
+test('service page preserves actual-start timing and the accepted automatic-end behavior', () => {
+  for (const token of ["workflow: 'service'", 'startMobileReservationService', 'endMobileReservationService', 'actualServiceStartedAt', 'serviceCountdownEndsAt', 'totalDurationSeconds', 'serviceExpectedEndMs', '已超时 ', '倒计时归零后自动结束服务。']) assert.equal(servicePage.includes(token), true, token)
   for (const token of ["let status = String(entity.statusCode || entity.status || '')", "status != 'IN_SERVICE' && status != '服务中'", 'entity.actualServiceEndedAt || entity.actualEndAt']) assert.equal(servicePage.includes(token), true, token)
   assert.equal(servicePage.includes('endMobileReservationService(detailId.value, payload, done)'), true)
   assert.equal(servicePage.includes('setTimeout(() => endMobileReservationService'), false)

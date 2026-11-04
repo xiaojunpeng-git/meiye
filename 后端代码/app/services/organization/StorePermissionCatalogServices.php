@@ -70,6 +70,8 @@ final class StorePermissionCatalogServices
     public static function navigationItems(): array
     {
         $items=[];
+        // 排班入口复用人员管理资格，导航元数据本身不新增岗位授权。
+        $items[-34001]=['id'=>-34001,'title'=>'排班管理','navigation_key'=>'staff.roster','owner_feature'=>'cashier.v3.management.staff','parent_id'=>301060,'sort'=>40];
         $items[-29001]=['id'=>-29001,'title'=>'合作方品项汇总','navigation_key'=>'report.partner_item_summary','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>0];
         $items[-29002]=['id'=>-29002,'title'=>'合作方品项明细','navigation_key'=>'report.partner_item_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>10];
         $items[-29003]=['id'=>-29003,'title'=>'会员消费明细','navigation_key'=>'report.member_consumption_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>20];

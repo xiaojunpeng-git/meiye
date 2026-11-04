@@ -33,6 +33,7 @@ const cashierApiProxy = {
     changeOrigin: false
   },
   // 平台会员使用平台管理员会话，与门店 cashier token/后端进程隔离。
+  '/adminapi/staff-roster': { target: platformApiTarget, changeOrigin: false },
   '/adminapi/user/member-center': {
     target: platformApiTarget,
     changeOrigin: false

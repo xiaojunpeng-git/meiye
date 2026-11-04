@@ -2558,6 +2558,8 @@ Route::group('adminapi', function () {
         // R41 成交人数门槛由平台系统设置管理，原单读取结账时的版本。
         Route::get('deal-people-threshold', 'v1.system.DealPeopleThresholdPolicy/read')->option(['real_name' => '读取成交人数门槛']);
         Route::put('deal-people-threshold', 'v1.system.DealPeopleThresholdPolicy/update')->option(['real_name' => '保存成交人数门槛']);
+        Route::get('staff-roster', 'v1.system.StaffRosterSetting/read')->option(['real_name'=>'读取启用排班参数']);
+        Route::put('staff-roster', 'v1.system.StaffRosterSetting/update')->option(['real_name'=>'保存启用排班参数']);
         Route::get('member-commerce-defaults', 'v1.system.MemberCommerceSettings/read')->option(['real_name' => '读取会员交易默认来源']);
         Route::put('member-commerce-defaults', 'v1.system.MemberCommerceSettings/update')->option(['real_name' => '保存会员交易默认来源']);
         Route::get('config/edit_new_build/:type', 'v1.system.config.SystemConfig/getNewFormBuild')->option(['real_name' => '新配置编辑表单']);
@@ -3427,6 +3429,19 @@ Route::group('adminapi', function () {
         Route::post('save', 'v1.system.TrainingDocument/save')->option(['real_name' => '保存培训资料']);
         Route::post('status/:id', 'v1.system.TrainingDocument/status')->option(['real_name' => '更新培训资料状态']);
         Route::get('download/:id', 'v1.system.TrainingDocument/download')->option(['real_name' => '下载培训资料']);
+    })->middleware([
+        \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
+        \app\http\middleware\admin\AdminCkeckRoleMiddleware::class
+    ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'admin');
+
+    // 平台仅增加组织筛选，读写与门店调用同一服务，不建立平台专属操作门禁。
+    Route::group('staff-roster', function () {
+        Route::get('scope', 'v1.staff.StaffRoster/scope')->option(['real_name' => '排班组织范围']);
+        Route::get('', 'v1.staff.StaffRoster/index')->option(['real_name' => '员工月排班']);
+        Route::get('export', 'v1.staff.StaffRoster/exportList')->option(['real_name' => '导出员工排班']);
+        Route::post('', 'v1.staff.StaffRoster/save')->option(['real_name' => '保存员工排班']);
+        Route::post('shift', 'v1.staff.StaffRoster/shift')->option(['real_name' => '保存班次']);
+        Route::post('shift/delete', 'v1.staff.StaffRoster/deleteShift')->option(['real_name' => '删除班次']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class

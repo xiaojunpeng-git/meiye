@@ -2290,7 +2290,6 @@ WSS;
                 Build::switch('station_open', $data['station_open']['info'], (int)$data['station_open']['value'])->control(1, $system)->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['station_open']['desc']),
             ])->option('门店设置', [
                 Build::switch('mobile_reservation_switch', $data['mobile_reservation_switch']['info'], (int)$data['mobile_reservation_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['mobile_reservation_switch']['desc']),
-                Build::switch('reservation_schedule_manage', $data['reservation_schedule_manage']['info'], (int)($data['reservation_schedule_manage']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['reservation_schedule_manage']['desc'] ?? '开启后预约看板按排班与休息展示员工'),
                 Build::switch('cashier_operator_gift_switch', $data['cashier_operator_gift_switch']['info'] ?? '前台收银支持操作员赠送', (int)($data['cashier_operator_gift_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['cashier_operator_gift_switch']['desc'] ?? '关闭后收银台隐藏赠送按钮，提交时自动使用商品/储值档位预设赠送配置'),
                 Build::switch('cashier_debt_pay_switch', $data['cashier_debt_pay_switch']['info'] ?? '是否允许欠款', (int)($data['cashier_debt_pay_switch']['value'] ?? 0))->trueValue('是', 1)->falseValue('否', 0)->info($data['cashier_debt_pay_switch']['desc'] ?? '关闭后收银台购物车和充值页面隐藏欠款按钮'),
                 // 仅管理收银目录入口，不能把已存在的定制卡或卡项操作一同禁用。

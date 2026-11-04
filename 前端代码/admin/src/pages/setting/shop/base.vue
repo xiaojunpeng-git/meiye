@@ -3,6 +3,7 @@
     <div>
         <from-submit :validate="ruleValidate" :url="url" :title="title" :rules="rules">
         <template #store-settings>
+        <StaffRosterSetting />
         <!-- 这些独立配置保留各自的读取、版本保护和保存接口，仅随门店设置页签展示。 -->
         <section class="deal-people-threshold" aria-label="成交人数门槛">
             <div class="deal-people-threshold__title">成交人数门槛</div>
@@ -63,6 +64,7 @@
 </template>
 
 <script>
+    import StaffRosterSetting from './StaffRosterSetting.vue';
     import fromSubmit from '@/components/fromSubmit/fromSubmit.vue';
     import { getDealPeopleThreshold, saveDealPeopleThreshold as updateDealPeopleThreshold } from '@/api/system';
     import buildData from "./buildData";
@@ -70,7 +72,7 @@
 
     export default {
         name: "base-index",
-        components:{fromSubmit},
+        components:{fromSubmit,StaffRosterSetting},
         mixins:[buildData],
         data() {
             return {

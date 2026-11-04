@@ -17,7 +17,7 @@ const props = reactive({
   craftsmen: [], rooms: [], submission: {}, isSubmitting: false
 })
 const emitted = []
-const context = vm.createContext({ computed, ref, watch, nextTick, useModalFocusTrap: () => {},
+const context = vm.createContext({ computed, ref, watch, nextTick, setTimeout, clearTimeout, onBeforeUnmount: () => {}, useModalFocusTrap: () => {},
   defineProps: () => props, defineEmits: () => (...args) => emitted.push(args) })
 vm.runInContext(script + '\nthis.test = { draft, appointmentDateValue, appointmentStartTimeValue, appointmentEndTimeValue, submitDraft, updateAppointmentDate, updateAppointmentStartTime, updateAppointmentEnd, updateRemark, withCalculatedEnd, applyScheduleChange, collectMissingFields };', context)
 const t = context.test

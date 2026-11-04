@@ -74,6 +74,8 @@ final class MobileReservationServices
     public function recalculate(array $merchant, array $payload): array
     {
         return $this->dispatch($merchant, 'recalculate-reservation-plan', [
+            // 编辑时排除自己，保持与门店端同一预约可用性投影。
+            'reservationId' => (int)($payload['reservationId'] ?? 0),
             'reservation' => is_array($payload['reservation'] ?? null) ? $payload['reservation'] : [],
             'recalculationRequestId' => trim((string)($payload['recalculationRequestId'] ?? '')),
         ]);

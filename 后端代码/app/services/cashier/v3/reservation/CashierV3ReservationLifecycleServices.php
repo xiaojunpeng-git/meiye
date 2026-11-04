@@ -99,6 +99,9 @@ final class CashierV3ReservationLifecycleServices
         sort($staffIds, SORT_NUMERIC);
         if (!$staffIds) return;
         if ($storeId <= 0 || $startAt <= 0 || $endAt <= $startAt) throw $this->failure('预约时间无效。');
+        \app\services\store\roster\StaffRosterSwitch::enabled();
+        // 与排班保存共用跨门店员工锁，避免“预约成功”和“改成休息”同时通过。
+        \app\services\store\roster\StaffRosterAvailability::lock($staffIds);
         foreach ($staffIds as $staffId) {
             $staff = Db::name('system_store_staff')->where('id', $staffId)->where('status', 1)->where('is_del', 0)->lock(true)->find();
             if (!$staff || ((int)$staff['store_id'] !== $storeId && (int)($staff['can_choose'] ?? 0) !== 1)) {

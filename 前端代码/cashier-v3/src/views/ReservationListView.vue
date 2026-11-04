@@ -1392,7 +1392,9 @@ async function selectEditorCraftsmen(payload = {}) {
   return { craftsmen: result.selected }
 }
 
+let staffAvailabilityCalculationSerial = 0
 async function recalculateReservationPlan({ draft, changeReason, recalculationRequestId } = {}) {
+  const calculationSerial = ++staffAvailabilityCalculationSerial
   const session = editorSession.value
   if (
     !session
@@ -1411,7 +1413,8 @@ async function recalculateReservationPlan({ draft, changeReason, recalculationRe
     reservation: normalizeEditorDraft(draft)
   })
   if (
-    !editorSession.value
+    calculationSerial !== staffAvailabilityCalculationSerial
+    || !editorSession.value
     || editorSession.value.preparationRequestId !== session.preparationRequestId
     || editorSession.value.stateContextId !== currentStateContextId()
   ) {
@@ -1445,7 +1448,12 @@ async function recalculateReservationPlan({ draft, changeReason, recalculationRe
   ) {
     return { success: false, message: '系统未返回与本次修改匹配的完整时长和冲突检查结果。' }
   }
-  return { success: true, draft: normalizeEditorDraft(calculatedDraft) }
+  // 可用性响应只更新候选人员，不能覆盖使用者刚调整的开始/结束时间。
+  if (Array.isArray(calculation.craftsmenOptions)) {
+    // editorConfig 是只读汇总；写入本次编辑会话的准备结果，才能触发候选列表刷新。
+    preparedEditorConfig.value = { ...editorConfig.value, craftsmenOptions: calculation.craftsmenOptions }
+  }
+  return { success: true, draft: normalizeEditorDraft(calculatedDraft), conflicts: calculation.conflicts || [] }
 }
 
 async function refreshReservationProjectCatalog({ memberId } = {}) {

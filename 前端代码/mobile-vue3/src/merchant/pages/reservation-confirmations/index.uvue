@@ -94,8 +94,18 @@
 	function applySuggestedEnd(minutes : number) : void { let end = addMinutesToStart(minutes); appointmentEndClock.value = end.date == appointmentDate.value ? end.clock : '' }
 	function changeAppointmentDate(value : any) : void { appointmentDate.value = String(value || '').slice(0, 10); refreshSuggestedEnd() }
 	function changeAppointmentStart(value : any) : void { appointmentStartClock.value = String(value || '').slice(0, 5); refreshSuggestedEnd() }
-	function changeAppointmentEnd(value : any) : void { scheduleRequestSerial++; appointmentEndClock.value = String(value || '').slice(0, 5) }
-	function refreshSuggestedEnd() : void { if (appointmentStartAt().length == 0) return; applySuggestedEnd(plannedDurationMinutes()); let serial = ++scheduleRequestSerial; if (selectedProjects.value.length == 0) return; recalculateMobileReservation({ reservation: reservationDraft(), recalculationRequestId: 'mobile-schedule-' + serial.toString() + '-' + uuid() }, (response : any) => { if (serial != scheduleRequestSerial || !succeeded(response)) return; let plan = payloadOf(response).data != null ? payloadOf(response).data.reservationPlan : null; let draft = plan != null ? plan.draft : null; let end = draft != null ? formatScheduleValue(String(draft.appointmentEndAt || '')) : null; if (end != null && end.clock.length > 0) appointmentEndClock.value = end.clock }) }
+	function changeAppointmentEnd(value : any) : void { scheduleRequestSerial++; appointmentEndClock.value = String(value || '').slice(0, 5); refreshStaffAvailability() }
+	// 日期、开始/结束及项目变化共用预约投影；只刷新人员状态，不覆盖手工确认的时间。
+	function refreshSuggestedEnd() : void { if (appointmentStartAt().length == 0) return; applySuggestedEnd(plannedDurationMinutes()); refreshStaffAvailability() }
+	function refreshStaffAvailability() : void {
+		let serial = ++scheduleRequestSerial
+		if (!editorOpen.value || appointmentStartAt().length == 0 || appointmentEndAt().length == 0 || appointmentEndClock.value <= appointmentStartClock.value) return
+		recalculateMobileReservation({ reservationId: detailId.value, reservation: reservationDraft(), recalculationRequestId: 'mobile-schedule-' + serial.toString() + '-' + uuid() }, (response : any) => {
+			if (serial != scheduleRequestSerial || !editorOpen.value || !succeeded(response)) return
+			let plan = payloadOf(response).data != null ? payloadOf(response).data.reservationPlan : null
+			if (plan != null && Array.isArray(plan.craftsmenOptions)) craftsmanOptions.value = plan.craftsmenOptions
+		})
+	}
 	function appointmentRangeLabel() : string { let end = appointmentEndAt(); if (end.length == 0) return ''; return '预约时段：' + appointmentStartAt() + ' 至 ' + end + (selectedProjects.value.length == 0 ? '（未选项目，默认一小时）' : '（项目时长可自动更新）') }
 	function estimatedEndLabel() : string { return appointmentRangeLabel() }
 	function reservationDraft() : any { return { memberId: selectedMember.value != null ? Number(selectedMember.value.memberId || selectedMember.value.id || 0) : 0, member: selectedMember.value, projects: selectedProjects.value, craftsmen: selectedCraftsmen.value, roomId: selectedRoomId.value, roomName: selectedRoomName.value, businessSourcePrimaryId: selectedBusinessPrimaryId.value, businessSourceSecondaryId: selectedBusinessSecondaryId.value, appointmentTime: appointmentStartAt(), appointmentStartAt: appointmentStartAt(), appointmentEndAt: appointmentEndAt(), remark: remark.value.trim() } }

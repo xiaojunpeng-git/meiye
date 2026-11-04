@@ -23,6 +23,7 @@ import CustomerAnalyticsView from '@/views/CustomerAnalyticsView.vue'
 import EmployeeDashboardView from '@/views/EmployeeDashboardView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
+import StaffRosterView from '@/views/StaffRosterView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
 import StoreSettingsView from '@/views/StoreSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
@@ -48,6 +49,7 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-management-center': 'cashier.v3.management.staff',
   'cashier-v3-inventory-entry': 'cashier.v3.inventory.overview',
   'cashier-v3-staff-list': 'cashier.v3.management.staff',
+  'cashier-v3-staff-roster': 'cashier.v3.management.staff',
   'cashier-v3-room-settings': 'cashier.v3.management.rooms',
   'cashier-v3-store-settings': 'cashier.v3.management.store_profile',
   'cashier-v3-business-dashboard': 'cashier.v3.management.dashboard',
@@ -88,6 +90,7 @@ export function firstGrantedRouteName() {
 }
 
 const routes = [
+  { path: '/platform/staff-roster', name: 'cashier-v3-platform-staff-roster', component: StaffRosterView, meta: { platformReport: true, title: '员工排班' } },
   { path: '/platform/member-list', name: 'cashier-v3-platform-member-list', component: PlatformMemberListView, meta: { platformReport: true, title: '用户列表' } },
   { path: '/platform/basic-reports/:report?', name: 'cashier-v3-platform-basic-reports', component: BasicReportsView, meta: { platformReport: true, title: '基础报表' } },
   { path: '/entry', name: 'cashier-v3-entry', component: RoutePlaceholderView },
@@ -236,6 +239,7 @@ const routes = [
         component: ManagementCenterView,
         meta: { title: '管理', description: '原门店后台功能的统一目录与逐步迁入入口。' }
       },
+      { path: 'management-center/staff-roster', name: 'cashier-v3-staff-roster', component: StaffRosterView, meta: { title: '员工排班' } },
       {
         path: 'management-center/staff',
         name: 'cashier-v3-staff-list',
