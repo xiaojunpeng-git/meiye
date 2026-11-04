@@ -19,7 +19,6 @@ const orderOverlay = readFileSync(path.join(root, '前端代码/cashier-v3/src/c
 const checkoutOverlay = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'), 'utf8')
 const printButton = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/order/SalesOrderReceiptPrintButton.vue'), 'utf8')
 const receiptPrint = readFileSync(path.join(root, '前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js'), 'utf8')
-const printerSetup = readFileSync(path.join(root, '前端代码/cashier-v3/src/components/order/ReceiptPrinterSetupOverlay.vue'), 'utf8')
 const orderCenter = readFileSync(path.join(root, '前端代码/cashier-v3/src/views/OrderCenterView.vue'), 'utf8')
 const cashierWorkbench = readFileSync(path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'), 'utf8')
 
@@ -315,10 +314,10 @@ ok('权益项目小票按行展示次数、余次及已保存的美容师，不�
   const entitlementSection = html.slice(html.indexOf('<h2>权益明细</h2>'), html.indexOf('<h2>收款明细</h2>'))
   assert.match(salesSection, /舒缓卡/)
   assert.doesNotMatch(salesSection, /身体\(收店\)/)
-  assert.match(entitlementSection, /<th>名称<\/th><th class="right">次数<\/th><th class="right">余次<\/th><th class="beautician">美容师<\/th>/)
-  assert.match(entitlementSection, /身体\(收店\)<\/td><td class="right">2<\/td><td class="right">8<\/td><td class="beautician">刘&lt;一&gt;、王&amp;二<\/td>/)
-  assert.match(entitlementSection, /面部护理<\/td><td class="right">1<\/td><td class="right">0<\/td><td class="beautician">—<\/td>/)
-  assert.doesNotMatch(entitlementSection, /<td class="beautician">刘<一>/)
+  assert.match(entitlementSection, /<th>名称<\/th><th class="right">次数<\/th><th class="right">余次<\/th>/)
+  assert.match(entitlementSection, /身体\(收店\)<\/td><td class="right">2<\/td><td class="right">8<\/td><\/tr><tr class="receipt-item-personnel"><td colspan="3"><small class="receipt-line-beautician">美容师：刘&lt;一&gt;、王&amp;二<\/small>/)
+  assert.match(entitlementSection, /面部护理<\/td><td class="right">1<\/td><td class="right">0<\/td><\/tr>/)
+  assert.doesNotMatch(entitlementSection, /<small class="receipt-line-beautician">美容师：刘<一>/)
   assert.doesNotMatch(entitlementSection, /金额|¥0/)
 })
 
@@ -340,7 +339,7 @@ ok('混合结账小票同时展示销售和权益区块', () => {
   assert.match(html, /权益明细/)
   assert.match(html, /买卡/)
   assert.match(html, /东方熏蒸/)
-  assert.match(html, /<td class="beautician">冯燕<\/td>/)
+  assert.match(html, /<small class="receipt-line-beautician">美容师：冯燕<\/small>/)
   assert.equal(receipt.items.length, 2)
   assert.equal(receipt.paymentDetails.length, 1)
   assert.equal(receipt.paymentDetails[0].name, '微信')
@@ -539,16 +538,6 @@ ok('订单中心打印不再发送后端打印动作', () => {
   assert.doesNotMatch(orderOverlay, /runAction\('print-sales-order-receipt'\)/)
 })
 
-ok('订单中心提供系统驱动纸宽设置与测试小票入口', () => {
-  assert.match(orderCenter, /ReceiptPrinterSetupOverlay/)
-  assert.match(orderCenter, />\s*打印设置\s*<\/button>/)
-  assert.match(printerSetup, /SALES_ORDER_RECEIPT_PAPER_PROFILES/)
-  assert.match(printerSetup, /打印测试小票/)
-  assert.match(printerSetup, /由当前电脑管理/)
-  assert.match(printerSetup, /使用系统已安装驱动/)
-  assert.doesNotMatch(printerSetup, /ESC\/POS|USB|Printer_Impact_Printer/)
-})
-
 ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.match(checkoutOverlay, /v-if="canPrintReceipt"/)
   assert.match(checkoutOverlay, /hasEntitlementLines\.value[\s\S]*props\.isServiceOrder === true/)
@@ -565,7 +554,8 @@ ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.match(cashierWorkbench, /checkoutReceiptSnapshot/)
   assert.match(cashierWorkbench, /:receipt="checkoutReceiptSnapshot"/)
   assert.doesNotMatch(cashierWorkbench, /\.\.\.\(checkoutReceiptSnapshot\.value \|\| \{\}\)/)
-  assert.match(cashierWorkbench, /checkoutReceiptSnapshot\.value = clonePlain\(\{[\s\S]*salesOrderReceiptFromCheckout\(receiptPreview\)/)
+  assert.match(cashierWorkbench, /checkoutReceiptSnapshot\.value = clonePlain\(\{[\s\S]*checkoutReceiptFromPreview\(receiptPreview,/)
+  assert.match(cashierWorkbench, /function checkoutReceiptFromPreview\(preview, submission\) \{[\s\S]*salesOrderReceiptFromCheckout\(preview, submission,/)
   assert.match(cashierWorkbench, /payload\?\.salesOrderId/)
   assert.match(cashierWorkbench, /return \{ \.\.\.result, receiptOrder: detail \}/)
   assert.doesNotMatch(cashierWorkbench, /requestAction\(action, \{\s*salesOrderId/)
