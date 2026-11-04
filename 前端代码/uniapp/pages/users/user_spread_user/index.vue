@@ -13,7 +13,8 @@
 						<text class="iconfont icon-ic_rightarrow"></text>
 					</view>
 				</view>
-				<view class="price-box" :class="!headerStatus ? 'header-height':''" :style="{backgroundImage:'url('+imgHost+'/statics/images/spread_bg.png)'}">
+				<!-- 推广页装饰图随会员端打包，避免独立客户站点缺少后端 public 图片时变成白底空图标。 -->
+				<view class="price-box" :class="!headerStatus ? 'header-height':''" :style="{backgroundImage:'url(/static/promotion/spread_bg.png)'}">
 					<view class="box-top acea-row row-center">
 						<view class="" @click="jumbPath(0)">可提现</view>
 					</view>
@@ -49,12 +50,12 @@
 			<view class="statistics acea-row">
 				<!-- 拼团推广使用独立的本人归属查询，不混入分销佣金订单或提现金额。 -->
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(13)">
-					<view class="img"><image :src="imgHost+'/statics/images/spread_dd.png'" class="image"></image></view>
+					<view class="img"><image src="/static/promotion/spread_dd.png" class="image"></image></view>
 					<view class="item-r"><view class="text">拼团推广</view></view>
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(8)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_dd.png'" class="image"></image>
+						<image src="/static/promotion/spread_dd.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">分销订单</view>
@@ -62,7 +63,7 @@
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(9)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_td.png'" class="image"></image>
+						<image src="/static/promotion/spread_td.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">我的团队</view>
@@ -70,7 +71,7 @@
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(2)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_ph.png'" class="image"></image>
+						<image src="/static/promotion/spread_ph.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">佣金排行</view>
@@ -78,7 +79,7 @@
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(12)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_yj.png'" class="image"></image>
+						<image src="/static/promotion/spread_yj.png" class="image"></image>
 						<uni-badge class="uni-badge-left-margin" v-if="userInfo.un_receive_count>0" :text="userInfo.un_receive_count"></uni-badge>
 					</view>
 					<view class="item-r">
@@ -87,7 +88,7 @@
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(1)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_tgr.png'" class="image"></image>
+						<image src="/static/promotion/spread_tgr.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">推广人排行</view>
@@ -95,7 +96,7 @@
 				</view>
 				<view class="item mb acea-row row-column row-center-wrapper" @click="jumbPath(5)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_yq.png'" class="image"></image>
+						<image src="/static/promotion/spread_yq.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">邀请好友</view>
@@ -103,7 +104,7 @@
 				</view>
 				<view class="item acea-row row-column row-center-wrapper" @click="jumbPath(10)" v-if="headerStatus">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_dj.png'" class="image"></image>
+						<image src="/static/promotion/spread_dj.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">分销等级</view>
@@ -111,7 +112,7 @@
 				</view>
 				<view class="item acea-row row-column row-center-wrapper" @click="jumbPath(11)">
 					<view class="img">
-						<image :src="imgHost+'/statics/images/spread_sm.png'" class="image"></image>
+						<image src="/static/promotion/spread_sm.png" class="image"></image>
 					</view>
 					<view class="item-r">
 						<view class="text">分销说明</view>
@@ -146,9 +147,6 @@
 	import home from '@/components/home';
 	import NavBar from '@/components/NavBar.vue';
 	import colors from '@/mixins/color.js'
-	import {
-		HTTP_REQUEST_URL
-	} from '@/config/app';
 	export default {
 		components: {
 			home,
@@ -163,7 +161,6 @@
 				iconColor: '#000000',
 				isScrolling: false,
 				// #endif
-				imgHost: HTTP_REQUEST_URL,
 				userInfo: {},
 				taskShow: false,
 				yesterdayPrice: 0.00,
