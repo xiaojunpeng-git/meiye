@@ -16,6 +16,9 @@ module.exports = {
 			const cli = process.env.UNI_HBUILDERX_PLUGINS && path.join(process.env.UNI_HBUILDERX_PLUGINS, 'uniapp-cli')
 			const dependency = name => require(require.resolve(name, { paths: [__dirname, cli].filter(Boolean) }))
 			const { MemberMiniCssDedupePlugin } = require('../../scripts/build/member-mini-css-dedupe.cjs')
+			// 推广页独占图片随所属分包加载，保持主包预算且不删除既有资源。
+			const { MemberMiniPromotionAssetsPlugin } = require('../../scripts/build/member-mini-promotion-assets.cjs')
+			config.plugins.push(new MemberMiniPromotionAssetsPlugin())
 			config.plugins.push(new MemberMiniCssDedupePlugin({ postcss: dependency('postcss'), valueParser: dependency('postcss-value-parser') }))
 		}
 		if (process.env.NODE_ENV === 'production') {

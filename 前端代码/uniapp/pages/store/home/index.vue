@@ -2,9 +2,9 @@
 	<!-- 商品分类 -->
 	<view :style="colorStyle">
 		<!-- 门店的两种样式布局 -->
-		<storeCate1 v-if="home_style==1" :info="info" :customerType="customer_type" ref="refresh2">
+		<storeCate1 v-if="home_style==1" :info="info" ref="refresh2">
 		</storeCate1>
-		<storeCate2 v-else-if="home_style==2" :cart_num="cart_num" :info="info" :customerType="customer_type"
+		<storeCate2 v-else-if="home_style==2" :cart_num="cart_num" :info="info"
 			ref="refresh">
 		</storeCate2>
 	</view>
@@ -53,7 +53,6 @@
 				id: 0,
 				category: '',
 				home_style: 0,
-				customer_type: 1,
 				where: {
 					latitude: 0,
 					longitude: 0,
@@ -227,7 +226,6 @@
 						...info,
 					};
 					this.cart_num = data.cart_num;
-					this.customer_type = parseInt(info.customer_type);
 					this.home_style = info.home_style || 0;
 					this.id = info.id || 0;
 					uni.setStorageSync('user_store_id', this.id);

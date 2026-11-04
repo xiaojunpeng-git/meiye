@@ -72,23 +72,9 @@
 					<view class="address-wrap acea-row row-bottom">
 						<view class="address-box">
 							<view class="time">营业时间：{{info.day_time}}</view>
-							<view class="address-info pr-60 mt-20">
+							<view class="address-info mt-20">
 								<text class="distance">距您{{info.range}}km</text>
 								{{info.address}}{{info.detailed_address}}
-							</view>
-						</view>
-						<view class="flex store-actions">
-							<view class="" @click="showMaoLocation">
-								<view class="flex-center w-40 h-40 rd-9 mb-8 bg--w111-f5f5f5">
-									<text class="iconfont icon-ic_map fs-28"></text>
-								</view>
-								<view class="fs-20">地图</view>
-							</view>
-							<view class="ml-36" @click="goKefu">
-								<view class="flex-center w-40 h-40 rd-9 mb-8 bg--w111-f5f5f5">
-									<text class="iconfont icon-a-ic_customerservice2 fs-28"></text>
-								</view>
-								<view class="fs-20">客服</view>
 							</view>
 						</view>
 					</view>
@@ -109,6 +95,8 @@
 					</view>
 				</view>
 			</view>
+			<!-- 两种门店布局共用联系入口，位于信息卡与商品区域之间。 -->
+			<store-contact-actions :phone="info.phone" @navigate="showMaoLocation" />
 			<view class="category acea-row" v-if="level == 3">
 				<scroll-view scroll-x="true" class="scroll-view" :scroll-into-view="navOneActiveId" scroll-with-animation>
 					<view class="item" :id="`navOne${index}`" :class="{ on: navOneActive == index }" v-for="(item,index) in categoryList" :key="item.id" @click="tapNavOne(item,index)">
@@ -276,8 +264,6 @@
 		<cartList v-if="$memberCartEntryEnabled" :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
 		<!-- 产品属性组件 -->
 		<productWindow :attr="attr" :isShow='1' :iSplus='1' :iScart='1' :type="2" :storeInfo="storeInfo" @myevent="onMyEvent" @ChangeAttr="ChangeAttr" @ChangeCartNum="ChangeCartNumDuo" @attrVal="attrVal" @iptCartNum="iptCartNum" @goCat="goCatNum" id='product-window'></productWindow>
-		<!-- 客服弹窗 -->
-		<Kefu ref="kefu" @closeKefu="closeKefu" :customerList="customerList" :customerType="customerType"></Kefu>
 		<homeList :currentPage="currentPage" :navH="getHeight.barTop+40" :openNavList="diyProduct.navList"></homeList>
 		<tuiDrawer :visible="!iSlong" mode="top" backgroundColor="transparent" @close="closeTap">
 			<view class="downTab acea-row row-column">
@@ -342,7 +328,6 @@
 	} from '@/api/store.js';
 	import {
 		getProducts,
-		getCustomerList,
 		getStoreCategory,
 		getStoreBrand,
 		storeCouponsApi,
@@ -357,7 +342,7 @@
 	import productWindow from '@/components/productWindow/index';
 	import goodClass from '../components/goodClass/index.vue';
 	import cartList from '@/components/cartList';
-	import Kefu from '../components/kefu/index.vue';
+	import storeContactActions from '../components/storeContactActions/index.vue';
 	import homeList from '@/components/homeList/index.vue';
 	import tuiDrawer from '@/components/tui-drawer/tui-drawer.vue';
 	import emptyPage from '@/components/emptyPage.vue';
@@ -389,7 +374,7 @@
 			productWindow,
 			goodClass,
 			cartList,
-			Kefu,
+			storeContactActions,
 			homeList,
 			tuiDrawer,
 			emptyPage,
@@ -399,10 +384,6 @@
 			info: {
 				type: Object,
 				default: () => ({})
-			},
-			customerType: {
-				type: Number,
-				default: 1
 			},
 		},
 		provide: {
@@ -469,7 +450,6 @@
 				collageStore: this.info,
 				collageAddress: {}, // 选择的配送地址
 				// #endif
-				customerList: [], // 客服数据
 				footerOpen: true,
 				categoryTwoList: [],
 				categoryThreeList: [],
@@ -1272,21 +1252,6 @@
 				this.loadend = false;
 				this.tempArr = [];
 				this.getProducts();
-			},
-			// 打开客服
-			goKefu() {
-				this.getCustomerList()
-				this.$refs.kefu.show = true
-			},
-			// 获取客服列表数据
-			getCustomerList() {
-				getCustomerList(this.info.id).then(res => {
-					this.customerList = res.data
-				})
-			},
-			// 关闭客服
-			closeKefu() {
-				this.$refs.kefu.show = false
 			},
 			tapNavOne(item, index) {
 				if (index > 2) {
@@ -2119,12 +2084,8 @@
 		}
 
 		.address-wrap {
-			// 完整地址决定卡片高度；右侧操作保留独立宽度，避免长地址挤出按钮。
+			// 联系操作移至卡片下方，地址独占可用宽度并按完整内容换行。
 			flex-wrap: nowrap;
-
-			.store-actions {
-				flex-shrink: 0;
-			}
 
 			.address-box {
 				flex: 1;

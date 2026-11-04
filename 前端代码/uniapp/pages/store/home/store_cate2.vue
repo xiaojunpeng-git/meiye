@@ -74,23 +74,9 @@
 					<view class="acea-row row-bottom address-wrap">
 						<view class="address-box">
 							<view class="time">营业时间：{{info.day_time}}</view>
-							<view class="address-info pr-60 mt-20">
+							<view class="address-info mt-20">
 								<text class="distance">距您{{info.range}}km</text>
 								{{info.address}}{{info.detailed_address}}
-							</view>
-						</view>
-						<view class="flex store-actions">
-							<view class="" @click="showMaoLocation">
-								<view class="flex-center w-40 h-40 rd-9 mb-8 bg--w111-f5f5f5">
-									<text class="iconfont icon-ic_map fs-28"></text>
-								</view>
-								<view class="fs-20">地图</view>
-							</view>
-							<view class="ml-36" @click="goKefu">
-								<view class="flex-center w-40 h-40 rd-9 mb-8 bg--w111-f5f5f5">
-									<text class="iconfont icon-a-ic_customerservice2 fs-28"></text>
-								</view>
-								<view class="fs-20">客服</view>
 							</view>
 						</view>
 					</view>
@@ -111,6 +97,8 @@
 					</view>
 				</view>
 			</view>
+			<!-- 两种门店布局共用联系入口，位于信息卡与商品区域之间。 -->
+			<store-contact-actions :phone="info.phone" @navigate="showMaoLocation" />
 			<!-- 商品排序条件 -->
 			<view class="nav-box" id="nav-box">
 				<view class="nav acea-row row-middle" :class="{ fixed: scrollTop && conterTop <= headerHeight }" :style="{ top: headerHeight+'px' }">
@@ -170,8 +158,6 @@
 		</view>
 		<!-- 筛选弹窗 -->
 		<filterPopup ref="popup" :level="level" :storeCategory="storeCategory" :storeBrand="storeBrand" @brandChange="brandChange" @categoryChange="categoryChange" @submitFn="submitFn"></filterPopup>
-		<!-- 客服弹窗 -->
-		<Kefu ref="kefu" @closeKefu="closeKefu" :customerList="customerList" :customerType="customerType"></Kefu>
 		<!-- #ifdef H5 || MP -->
 		<tuiDrawer :visible="collageVisible" :zIndex="970" :maskZIndex="960" mode="bottom" backgroundColor="transparent" @close="onCollageClose">
 			<view class="dialog">
@@ -267,7 +253,7 @@
 
 <script>
 	import filterPopup from "../components/filterPopup/index.vue";
-	import Kefu from "../components/kefu/index.vue";
+	import storeContactActions from '../components/storeContactActions/index.vue';
 	import WaterfallsFlow from "@/components/WaterfallsFlow/WaterfallsFlow.vue";
 	import productWindow from "@/components/productWindow/index.vue";
 	import emptyPage from "@/components/emptyPage.vue";
@@ -286,7 +272,6 @@
 	} from '@/api/order.js';
 	import {
 		getProducts,
-		getCustomerList,
 		getStoreCategory,
 		getStoreBrand,
 		storeCouponsApi,
@@ -319,7 +304,7 @@
 	export default {
 		components: {
 			filterPopup,
-			Kefu,
+			storeContactActions,
 			WaterfallsFlow,
 			productWindow,
 			emptyPage,
@@ -332,10 +317,6 @@
 			info: {
 				type: Object,
 				default: () => ({})
-			},
-			customerType: {
-				type: Number,
-				default: 1
 			},
 			cart_num: {
 				type: Number,
@@ -360,7 +341,6 @@
 				price: 0,
 				stock: 0,
 				productList: [], // 商品数据
-				customerList: [], // 客服数据
 				storeCategory: [], // 分类数据
 				storeBrand: [], // 品牌数据
 				show: false,
@@ -556,25 +536,10 @@
 					url: `/pages/store/store_list/index?storeFrom=1&type=1&storeId=${val ? this.collageStore.id : this.info.id}&isCollage=${val}`
 				});
 			},
-			// 打开客服
-			goKefu() {
-				this.getCustomerList()
-				this.$refs.kefu.show = true
-			},
 			// 购物车
 			shoppCart() {
 				uni.switchTab({
 					url: "/pages/order_addcart/order_addcart"
-				})
-			},
-			// 关闭客服
-			closeKefu() {
-				this.$refs.kefu.show = false
-			},
-			// 获取客服列表数据
-			getCustomerList() {
-				getCustomerList(this.where.store_id).then(res => {
-					this.customerList = res.data
 				})
 			},
 			// 去详情页
@@ -1496,12 +1461,8 @@
 		}
 
 		.address-wrap {
-			// 完整地址决定卡片高度；右侧操作保留独立宽度，避免长地址挤出按钮。
+			// 联系操作移至卡片下方，地址独占可用宽度并按完整内容换行。
 			flex-wrap: nowrap;
-
-			.store-actions {
-				flex-shrink: 0;
-			}
 
 			.address-box {
 				flex: 1;
