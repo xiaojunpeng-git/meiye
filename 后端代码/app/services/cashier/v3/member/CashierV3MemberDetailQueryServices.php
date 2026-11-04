@@ -981,7 +981,12 @@ final class CashierV3MemberDetailQueryServices
                 ->leftJoin('system_store ss', 'ss.id=gf.store_id')
                 ->where('gf.tenant_id', $tenantId)->where('gf.member_id', $memberId)
                 ->where('gf.source_type', $source['source']);
-            if ($status === 'active') $query->where('gf.status', 'effective');
+            if ($status === 'active') {
+                $query->where('gf.status', 'effective');
+                // A recharge void keeps the original fact for audit and adds
+                // a reversal; its grant must no longer appear as active.
+                if (!$isDirectGift) $query->where('ga.status', 'issued');
+            }
             if ($dateFrom !== '') $query->where('gf.business_date', '>=', $dateFrom);
             if ($dateTo !== '') $query->where('gf.business_date', '<=', $dateTo);
             if ($isDirectGift) {
@@ -1003,7 +1008,7 @@ final class CashierV3MemberDetailQueryServices
             $fields = [
                 'gf.id,gf.gift_fact_id,gf.source_id,gf.source_detail_id,gf.gift_kind,gf.content_name_snapshot,gf.quantity',
                 'gf.content_snapshot_json,gf.business_date,gf.settled_at,gf.recorded_at,gf.status,ss.name AS store_name',
-                'ga.gift_no,ga.' . $source['reason'] . ' AS reason_snapshot',
+                'ga.gift_no,ga.status AS authority_status,ga.' . $source['reason'] . ' AS reason_snapshot',
             ];
             if ($isDirectGift) {
                 $fields[] = 'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end,pc.claim_status AS claimable_status';
@@ -1025,7 +1030,8 @@ final class CashierV3MemberDetailQueryServices
                 if ($validityEnd <= 0 && $isDirectGift) {
                     $validityEnd = (int)($row['authority_validity_end'] ?? 0);
                 }
-                $giftLabel = $isDirectGift && (string)($row['claimable_status'] ?? '') === 'VOIDED'
+                $giftLabel = (!$isDirectGift && (string)($row['authority_status'] ?? '') === 'voided')
+                    || ($isDirectGift && (string)($row['claimable_status'] ?? '') === 'VOIDED')
                     ? '已作废' : $this->giftStatusLabel((string)($row['status'] ?? 'effective'));
                 $result[] = [
                     'id' => 'gift:' . (string)$row['id'],
@@ -1928,6 +1934,8 @@ final class CashierV3MemberDetailQueryServices
             'manual_refund_debit' => '余额退款扣减',
             // Card conversion credits gift balance; its zero settlement delta is not the transferred amount.
             'card_to_balance' => '卡转余额',
+            // 人工修正独立于充值及余额消费，继续展示同一权威余额变动事实。
+            'system_add' => '系统增加余额', 'system_sub' => '系统减少余额',
         ];
         $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;
@@ -1989,7 +1997,8 @@ final class CashierV3MemberDetailQueryServices
     private function sourceDocumentLabel(string $value): string
     {
         $labels = ['sales' => '销售订单', 'recharge' => '充值订单',
-            'debt_repayment' => '欠款补交', 'manual_refund' => '退款记录', 'card_operation' => '卡操作'];
+            'debt_repayment' => '欠款补交', 'manual_refund' => '退款记录', 'card_operation' => '卡操作',
+            'member_balance_adjustment' => '修改余额'];
         $key = strtolower(trim($value));
         return $labels[$key] ?? (trim($value) !== '' ? $value : '—');
     }
