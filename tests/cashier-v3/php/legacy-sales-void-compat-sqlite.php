@@ -56,6 +56,23 @@ $source = $sourceMethod->invoke(new CashierV3OrderLifecycleServices(),
 if ($source['sourceOrganizationId'] !== '65' || $source['storeId'] !== 1) {
     throw new RuntimeException('historical_organization_lost');
 }
+$aliasSource = $sourceMethod->invoke(new CashierV3OrderLifecycleServices(),
+    ['orderId' => 'legacy-sale-127119'], $operator, $scope, false);
+if ($aliasSource['sourceId'] !== $source['sourceId'] || $aliasSource['resourceId'] !== $source['resourceId']) {
+    throw new RuntimeException('legacy_display_id_did_not_resolve_to_authority');
+}
+// A second authority mapping for the same source is not a safe command target.
+Db::name('cashier_v3_sales_order')->insert(['id' => 2, 'tenant_id' => 'T', 'organization_id' => '65',
+    'store_id' => 1, 'order_id' => 'IMP007-127119-duplicate', 'order_no' => 'wx846063308397084672',
+    'order_status' => 'settled', 'order_direction' => 'forward', 'member_id' => 785,
+    'source_document_type' => 'legacy_store_order', 'source_document_id' => '127119']);
+try {
+    $sourceMethod->invoke(new CashierV3OrderLifecycleServices(), ['orderId' => 'legacy-sale-127119'], $operator, $scope, false);
+    throw new RuntimeException('ambiguous_legacy_alias_was_allowed');
+} catch (\app\services\cashier\v3\CashierV3CommandException $expected) {
+    if (($expected->getDetail()['reason'] ?? '') !== 'sales_order_not_mutable') throw $expected;
+}
+Db::name('cashier_v3_sales_order')->where('id', 2)->delete();
 $receiptMethod = new ReflectionMethod(CashierV3SalesOrderReversalServices::class, 'legacyImportedCardEvidence');
 $receiptMethod->setAccessible(true);
 $reversal = new CashierV3SalesOrderReversalServices();

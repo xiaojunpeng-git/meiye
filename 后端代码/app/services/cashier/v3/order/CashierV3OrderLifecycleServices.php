@@ -530,6 +530,25 @@ final class CashierV3OrderLifecycleServices
         $type = trim((string)($payload['sourceType'] ?? $payload['source_type'] ?? 'sales'));
         $id = trim((string)($payload['orderId'] ?? $payload['salesOrderId'] ?? $payload['sourceOrderId'] ?? ''));
         if ($type !== 'sales' || $id === '') throw self::failure('order_lifecycle_sales_source_required');
+        // The order center can display both the imported legacy row and its V3
+        // authority row under one printed number. Resolve only a provenance-
+        // matched legacy display ID; never use the printed number as identity.
+        if (preg_match('/^legacy-sale-([1-9][0-9]*)$/D', $id, $legacyMatch)) {
+            $legacyId = (int)$legacyMatch[1];
+            $legacy = (array)Db::name('store_order')->where('id', $legacyId)
+                ->where('store_id', $operator->storeId())->field('id,order_id,uid,store_id')->find();
+            if (!$legacy) throw self::failure('sales_order_not_mutable');
+            $aliases = Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())
+                ->where('store_id', $operator->storeId())
+                ->where('source_document_type', 'legacy_store_order')
+                ->where('source_document_id', (string)$legacyId)
+                ->where('order_no', (string)$legacy['order_id'])
+                ->where('member_id', (int)$legacy['uid'])
+                ->where('order_status', 'settled')->where('order_direction', 'forward')
+                ->field('order_id')->select()->toArray();
+            if (count($aliases) !== 1) throw self::failure('sales_order_not_mutable');
+            $id = (string)$aliases[0]['order_id'];
+        }
         // A store can change organization after an order was settled. The frozen
         // order keeps its original organization; current store ownership and
         // tenant isolation authorize this command, not a rewritten history.
