@@ -171,6 +171,10 @@ button { cursor: pointer; }
 .dashboard-warehouse-picker select{appearance:none;min-width:140px;max-width:230px;border:0;padding:8px 22px 8px 0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%2373869c' stroke-width='1.4'/%3E%3C/svg%3E") right center no-repeat;color:#304760;font:inherit;cursor:pointer;text-overflow:ellipsis}
 .dashboard-warehouse-picker:focus-within{border-color:#5598e6;box-shadow:0 0 0 3px #edf5ff}
 .dashboard-warehouse-picker select:focus{outline:none}
+/* 首页无集团总部仓读取权时仅显示明确说明，避免把零值伪装成授权范围内的库存。 */
+.dashboard-scope-state{padding:24px;margin-top:14px;color:#536b83}
+.dashboard-scope-state h2{margin:0 0 8px;color:#223245;font-size:17px}
+.dashboard-scope-state p{margin:0;font-size:13px;line-height:1.6}
 @media(max-width:600px){.page-heading--dashboard{align-items:flex-start;flex-direction:column}.dashboard-warehouse-picker select{min-width:0;width:180px}}
 
 /* 统计结果独立滚动，完整命中条数与分页常驻卡片底部；不影响其他库存列表。 */

@@ -99,6 +99,12 @@ final class InventoryPlatformWarehouseServices
     {
         $resolved = $this->resolvedLocations($adminInfo);
         $access = $resolved['access'];
+        // 总部仓是集团共用资产，受限门店账号不能借首页总量读取未授权门店对应的集团库存。
+        if (!(new InventoryPlatformAccessPolicy())->canReadHqDashboard($access)) {
+            throw new \app\services\query\UnifiedQueryException(
+                'INVENTORY_PLATFORM_ACCESS_DENIED', '当前权限范围无可查看的总部仓。', []
+            );
+        }
         // 平台首页固定以总部仓为主体。门店仓可由平台端查询，但不能
         // 因账号具备跨门店范围而混入总部仓的首页指标。
         $locationIds = array_values(array_map(

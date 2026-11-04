@@ -77,6 +77,11 @@ const platformSelectionType = computed(() => platformOrganizationSelection.value
 const platformSelectionId = computed(() => Number(platformOrganizationSelection.value.split(':')[1]) || 0)
 const platformReadScopeMode = computed(() => mode.value === 'platform' && platformOrganizationPages.has(active.value) && platformSelectionType.value !== 'HQ')
 const platformLocations = ref([])
+// 首页的总部仓总量只使用后端单独授权的清单；单据页原有仓库候选不授予首页查看权。
+const platformDashboardHqLocations = ref([])
+const platformCanViewHqDashboard = ref(false)
+const platformDashboardScopeReady = ref(false)
+const platformDashboardScopeError = ref('')
 // 库存查询专用目录可覆盖全部有效门店；业务单据继续使用原组织授权目录。
 const platformStockStoreLocations = ref([])
 // 接收目录与调出库存权限分离；仅提供名称筛选，不扩大单据数据范围。
@@ -194,6 +199,8 @@ const dashboard = ref({ stock_amount_cents: null, stock_product_count: 0, expiri
 const dashboardLoading = ref(false)
 const dashboardWarehouseId = ref(0)
 const dashboardError = ref('')
+const dashboardScopeDenied = computed(() => mode.value === 'platform' && platformDashboardScopeReady.value && !platformDashboardScopeError.value && !platformCanViewHqDashboard.value)
+let dashboardRequestVersion = 0
 const selectedDetail = ref(null)
 const statisticsQueryToolbar = ref(null)
 const statisticsInitialQuery = ref({})
@@ -278,10 +285,17 @@ function receiveEmbeddedSession(event) {
   embeddedSessionReady?.()
   embeddedSessionReady = null
   if (!wasWaiting) {
-    if (mode.value === 'platform') loadPlatformLocations()
-    else loadStoreSessionContext()
-    loadDashboard()
-    if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+    if (mode.value === 'platform') {
+      // 切换登录态后先读取新账号的首页权限，不能以旧仓库选项发出指标请求。
+      loadPlatformLocations().then(() => {
+        loadDashboard()
+        if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+      })
+    } else {
+      loadStoreSessionContext()
+      loadDashboard()
+      if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+    }
   }
 }
 
@@ -1862,9 +1876,25 @@ async function loadDashboard() {
   if (mode.value === 'platform' && active.value !== 'overview') return
   const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
   if (!client) return
+  const requestVersion = ++dashboardRequestVersion
+  if (mode.value === 'platform' && (!platformDashboardScopeReady.value || platformDashboardScopeError.value || dashboardScopeDenied.value)) {
+    // 未确认首页权限、读取失败或无总部仓权限时清除旧总量，不请求集团指标。
+    dashboardWarehouseId.value = 0
+    dashboard.value = { stock_amount_cents: null, stock_product_count: 0, expiring_90_batch_count: 0, expiry_risk_buckets: [], count_pending_count: 0, request_pending_count: 0 }
+    dashboardError.value = ''
+    dashboardLoading.value = false
+    return
+  }
   dashboardLoading.value = true
   dashboardError.value = ''
-  try { dashboard.value = await client.dashboard(mode.value === 'platform' ? { hq_location_id: Number(dashboardWarehouseId.value) } : {}) } catch (error) { dashboardError.value = error instanceof Error ? error.message : '库存首页读取失败。' } finally { dashboardLoading.value = false }
+  try {
+    const result = await client.dashboard(mode.value === 'platform' ? { hq_location_id: Number(dashboardWarehouseId.value) } : {})
+    if (requestVersion === dashboardRequestVersion && !dashboardScopeDenied.value) dashboard.value = result
+  } catch (error) {
+    if (requestVersion === dashboardRequestVersion) dashboardError.value = error instanceof Error ? error.message : '库存首页读取失败。'
+  } finally {
+    if (requestVersion === dashboardRequestVersion) dashboardLoading.value = false
+  }
 }
 
 async function openStockDetail(row) {
@@ -1882,12 +1912,19 @@ async function openStockDetail(row) {
 
 async function loadPlatformLocations() {
   if (mode.value !== 'platform') return
+  platformDashboardScopeReady.value = false
+  platformDashboardScopeError.value = ''
   try {
     const response = await platformInventoryApi.list('platformLocations', { include_inactive: 1 })
     platformCanManageInventory.value = response?.can_manage === true
     platformCanManageWarehouses.value = response?.can_manage_warehouses === true
     platformCreatePermissions.value = response?.can_create || {}
     platformLocations.value = Array.isArray(response?.list) ? response.list : []
+    platformCanViewHqDashboard.value = response?.can_view_hq_dashboard === true
+    platformDashboardHqLocations.value = platformCanViewHqDashboard.value && Array.isArray(response?.dashboard_hq_locations)
+      ? response.dashboard_hq_locations : []
+    if (!platformDashboardHqLocations.value.some((item) => Number(item.id) === Number(dashboardWarehouseId.value))) dashboardWarehouseId.value = 0
+    platformDashboardScopeReady.value = true
     platformStockStoreLocations.value = Array.isArray(response?.stock_store_locations) ? response.stock_store_locations : []
     if (platformStoreId.value > 0 && !platformStockStoreLocations.value.some((item) => Number(item.store_id) === Number(platformStoreId.value))) platformStoreId.value = 0
     if (platformHqLocationId.value > 0 && !platformHqLocations.value.some((item) => Number(item.id) === Number(platformHqLocationId.value))) platformHqLocationId.value = 0
@@ -1902,6 +1939,10 @@ async function loadPlatformLocations() {
     await loadPlatformTransferTargets()
   } catch (error) {
     platformLocations.value = []
+    platformDashboardHqLocations.value = []
+    platformCanViewHqDashboard.value = false
+    platformDashboardScopeReady.value = true
+    platformDashboardScopeError.value = error instanceof Error ? error.message : '库存首页权限范围读取失败。'
     platformStockStoreLocations.value = []
     platformCanManageInventory.value = false
     platformCreatePermissions.value = {}
@@ -2191,9 +2232,16 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'overview'">
           <div class="page-heading page-heading--dashboard">
             <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? '总部仓' : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
-            <div class="heading-actions"><label v-if="mode === 'platform'" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations.filter(item => item.location_status !== 'INACTIVE')" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
+            <div v-if="mode !== 'platform' || (platformDashboardScopeReady && platformCanViewHqDashboard)" class="heading-actions"><label v-if="mode === 'platform'" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformDashboardHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
           </div>
 
+          <section v-if="mode === 'platform' && !platformDashboardScopeReady" class="content-card dashboard-scope-state" role="status">正在读取库存首页权限…</section>
+          <section v-else-if="mode === 'platform' && platformDashboardScopeError" class="content-card dashboard-scope-state" role="status">库存首页权限范围读取失败：{{ platformDashboardScopeError }}</section>
+          <section v-else-if="dashboardScopeDenied" class="content-card dashboard-scope-state" role="status">
+            <h2>当前权限范围无可查看的总部仓</h2>
+            <p>请由管理员为账号开通库存首页，并将员工数据范围设置为集团全部门店。</p>
+          </section>
+          <template v-else>
           <div class="dashboard-cards">
             <button v-for="card in dashboardCards" :key="card.key" class="dashboard-card" :class="`dashboard-card--${card.tone}`" @click="goDashboardTarget(card)">
               <span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.note }}</small><ChevronRight :size="17" />
@@ -2233,6 +2281,7 @@ onBeforeUnmount(() => {
               <ChevronRight :size="20" /><button @click="selectPage('statistics')"><span>05</span><strong>库存统计</strong><small>分析与预警</small></button>
             </div>
           </section>
+          </template>
         </template>
 
         <template v-else-if="active === 'statistics'">

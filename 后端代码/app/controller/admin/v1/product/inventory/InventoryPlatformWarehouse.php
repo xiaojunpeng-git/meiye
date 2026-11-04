@@ -47,8 +47,17 @@ final class InventoryPlatformWarehouse extends AuthController
             } catch (UnifiedQueryException | \InvalidArgumentException $exception) {
                 // 非库存查询页面不获得库存查询专用门店目录；原页面权限仍由各自接口验证。
             }
+            // 首页只消费独立的总部仓清单；其他单据页原有仓库目录与写能力保持各自授权。
+            $canViewHqDashboard = (new InventoryPlatformAccessPolicy())->canReadHqDashboard($access);
+            $dashboardHqLocations = $canViewHqDashboard ? array_values(array_filter(
+                $locations,
+                static fn (array $location): bool => (string)($location['location_type'] ?? '') === 'HQ'
+                    && (string)($location['location_status'] ?? '') === 'ACTIVE'
+            )) : [];
             return $this->success([
                 'list' => $locations,
+                'dashboard_hq_locations' => $dashboardHqLocations,
+                'can_view_hq_dashboard' => $canViewHqDashboard,
                 'stock_store_locations' => $stockStoreLocations,
                 'permission_anchor' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
                 'cost_visible' => in_array(InventoryBatchStockQueryContract::PERMISSION_COST, $access['features'], true),
