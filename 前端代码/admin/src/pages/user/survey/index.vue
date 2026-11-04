@@ -106,6 +106,35 @@
       <p v-if="previewData && previewData.count > 100" class="hint">这里只展示前 100 人。</p>
     </Modal>
 
+    <Modal v-model="publishedTargetsOpen" :title="`固定目标名单 · ${publishedTargetsTitle}`" width="960" :footer-hide="true">
+      <div class="published-targets">
+        <p class="hint">是否完成问卷按当前第 {{ publishedTargetsData.send_round || 1 }} 轮统计。</p>
+        <div class="published-targets__filters">
+          <Input v-model.trim="publishedTargetsFilters.keyword" search enter-button="查询" placeholder="姓名、手机号或会员UID"
+            style="width:240px" @on-search="loadPublishedTargets(1)" @on-enter="loadPublishedTargets(1)" />
+          <Select v-model="publishedTargetsFilters.source" style="width:125px" @on-change="loadPublishedTargets(1)">
+            <Option value="">全部来源</Option><Option value="filter">条件筛选</Option><Option value="manual">手动指定</Option>
+          </Select>
+          <Select v-model="publishedTargetsFilters.completion" style="width:125px" @on-change="loadPublishedTargets(1)">
+            <Option value="">全部状态</Option><Option value="pending">未完成</Option><Option value="completed">已完成</Option>
+          </Select>
+          <Button @click="resetPublishedTargets">重置</Button>
+          <Button icon="md-download" :loading="publishedTargetsExporting" @click="exportPublishedTargets">导出名单</Button>
+        </div>
+        <div class="published-targets__table">
+          <Table :columns="publishedTargetColumns" :data="publishedTargetsData.list" :loading="publishedTargetsLoading"
+            :height="Math.max(240, tableHeight - 25)" border />
+        </div>
+        <div class="published-targets__footer">
+          <span>共 {{ publishedTargetsData.count }} 条 · 每页 20 条 · 第 {{ publishedTargetsData.page }} / {{ publishedTargetsData.total_pages }} 页</span>
+          <div>
+            <Button size="small" :disabled="publishedTargetsLoading || publishedTargetsData.page <= 1" @click="loadPublishedTargets(publishedTargetsData.page - 1)">上一页</Button>
+            <Button size="small" :disabled="publishedTargetsLoading || publishedTargetsData.page >= publishedTargetsData.total_pages" @click="loadPublishedTargets(publishedTargetsData.page + 1)">下一页</Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+
     <Modal v-model="memberPickerOpen" title="查找并指定会员" width="650" :footer-hide="true">
       <div class="member-search"><Input v-model.trim="memberKeyword" search enter-button="搜索" placeholder="输入姓名或手机号（至少 2 个字）" @on-search="searchMembers" @on-enter="searchMembers" /></div>
       <Table :columns="memberColumns" :data="memberResults" :loading="memberLoading" border />
@@ -191,7 +220,7 @@
 </template>
 
 <script>
-import { surveyList, surveyRead, surveyCreate, surveyUpdate, surveyCopy, surveyDelete, surveyTargets, surveyUpdateTargets, surveyPreview, surveySearchMembers, surveyPublish, surveyStop, surveyResend, surveyResults, surveyExportData, questionnaireList, questionnaireRead, questionnaireCreate, questionnaireUpdate, questionnaireAnalysis, questionnaireTextAnswers, questionnaireExportData } from '@/api/memberSurvey';
+import { surveyList, surveyRead, surveyCreate, surveyUpdate, surveyCopy, surveyDelete, surveyTargets, surveyPublishedTargets, surveyUpdateTargets, surveyPreview, surveySearchMembers, surveyPublish, surveyStop, surveyResend, surveyResults, surveyExportData, questionnaireList, questionnaireRead, questionnaireCreate, questionnaireUpdate, questionnaireAnalysis, questionnaireTextAnswers, questionnaireExportData } from '@/api/memberSurvey';
 import { guideRequired, clearRequiredGuidance } from '@/utils/requiredGuidance';
 import { surveyQr, surveyRetryRewards, questionnaireOptions } from '@/api/memberSurvey';
 import MemberSurveyReward from '@/components/memberSurveyReward';
@@ -218,6 +247,10 @@ export default {
       exportingTaskId: 0,
       questionForm: emptyQuestionnaire(), selectedQuestionnaire: null, previewQuestionnaire: emptyQuestionnaire(), questionnaireEditorOpen: false,
       editorOpen: false, targetsOpen: false, audienceOpen: false, memberPickerOpen: false, questionPreviewOpen: false, resultsOpen: false,
+      publishedTargetsOpen: false, publishedTargetsId: 0, publishedTargetsTitle: '', publishedTargetsLoading: false,
+      publishedTargetsExporting: false, publishedTargetsEpoch: 0,
+      publishedTargetsFilters: { keyword: '', source: '', completion: '' },
+      publishedTargetsData: { list: [], count: 0, page: 1, total_pages: 1 },
       giftOpen: false, giftTaskId: 0, giftReadOnly: false, copyingTaskId: 0, deletingTaskId: 0,
       previewLoading: false, previewData: null, resultData: null, resultId: 0, resultPage: 1,
       analysisOpen: false, analysisLoading: false, analysisData: null, analysisId: 0, analysisGroupKey: '',
@@ -228,8 +261,12 @@ export default {
         { title: '任务', key: 'title', minWidth: 210 },
         { title: '问卷', key: 'questionnaire_title', minWidth: 180 },
         { title: '状态', render: (h, { row }) => h('span', row.status === 'published' && row.deadline && row.deadline < Date.now() / 1000 ? '已截止' : ({ draft: '草稿', published: '进行中', stopped: '已停止' }[row.status] || row.status)) },
-        { title: '目标会员', width: 110, render: (h, { row }) => h('span', row.status === 'draft'
-          ? (row.targets_configured ? '待发布' : '公开扫码') : (row.targets_configured ? String(row.target_count) : '公开扫码')) },
+        { title: '目标会员', width: 110, render: (h, { row }) => row.status === 'draft'
+          ? h('span', row.targets_configured ? '待发布' : '公开扫码')
+          : (row.targets_configured
+            ? h('Button', { props: { type: 'text', size: 'small' }, attrs: { title: '查看并筛选固定目标名单' },
+              on: { click: () => this.openPublishedTargets(row) } }, String(row.target_count))
+            : h('span', '公开扫码')) },
         { title: '已填写', key: 'answer_count', width: 100 },
         { title: '截止', width: 120, render: (h, { row }) => h('span', row.deadline ? this.dateText(row.deadline) : '无') },
         { title: '操作', width: 620, render: (h, { row }) => h('div', { class: 'survey-task-actions' }, [
@@ -276,6 +313,14 @@ export default {
         { title: '现金业绩', render: (h, { row }) => h('span', this.targetFilters.cash_enabled ? row.cash_amount : '未统计') },
         { title: '到店次数', render: (h, { row }) => h('span', this.targetFilters.visits_enabled ? String(row.visit_count) : '未统计') },
         { title: '来源', render: (h, { row }) => h('span', row.source === 'manual' ? '指定' : '筛选') }
+      ],
+      publishedTargetColumns: [
+        { title: '会员UID', key: 'uid', width: 100 }, { title: '会员姓名', key: 'display_name', minWidth: 145 },
+        { title: '手机号', key: 'phone', width: 145 },
+        { title: '现金金额', key: 'cash_amount', width: 115 },
+        { title: '到店次数', key: 'visit_count', width: 100 },
+        { title: '来源', width: 100, render: (h, { row }) => h('span', row.source === 'manual' ? '手动指定' : '条件筛选') },
+        { title: '是否完成问卷', width: 125, render: (h, { row }) => h('span', row.completed ? '已完成' : '未完成') }
       ],
       memberColumns: [
         { title: '会员姓名', key: 'display_name' }, { title: '手机号', key: 'phone' },
@@ -431,6 +476,49 @@ export default {
       this.selectedMembers = res.data.members || [];
       this.previewData = null; this.memberKeyword = ''; this.memberResults = [];
       this.targetsOpen = true;
+    },
+    /** 已发布名单来自冻结目标关系；查询、翻页和导出共用同一组后端筛选。 */
+    openPublishedTargets(row) {
+      this.publishedTargetsId = Number(row.id);
+      this.publishedTargetsTitle = row.title;
+      this.publishedTargetsFilters = { keyword: '', source: '', completion: '' };
+      this.publishedTargetsData = { list: [], count: 0, page: 1, total_pages: 1 };
+      this.publishedTargetsOpen = true;
+      this.loadPublishedTargets(1);
+    },
+    async loadPublishedTargets(page = 1) {
+      if (!this.publishedTargetsId) return;
+      const epoch = ++this.publishedTargetsEpoch;
+      const id = this.publishedTargetsId;
+      const filters = { ...this.publishedTargetsFilters };
+      this.publishedTargetsLoading = true;
+      try {
+        const { data } = await surveyPublishedTargets(id, { ...filters, page });
+        if (epoch === this.publishedTargetsEpoch && id === this.publishedTargetsId) {
+          this.publishedTargetsData = data;
+        }
+      } finally {
+        if (epoch === this.publishedTargetsEpoch) this.publishedTargetsLoading = false;
+      }
+    },
+    resetPublishedTargets() {
+      this.publishedTargetsFilters = { keyword: '', source: '', completion: '' };
+      this.loadPublishedTargets(1);
+    },
+    /** Excel 使用服务端返回的完整命中名单，不从当前页或预览前 100 人拼接。 */
+    async exportPublishedTargets() {
+      if (!this.publishedTargetsId || this.publishedTargetsExporting) return;
+      this.publishedTargetsExporting = true;
+      try {
+        const { data } = await surveyPublishedTargets(this.publishedTargetsId,
+          { ...this.publishedTargetsFilters, export: 1 });
+        if (!data || !data.export || data.list.length !== Number(data.count)) throw new Error('导出名单不完整');
+        const { downloadMemberSurveyTargetsExcel } = await import('@/utils/memberSurveyExcel');
+        downloadMemberSurveyTargetsExcel(data);
+        this.$Message.success(`已导出 ${data.count} 位目标会员`);
+      } catch (error) {
+        this.$Message.error('导出目标名单失败，请重试');
+      } finally { this.publishedTargetsExporting = false; }
     },
     openGiftConfig(row) {
       this.giftTaskId = Number(row.id);
@@ -595,6 +683,13 @@ export default {
 .required { color:#ed4014; }
 </style>
 <style scoped>.paging-label{display:inline-block;margin-top:14px;color:#65758c;font-size:12px}.member-survey-page .pager{float:right;margin-top:12px}</style>
+<style scoped>
+.published-targets { display:flex; flex-direction:column; height:min(68vh,680px); min-height:360px; }
+.published-targets__filters { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.published-targets__table { flex:1; min-height:0; overflow:auto; }
+.published-targets__footer { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-shrink:0; padding:12px 0 0; border-top:1px solid #e8eaec; color:#65758c; }
+.published-targets__footer > div { display:flex; gap:8px; }
+</style>
 <style>
 .member-survey-page .survey-task-actions { display:flex; flex-direction:column; gap:9px; padding:5px 0; }
 .member-survey-page .survey-task-actions__row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }

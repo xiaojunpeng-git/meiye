@@ -18,6 +18,8 @@ export const surveyUpdate = (id, data) => request({ url: `user/survey/${id}`, me
 export const surveyCopy = id => request({ url: `user/survey/${id}/copy`, method: 'post' });
 export const surveyDelete = id => request({ url: `user/survey/${id}`, method: 'delete' });
 export const surveyTargets = id => request({ url: `user/survey/${id}/targets`, method: 'get' });
+// 发布后查询固定名单；筛选和分页交给后端，避免只看到前 100 人的预览结果。
+export const surveyPublishedTargets = (id, params) => request({ url: `user/survey/${id}/targets`, method: 'get', params: { ...params, view: 'published' }});
 export const surveyUpdateTargets = (id, filters) => request({ url: `user/survey/${id}/targets`, method: 'put', data: { filters }});
 export const surveyPreview = filters => request({ url: 'user/survey/preview', method: 'post', data: { filters }});
 export const surveySearchMembers = keyword => request({ url: 'user/survey/members', method: 'get', params: { keyword }});

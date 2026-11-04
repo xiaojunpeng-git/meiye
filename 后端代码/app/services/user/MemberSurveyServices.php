@@ -515,6 +515,50 @@ class MemberSurveyServices
         return ['task_id' => $id, 'status' => $task['status'], 'filters' => $task['filters'], 'members' => $members];
     }
 
+    /** 发布名单以固定目标关系为准；筛选和分页只缩小总部可读范围，不重算当时的资格或改动提醒状态。 */
+    public function listPublishedTargets(int $id, int $page = 1, string $keyword = '', string $source = '', string $completion = '', bool $export = false): array
+    {
+        $task = $this->task($id);
+        if ($task['status'] === 'draft') throw new ValidateException('任务发布后才能查看固定目标名单');
+        $keyword = trim($keyword);
+        if (mb_strlen($keyword) > 50) throw new ValidateException('会员搜索内容不能超过 50 字');
+        if (!in_array($source, ['', 'filter', 'manual'], true)
+            || !in_array($completion, ['', 'completed', 'pending'], true)) {
+            throw new ValidateException('目标名单筛选条件无效');
+        }
+        $round = max(1, (int)$task['send_round']);
+        $query = Db::name('member_survey_target')->alias('r')
+            ->leftJoin('user u', 'u.uid=r.uid')
+            ->where('r.task_id', $id)->where('r.source', '<>', 'qrcode');
+        if ($keyword !== '') {
+            $query->where(function ($q) use ($keyword): void {
+                $q->whereLike('u.real_name|u.nickname|u.phone|r.uid', '%' . $keyword . '%');
+            });
+        }
+        if ($source !== '') $query->where('r.source', $source);
+        if ($completion === 'completed') $query->where('r.completed_round', '>=', $round);
+        if ($completion === 'pending') $query->where('r.completed_round', '<', $round);
+        $count = (int)(clone $query)->count();
+        $limit = 20;
+        $pages = max(1, (int)ceil($count / $limit));
+        $page = min(max(1, $page), $pages);
+        $listQuery = (clone $query)
+            ->field('r.id,r.uid,r.source,r.cash_amount,r.visit_count,r.completed_round,r.submitted_at,u.real_name,u.nickname,u.phone')
+            ->order('r.uid', 'asc')->order('r.id', 'asc');
+        // 导出保留当前筛选和稳定排序，跳过分页以取得全部命中会员。
+        if (!$export) $listQuery->page($page, $limit);
+        $rows = $listQuery->select()->toArray();
+        foreach ($rows as &$row) {
+            $row['display_name'] = $row['real_name'] ?: ($row['nickname'] ?: '未填写姓名');
+            $row['completed'] = (int)$row['completed_round'] >= $round;
+            unset($row['real_name'], $row['nickname']);
+        }
+        unset($row);
+        return ['task_id' => $id, 'task_title' => (string)$task['title'], 'send_round' => $round,
+            'count' => $count, 'page' => $page, 'limit' => $limit, 'total_pages' => $pages,
+            'export' => $export, 'list' => $rows];
+    }
+
     /** 目标条件只在草稿修改；发布后固定名单同时作为扫码答卷资格。 */
     public function saveTargets(int $id, array $input): void
     {

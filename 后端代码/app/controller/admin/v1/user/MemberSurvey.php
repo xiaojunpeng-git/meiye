@@ -134,6 +134,13 @@ class MemberSurvey extends AuthController
     public function targets($id, MemberSurveyServices $service)
     {
         $this->headquartersOnly();
+        // 同一总部只读权限下，已发布任务返回真正冻结的目标名单；草稿编辑仍读取手动指定配置。
+        if ((string)$this->request->get('view', '') === 'published') {
+            return app('json')->success($service->listPublishedTargets((int)$id,
+                (int)$this->request->get('page', 1), (string)$this->request->get('keyword', ''),
+                (string)$this->request->get('source', ''), (string)$this->request->get('completion', ''),
+                (int)$this->request->get('export', 0) === 1));
+        }
         return app('json')->success($service->readTargets((int)$id));
     }
 
