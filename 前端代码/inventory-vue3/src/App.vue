@@ -20,6 +20,7 @@ import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
 import { createDocumentDetailReader } from './documentDetailReader'
 import { canReopenRequestForScope } from './requestReopenDraft'
+import { copyHeadquartersLocationId } from './documentCopyDraft'
 import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'
 import { inventoryStatusLabel } from './statusLabels'
 import { platformTransferQueryScope } from './transferQueryScope'
@@ -180,6 +181,7 @@ const stockSummary = ref({ available_quantity: '0', inventory_amount_cents: null
 const stockTableLayout = ref({ fixed: false, summaryRow: false })
 const listLoading = ref(false)
 const listError = ref('')
+const copyError = ref('')
 const transferSavedNotice = ref('')
 const transferListRefreshFailed = ref(false)
 const transferRefreshAfterSave = ref(false)
@@ -290,10 +292,17 @@ function receiveEmbeddedSession(event) {
   embeddedSessionReady?.()
   embeddedSessionReady = null
   if (!wasWaiting) {
-    if (mode.value === 'platform') loadPlatformLocations()
-    else loadStoreSessionContext()
-    loadDashboard()
-    if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+    if (mode.value === 'platform') {
+      // 切换登录态后先读取新账号的首页权限，不能以旧仓库选项发出指标请求。
+      loadPlatformLocations().then(() => {
+        loadDashboard()
+        if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+      })
+    } else {
+      loadStoreSessionContext()
+      loadDashboard()
+      if (active.value !== 'overview' && active.value !== 'statistics') loadCurrentList()
+    }
   }
 }
 
@@ -1059,23 +1068,38 @@ async function openRequestDetail(row) {
   }
 }
 
-/** 门店读列表同时含本店请货与本店供货；只有请货仓属于当前门店时才能复制为本店新单。 */
-function canReopenRequest(row) {
-  return active.value === 'request' && canReopenRequestForScope(row, mode.value, storeLocations.value)
+/** 复制只对当前可新建的仓库单据开放；门店供货方可读他店请货，但不能代请货方复制。 */
+function canCopyDocument(row) {
+  if (!['request', 'inbound', 'outbound', 'transfer', 'count', 'usage'].includes(active.value) || platformReadScopeMode.value) return false
+  if (mode.value === 'platform' && (!platformCanCreateCurrent.value || (active.value === 'transfer' && !platformTransferCanCreate.value))) return false
+  if (active.value === 'request') return canReopenRequestForScope(row, mode.value, storeLocations.value)
+  if (active.value === 'count') return Number(row?.id || row?.draft_id) > 0
+  if (active.value === 'transfer' && mode.value === 'store' && (row?.from_party_type !== 'STORE' || !storeLocations.value.some((location) => Number(location.store_id) === Number(row?.from_party_id)))) return false
+  if (active.value === 'transfer' && mode.value === 'platform' && row?.from_party_type !== 'HQ') return false
+  // 预售核销出库并非可手工新建的出库类型；复制成手工出库会改变业务来源。
+  if (active.value === 'outbound' && row?.source_type === 'presale_claim_outbound') return false
+  if (active.value === 'usage' && row?.operation_type === 'RETURN') return false
+  return Boolean(row?.id || row?.source_id)
 }
 
-/** 重开只取当前授权范围内的作废原单作为表单初值；新单仍由新建命令生成，原单不变。 */
-async function reopenRequest(row) {
-  if (!canReopenRequest(row)) return
+/** 详情只用于新建表单初值；任何已完成、作废或履约单都不继承身份和库存事实。 */
+async function copyDocument(row) {
+  if (!canCopyDocument(row)) return
+  copyError.value = ''
   try {
-    const detail = await currentDocumentDetailReader()('request', row)
-    if (detail?.document?.document_status !== 'VOIDED' || !Array.isArray(detail.lines) || !detail.lines.length) {
-      throw new Error('原请货单状态或商品明细已变化，请刷新列表后重试。')
-    }
+    if (mode.value === 'platform') platformHqLocationId.value = copyHeadquartersLocationId(
+      active.value, row, platformHqLocationId.value, platformHqLocations.value.map((location) => location.id)
+    )
+    const detail = active.value === 'count'
+      ? Number(row.draft_id || 0) > 0 ? await readCountDraft(row.draft_id)
+        : mode.value === 'platform' ? await platformInventoryApi.hqCountDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) }) : await inventoryApi.countDetail(row.id)
+      : await currentDocumentDetailReader()(active.value, row)
+    if (!Array.isArray(detail?.lines) || !detail.lines.length) throw new Error('原单据没有可复制的商品明细，请刷新列表后重试。')
     selectedDetail.value = detail
-    editor.value = 'request-reopen'
+    editor.value = `${active.value}-copy`
   } catch (error) {
-    listError.value = error instanceof Error ? error.message : '重开请货单失败。'
+    // 单张详情失败只提示本次复制，不能遮住已经成功加载的整页单据列表。
+    copyError.value = error instanceof Error ? error.message : '复制单据失败。'
   }
 }
 
@@ -1495,6 +1519,7 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
   const groupedRequest = groupedPage ? ++groupedListVersion : 0
   listLoading.value = true
   listError.value = ''
+  copyError.value = ''
   if (mode.value === 'platform' && active.value === 'usage' && !reusePlatformListQuery && !platformReadScopeMode.value && !platformListWarehouseOptions.value.some((item) => item.key === platformListWarehouseSelection.value)) {
     sourceRows.value = []
     remoteRows.value = []
@@ -1879,6 +1904,15 @@ async function loadDashboard() {
   if (mode.value === 'platform' && active.value !== 'overview') return
   const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
   if (!client) return
+  const requestVersion = ++dashboardRequestVersion
+  if (mode.value === 'platform' && (!platformDashboardScopeReady.value || platformDashboardScopeError.value || dashboardScopeDenied.value)) {
+    // 未确认首页权限、读取失败或无总部仓权限时清除旧总量，不请求集团指标。
+    dashboardWarehouseId.value = 0
+    dashboard.value = { stock_amount_cents: null, stock_product_count: 0, expiring_90_batch_count: 0, expiry_risk_buckets: [], count_pending_count: 0, request_pending_count: 0 }
+    dashboardError.value = ''
+    dashboardLoading.value = false
+    return
+  }
   dashboardLoading.value = true
   dashboardError.value = ''
   // 切换组织/门店时先清空上一个范围的汇总，晚到响应由请求序号拦截。
@@ -1922,6 +1956,8 @@ async function openStockDetail(row) {
 
 async function loadPlatformLocations() {
   if (mode.value !== 'platform') return
+  platformDashboardScopeReady.value = false
+  platformDashboardScopeError.value = ''
   try {
     const response = await platformInventoryApi.list('platformLocations', { include_inactive: 1 })
     platformCanManageInventory.value = response?.can_manage === true
@@ -2458,7 +2494,8 @@ onBeforeUnmount(() => {
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
             <div :inert="transferListRefreshFailed ? true : null" :class="{ 'inventory-list-result': inventoryListPage }">
-<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active), 'table-card--inventory-list-page': inventoryListPage }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else ref="storeListTableScroll" class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
+              <p v-if="copyError" class="inventory-load-error" role="alert">{{ copyError }}</p>
+<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active), 'table-card--inventory-list-page': inventoryListPage }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else ref="storeListTableScroll" class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button v-if="canCopyDocument(sourceRows[index])" class="text-button" @click="copyDocument(sourceRows[index])">复制</button><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->
             <table v-else class="inventory-grouped-table" :class="`inventory-grouped-table--${active}`" :aria-label="`${currentPage.title}明细列表`">
@@ -2471,7 +2508,7 @@ onBeforeUnmount(() => {
                     <label v-if="active === 'transfer' && (sourceRows[index].can_delete || sourceRows[index].can_dispatch || sourceRows[index].can_withdraw)" class="inventory-group-select"><input type="checkbox" :checked="selectedTransferIds.includes(Number(sourceRows[index].id))" :disabled="transferBatchPreparing || transferActionSubmitting" :aria-label="`选择调拨单 ${sourceRows[index].order_sn || sourceRows[index].id}`" @change="toggleTransferSelection(sourceRows[index])" /></label>
                     <span v-for="(cell, cellIndex) in row" :key="cellIndex"><strong>{{ currentPage.columns[cellIndex] }}：</strong><b>{{ cell }}</b></span>
                     <span class="inventory-group-line__actions">
-                      <button v-if="canReopenRequest(sourceRows[index])" class="text-button" @click="reopenRequest(sourceRows[index])">重开</button>
+                      <button v-if="canCopyDocument(sourceRows[index])" class="text-button" @click="copyDocument(sourceRows[index])">复制</button>
                       <button class="text-button" @click="openGroupedRowDetail(active, sourceRows[index])">查看</button>
                       <button v-if="!platformReadScopeMode && groupedDetails[groupedDetailKey(sourceRows[index])]?.detail?.remark_editable" class="text-button" @click="openRemarkEditor(active, sourceRows[index])">编辑备注</button>
                       <button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button>

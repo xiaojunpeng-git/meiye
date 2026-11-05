@@ -60,6 +60,13 @@ $openingRows = $provider->sourceRows([
     'locationIds' => [],
     'includeZero' => false,
 ], $scope);
+$openingBatches = iterator_to_array($provider->sourceBatches([
+    'queryCutoffDate' => '2026-07-29',
+    'locationIds' => [],
+    'includeZero' => false,
+], $scope), false);
+batchProviderAssert('bounded and streamed stock queries use identical authorized projections',
+    $openingRows === array_merge([], ...$openingBatches));
 batchProviderAssert('opening cutoff reconstructs batch quantity',
     count($openingRows) === 1 && $openingRows[0]['batch_balance_quantity'] === '10');
 batchProviderAssert('cost is hidden without permission', $openingRows[0]['batch_unit_cost'] === null);
@@ -82,6 +89,13 @@ $currentRows = $provider->sourceRows([
     'locationIds' => [1],
     'includeZero' => false,
 ], $costScope);
+$currentBatches = iterator_to_array($provider->sourceBatches([
+    'queryCutoffDate' => '2026-07-30',
+    'locationIds' => [1],
+    'includeZero' => false,
+], $costScope), false);
+batchProviderAssert('streamed stock keeps cost, expiry and store display parity',
+    $currentRows === array_merge([], ...$currentBatches));
 batchProviderAssert('later cutoff includes settled movement',
     count($currentRows) === 1 && $currentRows[0]['batch_balance_quantity'] === '8');
 batchProviderAssert('cost permission returns exact unit cost', $currentRows[0]['batch_unit_cost'] === '77.00');

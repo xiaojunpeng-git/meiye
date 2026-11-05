@@ -9,8 +9,8 @@ namespace app\services\product\inventory\query;
  */
 final class InventoryProductStockSummaryServices
 {
-    /** @param array<int,array<string,mixed>> $batchRows @return array<int,array<string,mixed>> */
-    public function summarize(array $batchRows): array
+    /** @param iterable<array<string,mixed>> $batchRows @return array<int,array<string,mixed>> */
+    public function summarize(iterable $batchRows): array
     {
         $groups = [];
         foreach ($batchRows as $row) {

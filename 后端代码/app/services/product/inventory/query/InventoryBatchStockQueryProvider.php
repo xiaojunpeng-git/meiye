@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\product\inventory\query;
 
 use app\services\product\inventory\InventoryCurrentStockUnitProjection;
+use app\services\query\UnifiedQueryExternalRows;
 use think\facade\Db;
 
 /**
@@ -35,8 +36,50 @@ final class InventoryBatchStockQueryProvider
     public function sourceRows(array $request, InventoryBatchStockDataScope $scope): array
     {
         $request = $this->normalizeRequest($request, $scope);
+        $rows = $this->balanceQuery($request, $scope)
+            ->limit(self::MAX_SOURCE_ROWS + 1)
+            ->select()
+            ->toArray();
+        if (count($rows) > self::MAX_SOURCE_ROWS) {
+            throw new \RuntimeException('inventory_query_source_window_too_large');
+        }
+        return $this->projectRows($rows, $scope, $request['queryCutoffDate']);
+    }
+
+    /**
+     * 大范围统一查询从授权仓库事实流读取，不截断在 10,000 个批次。
+     * 原始行暂存于私有临时文件以固定同一次查询的快照，再按相同投影口径分批交给统一执行器。
+     */
+    public function sourceBatches(array $request, InventoryBatchStockDataScope $scope): \Generator
+    {
+        $request = $this->normalizeRequest($request, $scope);
+        $rawRows = new UnifiedQueryExternalRows();
+        $totals = [];
+        $missingStoreIds = [];
+        foreach ($this->balanceQuery($request, $scope)->cursor() as $row) {
+            if (!is_array($row)) $row = (array)$row;
+            $rawRows->append($row);
+            $this->addQuantityTotal($totals, $row);
+            $storeId = (int)$row['store_id'];
+            if ($storeId > 0 && trim((string)$row['store_name']) === '') $missingStoreIds[$storeId] = $storeId;
+        }
+        $names = $this->currentStoreNames($missingStoreIds);
+        $batch = [];
+        foreach ($rawRows as $row) {
+            $batch[] = $row;
+            if (count($batch) === 200) {
+                yield $this->projectBatch($batch, $scope, $request['queryCutoffDate'], $names, $totals);
+                $batch = [];
+            }
+        }
+        if ($batch) yield $this->projectBatch($batch, $scope, $request['queryCutoffDate'], $names, $totals);
+    }
+
+    /** 权限仓库、截止日、事实状态与批次聚合只在这一处定义，列表和大范围查询一致。 */
+    private function balanceQuery(array $request, InventoryBatchStockDataScope $scope)
+    {
         $signedQuantity = "SUM(IF(f.direction=1,f.quantity_units,-CAST(f.quantity_units AS SIGNED)))";
-        $rows = Db::name('inventory_batch_movement_fact')
+        return Db::name('inventory_batch_movement_fact')
             ->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')
             ->join('inventory_stock s', 's.id=f.stock_id')
@@ -88,46 +131,50 @@ final class InventoryBatchStockQueryProvider
                 'b.unit_cost_cents', 'b.source_order_no_snapshot', 'b.data_quality',
             ])
             ->having($request['includeZero'] ? $signedQuantity . '>=0' : $signedQuantity . '>0')
-            ->order('b.id asc')
-            ->limit(self::MAX_SOURCE_ROWS + 1)
-            ->select()
-            ->toArray();
-        if (count($rows) > self::MAX_SOURCE_ROWS) {
-            throw new \RuntimeException('inventory_query_source_window_too_large');
-        }
+            ->order('b.id asc');
+    }
+
+    /** 兼容仍需小范围数组的库存首页等调用方，投影值与流式路径共用同一计算。 */
+    private function projectRows(array $rows, InventoryBatchStockDataScope $scope, string $cutoffDate): array
+    {
+        $totals = [];
         // 旧库位缺少门店名称快照时，按库位的门店 ID 一次性补读当前名称；不按仓名猜门店。
         $missingStoreIds = [];
         foreach ($rows as $row) {
             $storeId = (int)$row['store_id'];
             if ($storeId > 0 && trim((string)$row['store_name']) === '') $missingStoreIds[$storeId] = $storeId;
+            $this->addQuantityTotal($totals, $row);
         }
-        $currentStoreNames = $missingStoreIds
-            ? Db::name('system_store')->whereIn('id', array_values($missingStoreIds))->column('name', 'id')
-            : [];
-        $projected = array_map(function (array $row) use ($scope, $request, $currentStoreNames): array {
-            return $this->projectRow($row, $scope, $request['queryCutoffDate'], $currentStoreNames);
+        $names = $this->currentStoreNames($missingStoreIds);
+        return $this->projectBatch($rows, $scope, $cutoffDate, $names, $totals);
+    }
+
+    private function currentStoreNames(array $storeIds): array
+    {
+        return $storeIds ? Db::name('system_store')->whereIn('id', array_values($storeIds))->column('name', 'id') : [];
+    }
+
+    /** 数量事实按原商品/SKU 身份累计；不得先按商品名筛选而漏掉改名前的批次。 */
+    private function addQuantityTotal(array &$totals, array $row): void
+    {
+        $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
+        $scale = (int)$row['quantity_scale'];
+        if ($scale < 0 || $scale > 4 || (isset($totals[$key]) && (int)$totals[$key]['scale'] !== $scale)) {
+            throw new \RuntimeException('inventory_product_quantity_scale_mismatch');
+        }
+        $totals[$key] = ['scale' => $scale, 'units' => (int)($totals[$key]['units'] ?? 0) + (int)$row['balance_quantity_units']];
+    }
+
+    private function projectBatch(array $rows, InventoryBatchStockDataScope $scope, string $cutoffDate, array $names, array $totals): array
+    {
+        $projected = array_map(function (array $row) use ($scope, $cutoffDate, $names): array {
+            return $this->projectRow($row, $scope, $cutoffDate, $names);
         }, $rows);
-        // 当前批次库存及由其派生的首页、查询、临期统计共用当前商品单位；事实数量不变。
+        // 当前商品单位只改标签，不改数量；按批次查询目录避免全量商品目录载入内存。
         $projected = (new InventoryCurrentStockUnitProjection())->decorate($projected);
-        $totals = [];
-        foreach ($projected as $row) {
-            $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
-            $scale = (int)$row['quantity_scale'];
-            if (isset($totals[$key]) && (int)$totals[$key]['scale'] !== $scale) {
-                throw new \RuntimeException('inventory_product_quantity_scale_mismatch');
-            }
-            $totals[$key] = [
-                'scale' => $scale,
-                'units' => (int)($totals[$key]['units'] ?? 0)
-                    + $this->decimalUnits((string)$row['batch_balance_quantity'], $scale),
-            ];
-        }
         foreach ($projected as &$row) {
             $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
-            $row['available_quantity'] = InventoryBatchStockQueryContract::unitsToDecimal(
-                (int)$totals[$key]['units'],
-                (int)$totals[$key]['scale']
-            );
+            $row['available_quantity'] = InventoryBatchStockQueryContract::unitsToDecimal((int)$totals[$key]['units'], (int)$totals[$key]['scale']);
         }
         unset($row);
         return $projected;
@@ -237,10 +284,4 @@ final class InventoryBatchStockQueryProvider
         return InventoryBatchStockQueryContract::assertCutoffDate((string)$value);
     }
 
-    private function decimalUnits(string $quantity, int $scale): int
-    {
-        [$whole, $fraction] = array_pad(explode('.', $quantity, 2), 2, '');
-        $fraction = substr(str_pad($fraction, $scale, '0'), 0, $scale);
-        return (int)$whole * (10 ** $scale) + (int)($fraction === '' ? '0' : $fraction);
-    }
 }

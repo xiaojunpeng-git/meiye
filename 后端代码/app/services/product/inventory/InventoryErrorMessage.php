@@ -9,6 +9,8 @@ use Throwable;
 final class InventoryErrorMessage
 {
     private const MESSAGES = [
+        // 仍走小范围数组读取的库存调用方若超限，应说明原因，不能把限流误报成零库存。
+        'inventory_query_source_window_too_large' => '库存数据超出当前读取范围，请缩小门店或仓库范围后重试。',
         'inventory_salon_usage_return_exceeds_issue' => '退回数量不能超过原领用数量。',
         'inventory_salon_usage_project_not_found' => '所选项目不存在、已停用或不属于当前门店。',
         'inventory_salon_usage_stock_insufficient' => '当前库存不足，无法完成院装领用。',
