@@ -11,6 +11,23 @@ use think\facade\Db;
  */
 final class CashierV3HistoricalEntitlementReadServices
 {
+    /** 分析筛选批量复用同一有效迁入权益规则，只读取零门店迁移载体；金额仍按既有列表为零。
+     * 返回会员次数供SQL筛选，外层会员查询仍强制注入组织权限，不授予跨店会员可见性。
+     */
+    public function activeMemberTimes(string $tenantId, int $operatorStoreId): array
+    {
+        if ($tenantId === '' || $operatorStoreId <= 0) return [];
+        $members=Db::name('user_card_holder')->alias('h')->join('store_order o','o.id=h.oid')
+            ->where('h.store_id',0)->where('h.is_del',0)->where('h.write_surplus_times','>',0)
+            ->where('o.mark','migration_entitlement')->distinct(true)->column('h.uid');
+        $totals=[];
+        foreach ($this->activeHolders($members,$tenantId,$operatorStoreId) as $holder) {
+            $uid=(int)$holder['uid'];
+            $totals[$uid]=($totals[$uid]??0)+(int)$holder['write_surplus_times'];
+        }
+        return $totals;
+    }
+
     /**
      * @param int[] $memberIds Server-authorized member IDs, never client scope.
      * @return array<int,array<string,mixed>> Current holders keyed by holder ID.

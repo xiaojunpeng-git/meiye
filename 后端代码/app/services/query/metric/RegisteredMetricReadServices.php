@@ -1130,6 +1130,35 @@ final class RegisteredMetricReadServices
         return $query->having($expression . ' ' . $operator . ' ' . $condition['amount_cents']);
     }
 
+    /** 会员分析直接复用现金业绩的三类有效收款来源；金额按分，次数按来源业务单去重。
+     * 一单多个项目/支付方式只算一次；销售补欠以其收款来源单标识，不能与原销售重复。
+     */
+    public function memberAnalysisReceiptAggregate(string $tenantId, array $stores, array $range)
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        $sale=$this->saleCashQuery($tenantId,$stores,$range)
+            ->leftJoin('cashier_v3_payment_fact analysis_receipt','analysis_receipt.tenant_id=p.tenant_id AND analysis_receipt.fact_id=p.payment_fact_id');
+        $sources=[[$sale,'s.member_id',"CONCAT(COALESCE(analysis_receipt.source_document_type,'sale'),'|',COALESCE(analysis_receipt.order_id,p.order_id))"],
+            [$this->rechargeCashQuery($tenantId,$stores,$range),'p.member_id',"CONCAT(p.source_document_type,'|',p.order_id)"],
+            [$this->unallocatedSalesDebtRepaymentCashQuery($tenantId,$stores,$range),'p.member_id',"CONCAT(p.source_document_type,'|',p.order_id)"]];
+        $queries=[];
+        foreach ($sources as [$source,$memberId,$document]) {
+            $this->applyCashDirection($source,'positive','p.amount_cents');
+            $queries[]=$source->where($memberId,'>',0)->fieldRaw($memberId.' member_id,p.amount_cents amount_cents,'.$document.' document_key');
+        }
+        $union=array_shift($queries);
+        foreach ($queries as $source) $union->unionAll($source->buildSql(false));
+        return Db::table([$union->buildSql()=>'receipt_rows'])->group('member_id')
+            ->fieldRaw('member_id,SUM(amount_cents) cash_cents,COUNT(DISTINCT document_key) consume_count');
+    }
+
+    /** 到店存在/不存在与次数复用注册指标；一次会员同店同日有效服务算一次。 */
+    public function memberAnalysisVisitAggregate(string $tenantId, array $stores, array $range)
+    {
+        [$query,$expression]=$this->memberMetricAggregateQuery('member_service_visit_count',$tenantId,$stores,$range);
+        return $query->fieldRaw('s.member_id member_id,'.$expression.' visit_count');
+    }
+
     /** @return array{0:mixed,1:string} */
     private function memberMetricAggregateQuery(string $metricCode, string $tenantId, array $stores, array $range): array
     {

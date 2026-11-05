@@ -227,7 +227,7 @@ class UnifiedQueryExecutionServices
             'visible_fields' => $visibleFields,
             'filterRelation' => $query['filterRelation'] ?? 'all',
             'data_as_of' => $dataAsOf,
-        ]));
+        ] + (!empty($query['memberAnalysis']) ? ['member_analysis'=>$query['memberAnalysis']] : [])));
 
         return [
             'rows' => $pageRows,
@@ -338,12 +338,20 @@ class UnifiedQueryExecutionServices
             'domain_scope' => [
                 'data_scope' => (string)($query['dataScope'] ?? 'normal'),
                 'business_status' => (string)($query['businessStatus'] ?? ''),
-            ] + $this->reconciliationDomainScope($pageCode, $query),
+            ] + $this->reconciliationDomainScope($pageCode, $query) + $this->memberAnalysisDomainScope($pageCode, $query),
             // 冻结的任务只保存已白名单化的条件，worker 不能重新解释 UI 展示对象。
             'quick_filters' => $quickFilters,
             'visible_fields' => $visibleFields,
             'permission_must_be_injected_before_calculation' => true,
         ];
+    }
+
+    /** 分析条件随规范化计划冻结；其他页面不能借会员条件改变其数据源。 */
+    private function memberAnalysisDomainScope(string $pageCode, array $query): array
+    {
+        if (!array_key_exists('memberAnalysis',$query)) return [];
+        if (!in_array($pageCode,['member_list','platform_member_list'],true)) throw $this->invalidQuery('当前页面不支持会员分析筛选。');
+        return ['member_analysis'=>MemberAnalysisFilterServices::normalize($query['memberAnalysis'])];
     }
 
     /** 对账范围是来源条件，不是自定义表达式；非订单页面拒收，权限仍由provider在执行时重新裁剪。 */
@@ -375,7 +383,7 @@ class UnifiedQueryExecutionServices
             'topFilters', 'querySettings', 'filters', 'filterRelation', 'sorts',
             'groups', 'groupBy', 'summaries', 'dataScope', 'businessStatus',
             'quickFilters', 'visibleFields', 'export', 'fieldVersions',
-            'keywordFilters', 'topFilterConditions', 'reconciliationDrilldown',
+            'keywordFilters', 'topFilterConditions', 'reconciliationDrilldown', 'memberAnalysis',
         ];
         foreach (array_keys($raw) as $key) {
             if (!in_array($key, $uiKeys, true)) {
@@ -461,6 +469,8 @@ class UnifiedQueryExecutionServices
         // 只有全部订单支持此来源范围；列表、导出创建和worker使用同一规范化条件。
         $domain = $this->reconciliationDomainScope($pageCode, $raw);
         if ($domain) $normalized['reconciliationDrilldown'] = $domain['reconciliation_drilldown'];
+        $analysis = $this->memberAnalysisDomainScope($pageCode, $raw);
+        if ($analysis) $normalized['memberAnalysis'] = $analysis['member_analysis'];
         $topFilters = $raw['topFilters'] ?? [];
         if (!is_array($topFilters)) {
             throw $this->invalidQuery('topFilters 必须是结构化数组');
@@ -1214,7 +1224,7 @@ class UnifiedQueryExecutionServices
             'page', 'limit', 'filters', 'filterRelation', 'sorts', 'groups', 'groupBy',
             'summaries', 'export', 'dataScope', 'businessStatus', 'quickFilters', 'visibleFields',
             'fieldVersions', 'keywordFilters',
-            'topFilterConditions', 'reconciliationDrilldown',
+            'topFilterConditions', 'reconciliationDrilldown', 'memberAnalysis',
             'queryCutoffDate',
         ];
         foreach (array_keys($query) as $key) {

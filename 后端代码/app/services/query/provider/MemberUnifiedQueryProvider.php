@@ -32,6 +32,9 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
     /** @var array<string,array<string,bool>> */
     protected $columns = [];
 
+    /** 索引仅影响读取计划，缺少新索引仍保持相同业务结果。 */
+    private $analysisIndexes = [];
+
     public function __construct(
         UnifiedQueryExecutionServices $execution,
         UnifiedQueryCustomFieldServices $customFields,
@@ -64,6 +67,13 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         $normalizedQuery = $this->queryFromPlan($validatedPlan);
         $result = $this->sqlPageFastPath($context, $validatedPlan, $normalizedQuery);
         if ($result === null) {
+            if (!empty($normalizedQuery['memberAnalysis'])) {
+                $result=$this->execution->executeBatches(static::PAGE_CODE,
+                    $this->authorizedSourceBatches($context,$normalizedQuery),$definitions,
+                    $this->executionPayload($payload),$context,
+                    function(array $row,array $scope):bool{return $this->rowAllowed($row,$scope);},
+                    $this->memberNameInitialMatcher($normalizedQuery));
+            } else {
             $sourceRows = $this->authorizedSourceRows($context, $normalizedQuery);
             $result = $this->execution->execute(
                 static::PAGE_CODE,
@@ -76,6 +86,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
                 },
                 $this->memberNameInitialMatcher($normalizedQuery)
             );
+            }
         }
 
         $preference = $this->preferences->load($context, static::PAGE_CODE);
@@ -130,18 +141,32 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             'scope' => $exportScope,
             'fields' => array_values(array_unique(array_map('strval', $fieldKeys))),
         ];
-        $sourceRows = $this->authorizedSourceRows($context, $query);
-        return $this->execution->execute(
+        // 会员导出复用已有磁盘行集执行器，不能截取一万条或一次把全部会员装进PHP数组。
+        return $this->execution->executeBatches(
             static::PAGE_CODE,
-            $sourceRows,
+            $this->authorizedSourceBatches($context, $query),
             (array)($plan['custom_definitions'] ?? []),
             $query,
             $context,
-            function (array $row, array $scope): bool {
-                return $this->rowAllowed($row, $scope);
-            },
+            function (array $row, array $scope): bool { return $this->rowAllowed($row, $scope); },
             $this->memberNameInitialMatcher($query)
         );
+    }
+
+    /** 先固定授权/分析人口，再按会员键每批200条读取；分页、排序、筛选和合计由同一执行器处理。
+     * 游标只决定读取批次，不能充当业务排序，也不写入业务表或另建共享快照。
+     */
+    protected function authorizedSourceBatches(array $context, array $payload): \Generator
+    {
+        [$query,$visible,$allStores]=$this->authorizedUserQuery($context,$payload,true);
+        if ($query===null) return;
+        $cursor=0;
+        do {
+            $rows=(clone $query)->where('u.uid','>',$cursor)->order('u.uid','asc')->limit(200)->select()->toArray();
+            if (!$rows) break;
+            $cursor=(int)$rows[count($rows)-1]['uid'];
+            yield $this->projectSourceRows($context,$rows,$visible,$allStores);
+        } while (count($rows)===200);
     }
 
     protected function queryFromPlan(array $plan): array
@@ -158,6 +183,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             'summaries' => (array)($plan['summaries'] ?? []),
             'dataScope' => (string)($plan['domain_scope']['data_scope'] ?? 'normal'),
             'businessStatus' => (string)($plan['domain_scope']['business_status'] ?? ''),
+            'memberAnalysis' => (array)($plan['domain_scope']['member_analysis'] ?? []),
             'quickFilters' => (array)($plan['quick_filters'] ?? []),
             'visibleFields' => (array)($plan['visible_fields'] ?? []),
         ];
@@ -557,6 +583,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
                     : [$needle, $needle, $needle]
             );
         }
+        $this->applyMemberAnalysis($query, $context, $payload, $visibleStoreIds, $allStores);
         return [$query, $visibleStoreIds, $allStores];
     }
 
@@ -840,8 +867,129 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
     }
 
+    /** 使用可选覆盖索引避免宽订单随机读取；不把部署迁移状态当作业务资格判断。 */
+    private function hasAnalysisIndex(string $table, string $index): bool
+    {
+        if (!array_key_exists($table,$this->analysisIndexes)) {
+            $prefix=(string)Db::connect()->getConfig('prefix');
+            $this->analysisIndexes[$table]=array_column(Db::query('SHOW INDEX FROM `'.$prefix.$table.'`'),'Key_name');
+        }
+        return in_array($index,$this->analysisIndexes[$table],true);
+    }
+
+    /** 有效普通卡只定义一次：筛选先聚合再分页，列表/导出读取同一聚合，防止多项目联表放大次数。
+     * 金额保持原列表的逐项目截断口径；零价迁入载体另由既有迁入服务补次数，不虚增资产。
+     */
+    protected function ordinaryCardMetricQueries(array $visible, bool $allStores, array $uids = []): array
+    {
+        // MySQL 5.7 对多个低选择性状态索引求交会反复扫历史订单；授权门店索引/主键避免该计划。
+        $selectiveMembers=$allStores || $uids!==[];
+        $orderIndex=$selectiveMembers && $this->hasAnalysisIndex('store_order','idx_member_analysis_card_order')?'idx_member_analysis_card_order':($selectiveMembers?'PRIMARY':'store_id');
+        $holders=Db::name('store_order')->alias('o')->force($orderIndex)->join('user_card_holder h','o.id=h.oid')
+            ->where('h.is_del',0)->where('h.write_surplus_times','>',0)->where('o.paid',1)
+            ->where('o.is_del',0)->where('o.is_system_del',0)->where('o.refund_status',0);
+        if ($uids) $holders->whereIn('h.uid',$uids);
+        $columns=$this->tableColumns('store_order');
+        if (isset($columns['terminal_action'])) $holders->where('o.terminal_action',0);
+        if (isset($columns['card_upgrade_use_oid'])) $holders->where('o.card_upgrade_use_oid',0);
+        if (!$allStores) $holders->whereIn('o.store_id',$visible);
+        $times=(clone $holders)->group('h.uid')->fieldRaw('h.uid member_id,COUNT(DISTINCT h.oid) active_card_count,SUM(h.write_surplus_times) remaining_times');
+        $members=(clone $holders)->distinct(true)->fieldRaw('h.uid member_id,h.oid');
+        $amount=Db::name('store_order_cart_info')->alias('c')->join([$members->buildSql()=>'card_members'],'card_members.oid=c.oid')
+            ->where('c.write_surplus_times','>',0)->where('c.write_times','>',0);
+        $cartColumns=$this->tableColumns('store_order_cart_info');
+        foreach (['cart_type'=>2,'product_type'=>6,'is_writeoff'=>0] as $column=>$value) {
+            if (isset($cartColumns[$column])) $amount->where('c.'.$column,$value);
+        }
+        // 提高除法输入的小数精度后再截断8位，防止MySQL默认6位除法先四舍五入导致历史金额多出一分。
+        $amount->group('card_members.member_id')->fieldRaw('card_members.member_id,SUM(TRUNCATE(TRUNCATE(CAST(c.pay_price AS DECIMAL(40,12))/c.write_times,8)*c.write_surplus_times,2)) remaining_amount');
+        return [$times,$amount];
+    }
+
+    /** 业务分析条件在授权会员SQL中收窄；列表计数、翻页和冻结导出都从此入口经过。 */
+    protected function applyMemberAnalysis($query, array $context, array $payload, array $visible, bool $allStores): void
+    {
+        $analysis=\app\services\query\MemberAnalysisFilterServices::normalize($payload['memberAnalysis']??[]);
+        if (!$analysis) return;
+        $tenant=(string)($context['tenant_id']??'');
+        $stores=$allStores?array_map('intval',Db::name('system_store')->column('id')):$visible;
+        if (!$stores) { $query->whereRaw('1=0'); return; }
+        $reader=new \app\services\query\metric\RegisteredMetricReadServices();
+        $lifetime=['start'=>'1900-01-01','end'=>$this->trustedCutoffDate($context)];
+        if (isset($analysis['cashPerformance']) || isset($analysis['consumeCount'])) {
+            $cash=$reader->memberAnalysisReceiptAggregate($tenant,$stores,$lifetime);
+            foreach (['cashPerformance'=>'cash_cents/100','consumeCount'=>'consume_count'] as $key=>$expression) {
+                if (isset($analysis[$key])) $this->applyAnalysisMetric($query,$cash,$expression,$analysis[$key]);
+            }
+        }
+        if (isset($analysis['visitCount'])) {
+            $visits=$reader->memberAnalysisVisitAggregate($tenant,$stores,$lifetime);
+            $this->applyAnalysisMetric($query,$visits,'visit_count',$analysis['visitCount']);
+        }
+        foreach (['consumePeriod','visitPeriod','noVisitPeriod'] as $key) {
+            if (!isset($analysis[$key])) continue;
+            $range=['start'=>$analysis[$key]['min'],'end'=>$analysis[$key]['max']];
+            $population=$key==='consumePeriod'?$reader->memberAnalysisReceiptAggregate($tenant,$stores,$range)
+                :$reader->memberAnalysisVisitAggregate($tenant,$stores,$range);
+            $ids=Db::table([$population->buildSql()=>'analysis_period'])->field('member_id');
+            // NOT IN作用于非空会员ID全集，因而真正包含周期内没到店及从未到店的会员。
+            $query->whereRaw('u.uid '.($key==='noVisitPeriod'?'NOT IN ':'IN ').$ids->buildSql());
+        }
+        if (isset($analysis['totalAssets']) || isset($analysis['remainingTimes']) || isset($analysis['remainingAmount'])) {
+            [$times,$amount]=$this->ordinaryCardMetricQueries($visible,$allStores);
+            if (isset($analysis['remainingTimes'])) {
+                $store=(int)($context['store_id']??0);
+                if (!$allStores && !in_array($store,$visible,true)) $store=0;
+                $imported=(new CashierV3HistoricalEntitlementReadServices())->activeMemberTimes($tenant,$store);
+                // 迁入次数与普通卡次数共享会员键合并，不能让只持迁入卡的会员消失。
+                if ($imported) {
+                    foreach ($imported as $uid=>$count) $times->unionAll('SELECT '.(int)$uid.' member_id,0 active_card_count,'.(int)$count.' remaining_times');
+                    $times=Db::table([$times->buildSql()=>'times_parts'])->group('member_id')->fieldRaw('member_id,SUM(remaining_times) remaining_times');
+                }
+                $this->applyAnalysisMetric($query,$times,'remaining_times',$analysis['remainingTimes']);
+            }
+            if (isset($analysis['remainingAmount'])) $this->applyAnalysisMetric($query,$amount,'remaining_amount',$analysis['remainingAmount']);
+            if (isset($analysis['totalAssets'])) {
+                // 余额和卡余额分别只读一次再按会员求和；不能对十多万会员反复关联同一权益派生表。
+                $parts=Db::table([$amount->buildSql()=>'rights_amount'])->fieldRaw('member_id,remaining_amount asset_part');
+                $balances=Db::name('user')->fieldRaw('uid member_id,COALESCE(now_money,0) asset_part');
+                if (!$allStores) $balances->whereIn('uid',function($members)use($visible){$members->name('store_user')->where('status',1)->whereIn('store_id',$visible)->field('uid');});
+                $parts->unionAll($balances->buildSql(false));
+                $totals=Db::table([$parts->buildSql()=>'asset_parts'])->group('member_id')->fieldRaw('member_id,SUM(asset_part) total_assets');
+                $this->applyAnalysisMetric($query,$totals,'total_assets',$analysis['totalAssets']);
+            }
+        }
+    }
+
+    /** 先在指标人口中筛会员，再与授权目录求交，避免MySQL 5.7对低估的派生表逐会员嵌套扫描。
+     * 无事实的指标值为零：零满足范围时排除“有事实但不满足”的会员，不能丢掉无消费/无权益会员。
+     */
+    private function applyAnalysisMetric($query, $population, string $expression, array $range): void
+    {
+        $zeroMatches=($range['min']==='' || bccomp($range['min'],'0',2)<=0)
+            && ($range['max']==='' || bccomp($range['max'],'0',2)>=0);
+        $parts=[];$bindings=[];
+        if ($range['min']!=='') { $parts[]='('.$expression.') >= ?';$bindings[]=$range['min']; }
+        if ($range['max']!=='') { $parts[]='('.$expression.') <= ?';$bindings[]=$range['max']; }
+        $ids=Db::table([$population->buildSql()=>'analysis_metric'])->field('member_id')
+            ->whereRaw(($zeroMatches?'NOT ':'').'('.implode(' AND ',$parts).')',$bindings);
+        // 一个请求只计算一次指标人口，COUNT和当前页复用同一组会员键。
+        // 避免MySQL 5.7对同一多层聚合重复物化；只接收数据库返回的正整数键，不能插入客户端表达式。
+        $matched=$ids->limit(1000001)->column('member_id');
+        if (count($matched)>1000000) throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE','分析结果范围过大，请先选择组织或门店。',[]);
+        $keys=[];
+        foreach ($matched as $memberId) {
+            if (!ctype_digit((string)$memberId) || (int)$memberId<=0) throw new \RuntimeException('会员分析返回了非法身份');
+            $keys[]=(string)(int)$memberId;
+        }
+        if (!$keys) { if (!$zeroMatches) $query->whereRaw('1=0'); return; }
+        // 已验证整数的字面列表避免超过MySQL 5.7的65535个绑定占位符上限；业务范围仍由外层授权SQL求交。
+        $query->whereRaw('u.uid '.($zeroMatches?'NOT IN':'IN').' ('.implode(',',$keys).')');
+    }
+
     protected function cardSummaries(array $uids, array $visible, bool $allStores, array $context): array
     {
+        if (!$uids) return [];
         $holderColumns = $this->tableColumns('user_card_holder');
         $orderColumns = $this->tableColumns('store_order');
         if (!isset(
@@ -857,72 +1005,16 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         ) || (!$allStores && !isset($orderColumns['store_id']))) {
             return [];
         }
-        $query = Db::name('user_card_holder')->alias('h')
-            ->join('store_order o', 'o.id = h.oid')
-            ->whereIn('h.uid', $uids)
-            ->where('h.is_del', 0)
-            ->where('h.write_surplus_times', '>', 0)
-            ->where('o.paid', 1)
-            ->where('o.is_del', 0)
-            ->where('o.is_system_del', 0)
-            ->where('o.refund_status', 0);
-        if (isset($orderColumns['terminal_action'])) {
-            $query->where('o.terminal_action', 0);
+        [$timesQuery,$amountQuery]=$this->ordinaryCardMetricQueries($visible,$allStores,$uids);
+        $result=[];
+        foreach ($timesQuery->select()->toArray() as $row) {
+            $uid=(int)$row['member_id'];
+            $result[$uid]=['active_card_count'=>(int)$row['active_card_count'],
+                'remaining_project_times'=>(int)$row['remaining_times'],'remaining_project_amount'=>'0.00'];
         }
-        if (isset($orderColumns['card_upgrade_use_oid'])) {
-            $query->where('o.card_upgrade_use_oid', 0);
+        foreach ($amountQuery->select()->toArray() as $row) {
+            $result[(int)$row['member_id']]['remaining_project_amount']=$this->amount($row['remaining_amount']);
         }
-        if (!$allStores) {
-            $query->whereIn('o.store_id', $visible);
-        }
-        $rows = $query->field('h.uid,h.oid,h.write_surplus_times')
-            ->select()
-            ->toArray();
-        $result = [];
-        $oids = [];
-        foreach ($rows as $row) {
-            $uid = (int)$row['uid'];
-            $result[$uid]['holder_ids'][(int)$row['oid']] = true;
-            $result[$uid]['remaining_project_times'] = (int)($result[$uid]['remaining_project_times'] ?? 0)
-                + max(0, (int)$row['write_surplus_times']);
-            $result[$uid]['remaining_project_amount'] = '0.00';
-            $oids[(int)$row['oid']] = $uid;
-        }
-        $cartColumns = $this->tableColumns('store_order_cart_info');
-        if ($oids && isset($cartColumns['oid'], $cartColumns['pay_price'], $cartColumns['write_times'], $cartColumns['write_surplus_times'])) {
-            $cartQuery = Db::name('store_order_cart_info')
-                ->whereIn('oid', array_keys($oids))
-                ->where('write_surplus_times', '>', 0);
-            if (isset($cartColumns['cart_type'])) {
-                $cartQuery->where('cart_type', 2);
-            }
-            if (isset($cartColumns['product_type'])) {
-                $cartQuery->where('product_type', 6);
-            }
-            if (isset($cartColumns['is_writeoff'])) {
-                $cartQuery->where('is_writeoff', 0);
-            }
-            foreach ($cartQuery->field('oid,pay_price,write_times,write_surplus_times')->select()->toArray() as $cart) {
-                $uid = (int)($oids[(int)$cart['oid']] ?? 0);
-                $times = (int)($cart['write_times'] ?? 0);
-                if ($uid <= 0 || $times <= 0) {
-                    continue;
-                }
-                $remaining = max(0, (int)$cart['write_surplus_times']);
-                $unit = bcdiv($this->amount($cart['pay_price'] ?? 0), (string)$times, 8);
-                $amount = bcmul($unit, (string)$remaining, 2);
-                $result[$uid]['remaining_project_amount'] = bcadd(
-                    (string)$result[$uid]['remaining_project_amount'],
-                    $amount,
-                    2
-                );
-            }
-        }
-        foreach ($result as &$summary) {
-            $summary['active_card_count'] = count((array)($summary['holder_ids'] ?? []));
-            unset($summary['holder_ids']);
-        }
-        unset($summary);
 
         // Migrated cards have a storeless, system-hidden carrier order. They
         // belong to the member's rights, not to a store's sales or revenue;
@@ -1054,7 +1146,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $query->whereIn('sf.store_id', $visible);
         }
         $rows = $query
-            ->field("sf.member_id AS uid,COUNT(DISTINCT sf.business_date) AS visit_count,MAX(sf.business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(sf.id ORDER BY sf.settled_at DESC,sf.id DESC), ',', 1) AS latest_service_fact_id")
+            ->field("sf.member_id AS uid,COUNT(DISTINCT CONCAT(sf.store_id,'|',sf.business_date)) AS visit_count,MAX(sf.business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(sf.id ORDER BY sf.settled_at DESC,sf.id DESC), ',', 1) AS latest_service_fact_id")
             ->group('sf.member_id')
             ->select()
             ->toArray();

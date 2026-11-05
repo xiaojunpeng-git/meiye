@@ -1,8 +1,9 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
-import { UnifiedReportQueryToolbar, UnifiedQueryExportDrawer, cloneUnifiedQuerySnapshot } from '@mohe/unified-query-vue3'
+import { UnifiedReportQueryToolbar, UnifiedQueryExportDrawer, UnifiedQueryDateRange, cloneUnifiedQuerySnapshot } from '@mohe/unified-query-vue3'
 import { memberReportFields, memberReportDraftSnapshot, buildMemberReportQuery } from '@/services/memberReportFilters'
+import { memberAnalysisFields, memberAnalysisDraft, buildMemberAnalysis } from '@/services/memberAnalysisFilters'
 
 // Member-only host for the shared statistics filter UI. Do not change any other
 // page's toolbar, or build/export a query from unsubmitted panel drafts.
@@ -21,6 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['query'])
 const toolbar = ref(null), keyword = ref(''), scope = ref('normal'), original = ref({}), cleared = ref(false)
 const businessStatus = ref('')
+const analysisOpen = ref(false), analysis = ref(memberAnalysisDraft()), analysisError = ref('')
 const statuses = computed(() => props.statusOptions.map(option => typeof option === 'string'
   ? { value: option, label: option } : { value: option.value ?? option.label, label: option.label ?? option.value }))
 const exportOpen = ref(false), exportTask = ref(null)
@@ -34,10 +36,17 @@ watch(() => props.executedQuery, query => {
   keyword.value = query.keyword || ''
   scope.value = query.dataScope === 'all' ? 'all' : 'normal'
   businessStatus.value = query.businessStatus || ''
+  analysis.value = memberAnalysisDraft(query.memberAnalysis)
+  analysisError.value = ''
   cleared.value = false
 }, { immediate: true, deep: true })
 function query(panel) {
-  emit('query', buildMemberReportQuery(original.value, panel, keyword.value, scope.value, props.pageSize, cleared.value, businessStatus.value, props.pageCode))
+  try {
+    const submitted = buildMemberReportQuery(original.value, panel, keyword.value, scope.value, props.pageSize, cleared.value, businessStatus.value, props.pageCode)
+    submitted.memberAnalysis = buildMemberAnalysis(analysis.value)
+    analysisError.value = ''
+    emit('query', submitted)
+  } catch (error) { analysisError.value = error.message; analysisOpen.value = true }
 }
 async function changeScope(value) {
   if (props.isQueryLoading || scope.value === value) return
@@ -70,6 +79,26 @@ function createExport(configuration) {
     <template #leading-controls>
       <label class="member-report-search"><span class="sr-only">综合查询</span><input v-model="keyword" type="search" placeholder="搜索会员姓名、完整手机号或会员姓名首字母" autocomplete="off" @keyup.enter="toolbar?.submitQuery()" /></label>
     </template>
+    <template #before-filter-toggle>
+      <button type="button" class="button button--secondary" :aria-expanded="analysisOpen" @click="analysisOpen = !analysisOpen">分析筛选</button>
+    </template>
+    <template #supplementary-filters>
+      <section v-if="analysisOpen" class="member-analysis" aria-label="会员分析筛选">
+        <div class="member-analysis__grid" @keydown.enter="toolbar?.submitQuery()">
+          <div v-for="field in memberAnalysisFields" :key="field.key" class="member-analysis__field">
+            <label :for="`analysis-${field.key}-min`">{{ field.label }}</label>
+            <UnifiedQueryDateRange v-if="field.kind === 'period'" v-model="analysis[field.key]" :label="`${field.label}周期`" />
+            <div v-else class="member-analysis__range">
+              <input :id="`analysis-${field.key}-min`" v-model="analysis[field.key].min" type="number" min="0" :step="field.kind === 'count' ? 1 : '0.01'" placeholder="最小值" :aria-label="`${field.label}最小值`" />
+              <span>至</span>
+              <input v-model="analysis[field.key].max" type="number" min="0" :step="field.kind === 'count' ? 1 : '0.01'" placeholder="最大值" :aria-label="`${field.label}最大值`" />
+            </div>
+          </div>
+        </div>
+        <div class="member-analysis__footer"><span>现金业绩及消费条件：购买＋充值＋补欠款；金额单位：元。</span><button type="button" class="button button--secondary" @click="analysis = memberAnalysisDraft(); analysisError = ''">清空分析筛选</button></div>
+        <p v-if="analysisError" role="alert" class="member-analysis__error">{{ analysisError }}</p>
+      </section>
+    </template>
     <template #primary-actions>
       <div class="member-report-scope" role="group" aria-label="数据范围">
         <button v-for="option in [{ value: 'normal', label: '正常数据' }, { value: 'all', label: '全部数据' }]" :key="option.value" type="button" :aria-pressed="scope === option.value" :disabled="isQueryLoading" @click="changeScope(option.value)">{{ option.label }}</button>
@@ -93,4 +122,12 @@ function createExport(configuration) {
 .member-report-scope button[aria-pressed="true"] { background: #086ad8; color: white; }
 .member-report-scope button:disabled { cursor: wait; }
 .member-report-status { min-height: 34px; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; background: white; }
+.member-analysis { border-top: 1px solid #e2e8f0; padding: 14px 16px; max-height: 40vh; overflow: auto; }
+.member-analysis__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: 14px 20px; }
+.member-analysis__field { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.member-analysis__field > label { font-size: 13px; text-align: right; }
+.member-analysis__range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; }
+.member-analysis__range input { width: 100%; min-width: 0; height: 34px; padding: 6px; border: 1px solid #d8e0ea; border-radius: 6px; box-sizing: border-box; font: inherit; }
+.member-analysis__footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; font-size: 12px; color: #64748b; }
+.member-analysis__error { color: #c2410c; margin: 10px 0 0; }
 </style>

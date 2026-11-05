@@ -3,7 +3,7 @@ import { cloneUnifiedQuerySnapshot, normalizeUnifiedQueryFilter } from './unifie
 
 const NUMERIC_TYPES = new Set(['number', 'integer', 'decimal'])
 const hasValue = (value) => value !== '' && value !== null && value !== undefined
-const QUERY_KEYS = new Set(['pageCode', 'limit', 'keyword', 'dataScope', 'businessStatus', 'topFilters', 'sorts', 'groupBy', 'summaries', 'visibleFields', 'fieldVersions', 'queryCutoffDate', 'start_date', 'end_date', 'as_of_date', 'store_ids'])
+const QUERY_KEYS = new Set(['pageCode', 'memberAnalysis', 'limit', 'keyword', 'dataScope', 'businessStatus', 'topFilters', 'sorts', 'groupBy', 'summaries', 'visibleFields', 'fieldVersions', 'queryCutoffDate', 'start_date', 'end_date', 'as_of_date', 'store_ids'])
 
 // 后端元数据是筛选字段的唯一白名单；标题仅用于展示，不参与字段身份或查询推断。
 export function reportFilterFields(fields = []) {
