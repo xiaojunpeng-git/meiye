@@ -20,6 +20,7 @@ use app\services\other\CityAreaServices;
 use app\services\product\product\StoreProductWordsServices;
 use app\services\store\DeliveryServiceServices;
 use app\services\other\CacheServices;
+use app\services\other\PosterImageSourcePolicy;
 use app\services\product\category\StoreProductCategoryServices;
 use app\services\product\product\StoreProductServices;
 use app\services\other\ExpressServices;
@@ -644,28 +645,27 @@ class PublicController extends BaseController
             ['image', ''],
             ['code', ''],
         ], true);
-		if ($imageUrl !== '' && !(preg_match('/.*(\.png|\.jpg|\.jpeg|\.gif)$/', $imageUrl) || strpos($imageUrl, 'https://mp.weixin.qq.com/cgi-bin/showqrcode') !== false || strpos($imageUrl, 'https://thirdwx.qlogo.cn/mmopen') !== false)) {
-			return app('json')->success(['code' => false, 'image' => false]);
-		}
-		if ($codeUrl !== '' && !(preg_match('/.*(\.png|\.jpg|\.jpeg|\.gif)$/', $codeUrl) || strpos($codeUrl, 'https://mp.weixin.qq.com/cgi-bin/showqrcode') !== false || strpos($codeUrl, 'https://thirdwx.qlogo.cn/mmopen') !== false)) {
-			return app('json')->success(['code' => false, 'image' => false]);
-		}
-		$imageUrlHost = $imageUrl ? (parse_url($imageUrl)['host'] ?? $imageUrl) : $imageUrl;
-		$codeUrlHost = $codeUrl ? (parse_url($codeUrl)['host'] ?? $codeUrl) : $codeUrl;
-
-		/** @var SystemStorageServices $systemStorageServices */
-		$systemStorageServices = app()->make(SystemStorageServices::class);
-		$domainArr = $systemStorageServices->getColumn([], 'domain');
-		$domainArr = array_merge($domainArr, [$request->host(), 'mp.weixin.qq.com', 'thirdwx.qlogo.cn']);
-		$domainArr = array_unique(array_diff($domainArr, ['']));
-		if (count($domainArr)) {
-			$domainArr = array_map(function ($item) {
-				return str_replace(['https://', 'http://'], '', $item);
-			}, $domainArr);
-		}
-		if ($domainArr && (($imageUrlHost && !in_array($imageUrlHost, $domainArr)) || ($codeUrlHost && !in_array($codeUrlHost, $domainArr)))) {
-			return app('json')->success(['code' => false, 'image' => false]);
-		}
+        /** 历史媒体读取配置与上传配置分开，不能为海报伪造上传桶或放行任意外站。 */
+        $storage = app()->make(SystemStorageServices::class);
+        // 旧上传配置可能只存主机名，仍按原口径支持 HTTP/HTTPS；新配置须明确完整 origin。
+        $storageOrigins = [];
+        foreach ($storage->getColumn([], 'domain') as $domain) {
+            if (!is_string($domain) || $domain === '') continue;
+            if (strpos($domain, '://') === false) {
+                $storageOrigins[] = 'http://' . $domain;
+                $storageOrigins[] = 'https://' . $domain;
+            } else {
+                $storageOrigins[] = $domain;
+            }
+        }
+        $origins = array_merge($storageOrigins, (array)config('poster.image_origins', []), [
+            $request->domain(), sys_config('site_url', ''), 'https://mp.weixin.qq.com', 'https://thirdwx.qlogo.cn',
+        ]);
+        $policy = new PosterImageSourcePolicy();
+        if (!is_string($imageUrl) || !is_string($codeUrl)
+            || !$policy->allows($imageUrl, $origins) || !$policy->allows($codeUrl, $origins)) {
+            return app('json')->success(['code' => false, 'image' => false]);
+        }
         try {
             $code = CacheService::get($codeUrl, function () use ($codeUrl) {
                 $codeTmp = $code = $codeUrl ? image_to_base64($codeUrl) : false;

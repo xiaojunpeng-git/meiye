@@ -1071,7 +1071,8 @@
 					if(this.$wechat.isWeixin() && this.shareQrcode=='1'){
 						that.downloadFilePromotionCode();
 					}else{
-					    that.getImageBase64();
+					    // 预加载失败不覆盖原图；用户点击分享时重试并显示具体失败提示。
+					    that.getImageBase64().catch(() => {});
 					}
 					that.setShare();
 					// #endif
@@ -1474,22 +1475,69 @@
 					that.$set(that, 'PromotionCode', '');
 				});
 			},
-			getImageBase64: function(type) {
-				let that = this;
-				imageBase64(that.storeImage,that.followCode)
-					.then(res => {
-						that.storeImage = res.data.image;
-						if(type){
-							that.PromotionCode = res.data.code;
-						}
-						that.base64Show = 1;
-					})
-					.catch(() => {});
+			/** 转码失败保留原始商品地址，避免 false 污染下一次重试；同一原图共用在途请求。 */
+			getImageBase64: function() {
+				const source = this.storeInfo.image;
+				if (this._posterSource === source && typeof this.storeImage === 'string' && this.storeImage.indexOf('data:image/') === 0) {
+					return Promise.resolve(this.storeImage);
+				}
+				if (this._posterImageRequest) return this._posterImageRequest;
+				this._posterImageRequest = imageBase64(source, '').then(res => {
+					const image = res && res.data && res.data.image;
+					if (typeof image !== 'string' || image.indexOf('data:image/') !== 0) throw new Error('海报商品图片加载失败，请稍后重试');
+					this.storeImage = image;
+					this._posterSource = source;
+					this.base64Show = 1;
+					return image;
+				}).finally(() => { this._posterImageRequest = null; });
+				return this._posterImageRequest;
 			},
+			// #ifdef H5
+			/** 网页先取得可绘制的同源数据，再创建画布；失败收起加载层，下一次分享可重试。 */
+			generateH5Poster: async function() {
+				if (this._h5PosterPending) return;
+				this._h5PosterPending = true;
+				let timer;
+				try {
+					const image = await this.getImageBase64();
+					let code = this.PromotionCode;
+					if (!code) throw new Error('海报二维码尚未准备好，请重新点击分享');
+					// 微信公众号二维码可能是外站 URL，同样通过受控转码，避免跨域污染画布。
+					if (/^https?:\/\//i.test(code)) {
+						const res = await imageBase64('', code);
+						code = res && res.data && res.data.code;
+						if (typeof code !== 'string' || code.indexOf('data:image/') !== 0) throw new Error('海报二维码加载失败，请稍后重试');
+					}
+					this.canvasStatus = true;
+					await this.$nextTick();
+					const poster = await new Promise((resolve, reject) => {
+						timer = setTimeout(() => reject(new Error('海报生成超时，请稍后重试')), 15000);
+						const name = this.type == 6 || this.type == 7 ? this.storeInfo.store_name : this.storeInfo.title;
+						const originalPrice = this.type == 6 ? this.storeInfo.ot_price : this.storeInfo.product_price;
+						this.$util.PosterCanvas(this.fontColor, this.themeColor, this.siteName,
+							[this.posterbackgd, image, code], name, this.storeInfo.price, originalPrice, this.posterTitle,
+							resolve, () => reject(new Error('海报图片生成失败，请稍后重试')));
+					});
+					this.posterImage = poster;
+					this.posterImageStatus = true;
+				} catch (error) {
+					this.posters = false;
+					this.$util.Tips({ title: error && error.message || '海报生成失败，请稍后重试' });
+				} finally {
+					clearTimeout(timer);
+					this.canvasStatus = false;
+					this._h5PosterPending = false;
+				}
+			},
+			// #endif
 			/**
 			 * 生成海报
 			 */
 			goPoster: function() {
+				// #ifdef H5
+				return this.generateH5Poster();
+				// #endif
+				// #ifndef H5
 				let that = this;
 				that.$set(that, 'canvasStatus', true);
 				let arr2 = [that.posterbackgd, that.storeImage, that.PromotionCode];
@@ -1552,6 +1600,7 @@
 						}
 					},
 				});
+				// #endif
 			},
 
 			/*

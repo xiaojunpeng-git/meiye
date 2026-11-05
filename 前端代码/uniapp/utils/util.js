@@ -452,8 +452,10 @@ export default {
 	 *
 	 *
 	 */
-	PosterCanvas: function(fontColor, themeColor, siteName, arr2, store_name, price, ot_price, posterTitle, successFn) {
+	PosterCanvas: function(fontColor, themeColor, siteName, arr2, store_name, price, ot_price, posterTitle, successFn, failFn) {
 		let that = this;
+		// 网页调用方负责结束加载与重试；旧调用方继续沿用原提示。
+		const failed = error => failFn ? failFn(error) : that.Tips({ title: '无法获取图片信息' });
 		// uni.showLoading({
 		// 	title: '海报生成中',
 		// 	mask: true
@@ -624,14 +626,11 @@ export default {
 					success: function(res) {
 						// uni.hideLoading();
 						successFn && successFn(res.tempFilePath);
-					}
+					},
+					fail: failed
 				})
 			});
-		}).catch(err=>{
-			that.Tips({
-				title: '无法获取图片信息'
-			});
-		})
+		}).catch(failed)
 		// uni.getImageInfo({
 		// 	src: arr2[0],
 		// 	success: function(res) {
