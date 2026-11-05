@@ -237,8 +237,24 @@ final class CashierV3RechargeGiftIssuanceServices
             if (!is_array($entry)) throw self::failure('recharge_gift_product_config_invalid', '充值套餐赠品配置无效，请先修正套餐配置。');
             $productId = (int)($entry['id'] ?? 0); $quantity = (int)($entry['num'] ?? 0); $declaredType = (int)($entry['product_type'] ?? -1);
             if ($productId <= 0 || $quantity <= 0 || $quantity > 1000 || isset($seen['p:' . $productId])) throw self::failure('recharge_gift_product_config_invalid', '充值套餐赠品配置无效，请先修正套餐配置。');
-            $product = (array)Db::name('store_product')->where('id', $productId)->where('relation_id', $operatorScope->storeId())->where('is_del', 0)->lock(true)->find();
-            if (!$product || (int)($product['product_type'] ?? -1) !== $declaredType) throw self::failure('recharge_gift_product_unavailable', '充值套餐中的赠品已删除、类型变化或不属于当前门店。');
+            // Old packages can still contain cards. Never issue one as a plain product: that would lose its card rights.
+            if (!in_array($declaredType, [0, 6], true)) throw self::failure('recharge_gift_type_unsupported', '此充值套餐含卡项等不支持的赠品，请先在套餐赠送配置中删除或换成项目、产品。');
+            $configuredProductId = $productId;
+            $product = (array)Db::name('store_product')->where('id', $productId)->where('is_del', 0)->lock(true)->find();
+            if (!$product || (int)($product['product_type'] ?? -1) !== $declaredType) throw self::failure('recharge_gift_product_unavailable', '充值套餐中的赠品已删除或类型变化，请先修正套餐配置。');
+            if ((int)($product['type'] ?? -1) === 0 && (int)($product['relation_id'] ?? -1) === 0) {
+                // 套餐配置存平台商品；发放时只认当前门店的唯一有效副本，不能跨店取权益。
+                $copies = Db::name('store_product')->where('pid', $configuredProductId)
+                    ->where('type', 1)->where('relation_id', $operatorScope->storeId())
+                    ->where('product_type', $declaredType)->where('is_del', 0)
+                    ->limit(2)->lock(true)->select()->toArray();
+                if (count($copies) !== 1) throw self::failure('recharge_gift_product_unavailable', '当前门店缺少对应赠品或存在重复商品，请先核对门店商品。');
+                $product = (array)$copies[0];
+                $productId = (int)$product['id'];
+            } elseif ((int)($product['type'] ?? -1) !== 1 || (int)($product['relation_id'] ?? 0) !== $operatorScope->storeId()) {
+                throw self::failure('recharge_gift_product_unavailable', '充值套餐中的赠品不属于当前门店。');
+            }
+            if (isset($seen['p:' . $productId])) throw self::failure('recharge_gift_product_config_invalid', '充值套餐赠品重复，请先修正套餐配置。');
             $sku = (array)Db::name('store_product_attr_value')->where('product_id', $productId)->where('type', 0)->order('id asc')->lock(true)->find();
             if (!$sku) throw self::failure('recharge_gift_product_sku_missing', '充值套餐赠品缺少有效规格，不能发放。');
             $validity = $this->validity($entry, $now);
@@ -249,6 +265,9 @@ final class CashierV3RechargeGiftIssuanceServices
                 'skuUnique' => (string)($sku['unique'] ?? ''), 'skuWriteTimes' => max(1, (int)($sku['write_times'] ?? 1)),
                 'validityStart' => $validity['start'], 'validityEnd' => $validity['end'],
             ];
+            if ($configuredProductId !== $productId) {
+                $out[count($out) - 1]['configuredProductId'] = $configuredProductId;
+            }
             $seen['p:' . $productId] = true;
         }
         foreach ((array)($config['coupon'] ?? []) as $entry) {
