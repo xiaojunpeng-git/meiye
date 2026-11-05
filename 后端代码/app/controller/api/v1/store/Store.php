@@ -206,7 +206,7 @@ class Store
      */
     public function getStoreList(Request $request)
     {
-        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options] = $request->getMore([
+        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options, $member_directory] = $request->getMore([
             ['store_type', 1],
             ['keyword', ''],
             ['latitude', ''],
@@ -222,6 +222,7 @@ class Store
             ['card_product_id', 0],//卡项商品id
             ['is_all', 0],//预约等场景：展示全部门店，不依赖定位
             ['region_options', 0],//同一可选门店范围的地区投影，不返回门店资料
+            ['member_directory', 0],//会员端公开门店目录，不用于订单选店或管理范围
         ], true);
         // 沿用原坐标校验：空坐标合法，有定位则继续距离排序；地区筛选不提升进店权限。
         if (!$is_all && !checkCoordinates($longitude, $latitude)) {
@@ -261,7 +262,11 @@ class Store
         $storeList = [];
         //开启门店
         if (sys_config('store_func_status', 1)) {
-			if (!$is_all && !$keywords) {//无搜索门店 进店规则匹配
+            // 目录仅查询营业且未删除的门店公开资料，不按进店区域裁剪；不复用is_all，以保留常用门店筛选。
+            // 商品/卡项/订单选店仍走原隔离规则，目录标记不能放宽交易范围或后台/门店端权限。
+            $publicDirectory = (int)$member_directory === 1 && !(int)$product_id && !(int)$card_product_id && !(int)$store_id && !(int)$is_select;
+            if ($publicDirectory) $where = array_merge($where, ['is_del' => 0, 'is_show' => 1]);
+			if (!$publicDirectory && !$is_all && !$keywords) {//无搜索门店 进店规则匹配
 				$entryRules = $this->services->getStoreIdByEntryRules($uid, ['latitude' => $latitude, 'longitude' => $longitude]);
 				$entryStoreId = $entryRules['store_id'] ?? 0;
 				$shop_operation_type = $entryRules['shop_operation_type'] ?? 1;
