@@ -17,12 +17,14 @@ final class ProductManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'product_management_dashboard';
     public const METRIC_VERSION = 'product-management-current-category-v5';
+    private const EXPIRY_LABELS = ['OVERDUE' => '已过期', 'WITHIN_30' => '30天内临期', 'DAYS_31_60' => '31至60天', 'DAYS_61_90' => '61至90天', 'SAFE_OVER_90' => '90天以上', 'UNKNOWN' => '到期日未知'];
 
     public function dashboard(array $context, array $input): array
     {
         $scope = $this->scope($context, $input);
         // 批次下钻沿用同一个菜单、门店范围和成本权限；不经过经营金额聚合。
         if (($input['detail'] ?? '') === 'expiry') return $this->expiryDetail($scope, $input);
+        if (($input['detail'] ?? '') === 'expiry_bucket') return $this->expiryBucketDetail($scope, $input);
         $range = $this->range($input);
         $categories = $this->categories();
         $categoryId = max(0, (int)($input['category_id'] ?? 0));
@@ -253,35 +255,28 @@ final class ProductManagementDashboardServices
         $categoryNames = [];
         foreach ($categories['roots'] as $category) $categoryNames[(int)$category['id']] = (string)$category['name'];
         $cutoff = date('Y-m-d');
-        $allowed = $selected > 0 ? array_fill_keys($this->descendants($selected, $categories['children']), true) : [];
-        foreach ($rows as &$row) {
-            $row['category_id'] = $map[(string)$row['store_id'] . ':' . (int)$row['product_id']] ?? $map[(int)$row['product_id']] ?? 0;
-        }
-        unset($row);
-        $rows = array_values(array_filter($rows, static function (array $row) use ($allowed): bool {
-            return $allowed === [] || isset($allowed[(int)$row['category_id']]);
-        }));
-        $labels = ['OVERDUE' => '已过期', 'WITHIN_30' => '30天内临期', 'DAYS_31_60' => '31至60天', 'DAYS_61_90' => '61至90天', 'SAFE_OVER_90' => '90天以上', 'UNKNOWN' => '到期日未知'];
-        $bucketTotals = array_fill_keys(array_keys($labels), ['count' => 0, 'quantity' => 0]);
-        $rankings = array_fill_keys(array_keys($labels), []);
+        $rows = $this->expiryScopedRows($rows, $map, $categories, $selected);
+        $bucketTotals = array_fill_keys(array_keys(self::EXPIRY_LABELS), ['count' => 0, 'quantity' => 0]);
+        $rankings = array_fill_keys(array_keys(self::EXPIRY_LABELS), []);
         $today = new \DateTimeImmutable($cutoff);
         foreach ($rows as $row) {
             $days = $row['expire_date'] ? (int)$today->diff(new \DateTimeImmutable($row['expire_date']))->format('%r%a') : null;
-            $key = $days === null ? 'UNKNOWN' : ($days < 0 ? 'OVERDUE' : ($days <= 30 ? 'WITHIN_30' : ($days <= 60 ? 'DAYS_31_60' : ($days <= 90 ? 'DAYS_61_90' : 'SAFE_OVER_90'))));
+            $key = $this->expiryBucketKey($days);
             $bucketTotals[$key]['count']++;
             $bucketTotals[$key]['quantity'] += (float)$row['quantity'];
             $rankings[$key][] = [
                 'product_name' => $row['product_name'], 'category_name' => $categoryNames[(int)$row['category_id']] ?? '未分类',
                 'batch_no' => $row['batch_no'], 'current_quantity' => $row['quantity'], 'expire_date' => $row['expire_date'],
-                'days' => $days, 'status' => $labels[$key],
+                'days' => $days, 'status' => self::EXPIRY_LABELS[$key],
                 // 同名/同批号可属于不同门店，浏览器只能使用服务端声明的真实身份下钻。
                 'drilldown' => isset($row['batch_id']) ? ['detail' => 'expiry', 'batch_id' => (int)$row['batch_id'], 'batch_store_id' => (int)$row['store_id'], 'cutoff_date' => $cutoff] : null,
                 'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
             ];
         }
         $buckets = [];
-        foreach ($labels as $key => $label) {
-            $buckets[] = ['key' => $key, 'label' => $label, 'count' => $bucketTotals[$key]['count'], 'quantity' => $bucketTotals[$key]['quantity']];
+        foreach (self::EXPIRY_LABELS as $key => $label) {
+            $buckets[] = ['key' => $key, 'label' => $label, 'count' => $bucketTotals[$key]['count'], 'quantity' => $bucketTotals[$key]['quantity'],
+                'drilldown' => ['detail' => 'expiry_bucket', 'bucket_key' => $key, 'cutoff_date' => $cutoff, 'category_id' => $selected]];
             // Totals cover all authorized batches; each switchable ranking is
             // independently bounded to ten rows and does not change totals.
             $rankings[$key] = $this->topExpiryRows($rankings[$key]);
@@ -292,15 +287,91 @@ final class ProductManagementDashboardServices
     /** Display the ten most urgent batches; bucket totals still count every authorized batch. */
     private function topExpiryRows(array $rows): array
     {
+        $this->sortExpiryRows($rows);
+        return array_slice($rows, 0, 10);
+    }
+
+    /** The card's full list and its top ten use one stable order, including equal dates across stores. */
+    private function sortExpiryRows(array &$rows): void
+    {
         usort($rows, static function (array $a, array $b): int {
             $daysA = $a['days'] === null ? PHP_INT_MAX : (int)$a['days'];
             $daysB = $b['days'] === null ? PHP_INT_MAX : (int)$b['days'];
             return $daysA <=> $daysB
                 ?: strcmp((string)$a['category_name'], (string)$b['category_name'])
                 ?: strcmp((string)$a['product_name'], (string)$b['product_name'])
-                ?: strcmp((string)$a['batch_no'], (string)$b['batch_no']);
+                ?: strcmp((string)$a['batch_no'], (string)$b['batch_no'])
+                ?: ((int)$a['drilldown']['batch_store_id'] <=> (int)$b['drilldown']['batch_store_id'])
+                ?: ((int)$a['drilldown']['batch_id'] <=> (int)$b['drilldown']['batch_id']);
         });
-        return array_slice($rows, 0, 10);
+    }
+
+    /** Apply the same current-category filter to card totals, top ten and the complete bucket list. */
+    private function expiryScopedRows(array $rows, array $map, array $categories, int $selected): array
+    {
+        $allowed = $selected > 0 ? array_fill_keys($this->descendants($selected, $categories['children']), true) : [];
+        foreach ($rows as &$row) {
+            $row['category_id'] = $map[(string)$row['store_id'] . ':' . (int)$row['product_id']] ?? $map[(int)$row['product_id']] ?? 0;
+        }
+        unset($row);
+        return array_values(array_filter($rows, static function (array $row) use ($allowed): bool {
+            return $allowed === [] || isset($allowed[(int)$row['category_id']]);
+        }));
+    }
+
+    /** Exact day boundaries are shared by the six cards and the detail endpoint. */
+    private function expiryBucketKey(?int $days): string
+    {
+        return $days === null ? 'UNKNOWN' : ($days < 0 ? 'OVERDUE' : ($days <= 30 ? 'WITHIN_30' : ($days <= 60 ? 'DAYS_31_60' : ($days <= 90 ? 'DAYS_61_90' : 'SAFE_OVER_90'))));
+    }
+
+    /** Read every authorized batch in one card's bucket; pagination follows the full server total. */
+    private function expiryBucketDetail(array $scope, array $input): array
+    {
+        $bucketKey = (string)($input['bucket_key'] ?? '');
+        $cutoff = (string)($input['cutoff_date'] ?? '');
+        if (!isset(self::EXPIRY_LABELS[$bucketKey]) || !$this->validDate($cutoff) || $cutoff > date('Y-m-d')) {
+            throw new \InvalidArgumentException('临期档位或截止日无效');
+        }
+        // A transaction keeps the card's full count, quantity and page rows on one read snapshot.
+        return Db::transaction(function () use ($scope, $input, $bucketKey, $cutoff): array {
+            $categories = $this->categories();
+            $selected = max(0, (int)($input['category_id'] ?? 0));
+            if ($selected > 0 && !isset($categories['visible_ids'][$selected])) {
+                throw new \InvalidArgumentException('商品分类不存在或已关闭统计');
+            }
+            $inventory = $this->inventoryRows($scope, $cutoff);
+            $map = $this->productCategoryMap($categories, $inventory);
+            $categoryNames = [];
+            foreach ($categories['roots'] as $category) $categoryNames[(int)$category['id']] = (string)$category['name'];
+            $today = new \DateTimeImmutable($cutoff);
+            $rows = [];
+            $quantity = 0;
+            foreach ($this->expiryScopedRows($inventory, $map, $categories, $selected) as $row) {
+                $days = $row['expire_date'] ? (int)$today->diff(new \DateTimeImmutable($row['expire_date']))->format('%r%a') : null;
+                if ($this->expiryBucketKey($days) !== $bucketKey) continue;
+                $quantity += (float)$row['quantity'];
+                $rows[] = ['product_name' => $row['product_name'], 'category_name' => $categoryNames[(int)$row['category_id']] ?? '未分类',
+                    'batch_no' => $row['batch_no'], 'current_quantity' => $row['quantity'], 'expire_date' => $row['expire_date'],
+                    'days' => $days, 'status' => self::EXPIRY_LABELS[$bucketKey],
+                    'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
+                    'drilldown' => ['detail' => 'expiry', 'batch_id' => (int)$row['batch_id'], 'batch_store_id' => (int)$row['store_id'], 'cutoff_date' => $cutoff]];
+            }
+            $this->sortExpiryRows($rows);
+            $total = count($rows);
+            $pageSize = 20;
+            $page = min(max(1, (int)($input['page'] ?? 1)), max(1, (int)ceil($total / $pageSize)));
+            return ['detail' => 'expiry_bucket', 'bucket_key' => $bucketKey, 'title' => self::EXPIRY_LABELS[$bucketKey],
+                'cutoff_date' => $cutoff, 'quantity' => $quantity, 'total' => $total, 'page' => $page, 'page_size' => $pageSize,
+                'rows' => array_slice($rows, ($page - 1) * $pageSize, $pageSize),
+                'columns' => [
+                    ['key' => 'product_name', 'label' => '品名'], ['key' => 'category_name', 'label' => '商品分类'],
+                    ['key' => 'batch_no', 'label' => '批次号'], ['key' => 'current_quantity', 'label' => '当前库存数量'],
+                    ['key' => 'expire_date', 'label' => '到期日'], ['key' => 'days', 'label' => '剩余天数'],
+                    ['key' => 'status', 'label' => '状态'], ['key' => 'inventory_cost_cents', 'label' => '库存成本'],
+                ], 'table_layout' => ['fixed' => true, 'fixed_header' => true],
+                'data_as_of' => date('Y-m-d H:i:s'), 'read_only' => true];
+        });
     }
 
     /** 汇总与下钻共用同一已结算事实、活动仓及截止日范围；冲销按符号抵消，不能排除负向记录。 */

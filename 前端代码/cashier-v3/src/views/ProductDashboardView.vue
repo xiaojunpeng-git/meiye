@@ -9,6 +9,7 @@ import Search from '@lucide/vue/dist/esm/icons/search.mjs'
 import TriangleAlert from '@lucide/vue/dist/esm/icons/triangle-alert.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import ExpiryBatchDetail from '@/components/ExpiryBatchDetail.vue'
+import ExpiryBucketDetail from '@/components/ExpiryBucketDetail.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import { queryProductDashboard, queryProductDashboardScope } from '@/services/productDashboardApi'
 
@@ -108,6 +109,7 @@ const inventoryCategories = ref([])
 const expiryCards = ref([])
 const expiryRankings = ref({})
 const expiryDetail = ref(null)
+const expiryBucketDetail = ref(null)
 const committedStoreIds = ref([])
 const selectedExpiryBucket = ref('OVERDUE')
 let queuedQuery = false
@@ -165,7 +167,7 @@ function applyDashboard(data) {
     products: (item.product_rankings || []).map((row) => [row.name, money(row.revenue_cents), money(row.cost_cents), money(row.gross_profit_cents), percent(row.gross_margin_rate)])
   }))
   inventoryCategories.value = (data?.product_inventory_categories || []).map((item) => ({ id: String(item.category_id), name: item.name, amount: money(item.inventory_cost_cents), rows: (item.rows || []).map((row) => [row.product_name, row.available_quantity, money(row.inventory_cost_cents)]) }))
-  expiryCards.value = (data?.expiry_alerts?.buckets || []).map((item) => ({ key: item.key, label: item.label, value: Number(item.quantity ?? item.count ?? 0).toLocaleString('zh-CN'), tone: item.key === 'OVERDUE' ? 'expired' : item.key === 'WITHIN_30' ? 'urgent' : item.key === 'DAYS_31_60' ? 'warm' : item.key === 'DAYS_61_90' ? 'watch' : item.key === 'SAFE_OVER_90' ? 'normal' : 'unknown' }))
+  expiryCards.value = (data?.expiry_alerts?.buckets || []).map((item) => ({ key: item.key, label: item.label, value: Number(item.quantity ?? item.count ?? 0).toLocaleString('zh-CN'), drilldown: item.drilldown || null, tone: item.key === 'OVERDUE' ? 'expired' : item.key === 'WITHIN_30' ? 'urgent' : item.key === 'DAYS_31_60' ? 'warm' : item.key === 'DAYS_61_90' ? 'watch' : item.key === 'SAFE_OVER_90' ? 'normal' : 'unknown' }))
   // The server owns bucket membership and each top-ten ranking; switching tabs is display-only.
   expiryRankings.value = Object.fromEntries(Object.entries(data?.expiry_alerts?.rankings || {}).map(([key, rows]) => [key, rows.map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents), row.drilldown])]))
   selectedExpiryBucket.value = data?.expiry_alerts?.default_bucket || 'OVERDUE'
@@ -196,6 +198,7 @@ async function loadDashboard(action = '查询') {
     const data = await queryProductDashboard({ ...rangeForPeriod(), store_ids: storeIds.join(',') })
     committedStoreIds.value = storeIds
     expiryDetail.value = null
+    expiryBucketDetail.value = null
     applyDashboard(data)
     queryMessage.value = action === '刷新' ? '已刷新商品看板。' : '已按当前筛选更新商品看板。'
   } catch (error) {
@@ -328,16 +331,18 @@ function runQuery(action = '查询') {
     </section>
 
     <ExpiryBatchDetail v-if="expiryDetail" :params="expiryDetail" :store-ids="committedStoreIds" @close="expiryDetail = null" />
+    <ExpiryBucketDetail v-if="expiryBucketDetail" :params="expiryBucketDetail" :store-ids="committedStoreIds" @close="expiryBucketDetail = null" />
     <section class="product-dashboard__section product-dashboard__section--expiry" aria-labelledby="expiry-title">
       <header class="product-dashboard__section-header"><div><span class="product-dashboard__section-kicker"><TriangleAlert :size="16" aria-hidden="true" />库存预警</span><h2 id="expiry-title">临期产品预警</h2></div><button type="button" class="product-dashboard__guide"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></header>
       <div v-if="loading" class="product-dashboard__loading">正在加载临期产品预警数据...</div>
       <template v-else>
         <div class="product-dashboard__expiry-summary" role="tablist" aria-label="到期日排行">
-          <button v-for="item in expiryCards" :key="item.key" type="button" role="tab"
-            class="expiry-summary-card" :class="[`expiry-summary-card--${item.tone}`, { 'is-active': selectedExpiryBucket === item.key }]"
-            :aria-selected="selectedExpiryBucket === item.key" @click="selectedExpiryBucket = item.key">
-            <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>当前库存数量</small>
-          </button>
+          <div v-for="item in expiryCards" :key="item.key" class="expiry-summary-card" :class="[`expiry-summary-card--${item.tone}`, { 'is-active': selectedExpiryBucket === item.key }]">
+            <button type="button" role="tab" class="expiry-summary-card__select" :aria-selected="selectedExpiryBucket === item.key" @click="selectedExpiryBucket = item.key">
+              <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>当前库存数量</small>
+            </button>
+            <button v-if="item.drilldown" type="button" class="expiry-summary-card__detail" :aria-label="`查看${item.label}全部批次明细`" @click="expiryBucketDetail = item.drilldown">查看明细</button>
+          </div>
         </div>
         <p class="product-dashboard__expiry-hint">卡片为当前范围全部库存数量；下表仅展示该档最早到期的前10条批次，点击查看明细可核对门店、仓库和出入库流水。</p>
         <p v-if="!expiryRows.length" class="product-dashboard__empty">当前筛选范围没有该档的产品批次。</p>
@@ -398,8 +403,10 @@ function runQuery(action = '查询') {
   .product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr))}
   .profit-category-card__table-head,.profit-category-card__rank-row{grid-template-columns:minmax(0,1.8fr) repeat(3,minmax(0,.9fr)) minmax(0,.65fr)}
 }
-/* Bucket totals are controls: keep their original footprint and expose the selected ranking. */
-.expiry-summary-card{display:block;width:100%;font:inherit;text-align:left;cursor:pointer}
+/* A card switches its top-ten preview and independently opens every batch in the bucket. */
+.expiry-summary-card{display:flex;min-width:0;flex-direction:column;align-items:stretch;width:100%;font:inherit;text-align:left}
+.expiry-summary-card__select{display:block;width:100%;border:0;padding:0;background:transparent;font:inherit;text-align:left;cursor:pointer}
+.expiry-summary-card__detail{align-self:flex-end;border:0;padding:3px 0 0;background:transparent;color:#1769aa;font:inherit;font-size:11px;cursor:pointer}
+.expiry-summary-card__select:focus-visible,.expiry-summary-card__detail:focus-visible{outline:2px solid #1769aa;outline-offset:2px}
 .expiry-summary-card.is-active{outline:2px solid #1f5f8b;outline-offset:-2px;background:#f5faff}
-.expiry-summary-card:focus-visible{outline:2px solid #1769aa;outline-offset:2px}
 </style>

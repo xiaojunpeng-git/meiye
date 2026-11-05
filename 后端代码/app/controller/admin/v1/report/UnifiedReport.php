@@ -405,7 +405,7 @@ class UnifiedReport extends AuthController
                 ['period', 'month'], ['start_date', ''], ['end_date', ''], ['store_ids', ''],
                 ['org_id', 0], ['store_id', 0], ['category_id', 0], ['product_type', 'all'],
                 // 下钻仍走本菜单的后端范围与成本权限，客户端仅提交批次身份及页码。
-                ['detail', ''], ['batch_id', 0], ['batch_store_id', 0], ['cutoff_date', ''], ['page', 1],
+                ['detail', ''], ['batch_id', 0], ['batch_store_id', 0], ['bucket_key', ''], ['cutoff_date', ''], ['page', 1],
             ]);
             $stores = $this->scopedStoreIds([
                 'org_id' => (int)$input['org_id'], 'store_id' => (int)$input['store_id'],
