@@ -186,8 +186,8 @@
 									<view>预售时间: {{storeInfo.presale_start_time}} ~ {{storeInfo.presale_end_time}}</view>
 									<view class="mt-12">预售结束后{{ storeInfo.presale_day }}天内发货</view>
 								</view>
-								<!-- 库存销量 -->
-								<view class="flex-between-center mt-20 text--w111-999 fs-22 lh-30rpx">
+								<!-- 拼团详情不展示限量和销量；仅控制展示，库存及购买限额仍按原规则校验。 -->
+								<view v-if="type != 3" class="flex-between-center mt-20 text--w111-999 fs-22 lh-30rpx">
 									<text class="line-through" v-if="type == 6 && storeInfo.ot_price">￥{{storeInfo.ot_price}}</text>
 									<text class="line-through" v-else-if="type != 6 && type != 3 && attribute.productSelect.ot_price">￥{{attribute.productSelect.ot_price}}</text>
 									<text>限量：{{ storeInfo.quota_show || storeInfo.stock }}{{  storeInfo.unit_name || ''}}</text>
