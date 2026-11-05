@@ -304,6 +304,8 @@ class Report extends AuthController
             ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
             // Shared detail search only narrows already-authorized rows; it never changes the parent metric or scope.
             ['detail_member', ''], ['detail_order_no', ''],
+            // 大单原单弹窗只透传后端行键和金额列；权限与事实仍由统一报表服务重验。
+            ['detail_row_key', ''], ['detail_metric', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             // 薪资筛选和指标下钻保留原单号与稳定人员/门店 ID；权限范围仍由服务端裁剪。
             ['employee_name', ''], ['document_no', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''], ['salary_metric_key', ''],

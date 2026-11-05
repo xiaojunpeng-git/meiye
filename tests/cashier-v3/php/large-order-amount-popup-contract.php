@@ -7,6 +7,19 @@ require '/var/www/html/vendor/autoload.php';
 
 use app\services\report\StoreUnifiedReportPhaseTwoServices;
 use app\services\report\StoreLargeOrderInstallmentServices;
+use app\controller\cashier\v3\Report as CashierReport;
+use app\controller\admin\v1\report\UnifiedReport as AdminReport;
+
+// 两端入口的显式参数白名单必须保留行键和金额列，否则点击会误读成整张汇总表。
+foreach ([CashierReport::class, AdminReport::class] as $controller) {
+    $method = new ReflectionMethod($controller, 'inputRules');
+    $method->setAccessible(true);
+    $rules = $method->invoke((new ReflectionClass($controller))->newInstanceWithoutConstructor());
+    $keys = array_column($rules, 0);
+    if (!in_array('detail_row_key', $keys, true) || !in_array('detail_metric', $keys, true)) {
+        throw new RuntimeException($controller . ' dropped large-order detail parameters');
+    }
+}
 
 $service = new StoreUnifiedReportPhaseTwoServices();
 $method = new ReflectionMethod($service, 'largeOrderDetail');
