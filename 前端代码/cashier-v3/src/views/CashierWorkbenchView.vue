@@ -65,7 +65,7 @@ const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai
 const keyword = ref('')
 // 游客开单优先展示项目；选中会员后切回卡项，便于先办理会员卡。
 // 实际目录仍由后端按当前门店权限返回。
-const preferredCatalogTypeOrder = ['卡项', '定制卡', '项目', '产品']
+const preferredCatalogTypeOrder = ['卡项', '体验卡', '定制卡', '项目', '产品']
 const selectedType = ref('项目')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
@@ -510,13 +510,19 @@ const isCustomCardEntryVisible = computed(() => (
   Array.isArray(catalog.value.types) && catalog.value.types.includes('定制卡')
   && canUseCashierV3Operation('cashier.v3.cashier.custom_card_entry')
 ))
+// 只从当前门店已授权的完整目录判断入口，不受搜索/分类影响，也不按卡名推断。
+const hasExperienceCards = computed(() => (catalog.value.items || []).some(
+  (item) => item.kind === '卡项' && item.cardStatisticsType === 1
+))
 const productTypes = computed(() => {
   if (previewCardOperation.value?.awaitingTarget) {
     return [previewCardOperation.value.mode === 'card-upgrade' ? '卡项' : '项目']
   }
-  const available = catalog.value.types && catalog.value.types.length
+  const catalogTypes = catalog.value.types && catalog.value.types.length
     ? catalog.value.types
     : defaultTypes
+  const available = [...catalogTypes.filter((type) => type !== '体验卡')]
+  if (available.includes('卡项') && hasExperienceCards.value) available.push('体验卡')
   const known = preferredCatalogTypeOrder.filter((type) => available.includes(type)
     && (type !== '定制卡' || isCustomCardEntryVisible.value))
   const other = available.filter((type) => !preferredCatalogTypeOrder.includes(type))
@@ -545,7 +551,7 @@ function selectCatalogType(type) {
     selectCatalogItem({ id: 'custom-card-entry' })
     return
   }
-  if (type === '卡项' && currentCustomerMode.value === 'guest') {
+  if ((type === '卡项' || type === '体验卡') && currentCustomerMode.value === 'guest') {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
       detail: { status: 'error', message: '游客无法选择卡项，请选择会员。' }
     }))
@@ -566,8 +572,13 @@ const filteredCatalogItems = computed(() => {
     // 不得放开任意“定制卡”目录商品来绕过目标校验。
     const isCustomCardUpgradeTarget = expectedTargetKind === '卡项'
       && item.id === 'custom-card-entry'
-    const typeMatched = isCustomCardUpgradeTarget
-      || item.kind === (expectedTargetKind || selectedType.value)
+    // 体验卡只是售卡目录分组，仍是同一种卡项；升级/替换的目标选择沿用原规则。
+    const isExperienceCard = item.kind === '卡项' && item.cardStatisticsType === 1
+    const typeMatched = isCustomCardUpgradeTarget || (expectedTargetKind
+      ? item.kind === expectedTargetKind
+      : selectedType.value === '体验卡'
+        ? isExperienceCard
+        : item.kind === selectedType.value && !isExperienceCard)
     const categoryMatched = isCustomCardUpgradeTarget
       || !selectedCategory.value
       || item.category === selectedCategory.value
@@ -575,6 +586,13 @@ const filteredCatalogItems = computed(() => {
     const keywordMatched = !normalizedKeyword || searchable.includes(normalizedKeyword)
     return typeMatched && categoryMatched && keywordMatched
   })
+})
+
+watch(hasExperienceCards, (available) => {
+  // 门店切换或目录刷新后入口消失时回到疗程卡，不保留一个不可见的已选分组。
+  if (!available && selectedType.value === '体验卡' && !previewCardOperation.value?.awaitingTarget) {
+    selectedType.value = '卡项'
+  }
 })
 
 function catalogItemSelectedQuantity(item) {

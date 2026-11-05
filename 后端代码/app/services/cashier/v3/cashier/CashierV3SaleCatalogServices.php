@@ -1584,6 +1584,8 @@ final class CashierV3SaleCatalogServices
             'productType' => $productType,
             'kindCode' => $kind['code'],
             'kind' => $kind['label'],
+            // 统计类型独立于卡项规则，仅供收银目录区分疗程卡与体验卡。
+            'cardStatisticsType' => $productType === 5 ? (int)($row['product_card_statistics_type'] ?? 0) : 0,
             'cardRuleType' => trim((string)($row['product_card_rule_type'] ?? '')),
             'name' => $name,
             'specification' => $specification === '默认' ? '' : $specification,
@@ -2023,6 +2025,7 @@ final class CashierV3SaleCatalogServices
         return [
             'id' => $skuId, 'catalogItemId' => $skuId, 'productId' => $productId, 'skuId' => $skuId,
             'name' => $name, 'kind' => $kind['label'], 'kindCode' => $kind['code'],
+            'cardStatisticsType' => $productType === 5 ? (int)($row['product_card_statistics_type'] ?? 0) : 0,
             'category' => $names[0] ?? '', 'categoryNames' => $names,
             'code' => is_string($row['sku_code'] ?? null) ? $row['sku_code'] : '',
             'price' => null, 'catalogUnavailable' => true, 'disabled' => true,
@@ -2057,6 +2060,7 @@ final class CashierV3SaleCatalogServices
             'productType' => $item['productType'],
             'kindCode' => $item['kindCode'],
             'kind' => $item['kind'],
+            'cardStatisticsType' => $item['cardStatisticsType'] ?? 0,
             'cardRuleType' => $item['cardRuleType'],
             'cardRuleLabel' => self::cardRuleLabel($item['cardRuleType']),
             'ordinaryCardSaleEditable' => $item['cardRuleType'] === 'normal'
