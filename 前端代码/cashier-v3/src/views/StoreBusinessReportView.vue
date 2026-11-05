@@ -1346,6 +1346,10 @@ function closeBdeghDetail() {
 function bdeghDetailParams(pageNumber = 1) {
   return reportParams({
     report: bdeghDetail.value.detailReport,
+    // 大单明细只传后端签发的稳定行键和所点金额列；后端重算权限与原单集合。
+    ...(bdeghDetail.value.detailReport === 'salesperson_large_order_statistics' ? {
+      detail_row_key: bdeghDetail.value.rowKey, detail_metric: bdeghDetail.value.metric
+    } : {}),
     parent_report: bdeghDetail.value.parentReport,
     item_id: bdeghDetail.value.itemId,
     item_group_key: bdeghDetail.value.itemGroupKey,
@@ -1487,9 +1491,20 @@ function openSalespersonPerformanceDetail(row, column) {
   loadBdeghDetail(1)
 }
 
+/** 达标、退款和本期金额共用原报表事实投影，弹窗保留查询月份与筛选上下文。 */
+function openLargeOrderDetail(row, column) {
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'salesperson_large_order_statistics',
+    rowKey: String(row?.row_key || ''), metric: String(column.key), label: String(column.label),
+    month: selectedMonth.value, page: 1, total: 0, records: [], columns: [], amount: '-', error: '' }
+  detailMemberFilter.value = ''
+  detailOrderFilter.value = ''
+  loadBdeghDetail(1)
+}
+
 // One target table drives both link visibility and click dispatch. Query scopes
 // remain in the report-specific adapters and are revalidated by the backend.
 const detailPopupOpeners = {
+  salesperson_large_order_statistics: openLargeOrderDetail,
   operations_pre_sale_bdegh_detail: openBdeghDetail,
   operations_referral_beautician_pre_sale_detail: openBdeghDetail,
   operations_cash_fact_detail: openOperationsCashDetail,
@@ -1519,6 +1534,8 @@ function receiptDetailPeriod() {
 }
 
 function receiptAmountLabel() {
+  if (bdeghDetail.value.detailReport === 'salesperson_large_order_statistics') return bdeghDetail.value.metric === 'refund_amount'
+    ? '退款金额' : (bdeghDetail.value.metric === 'award_amount' ? '现金业绩' : '本期分摊金额')
   if (bdeghDetail.value.detailReport === 'store_item_analysis_detail') return bdeghDetail.value.label
   if (bdeghDetail.value.detailReport === 'store_salesperson_performance_detail') return '销售业绩'
   if (isAcquisitionReceiptDetail.value) return bdeghDetail.value.metric === 'amount' ? '收款金额' : '人数'
@@ -1618,7 +1635,7 @@ function detailDialogCell(record, column) {
   const value = record?.[column.key]
   if (value === null || value === undefined || value === '') return '-'
   if (memberVisitDetail.value.open && column.key === 'amount') return memberVisitAmountText(value)
-  if (['receipt_amount', 'detail_value', 'performance_amount'].includes(column.key)) return detailValueText(value)
+  if (['receipt_amount', 'origin_amount', 'detail_value', 'performance_amount'].includes(column.key)) return detailValueText(value)
   if (column.value_type === 'integer') return String(Number(value) || 0)
   return String(value)
 }

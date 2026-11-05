@@ -35,6 +35,8 @@ const context = vm.createContext({
   member: { value: { id: 1 } },
   currentMemberId: { value: 1 },
   currentCustomerMode: { value: 'member' },
+  // 预览与提交共用项目自动完成选择；夹具须固定同一已确认选项。
+  projectAutoComplete: { value: true },
   localCheckoutBusinessDate: { value: '2026-10-09' },
   localCheckoutBusinessDateReason: { value: '' },
   localCheckoutBusinessSource: { value: { primarySourceId: 1 } },

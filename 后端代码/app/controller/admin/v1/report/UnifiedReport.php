@@ -965,6 +965,8 @@ class UnifiedReport extends AuthController
             ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
             // Shared detail search only narrows already-authorized rows; it never changes the parent metric or scope.
             ['detail_member', ''], ['detail_order_no', ''],
+            // 大单弹窗只接受当前报表重新核验的行键与金额列，不能用客户端身份扩大明细范围。
+            ['detail_row_key', ''], ['detail_metric', ''],
             // Fact popup identifiers only narrow the authorized report scope;
             // the report service revalidates the parent metric and row key.
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''], ['source_code', ''], ['parent_report', ''], ['team_key', ''],

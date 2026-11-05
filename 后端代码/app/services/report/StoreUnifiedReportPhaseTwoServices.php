@@ -1513,6 +1513,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return strcmp((string)$a['business_date'], (string)$b['business_date'])
                 ?: strcmp((string)$a['source_line_id'], (string)$b['source_line_id']);
         });
+        // 明细和父表读取同一批权限过滤后的分类事实，避免再次查询造成数值漂移。
+        $detailFacts = $facts;
         $awards = self::beautyLargeOrderMonthlyAwards($facts);
         $selectedMonth = substr($range['start'], 0, 7);
         $dueRows = StoreLargeOrderInstallmentServices::dueRows($facts, $awards, $selectedMonth);
@@ -1558,6 +1560,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach (range(1, 6) as $i) {
                 $row['installment_' . $i] = $refundOnly ? '-' : ($row['installment_number'] === $i ? $row['monthly_due'] : '');
             }
+            // 只对可由同组原单精确解释的金额签发下钻；未达标退款没有本金或期次。
+            $row['_drilldown'] = [];
+            if (!$refundOnly) {
+                foreach (['award_amount', 'monthly_due', 'installment_' . $row['installment_number']] as $key) {
+                    $row['_drilldown'][$key] = ['report' => 'salesperson_large_order_statistics'];
+                }
+            }
+            if ((int)$row['refund_amount_cents'] > 0) {
+                $row['_drilldown']['refund_amount'] = ['report' => 'salesperson_large_order_statistics'];
+            }
             // 成员集合只用于本次后端分组与展示，不作为单个会员身份交给页面或导出。
             unset($row['member_ids'], $row['member_names']);
         }
@@ -1602,11 +1614,73 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
         }
         unset($column);
-        $result = $this->result('销售人生美大单统计表', $columns, $facts, $input);
+        $detailKey = trim((string)($input['detail_row_key'] ?? ''));
+        $detailMetric = trim((string)($input['detail_metric'] ?? ''));
+        $result = $this->result('销售人生美大单统计表', $columns, $facts,
+            $detailKey === '' ? $input : array_merge($input, ['_internal_all' => true]));
+        if ($detailKey !== '') return $this->largeOrderDetail($result, $detailFacts, $detailKey, $detailMetric, $input, $selectedMonth);
         $result['metric_version'] = 'large-order-person-month-category-v13';
         $result['range'] = $range;
         $result['filter_schema'][] = ['key' => 'month', 'type' => 'month', 'label' => '应计月份'];
         return $result;
+    }
+
+    private function largeOrderDetail(array $parent, array $facts, string $key, string $metric, array $input, string $selectedMonth): array
+    {
+        if (!preg_match('/^[a-f0-9]{64}$/D', $key)
+            || !in_array($metric, ['award_amount', 'refund_amount', 'monthly_due', 'installment_1', 'installment_2', 'installment_3', 'installment_4', 'installment_5', 'installment_6'], true)) {
+            throw new \InvalidArgumentException('大单明细参数无效');
+        }
+        $row = null;
+        foreach ((array)($parent['records'] ?? []) as $candidate) {
+            if (hash_equals((string)($candidate['row_key'] ?? ''), $key) && isset($candidate['_drilldown'][$metric])) { $row = $candidate; break; }
+        }
+        if (!$row) throw new \InvalidArgumentException('当前范围内没有该大单明细');
+        $isRefund = $metric === 'refund_amount';
+        $isDue = $metric === 'monthly_due' || strpos($metric, 'installment_') === 0;
+        $matches = [];
+        foreach ($facts as $fact) {
+            if ((string)($fact['tenant_id'] ?? '') !== (string)$row['tenant_id']
+                || (string)($fact['role_snapshot'] ?? '') !== (string)$row['role_snapshot']
+                || (int)($fact['employee_id'] ?? 0) !== (int)$row['employee_id']
+                || (int)($fact['store_id'] ?? 0) !== (int)$row['store_id']
+                || substr((string)($fact['business_date'] ?? ''), 0, 7) !== (!empty($row['refund_only']) ? $selectedMonth : (string)$row['award_month'])
+                || (string)($fact['rule_type'] ?? '') !== (string)$row['rule_type']
+                || (int)($fact['award_category_id'] ?? 0) !== (int)$row['award_category_id']) continue;
+            $amount = (int)($fact['amount_cents'] ?? 0);
+            if (($isRefund && $amount >= 0) || (!$isRefund && $amount <= 0)) continue;
+            $matches[] = $fact;
+        }
+        $principal = array_sum(array_map(static fn(array $fact): int => (int)$fact['amount_cents'], $matches));
+        $expected = $isRefund ? (int)$row['refund_amount_cents'] : ($isDue ? (int)$row['due_amount_cents'] : (int)$row['award_amount_cents']);
+        if (($isRefund ? -$principal : $principal) !== ($isDue ? (int)$row['award_amount_cents'] : $expected)) {
+            throw new \RuntimeException('大单明细与汇总金额不一致');
+        }
+        $details = []; $allocated = 0; $last = count($matches) - 1;
+        foreach ($matches as $index => $fact) {
+            $raw = abs((int)$fact['amount_cents']);
+            $value = $isDue ? ($index === $last ? $expected - $allocated : intdiv($expected * $raw, $principal)) : $raw;
+            $allocated += $value;
+            $document = $isRefund ? (string)($fact['operation_id'] ?? '') : (string)($fact['order_id'] ?? '');
+            $details[] = ['business_date' => (string)$fact['business_date'], 'store_name' => (string)($fact['store_name'] ?? ''),
+                'member_name' => (string)($fact['member_name_snapshot'] ?? ''), 'order_no' => $document,
+                'source_line_id' => (string)($fact['source_line_id'] ?? ''), 'source_type' => $isRefund ? '成功退款' : '成交／补交',
+                'origin_amount' => $this->money($raw), 'receipt_amount' => $this->money($value)];
+        }
+        if ($allocated !== $expected) throw new \RuntimeException('大单明细分摊金额不一致');
+        $memberFilter = trim((string)($input['detail_member'] ?? ''));
+        $orderFilter = trim((string)($input['detail_order_no'] ?? ''));
+        if ($memberFilter !== '') $details = array_values(array_filter($details, static fn(array $item): bool => mb_strpos($item['member_name'], $memberFilter) !== false));
+        if ($orderFilter !== '') $details = array_values(array_filter($details, static fn(array $item): bool => mb_strpos($item['order_no'], $orderFilter) !== false));
+        $columns = $this->columns(['business_date' => '业务日期', 'store_name' => '门店', 'member_name' => '会员',
+            'source_type' => '业务类型', 'order_no' => $isRefund ? '退款操作号' : '原单号',
+            'source_line_id' => '原明细号', 'origin_amount' => '原单归属金额', 'receipt_amount' => $isDue ? '本期分摊金额' : ($isRefund ? '退款金额' : '现金业绩')]);
+        $page = max(1, (int)($input['page'] ?? 1)); $limit = min(100, max(10, (int)($input['limit'] ?? 20)));
+        $total = count($details); $visible = !empty($input['_internal_all']) ? $details : array_slice($details, ($page - 1) * $limit, $limit);
+        return ['title' => '销售人生美大单明细', 'columns' => $columns, 'records' => $visible, 'total' => $total,
+            'page' => $page, 'page_size' => $limit,
+            'summary_row' => ['receipt_amount' => $this->money(array_sum(array_map(fn(array $item): int => $this->decimalCents($item['receipt_amount']), $details)))],
+            'metric_version' => 'large-order-person-month-category-v13', 'data_as_of' => date('Y-m-d H:i:s')];
     }
 
     /**

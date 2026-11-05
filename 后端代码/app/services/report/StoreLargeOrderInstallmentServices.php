@@ -85,7 +85,8 @@ final class StoreLargeOrderInstallmentServices
         return $values;
     }
 
-    /** One selected month's accrual per qualifying origin month; displayed refunds never alter the principal. */
+    /** One selected month's accrual per employee, store, rule, category and qualifying origin month;
+     * displayed refunds never alter the principal. Multi-member identity stays internal to this projection. */
     public static function dueRows(array $facts, array $awards, string $month): array
     {
         $target = (int)substr($month, 0, 4) * 12 + (int)substr($month, 5, 2);
@@ -104,9 +105,13 @@ final class StoreLargeOrderInstallmentServices
             $row['refund_amount_cents'] = (int)($award['refund_amount_cents'] ?? 0);
             $row['due_amount_cents'] = $schedule[$offset];
             $row['threshold_cents'] = (int)$award['threshold_cents'];
-            // 会员加入应计行身份：同一人员、月份、分类下两名会员不能共用行键。
+            // 月度人员达标可跨会员合并；留住成员集合，但不能把合计误标为最后一笔会员。
+            $row['member_names'] = (array)($award['member_names'] ?? []);
+            $row['member_ids'] = array_keys($row['member_names']);
+            if (count($row['member_ids']) > 1) $row['member_id'] = null;
+            // 行键只表达人员、门店、类别和期次；跨会员合并后不再依赖承载事实的会员 ID。
             $row['row_key'] = hash('sha256', json_encode([$row['tenant_id'], $row['role_snapshot'], $row['employee_id'],
-                (int)($row['member_id'] ?? 0), $origin,
+                (int)($row['store_id'] ?? 0), $origin,
                 $row['rule_type'] ?? 'beauty', $row['award_category_id'] ?? $row['beauty_category'], $month]));
             $rows[] = $row;
         }
