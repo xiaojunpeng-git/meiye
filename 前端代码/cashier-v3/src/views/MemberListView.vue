@@ -690,6 +690,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
     <!-- A context change remounts drafts and export tasks; member/store data
          must never inherit another operator's in-progress filter state. -->
     <MemberReportQueryToolbar
+      :page-code="MEMBER_QUERY_PAGE_CODE"
       :key="state.stateContextId || ''"
       :fields="queryFields"
       :status-options="statusOptions"

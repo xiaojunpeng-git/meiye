@@ -91,7 +91,7 @@ defineExpose({ submitQuery })
     <p v-if="expanded && !secondaryFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
     <div v-if="expanded && secondaryFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
       <div class="unified-report-query-toolbar__fields" @keydown.enter.prevent="submitQuery">
-        <label v-for="field in secondaryFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterType(field) === 'number' }">
+        <label v-for="field in secondaryFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterIsRange(field) }">
           <span>{{ field.label || field.key }}</span>
           <UnifiedQueryDateRange v-if="reportFilterType(field) === 'date' && reportFilterIsRange(field)" v-model="draft[field.key]" :label="`${field.label || field.key}周期`" />
           <span v-else-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
@@ -122,6 +122,7 @@ defineExpose({ submitQuery })
 .unified-report-query-toolbar__panel { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; min-height: 0; max-height: min(38vh, 340px); overflow-y: auto; padding: 2px 16px 13px; }
 .unified-report-query-toolbar__fields { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; width: 100%; min-width: 0; }
 .unified-report-query-toolbar__field { display: grid; flex: 0 1 180px; gap: 5px; min-width: 0; max-width: 100%; color: #687586; font-size: 12px; overflow-wrap: anywhere; }
+/* 数字上下界和日期周期共用宽列，完整起止日期不能挤入相邻字段。 */
 .unified-report-query-toolbar__field--range { flex-basis: 260px; }
 .unified-report-query-toolbar__field input, .unified-report-query-toolbar__field select { width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #252a34; font: inherit; }
 .unified-report-query-toolbar__range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; }

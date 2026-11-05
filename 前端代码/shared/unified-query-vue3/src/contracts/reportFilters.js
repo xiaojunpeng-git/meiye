@@ -1,3 +1,4 @@
+import { parseDateKey } from './dateRange.js'
 import { cloneUnifiedQuerySnapshot, normalizeUnifiedQueryFilter } from './unifiedQueryContract.js'
 
 const NUMERIC_TYPES = new Set(['number', 'integer', 'decimal'])
@@ -39,7 +40,17 @@ export function reportFilterOptions(field) {
   })
 }
 
+// 周期控件仅接管可无损表达的整天边界；已有精确到时分秒的条件继续保留，避免扩大查询。
 function supportsFilter(field, filter) {
+  if (field.filter?.dateTime === true) {
+    const isDay = value => Boolean(parseDateKey(String(value || '')))
+    const isBoundary = (value, end) => isDay(value) || new RegExp(`^\\d{4}-\\d{2}-\\d{2}[ T]${end ? '23:59:59' : '00:00:00'}$`).test(String(value || ''))
+    if (filter.operator === 'eq') return isDay(filter.value)
+    if (filter.operator === 'gte') return isBoundary(filter.value, false)
+    if (filter.operator === 'lte') return isBoundary(filter.value, true)
+    if (filter.operator === 'between') return isBoundary(filter.value, false) && isBoundary(filter.valueTo, true)
+    return false
+  }
   return reportFilterIsRange(field)
     ? ['eq', 'gte', 'lte', 'between'].includes(filter.operator)
     : filter.operator === (reportFilterType(field) === 'text' ? 'contains' : 'eq')
@@ -58,9 +69,9 @@ export function reportFilterDraft(fields, query = {}) {
       ? String(filter.value || '').replace(' ', 'T') : filter.value
     else {
       const range = draft[field.key]
-      if (['gte', 'eq', 'between'].includes(filter.operator)) range.min = filter.value
-      if (['lte', 'eq'].includes(filter.operator)) range.max = filter.value
-      if (filter.operator === 'between') range.max = filter.valueTo
+      if (['gte', 'eq', 'between'].includes(filter.operator)) range.min = field.filter?.dateTime ? String(filter.value).slice(0, 10) : filter.value
+      if (['lte', 'eq'].includes(filter.operator)) range.max = field.filter?.dateTime ? String(filter.value).slice(0, 10) : filter.value
+      if (filter.operator === 'between') range.max = field.filter?.dateTime ? String(filter.valueTo).slice(0, 10) : filter.valueTo
     }
   }
   return draft
@@ -82,14 +93,16 @@ export function buildReportFilterQuery(fields, draft, executedQuery = {}, pageCo
       const range = value || {}
       const bounds = [range.min, range.max].filter(hasValue)
       const date = reportFilterType(field) === 'date'
-      if (date ? bounds.some(bound => !/^\d{4}-\d{2}-\d{2}$/.test(String(bound))) : bounds.some(bound => !Number.isFinite(Number(bound)))) {
+      if (date ? bounds.some(bound => !parseDateKey(String(bound))) : bounds.some(bound => !Number.isFinite(Number(bound)))) {
         throw new Error(`${field.label || field.key}请输入有效${date ? '日期' : '数值'}`)
       }
       if (hasValue(range.min) && hasValue(range.max) && (date ? String(range.min) > String(range.max) : Number(range.min) > Number(range.max))) {
         throw new Error(`${field.label || field.key}的${date ? '开始日期不能晚于结束日期' : '最小值不能大于最大值'}`)
       }
-      if (hasValue(range.min)) filters.push({ field: field.key, operator: 'gte', value: range.min })
-      if (hasValue(range.max)) filters.push({ field: field.key, operator: 'lte', value: range.max })
+      // datetime 字段按业务本地日历日提交完整起止时间，结束日的晚间记录也必须命中。
+      const bound = (value, end) => field.filter?.dateTime === true ? `${value} ${end ? '23:59:59' : '00:00:00'}` : value
+      if (hasValue(range.min)) filters.push({ field: field.key, operator: 'gte', value: bound(range.min, false) })
+      if (hasValue(range.max)) filters.push({ field: field.key, operator: 'lte', value: bound(range.max, true) })
     } else if (hasValue(value) && (typeof value !== 'string' || value.trim())) {
       const input = typeof value === 'string' ? value.trim() : value
       const datetime = reportFilterType(field) === 'datetime-local' ? input.replace('T', ' ') : null

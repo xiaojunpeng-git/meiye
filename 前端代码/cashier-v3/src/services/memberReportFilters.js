@@ -14,12 +14,14 @@ export function memberReportFields(fields = []) {
     return true
   }).map(field => {
     const type = field.queryType || field.type || 'text'
+    // 日期及日期时间统一使用周期控件；日期时间保留后端类型，边界按整天提交。
+    const dateTime = ['datetime', 'date_time', 'datetime-local'].includes(type)
     const inputType = ['integer', 'decimal', 'amount', 'money', 'number', 'count'].includes(type) ? 'number'
-      : ['datetime', 'date_time'].includes(type) ? 'datetime-local' : ['enum', 'date', 'month'].includes(type) ? type : 'text'
+      : dateTime ? 'date' : ['enum', 'date', 'month'].includes(type) ? type : 'text'
     const options = type === 'boolean' ? [{ value: true, label: '是' }, { value: false, label: '否' }]
       : field.filter?.options || field.options || []
     return { ...field, defaultQuick: false, filter: { ...field.filter, enabled: true,
-      type: type === 'boolean' ? 'enum' : inputType, range: inputType === 'date', options } }
+      type: type === 'boolean' ? 'enum' : inputType, range: inputType === 'date', dateTime, options } }
   })
 }
 
@@ -35,9 +37,9 @@ export function memberReportDraftSnapshot(query, pageCode = 'member_list') {
 /** Same query contract for list, pagination and export; only the query button
  * promotes a draft. Clear removes extra conditions, never keyword/scope/rights.
  */
-export function buildMemberReportQuery(original, panel, keyword, dataScope, limit, cleared = false, businessStatus = original?.businessStatus || '') {
+export function buildMemberReportQuery(original, panel, keyword, dataScope, limit, cleared = false, businessStatus = original?.businessStatus || '', pageCode = original?.pageCode || panel?.pageCode || 'member_list') {
   const query = cloneUnifiedQuerySnapshot(original)
-  return { ...query, pageCode: 'member_list', page: 1, limit,
+  return { ...query, pageCode, page: 1, limit,
     keyword: String(keyword || '').trim(), dataScope: dataScope === 'all' ? 'all' : 'normal',
     businessStatus: dataScope === 'all' ? businessStatus : '',
     topFilters: list(panel.filters), filters: cleared ? [] : list(query.filters),

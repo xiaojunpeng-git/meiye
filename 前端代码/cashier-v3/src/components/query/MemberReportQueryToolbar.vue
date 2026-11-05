@@ -7,6 +7,8 @@ import { memberReportFields, memberReportDraftSnapshot, buildMemberReportQuery }
 // Member-only host for the shared statistics filter UI. Do not change any other
 // page's toolbar, or build/export a query from unsubmitted panel drafts.
 const props = defineProps({
+  // 页面身份由宿主明确传入；平台和门店复用同一筛选与导出实现，不能互换查询上下文。
+  pageCode: { type: String, default: 'member_list' },
   fields: { type: Array, default: () => [] }, executedQuery: { type: Object, default: null },
   statusOptions: { type: Array, default: () => [] },
   queryCapability: { type: Object, default: () => ({}) }, settings: { type: Object, default: () => ({}) },
@@ -22,12 +24,12 @@ const businessStatus = ref('')
 const statuses = computed(() => props.statusOptions.map(option => typeof option === 'string'
   ? { value: option, label: option } : { value: option.value ?? option.label, label: option.label ?? option.value }))
 const exportOpen = ref(false), exportTask = ref(null)
-const fields = computed(() => props.queryCapability.enabled === true && props.queryCapability.pageCode === 'member_list'
+const fields = computed(() => props.queryCapability.enabled === true && props.queryCapability.pageCode === props.pageCode
   ? memberReportFields(props.fields) : [])
-const panelQuery = computed(() => memberReportDraftSnapshot(props.executedQuery))
+const panelQuery = computed(() => memberReportDraftSnapshot(props.executedQuery, props.pageCode))
 watch(() => props.executedQuery, query => {
   // Failed reads disable export, but retain the last draft for a safe retry.
-  if (query == null || (query.pageCode && query.pageCode !== 'member_list')) return
+  if (query == null || (query.pageCode && query.pageCode !== props.pageCode)) return
   original.value = cloneUnifiedQuerySnapshot(query)
   keyword.value = query.keyword || ''
   scope.value = query.dataScope === 'all' ? 'all' : 'normal'
@@ -35,7 +37,7 @@ watch(() => props.executedQuery, query => {
   cleared.value = false
 }, { immediate: true, deep: true })
 function query(panel) {
-  emit('query', buildMemberReportQuery(original.value, panel, keyword.value, scope.value, props.pageSize, cleared.value, businessStatus.value))
+  emit('query', buildMemberReportQuery(original.value, panel, keyword.value, scope.value, props.pageSize, cleared.value, businessStatus.value, props.pageCode))
 }
 async function changeScope(value) {
   if (props.isQueryLoading || scope.value === value) return
@@ -49,9 +51,9 @@ async function changeScope(value) {
 const exportFields = computed(() => props.fields.filter(field => !field.hidden && field.key !== 'id' && field.capabilities?.export === true))
 const canExport = computed(() => {
   const capability = props.queryCapability
-  return capability.enabled === true && capability.pageCode === 'member_list'
+  return capability.enabled === true && capability.pageCode === props.pageCode
     && capability.commandContext?.kind && capability.commandContext?.id
-    && props.executedQuery && (!props.executedQuery.pageCode || props.executedQuery.pageCode === 'member_list')
+    && props.executedQuery && (!props.executedQuery.pageCode || props.executedQuery.pageCode === props.pageCode)
     && Object.keys(props.executedQuery).length > 0 && !props.isQueryLoading
     && capability.exportCapability?.enabled === true
     && (capability.exportCapability.allowCurrentQuery === true || capability.exportCapability.allowCurrentPage === true)
@@ -64,7 +66,7 @@ function createExport(configuration) {
 </script>
 
 <template>
-  <UnifiedReportQueryToolbar ref="toolbar" :fields="fields" page-code="member_list" :executed-query="panelQuery" :is-query-loading="isQueryLoading" keep-filter-toggle :filter-message="capabilityMessage || (isQueryLoading ? '正在加载筛选字段…' : '暂无可用筛选字段。')" @query="query" @clear="cleared = true">
+  <UnifiedReportQueryToolbar ref="toolbar" :fields="fields" :page-code="pageCode" :executed-query="panelQuery" :is-query-loading="isQueryLoading" keep-filter-toggle :filter-message="capabilityMessage || (isQueryLoading ? '正在加载筛选字段…' : '暂无可用筛选字段。')" @query="query" @clear="cleared = true">
     <template #leading-controls>
       <label class="member-report-search"><span class="sr-only">综合查询</span><input v-model="keyword" type="search" placeholder="搜索会员姓名、完整手机号或会员姓名首字母" autocomplete="off" @keyup.enter="toolbar?.submitQuery()" /></label>
     </template>

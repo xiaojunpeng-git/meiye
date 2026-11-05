@@ -136,7 +136,7 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
         // 显式数量筛选必须先读入零结存，再按商品/SKU 总量筛选；否则等于0/全部永远漏零库存。
         // 未使用数量筛选的既有查询保留仅正库存源窗口，权限仍由服务端仓库范围强制裁剪。
         $hasQuantityFilter = $this->hasQuantityRangeTopFilter($payload);
-        $rows = $this->source->sourceRows([
+        $batches = $this->source->sourceBatches([
             'queryCutoffDate' => (string)$context['query_cutoff_date'],
             'locationIds' => $scope->locationIds(),
             'includeZero' => $hasQuantityFilter,
@@ -144,13 +144,24 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
         if ($hasQuantityFilter) {
             // The stock page displays one row per product/SKU. A quantity range
             // must therefore be applied to that total, never to individual
-            // batches before the browser adds them again.
-            $rows = (new InventoryProductStockSummaryServices())->summarize($rows);
+            // batches before the browser adds them again. Fold the authorized
+            // batch stream first, then pass bounded product batches to UQ.
+            $productRows = (new InventoryProductStockSummaryServices())->summarize((static function () use ($batches): \Generator {
+                foreach ($batches as $batch) foreach ($batch as $row) yield $row;
+            })());
+            $batches = (static function () use ($productRows): \Generator {
+                $batch = [];
+                foreach ($productRows as $row) {
+                    $batch[] = $row;
+                    if (count($batch) === 200) { yield $batch; $batch = []; }
+                }
+                if ($batch) yield $batch;
+            })();
         }
         $allowedLocations = array_fill_keys($scope->locationIds(), true);
-        return $this->execution->execute(
+        return $this->execution->executeBatches(
             $this->pageCode(),
-            $rows,
+            $batches,
             $definitions,
             $payload,
             $context,
