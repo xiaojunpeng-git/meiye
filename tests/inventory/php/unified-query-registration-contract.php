@@ -45,7 +45,7 @@ $providerSource = file_get_contents($root . '/后端代码/app/services/product/
 $contextSource = file_get_contents($root . '/后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php');
 uqInventoryAssert('provider injects DataScope before UQ calculation and never accepts client locations',
     $providerSource !== false
-    && strpos($providerSource, 'sourceRows([') !== false
+    && strpos($providerSource, 'sourceBatches([') !== false
     && strpos($providerSource, 'dataScope($context)') !== false
     && strpos($providerSource, 'InventoryBatchStockDataScope') !== false);
 uqInventoryAssert('store context calculates location scope from the authenticated store',

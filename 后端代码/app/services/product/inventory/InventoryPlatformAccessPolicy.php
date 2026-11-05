@@ -382,6 +382,22 @@ final class InventoryPlatformAccessPolicy
         return $access;
     }
 
+    /**
+     * 集团总部仓库存无法按门店拆分；首页只有覆盖集团全部业务门店的数据权限才能展示总部仓总量。
+     * 页面菜单仅决定入口，不能替代员工数据范围；内置 admin 的全量豁免由 dashboardReadStoreIds 统一处理。
+     */
+    public function canReadHqDashboard(array $access): bool
+    {
+        if (empty($access['is_super_admin'])
+            && !$this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'overview')) return false;
+        $allStoreIds = $this->allReportStoreIds();
+        if (!$allStoreIds) return false;
+        $readStoreIds = $this->dashboardReadStoreIds($access);
+        sort($allStoreIds, SORT_NUMERIC);
+        sort($readStoreIds, SORT_NUMERIC);
+        return $readStoreIds === $allStoreIds;
+    }
+
     /** 三类库存读取与集团看板使用同一员工权限、个人参与和集团根组织口径。 */
     private function dashboardReadStoreIds(array $access): array
     {
