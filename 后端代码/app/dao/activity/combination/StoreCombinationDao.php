@@ -43,6 +43,9 @@ class StoreCombinationDao extends BaseDao
             $time = time();
             [$startTime, $stopTime] = is_array($where['pinkIngTime']) ? $where['pinkIngTime'] : [$time, $time];
             $query->where('start_time', '<=', $startTime)->where('stop_time', '>=', $stopTime);
+        })->when(isset($where['pinkDisplayTime']), function ($query) use ($where) {
+            // 会员预告只排除已结束活动；不改 pinkIngTime 的交易／正在拼团查询。
+            $query->where('stop_time', '>=', (int)$where['pinkDisplayTime']);
         })->when(isset($where['storeProductId']), function ($query) {
             $query->where('product_id', 'IN', function ($query) {
                 $query->name('store_product')->where('is_del', 0)->field('id');

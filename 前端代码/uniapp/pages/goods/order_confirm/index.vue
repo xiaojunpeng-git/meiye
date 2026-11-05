@@ -219,16 +219,7 @@
 						</view>
 					</view>
 				</view>
-				<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32" v-if="contactShow">
-					<view class="cell flex justify-between flex-y-center">
-						<text class="text--w111-333 fs-28">联系人</text>
-						<input type="text" placeholder="请填写姓名" placeholder-class="placeholder" v-model="contacts" class="fs-28" />
-					</view>
-					<view class="cell flex justify-between flex-y-center mt-32">
-						<text class="text--w111-333 fs-28">联系电话</text>
-						<input type="text" placeholder="请填写电话" placeholder-class="placeholder" v-model="contactsTel" class="fs-28" />
-					</view>
-				</view>
+				<!-- 购买身份沿用登录会员，不再重复采集联系人和联系电话。 -->
 				<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32">
 					<view class="cell flex-between-center" v-if="[0, 6, 10, 11, 12, 13].includes(type) && !noCoupon && goodsType != 7 && priceGroup.firstOrderPrice==0" @tap='couponTap'>
 						<text class="text--w111-333 fs-28">优惠券</text>
@@ -719,8 +710,6 @@
 				shippingType: 0,
 				system_store: {},
 				storePostage: 0,
-				contacts: '',
-				contactsTel: '',
 				mydata: {},
 				storeList: [],
 				store_self_mention: 0,
@@ -767,8 +756,6 @@
 				svip_status: false,
 				svip_price: 0,
         spid:0,
-				contactsFocus: false,
-				telFocus: false,
 				deliveryType: 1,
 				product_id: 0,
 				collage_id: 0,
@@ -816,10 +803,6 @@
 			},
 			styleType() {
 				let obj = this.isDisplay.includes('2') && this.isDisplay.length == 2 && this.deliveryType != 2 ? (this.isDisplay.includes('1') ? 'bg-horn-r' : 'bg-horn') : '';
-				return obj
-			},
-			contactShow() {
-				let obj = ((this.productTypeNum == 6 && this.reservationInfo.reservation_type == 2) || (this.productTypeNum != 6 && this.deliveryType == 2)) && !this.tableId;
 				return obj
 			},
 			confirmShow() {
@@ -1397,8 +1380,6 @@
 					that.$set(that, 'store_self_mention', res.data.store_self_mention);
 					that.$set(that, 'svip_status', res.data.svip_status);
 					that.$set(that, 'svip_price', res.data.svip_price);
-					that.$set(that, 'contacts', res.data.userInfo.real_name);
-					that.$set(that, 'contactsTel', res.data.userInfo.record_pone);
 					let cartInfo = res.data.cartInfo;
 					let cartObj = [],
 						giftObj = [];
@@ -1638,26 +1619,7 @@
 				if (!that.addressId && !that.shippingType && !that.product_type) return that.$util.Tips({
 					title: '请选择收货地址'
 				});
-				if ((that.shippingType == 2 && that.productTypeNum != 6)) {
-					if (that.contacts == "" || that.contactsTel == "") {
-						return that.$util.Tips({
-							title: '请填写联系人或联系人电话'
-						});
-					}
-					if (!/^1(3|4|5|7|8|9|6)\d{9}$/.test(that.contactsTel)) {
-						return that.$util.Tips({
-							title: '请填写正确的手机号'
-						});
-					}
-					if (!/^[\u4e00-\u9fa5\w]{2,16}$/.test(that.contacts)) {
-						return that.$util.Tips({
-							title: '请填写您的真实姓名'
-						});
-					}
-					// if (that.storeList.length == 0) return that.$util.Tips({
-					//   title: '暂无门店,请选择其他方式'
-					// });
-				}
+				// 到店购买不再校验另一套联系人资料；保留原有门店、配送与业务表单校验。
 				if (this.confirmShow) {
 					for (var i = 0; i < that.confirm.length; i++) {
 						for (var j = 0; j < that.confirm[i].length; j++) {
@@ -1743,8 +1705,6 @@
 				data = {
 					collate_code_id: that.collage_id || that.tableId,
 					custom_form: that.confirm,
-					real_name: that.contacts,
-					phone: that.contactsTel,
 					addressId: that.addressId,
 					formId: '',
 					couponId: that.priceGroup.couponPrice == 0 ? 0 : that.couponId,
@@ -1893,15 +1853,6 @@
 					})
 				}
 				this.isAddress = false;
-			},
-			clearInput(type) {
-				if (type == 0) {
-					this.contacts = '';
-					this.contactsFocus = true;
-				} else {
-					this.contactsTel = '';
-					this.telFocus = true;
-				}
 			},
 			getCodeData() {
 				getCodeData({

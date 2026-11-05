@@ -87,7 +87,8 @@ class StoreCombinationServices extends BaseServices
         return $this->dao->count([
             'is_del' => 0,
             'is_show' => 1,
-            'pinkIngTime' => true
+            // 会员入口在只有预告活动时也需显示，真正购买仍独立校验活动时间。
+            'pinkDisplayTime' => time()
         ]);
     }
 
@@ -339,9 +340,11 @@ class StoreCombinationServices extends BaseServices
     public function getCombinationList(array $where = [])
     {
         [$page, $limit] = $this->getPageValue();
-		$field = 'id,title,image,price,product_id,people,quota,quota_show,stock';
-		$list = $this->dao->combinationList(array_merge($where, ['is_del' => 0, 'is_show' => 1, 'pinkIngTime' => true, 'storeProductId' => true]), $field, $page, $limit);
+		$now = time();
+		$field = 'id,title,image,price,product_id,people,quota,quota_show,stock,start_time,stop_time';
+		$list = $this->dao->combinationList(array_merge($where, ['is_del' => 0, 'is_show' => 1, 'pinkDisplayTime' => $now, 'storeProductId' => true]), $field, $page, $limit);
         foreach ($list as &$item) {
+            $item = array_merge($item, CombinationActivityWindow::present($item, $now));
             $item['image'] = set_file_url($item['image']);
             $item['price'] = floatval($item['price']);
             $item['product_price'] = floatval($item['product_price']);
@@ -374,6 +377,8 @@ class StoreCombinationServices extends BaseServices
 			}
 			return $storeInfo;
 		}, 600);
+        // 状态不进入600秒目录缓存，保证开始秒与结束秒按同一服务器时钟切换。
+        $storeInfo = array_merge($storeInfo, CombinationActivityWindow::present($storeInfo, time()));
 		/** @var DiyServices $diyServices */
 		$diyServices = app()->make(DiyServices::class);
 		$infoDiy = $diyServices->getProductDetailDiy();
@@ -495,6 +500,20 @@ class StoreCombinationServices extends BaseServices
             }
             return true;
         });
+    }
+
+    /**
+     * 访客参团链接只解析为公开活动：不返回 UID、订单号或团员资料，
+     * 不调用 getPinkInfo 中的成团／失败结算；真正参团仍经认证接口验证。
+     */
+    public function getPublicPinkActivity(int $id): array
+    {
+        if ($id <= 0) throw new ValidateException('拼团不存在');
+        $pink = app()->make(StorePinkServices::class)->getOne(['id' => $id], 'id,cid');
+        if (!$pink) throw new ValidateException('拼团不存在');
+        $activity = $this->dao->getOne(['id' => (int)$pink['cid'], 'is_del' => 0, 'is_show' => 1], 'id');
+        if (!$activity) throw new ValidateException('拼团活动不存在或已下架');
+        return ['pink_id' => (int)$pink['id'], 'combination_id' => (int)$activity['id']];
     }
 
     /**

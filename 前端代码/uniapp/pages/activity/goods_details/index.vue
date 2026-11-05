@@ -393,13 +393,18 @@
 									<view  class="h-72 flex-center bg-hui rd-36px text--w111-fff fs-26"
 										v-if="[0,2].includes(status)">{{status == 2 ? '未开始' : '已结束'}}</view>
 								</view>
-								<!-- 拼团下单按钮 -->
-								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx" v-if="type == 3">
-									<view class="h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="openAlone">单独购买</view>
-									<view class="h-72 flex-center bg-red rd-36px text--w111-fff fs-26"
-										v-if=" attribute.productSelect.quota > 0 && attribute.productSelect.stock > 0" @tap="goCat">立即开团</view>
-									<view class="h-72 flex-center bg-hui rd-36px text--w111-fff fs-26"
-										v-if="attribute.productSelect.quota <= 0 || attribute.productSelect.stock <= 0">已售罄</view>
+								<!-- 拼团预告占用原购买区域；分享入口仍可使用，不能提前开团。 -->
+								<view class="flex-1 self-center" v-if="type == 3">
+									<view class="combination-start-countdown" v-if="combinationPhase === 'upcoming'" role="status" aria-live="polite">
+										<text>距开团</text><text>{{combinationCountdown}}</text>
+									</view>
+									<view class="grid-column-2 grid-gap-16rpx" v-else-if="combinationPhase === 'running'">
+										<view class="h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="openAlone">单独购买</view>
+										<view class="h-72 flex-center bg-red rd-36px text--w111-fff fs-26"
+											v-if="attribute.productSelect.quota > 0 && attribute.productSelect.stock > 0" @tap="goCat">{{entryPinkId ? '立即参团' : '立即开团'}}</view>
+										<view class="h-72 flex-center bg-hui rd-36px text--w111-fff fs-26" v-else>已售罄</view>
+									</view>
+									<view class="h-72 flex-center bg-hui rd-36px text--w111-fff fs-26" v-else>{{combinationPhase === 'ended' ? '活动已结束' : '活动已下架'}}</view>
 								</view>
 								<!-- 积分下单按钮 -->
 								<view class="flex-between-center flex-1" v-if="type == 4">
@@ -589,12 +594,29 @@
 	import baseDrawer from '@/components/tui-drawer/tui-drawer.vue';
 	import { imageBase64 } from "@/api/public";
 	import { toLogin } from '@/libs/login.js';
+	import { hasMemberPhoneAuthorization } from '@/utils/memberPhoneGate';
+	import { combinationPhase as resolveCombinationPhase, combinationCountdown } from '@/utils/memberCombinationWindow';
 	import { silenceBindingSpread } from "@/utils";
 	import { getUserInfo } from '@/api/user.js';
 	import { TOKENNAME, HTTP_REQUEST_URL } from '@/config/app.js';
 	import {Debounce} from '@/utils/validate.js'
 	export default {
 		computed:{
+			combinationPhase() {
+				return resolveCombinationPhase(this.storeInfo, this.activityNow);
+			},
+			combinationCountdown() {
+				return combinationCountdown(this.storeInfo.start_time, this.activityNow);
+			},
+			// 微信下单必须有手机号；公开浏览不依赖会员会话，H5沿用原登录规则。
+			purchaseAuthorized() {
+				// #ifdef MP-WEIXIN
+				return hasMemberPhoneAuthorization(this.$store);
+				// #endif
+				// #ifndef MP-WEIXIN
+				return this.isLogin;
+				// #endif
+			},
 			infoCardBg(){
 				if(this.type == 1){
 					return 'url('+this.imgHost+'/statics/images/product/seckill_background.png'+')'
@@ -673,6 +695,7 @@
 				attr: '请选择',
 				attrValue: '',
 				status: 1,
+				activityNow: Math.floor(Date.now() / 1000),
 				isAuto: false,
 				isShowAuth: false,
 				iShidden: false,
@@ -768,6 +791,9 @@
 				attrPicIndex: 0,
 				scrollToView: 0,
 				storeShow:true,
+				entryPinkId: 0,
+				resumePurchase: false,
+				purchaseSelection: null,
 				pageHide: false
 			}
 		},
@@ -815,13 +841,18 @@
 			if(options.type && !options.scene){
 				this.type = options.type;
 			}
+			// 返回参数只恢复选择意图；价格、库存和门店有效性仍读取当前服务端数据。
+			this.entryPinkId = Number(options.pinkId) || 0;
+			this.resumePurchase = options.resume_purchase === '1';
+			this.purchaseSelection = {unique: options.selected_unique || '', quantity: Number(options.quantity) || 1};
+			this.storeId = Number(options.selected_store_id) || 0;
 			this.time_id = options.time_id ? options.time_id : '';
 			this.promotions_type = options.promotions_type || 0;
 			if (Number(this.type) === 3 && this.isLogin) {
 				// 拼团默认会员真实归属门店；商品适用门店仍由选择器核验，不可直接信任本地缓存。
 				getUserInfo().then(res => {
 					const belongStoreId = Number(res.data && res.data.belong_store_id) || 0;
-					if (belongStoreId > 0) this.storeId = belongStoreId;
+					if (!this.storeId && belongStoreId > 0) this.storeId = belongStoreId;
 				}).catch(() => {}).then(() => this.getActivityDetail());
 			} else {
 				this.getActivityDetail();
@@ -842,11 +873,14 @@
 		},
 		onShow(){
 			this.pageHide = false;
+			this.startCombinationClock();
 			uni.removeStorageSync('form_type_cart');
 		},
 		onHide() {
 			this.pageHide = true;
+			this.stopCombinationClock();
 		},
+		onUnload() { this.stopCombinationClock(); },
 		mounted(){
 			uni.$off('activeFn');
 			uni.$on('activeFn', data => {
@@ -857,6 +891,24 @@
 			})
 		},
 		methods: {
+			/** 用服务器时间作为锚点递进；进入后台／销毁停止定时器，恢复时补上经过的时间。 */
+			startCombinationClock(reset = false) {
+				this.stopCombinationClock();
+				if (Number(this.type) !== 3 || !this.storeInfo.stop_time) return;
+				if (reset || !this._combinationClockAnchor) {
+					this._combinationClockAnchor = {server: Number(this.storeInfo.server_time) || Math.floor(Date.now() / 1000), local: Date.now()};
+				}
+				const tick = () => {
+					const anchor = this._combinationClockAnchor;
+					this.activityNow = anchor.server + Math.max(0, Math.floor((Date.now() - anchor.local) / 1000));
+				};
+				tick();
+				this._combinationClock = setInterval(tick, 1000);
+			},
+			stopCombinationClock() {
+				if (this._combinationClock) clearInterval(this._combinationClock);
+				this._combinationClock = null;
+			},
 			mySpecs() {
 				this.$set(this.specsInfo, 'show', false);
 			},
@@ -894,13 +946,48 @@
 				})
 			},
 			// 登录只回到本次活动深链；小程序默认 route 不含参数，会丢失活动和分享人。
-			activityReturnUrl() {
+			activityReturnUrl(pinkId = this.entryPinkId) {
 				return '/pages/activity/goods_details/index?id=' + encodeURIComponent(this.id) + '&type=' + encodeURIComponent(this.type)
 					+ '&spid=' + encodeURIComponent(this.spid || 0) + (this.time_id ? '&time_id=' + encodeURIComponent(this.time_id) : '')
-					+ (this.promotions_type ? '&promotions_type=' + encodeURIComponent(this.promotions_type) : '');
+					+ (this.promotions_type ? '&promotions_type=' + encodeURIComponent(this.promotions_type) : '')
+					+ (pinkId ? '&pinkId=' + encodeURIComponent(pinkId) : '');
 			},
-			changeLogin(){
-				toLogin(undefined, undefined, this.activityReturnUrl());
+			changeLogin(purchase = false, pinkId = this.entryPinkId) {
+				// 只有主动购买保存继续购买意图；收藏等登录返回不自动打开购买面板。
+				let url = this.activityReturnUrl(pinkId);
+				if (purchase === true) {
+					const selected = this.attribute.productSelect;
+					url += '&resume_purchase=1&selected_store_id=' + encodeURIComponent(this.store_id || this.storeId || 0)
+						+ '&selected_unique=' + encodeURIComponent(selected.unique || '') + '&quantity=' + encodeURIComponent(selected.cart_num || 1);
+				}
+				toLogin(undefined, undefined, url);
+			},
+			/** 授权返回只重开规格确认，绝不自动加购、创建订单或支付。 */
+			restorePurchaseSelection() {
+				const selection = this.purchaseSelection || {};
+				const key = Object.keys(this.productValue).find(key => String(this.productValue[key].unique) === selection.unique);
+				if (key !== undefined) {
+					this.ChangeAttr(key);
+					const values = key.split(',');
+					this.attribute.productAttr.forEach((attr, index) => this.$set(attr, 'index', values[index]));
+					const sku = this.productValue[key];
+					const quantity = Math.max(1, Math.floor(selection.quantity || 1));
+					this.attribute.productSelect.cart_num = Math.min(quantity, Number(sku.stock) || 1, Number(sku.quota) || 1);
+				}
+				if (this.resumePurchase && this.purchaseAuthorized) {
+					this.resumePurchase = false;
+					if (Number(this.type) === 3 && this.combinationPhase !== 'running') return;
+					if (this.entryPinkId) { this.openInvitedGroup(); return; }
+					this.attribute.cartAttr = true;
+					this.isOpen = true;
+				}
+			},
+			/** 原团身份和选择随登录返回，参团仍由原有后端核验团状态。 */
+			openInvitedGroup() {
+				const selected = this.attribute.productSelect;
+				uni.navigateTo({url: '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.entryPinkId)
+					+ '&spid=' + encodeURIComponent(this.spid || 0) + '&resume_purchase=1&selected_store_id=' + encodeURIComponent(this.store_id || this.storeId || 0)
+					+ '&selected_unique=' + encodeURIComponent(selected.unique || '') + '&quantity=' + encodeURIComponent(selected.cart_num || 1)});
 			},
 			// 主动分享生成当前会员自己的链接；不能读其他页面改写的全局分享地址。
 			activitySharePath(shareUid = this.$store.state.app.uid) {
@@ -1031,6 +1118,7 @@
 					this.$set(this.attribute, 'relation_id', res.data.storeInfo.relation_id);
 					this.dataShow = 1;
 					this.storeInfo = res.data.storeInfo;
+					this.startCombinationClock(true);
 					this.$set(this,'productSwiper', res.data.storeInfo.slider_image || res.data.storeInfo.images);
 					this.$set(this,'productVideoLink',res.data.storeInfo.video_link);
 					let specsTitle = [];
@@ -1071,23 +1159,27 @@
 					that.siteName = res.data.site_name;
 					// #ifdef H5
 					that.storeImage = that.storeInfo.image;
-					if(this.$wechat.isWeixin() && this.shareQrcode=='1'){
-						that.downloadFilePromotionCode();
-					}else{
-					    // 预加载失败不覆盖原图；用户点击分享时重试并显示具体失败提示。
-					    that.getImageBase64().catch(() => {});
+					// 访客只展示活动原图，不预生成个人海报；已登录会员仍保留分享预加载。
+					if (this.isLogin) {
+						if(this.$wechat.isWeixin() && this.shareQrcode=='1'){
+							that.downloadFilePromotionCode().catch(() => {});
+						}else{
+							// 预加载失败不覆盖原图；主动生成时仍可重试。
+							that.getImageBase64().catch(() => {});
+						}
 					}
 					that.setShare();
 					// #endif
 					if (this.isLogin) {
 						// #ifdef MP
-						that.downloadFilePromotionCode();
+						that.downloadFilePromotionCode().catch(() => {});
 						// #endif
 					}
 					// #ifndef H5
-					that.downloadFilestoreImage();
+					that.downloadFilestoreImage().catch(() => {});
 					// #endif
 					that.DefaultSelect();
+					that.restorePurchaseSelection();
 					that.preloadImage();
 					// 外发链接只含当前会员的一个分享参数；本次入站 spid 保持独立。
 					app.globalData.openPages = this.activitySharePath();
@@ -1203,10 +1295,7 @@
 				}
 			},
 			selecAttr: function() {
-				if(!this.isLogin){
-					this.changeLogin();
-					return
-				}
+				// 浏览规格属于公开商品信息，点击确认购买才要求手机号授权。
 				// 规格选择不请求配送定位，订单只关联会员选择的购买门店。
 				this.currentPage = false;
 				this.attribute.cartAttr = true
@@ -1343,7 +1432,12 @@
 			 *  下订单
 			 */
 			goCat: function() {
-				if(this.isLogin){
+				// 预告／结束先阻止购买，不因点击失效按钮而要求游客授权手机号。
+				if (Number(this.type) === 3 && this.combinationPhase !== 'running') {
+					return this.$util.Tips({title: this.combinationPhase === 'upcoming' ? '活动尚未开始' : '活动已结束或已下架'});
+				}
+				if(this.purchaseAuthorized){
+					if (Number(this.type) === 3 && this.entryPinkId) return this.openInvitedGroup();
 					// 拼团订单必须先落到实际购买门店，再沿普通订单提交页继续付款。
 					if (Number(this.type) === 3 && !(Number(this.store_id) > 0)) {
 						return this.$util.Tips({ title: '请先选择购买门店' });
@@ -1390,7 +1484,7 @@
 						});
 					});
 				}else{
-					this.changeLogin();
+					this.changeLogin(true);
 				}
 			},
 			/**
@@ -1424,58 +1518,61 @@
 				else return url.replace('http://', 'https://');
 			},
 			//获取海报产品图
+			/** 商品原图预载和主动生成共用请求；失败交给主动分享显示具体原因。 */
 			downloadFilestoreImage: function() {
-				let that = this;
-				uni.downloadFile({
-					url: that.setDomain(that.storeInfo.image),
-					success: function(res) {
-						that.storeImage = res.tempFilePath;
-						that.base64Show = 1;
-					},
-					fail: function() {
-						return that.$util.Tips({
-							title: ''
-						});
-						that.storeImage = '';
-					},
-				});
+				if (this.storeImage && this._nativePosterSource === this.storeInfo.image) return Promise.resolve(this.storeImage);
+				if (this._nativePosterImageRequest) return this._nativePosterImageRequest;
+				const source = this.storeInfo.image;
+				this._nativePosterImageRequest = new Promise((resolve, reject) => {
+					uni.downloadFile({url: this.setDomain(source), success: res => {
+						if ((res.statusCode && res.statusCode >= 400) || !res.tempFilePath) return reject(new Error('海报商品图片加载失败，请重试'));
+						this.storeImage = res.tempFilePath;
+						this._nativePosterSource = source;
+						this.base64Show = 1;
+						resolve(res.tempFilePath);
+					}, fail: () => reject(new Error('海报商品图片加载失败，请重试'))});
+				}).finally(() => { this._nativePosterImageRequest = null; });
+				return this._nativePosterImageRequest;
 			},
 			/**
 			 * 获取产品分销二维码
 			 * @param function successFn 下载完成回调
 			 *
 			 */
+			/** 活动未开始也允许分享；二维码只绑定活动及当前分享人，不以购买资格代替分享资格。 */
 			downloadFilePromotionCode: function(successFn) {
-				let that = this,data = {};
-				if(this.type == 1){
-					data = {
-						time:this.datatime,
-						status:this.status
-					};
+				const key = [this.type, this.id, this.$store.state.app.uid || 0].join(':');
+				if (this._promotionCodeKey === key && this.PromotionCode) {
+					if (typeof successFn === 'function') successFn(this.PromotionCode);
+					return Promise.resolve(this.PromotionCode);
 				}
-				activityCodeApi(this.type,this.id, data).then(res => {
-					uni.downloadFile({
+				// 静默登录若在访客二维码下载中完成，等待后按新的分享人重新取码，不能复用旧归属。
+				if (this._promotionCodeRequest && this._promotionCodeRequestKey !== key) {
+					return this._promotionCodeRequest.catch(() => {}).then(() => this.downloadFilePromotionCode(successFn));
+				}
+				if (!this._promotionCodeRequest) {
+					this._promotionCodeRequestKey = key;
+					const data = this.type == 1 ? {time: this.datatime, status: this.status} : {};
+					this.isDown = true;
+					this._promotionCodeRequest = activityCodeApi(this.type, this.id, data).then(res => new Promise((resolve, reject) => {
 						// #ifdef H5
-						url: that.setDomain(res.data.wechatUrl ? res.data.wechatUrl : ''),
+						const url = res.data.wechatUrl;
 						// #endif
-						// #ifdef MP
-						url: that.setDomain(res.data.routineUrl ? res.data.routineUrl : ''),
+						// #ifndef H5
+						const url = res.data.routineUrl;
 						// #endif
-						success: function(res) {
-							that.$set(that, 'isDown', false);
-							if (typeof successFn == 'function')
-								successFn && successFn(res.tempFilePath);
-							else
-								that.$set(that, 'PromotionCode', res.tempFilePath);
-						},
-						fail: function() {
-							that.$set(that, 'isDown', false);
-							that.$set(that, 'PromotionCode', '');
-						},
-					});
-				}).catch(err => {
-					that.$set(that, 'isDown', false);
-					that.$set(that, 'PromotionCode', '');
+						if (!url) return reject(new Error('海报二维码加载失败，请重试'));
+						uni.downloadFile({url: this.setDomain(url), success: file => {
+							if ((file.statusCode && file.statusCode >= 400) || !file.tempFilePath) return reject(new Error('海报二维码加载失败，请重试'));
+							this.PromotionCode = file.tempFilePath;
+							this._promotionCodeKey = key;
+							resolve(file.tempFilePath);
+						}, fail: () => reject(new Error('海报二维码加载失败，请重试'))});
+					})).finally(() => { this.isDown = false; this._promotionCodeRequest = null; this._promotionCodeRequestKey = ''; });
+				}
+				return this._promotionCodeRequest.then(path => {
+					if (typeof successFn === 'function') successFn(path);
+					return path;
 				});
 			},
 			/** 转码失败保留原始商品地址，避免 false 污染下一次重试；同一原图共用在途请求。 */
@@ -1503,7 +1600,7 @@
 				let timer;
 				try {
 					const image = await this.getImageBase64();
-					let code = this.PromotionCode;
+					let code = await this.downloadFilePromotionCode();
 					if (!code) throw new Error('海报二维码尚未准备好，请重新点击分享');
 					// 微信公众号二维码可能是外站 URL，同样通过受控转码，避免跨域污染画布。
 					if (/^https?:\/\//i.test(code)) {
@@ -1536,71 +1633,50 @@
 			/**
 			 * 生成海报
 			 */
-			goPoster: function() {
+			goPoster: async function() {
 				// #ifdef H5
 				return this.generateH5Poster();
 				// #endif
 				// #ifndef H5
 				let that = this;
+				try {
+					// 共享未完成的预载，避免快速点击分享时误报“需要发布正式版”。
+					await Promise.all([this.downloadFilestoreImage(), this.downloadFilePromotionCode()]);
+				} catch (error) {
+					this.posters = false;
+					this.canvasStatus = false;
+					return this.$util.Tips({title: error.message || '海报图片加载失败，请重试'});
+				}
 				that.$set(that, 'canvasStatus', true);
 				let arr2 = [that.posterbackgd, that.storeImage, that.PromotionCode];
-				// #ifdef MP
-				if(that.PromotionCode=='' && !that.isDown){
-					return that.$util.Tips({
-						title: '小程序二维码需要发布正式版后才能获取到'
-					},function(){
-						that.posters = false;
-					});
-				}
-				// #endif
-				if (that.isDown) return that.$util.Tips({
-					title: '正在下载海报,请稍后再试！'
-				},function(){
-					that.posters = false;
-				});
 
 				uni.getImageInfo({
 					src: that.PromotionCode,
 					success() {
 						let storeName = that.type == 6 || that.type == 7 ? that.storeInfo.store_name : that.storeInfo.title;
 						let otPrice = that.type == 6?that.storeInfo.ot_price:that.storeInfo.product_price;
-						if (arr2[2] == '') {
-							//海报二维码不存在则从新下载
-							that.downloadFilePromotionCode(function(msgPromotionCode) {
-								arr2[2] = msgPromotionCode;
-								if (arr2[2] == '')
-									return that.$util.Tips({
-										title: '海报二维码生成失败！'
+						// 图片和二维码已由共享预载保证非空，只保留这一条绘制路径。
+						that.$nextTick(() => {
+							setTimeout(() => {
+								that.$util.PosterCanvas(that.fontColor, that.themeColor, that.siteName, arr2, storeName,
+									that.storeInfo.price, otPrice, that.posterTitle, tempFilePath => {
+										that.posterImage = tempFilePath;
+										that.posterImageStatus = true;
+										that.canvasStatus = false;
+										that.actionSheetHidden = !that.actionSheetHidden;
+									}, () => {
+										that.canvasStatus = false;
+										that.posters = false;
+										that.$util.Tips({title: '海报图片生成失败，请重试'});
 									});
-								that.$nextTick(()=>{
-									setTimeout(()=>{
-										that.$util.PosterCanvas(that.fontColor, that.themeColor, that.siteName, arr2, storeName,
-										that.storeInfo.price, otPrice,that.posterTitle,
-											function(tempFilePath) {
-												that.$set(that, 'posterImage', tempFilePath);
-												that.$set(that, 'posterImageStatus', true);
-												that.$set(that, 'canvasStatus', false);
-												that.$set(that, 'actionSheetHidden', !that
-													.actionSheetHidden);
-											});
-									},1000)
-								})
-							});
-
-						} else {
-							//生成推广海报
-							that.$nextTick(function(){
-								setTimeout(()=>{
-									that.$util.PosterCanvas(that.fontColor, that.themeColor, that.siteName, arr2, storeName, that.storeInfo.price, otPrice,that.posterTitle,
-										function(tempFilePath) {
-											that.$set(that, 'posterImage', tempFilePath);
-											that.$set(that, 'posterImageStatus', true);
-											that.$set(that, 'canvasStatus', false);
-											that.$set(that, 'actionSheetHidden', !that.actionSheetHidden);
-										});
-								},1000)
-							})
-						}
+							}, 1000);
+						});
+					},
+					fail() {
+						that.canvasStatus = false;
+						that.posters = false;
+						that.PromotionCode = '';
+						that.$util.Tips({title: '海报二维码加载失败，请重试'});
 					},
 				});
 				// #endif
@@ -1709,13 +1785,14 @@
 				}
 			},
 			spellBnt(item) {
-				if (this.isLogin) {
+				if (this.combinationPhase !== 'running') return this.$util.Tips({title: '活动尚未开始或已结束'});
+				if (this.purchaseAuthorized) {
 					uni.navigateTo({
 						// 从活动进入现有团继续保留本次分享，不能改成购买人或永久推荐人。
 						url: '/pages/activity/goods_combination_status/index?id=' + item.id + '&spid=' + encodeURIComponent(this.spid || 0)
 					})
 				} else {
-					this.changeLogin();
+					this.changeLogin(true, Number(item.id));
 				}
 			},
 			goGoodCall() {
@@ -1836,6 +1913,21 @@
 	  margin-top: -32rpx;
 	}
 	// 拼团图片区、价格区和标题按文档流依次排列；价格行可换行，团人数不挤压金额。
+	.combination-start-countdown {
+		min-height: 72rpx;
+		padding: 8rpx 18rpx;
+		border-radius: 36rpx;
+		background: #fff3e8;
+		color: #b95012;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 8rpx 16rpx;
+		font-size: 26rpx;
+		font-variant-numeric: tabular-nums;
+	}
+
 	.group-price-card {
 		display: flex;
 		align-items: center;

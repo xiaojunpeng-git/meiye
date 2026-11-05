@@ -2,7 +2,7 @@
 	import {checkLogin} from './libs/login';
 	import { remindMemberSurvey, beginSurveyForeground } from '@/utils/memberSurveyReminder';
 	import {HTTP_REQUEST_URL} from './config/app';
-	import { beginMemberSessionRecovery, isMemberSessionExpired } from '@/utils/memberSessionRecovery';
+	import { beginMemberSessionRecovery, getMemberSessionRecovery, isMemberSessionExpired } from '@/utils/memberSessionRecovery';
 	import { getShopConfig, silenceAuth, getLogo } from '@/api/public';
 	import Auth from '@/libs/wechat.js';
 	import Routine from './libs/routine.js';
@@ -12,7 +12,7 @@
 	import { silenceBindingSpread } from "@/utils/index.js";
 	// #ifdef MP-WEIXIN
 	import { loadMemberIconFont } from '@/utils/memberIconFont';
-	import { enforceMemberPhoneGate, installMemberPhoneGate } from '@/utils/memberPhoneGate';
+	import { enforceMemberPhoneGate, installMemberPhoneGate, hasMemberPhoneAuthorization } from '@/utils/memberPhoneGate';
 	// #endif
 	// #ifdef MP
 	// let livePlayer = requirePlugin('live-player-plugin')
@@ -354,7 +354,7 @@
 			if (enterOptions.query && enterOptions.query.spid) {
 				this.$Cache.set('spid', enterOptions.query.spid);
 				this.globalData.spid = enterOptions.query.spid;
-				silenceBindingSpread(this);
+				this.bindIncomingShare();
 			}
 			// #ifdef MP
 			if (enterOptions.query && enterOptions.query.scene) {
@@ -362,7 +362,7 @@
 				if (params.spid) {
 					this.$Cache.set('spid', params.spid);
 					this.globalData.spid = params.spid;
-					silenceBindingSpread(this);
+					this.bindIncomingShare();
 				}
 			}
 			// #endif
@@ -383,6 +383,23 @@
 			// #endif
 		},
 		methods: {
+			/**
+			 * 扫码先保存分享人，会员身份恢复完成后才允许绑定关系。
+			 * 访客不能用受保护的绑定请求触发全局登录；购买授权返回仍沿用该分享人。
+			 */
+			bindIncomingShare() {
+				const bind = () => {
+					// #ifdef MP-WEIXIN
+					const authorized = hasMemberPhoneAuthorization(this.$store);
+					// #endif
+					// #ifndef MP-WEIXIN
+					const authorized = this.$store.getters.isLogin;
+					// #endif
+					if (authorized) silenceBindingSpread(this);
+				};
+				const recovery = getMemberSessionRecovery();
+				return recovery ? recovery.then(bind) : bind();
+			},
 			// 小程序静默授权
 			silenceAuth(code) {
 				let that = this;

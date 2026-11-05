@@ -60,7 +60,7 @@
 										:style="[otPriceColor]">¥{{item.product_price}}</text>
 								</view>
 								<view class='w-144 h-56 rd-30rpx flex-center fs-24 text--w111-fff'
-									v-if="!showBtn" :style="[btnBgColor]">去拼团</view>
+									v-if="!showBtn" :style="[btnBgColor]">{{item.activity_status === 'upcoming' ? '即将开团' : '去拼团'}}</view>
 							</view>
 						</view>
 					</view>
@@ -96,7 +96,7 @@
 									v-if="checkboxInfo.includes(3)" :style="[otPriceColor]">¥{{item.product_price}}</text>
 							</view>
 							<view class='w-144 h-56 rd-30rpx flex-center fs-24 text--w111-fff bg--w111-E93323'
-								v-if="!showBtn" :style="[btnBgColor]">去拼团</view>
+								v-if="!showBtn" :style="[btnBgColor]">{{item.activity_status === 'upcoming' ? '即将开团' : '去拼团'}}</view>
 						</view>
 					</view>
 				</view>
@@ -337,6 +337,11 @@
 				})
 			},
 			goDetail(item){
+				// 预告可直接浏览；原进行中活动的订阅流程保留。
+				if (item.activity_status === 'upcoming') {
+					uni.navigateTo({url: `/pages/activity/goods_details/index?id=${item.id}&type=3`});
+					return;
+				}
 				// #ifndef MP
 				uni.navigateTo({
 					url:`/pages/activity/goods_details/index?id=${item.id}&type=3`

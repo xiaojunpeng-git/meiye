@@ -38,6 +38,7 @@ function environment(platform){
   wx:{},WX_AUTH:'WX_AUTH',STATE_KEY:'wx_authorize_state',BACK_URL:'login_back_url',needsMemberProfileCompletion:()=>authState.needsProfile,
   wechatAuthLogin:()=>Promise.resolve({data:{bindPhone:authState.bindPhone,key:'LOCAL_AUTH',token:'LOCAL_TOKEN',expires_time:2000}}),
   phoneLogin:()=>Promise.resolve({data:{token:'LOCAL_TOKEN',expires_time:2000}}),wechatBindingPhone:()=>Promise.resolve({data:{token:'LOCAL_TOKEN',expires_time:2000}}),
+  getCombinationPublicActivity:id=>Promise.resolve({data:{pink_id:id,combination_id:40}}),
   getUserInfo:()=>Promise.resolve({data:{uid:202,belong_store_id:301}}),silenceBindingSpread(){},postCartAdd:data=>{calls.push({kind:'cart',data});return Promise.resolve({data:{cartId:'cart-local-44'}});},
   orderCreate:(key,data)=>{calls.push({kind:'order',key,data:{...data}});return Promise.resolve({data:{result:{order_id:'NO_PROVIDER_CALLED'}}});},
   activityCodeApi:(type,id,data)=>{calls.push({kind:'qr',type,id,data});return Promise.resolve({data:{routineUrl:'https://local.invalid/qr/202',wechatUrl:'https://local.invalid/qr/202'}});}
@@ -51,7 +52,7 @@ function environment(platform){
  ctx.actualOAuthUrl=vm.runInContext('({'+wxsource.slice(wxmethod.start,wxmethod.end)+'}).getAuthUrl',ctx);
  const methods=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,vueMethods(file,platform,ctx)]));
  function page(kind,logged=false){
-  store.getters.isLogin=logged;const result={...methods[kind],$store:store,$Cache:ctx.Cache,isLogin:logged,$util:util,$set:(obj,k,v)=>obj[k]=v,$wechat:{isWeixin:()=>true,wechatEvevt:(_,cfg)=>{outgoing.push(cfg);return Promise.resolve();}},
+  store.getters.isLogin=logged;const result={...methods[kind],$store:store,$Cache:ctx.Cache,isLogin:logged,purchaseAuthorized:logged,combinationPhase:'running',$util:util,$set:(obj,k,v)=>obj[k]=v,$wechat:{isWeixin:()=>true,wechatEvevt:(_,cfg)=>{outgoing.push(cfg);return Promise.resolve();}},
    loginReturnUrl:'',backUrl:'',configData:{wechat_auth_switch:1},colorData(){},userLogin(){},
    spid:0,shareUid:0,id:0,type:3,pinkId:0,time_id:'',promotions_type:0,storeId:301,store_id:301,store_name:"门店O'Brien &spid=909",addressId:0,delivery_type:2,
    userData:{belong_store_id:301},userInfo:{uid:202,nickname:'B'},storeInfo:{product_id:91,title:'测试活动',image:'',info:''},storeCombination:{id:40,product_id:91,title:'测试团'},
@@ -74,9 +75,11 @@ function environment(platform){
   const confirm=e.page('confirm',true);await confirm.onLoad(query(confirmReturn));confirm.payment({pinkId:confirm.pinkId});await flush();
   ok(e.calls.at(-1).kind==='order'&&e.calls.at(-1).data.spid==='101',platform+' actual confirm payment sends inbound share to create API');
   backendCases.push({case:platform+'-activity',spid:Number(e.calls.at(-1).data.spid),pinkId:0});
-  a2.spellBnt({id:51});const g=e.page('group');g.onLoad(query(e.nav.at(-1)));
-  ok(query(e.cache.get('login_back_url')).spid==='101'&&query(e.cache.get('login_back_url')).id==='51',platform+' activity to group to login retains invite owner');
-  const g2=e.page('group',true);g2.onLoad(query(e.cache.get('login_back_url')));e.app.globalData.spid=888888;g2.goPay();await flush();
+  a2.spellBnt({id:51});const g=e.page('group');g.onLoad(query(e.nav.at(-1)));await flush();
+  ok(query(e.nav.at(-1)).pinkId==='51'&&query(e.nav.at(-1)).id==='40',platform+' guest group landing first displays its public activity');
+  const invite=e.page('activity');invite.onLoad(query(e.nav.at(-1)));invite.goCat();
+  ok(query(e.cache.get('login_back_url')).spid==='101'&&query(e.cache.get('login_back_url')).pinkId==='51',platform+' join authorization retains invite owner and group');
+  const g2=e.page('group',true);g2.onLoad({id:query(e.cache.get('login_back_url')).pinkId,spid:query(e.cache.get('login_back_url')).spid});e.app.globalData.spid=888888;g2.goPay();await flush();
   const joinOptions=query(e.nav.at(-1));ok(joinOptions.spid==='101'&&joinOptions.pinkId==='51'&&joinOptions.store_name==="门店O'Brien &spid=909",platform+' joining preserves invite owner and group id');
   const jg=e.page('confirm');await jg.onLoad(joinOptions);const j=e.page('confirm',true);await j.onLoad(query(e.cache.get('login_back_url')));j.payment({pinkId:j.pinkId});await flush();
   ok(e.calls.at(-1).data.spid==='101'&&e.calls.at(-1).data.pinkId===51,platform+' joining confirm login and actual payment preserve group/share');
@@ -88,7 +91,14 @@ function environment(platform){
   const gp=e.page('group',true);gp.onLoad({id:'51'});gp.goPay();await flush();ok(query(e.nav.at(-1)).spid==='0',platform+' unshared group also never borrows permanent referrer');
   if(platform==='MP-WEIXIN'){
    const scene=e.page('activity');scene.onLoad({scene:encodeURIComponent('id=40&type=3&spid=101')});scene.changeLogin();ok(query(e.cache.get('login_back_url')).spid==='101'&&query(e.cache.get('login_back_url')).type==='3','MP scanned activity scene survives login');
-   const sg=e.page('group');sg.onLoad({scene:encodeURIComponent('id=51&spid=101')});ok(query(e.cache.get('login_back_url')).spid==='101'&&query(e.cache.get('login_back_url')).id==='51','MP scanned group scene survives login');
+   // 海报小程序码使用 scene；订单只认页面保存的本次分享人，不能借用会被静默绑定清除的全局值。
+   const poster=e.page('activity',true);poster.onLoad({scene:encodeURIComponent('id=40&spid=101&type=3')});e.app.globalData.spid=0;poster.goCat();await flush();
+   const posterConfirm=e.page('confirm',true);await posterConfirm.onLoad(query(e.nav.at(-1)));posterConfirm.payment({pinkId:0});await flush();
+   ok(e.calls.at(-1).kind==='order'&&e.calls.at(-1).data.spid==='101','MP poster scan preserves promoter through actual order creation after global binding clears');
+   const posterReturn=e.page('activity',true);posterReturn.onLoad(query(e.cache.get('login_back_url')));posterReturn.goCat();await flush();
+   const posterLoginConfirm=e.page('confirm',true);await posterLoginConfirm.onLoad(query(e.nav.at(-1)));posterLoginConfirm.payment({pinkId:0});await flush();
+   ok(e.calls.at(-1).kind==='order'&&e.calls.at(-1).data.spid==='101','MP poster scan keeps promoter after login return and checkout');
+   const sg=e.page('group');sg.onLoad({scene:encodeURIComponent('id=51&spid=101')});await flush();ok(query(e.nav.at(-1)).spid==='101'&&query(e.nav.at(-1)).pinkId==='51','MP scanned group scene survives public activity redirect');
    ok(query(a2.onShareAppMessage().path).spid==='202'&&a2.spid==='101','MP reshare uses current member while own purchase keeps incoming share');
    ok(new URLSearchParams(a2.onShareTimeline().query).getAll('spid').join()==='202','MP timeline has exactly one current-member spid');
    ok(query(g2.onShareAppMessage().path).spid==='202'&&g2.shareUid===101,'MP group reshare uses current member independent of incoming owner');

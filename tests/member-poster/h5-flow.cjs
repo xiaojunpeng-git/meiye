@@ -8,7 +8,7 @@ let calls=[], mode='ok', drawn=[];
 const context = {Promise, Error, clearTimeout, setTimeout,
  imageBase64: async (image,code)=>{ calls.push({image,code}); await new Promise(r=>setTimeout(r,5)); if(mode==='reject')throw Error('network failed');return {data:{image:mode==='false'?false:image?'data:image/png;base64,PRODUCT':false,code:code?'data:image/png;base64,QR':false}}; }};
 const actual = vm.runInNewContext('({'+methods+'})',context);
-function page(){return {...actual,storeInfo:{image:'https://media.example.com/product.png',title:'测试',price:1,product_price:1980},PromotionCode:'data:image/png;base64,LOCALQR',canvasStatus:false,posters:true,posterImageStatus:false,type:3,$nextTick:async()=>{},$util:{Tips:x=>drawn.push({error:x.title}),PosterCanvas:(...args)=>{drawn.push(args.slice(0,8)); if(mode==='drawFail')args[9]();else args[8]('data:image/png;base64,POSTER');}}};}
+function page(){return {...actual,downloadFilePromotionCode(){return Promise.resolve(this.PromotionCode);},storeInfo:{image:'https://media.example.com/product.png',title:'测试',price:1,product_price:1980},PromotionCode:'data:image/png;base64,LOCALQR',canvasStatus:false,posters:true,posterImageStatus:false,type:3,$nextTick:async()=>{},$util:{Tips:x=>drawn.push({error:x.title}),PosterCanvas:(...args)=>{drawn.push(args.slice(0,8)); if(mode==='drawFail')args[9]();else args[8]('data:image/png;base64,POSTER');}}};}
 (async()=>{
  let p=page(); const preload=p.getImageBase64(); await p.generateH5Poster(); await preload;
  assert.equal(calls.length,1); assert.equal(p.posterImageStatus,true); assert.equal(p.canvasStatus,false); assert.equal(drawn[0][3][1],'data:image/png;base64,PRODUCT'); assert.equal(drawn[0][3][2],p.PromotionCode);

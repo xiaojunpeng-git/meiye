@@ -98,6 +98,12 @@ class StoreCombination
 		return app('json')->success($storeInfo);
 	}
 
+    /** 访客只能得到团对应的公开活动编号；个人拼团信息仍使用认证 pink 接口。 */
+    public function publicActivity(Request $request, $id)
+    {
+        return app('json')->successful($this->services->getPublicPinkActivity((int)$id));
+    }
+
     /**
      * 拼团 开团
      * @param Request $request

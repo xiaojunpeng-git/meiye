@@ -36,6 +36,11 @@ export function getCombinationDetail(id) {
 /**
  * 拼团 开团
  */
+/** 访客参团深链只解析公开活动身份，不读取会员订单或触发成团结算。 */
+export function getCombinationPublicActivity(id) {
+	return request.get('combination/public_activity/' + encodeURIComponent(id), {}, {noAuth: true});
+}
+
 export function getCombinationPink(id) {
 	return request.get("combination/pink/" + id);
 }
@@ -216,7 +221,8 @@ export function getBargainUserCancel(data) {
  * 获取活动小程序二维码
  */
 export function activityCodeApi(type, id, data) {
-	return request.get(`get_qrcode/${type}/${id}`, data);
+	// 拼团活动海报属于公开分享；访客二维码使用服务端 UID=0，其他类型仍保留原认证。
+	return request.get(`get_qrcode/${type}/${id}`, data, {noAuth: Number(type) === 3});
 }
 
 /**

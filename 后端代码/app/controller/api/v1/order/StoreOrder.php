@@ -216,7 +216,7 @@ class StoreOrder
         $uid = (int)$request->uid();
         if ($checkOrder = $this->services->getOne(['unique' => $key, 'uid' => $uid, 'is_del' => 0], 'id,order_id'))
             return app('json')->status('extend_order', '订单已创建，请点击查看完成支付', ['orderId' => $checkOrder['order_id'], 'key' => $key]);
-        [$spid,$addressId, $couponId, $payType, $useIntegral, $mark, $combinationId, $pinkId, $seckill_id, $collate_code_id, $bargainId, $newcomerId, $from, $shipping_type, $real_name, $phone, $storeId, $news, $invoice_id, $quitUrl, $discountId, $customForm, $estimate_time, $is_store_delivery_type] = $request->postMore([
+        [$spid,$addressId, $couponId, $payType, $useIntegral, $mark, $combinationId, $pinkId, $seckill_id, $collate_code_id, $bargainId, $newcomerId, $from, $shipping_type, $storeId, $news, $invoice_id, $quitUrl, $discountId, $customForm, $estimate_time, $is_store_delivery_type] = $request->postMore([
             ['spid', 0],
             [['addressId', 'd'], 0],
             [['couponId', 'd'], 0],
@@ -231,8 +231,6 @@ class StoreOrder
             [['newcomerId', 'd'], ''],
             ['from', 'weixin'],
             [['shipping_type', 'd'], 1],
-            ['real_name', ''],
-            ['phone', ''],
             [['store_id', 'd'], 0],
             ['new', 0],
             [['invoice_id', 'd'], 0],
@@ -290,15 +288,12 @@ class StoreOrder
             if ($product_type == 0 && !$addressId) {
                 return app('json')->fail('请选择收货地址!');
             }
-        } elseif ($shipping_type == 2) {//核销订单
-            $reservationInfo = $cartGroup['other']['reservationInfo'] ?? [];
-            if ((!isset($reservationInfo['reservation_type']) || $reservationInfo['reservation_type'] == 2) && (!$real_name || !$phone)) {
-                return app('json')->fail('请填写姓名和电话');
-            }
-			if (isset($reservationInfo['reservation_type']) && $reservationInfo['reservation_type'] == 2) {//到店服务
-				$addressInfo['real_name'] = $real_name;
-				$addressInfo['phone'] = $phone;
-			}
+        } elseif ($shipping_type == 2) {//到店核销订单
+            // 到店购买不再接收或必填另一套联系人；订单身份只从当前登录会员档案取快照。
+            // 档案为空也可继续购买，不能伪造姓名/电话；配送订单仍使用已授权收货地址。
+            $member = $request->user()->toArray();
+            $addressInfo['real_name'] = (string)(($member['real_name'] ?? '') ?: ($member['nickname'] ?? ''));
+            $addressInfo['phone'] = (string)(($member['record_phone'] ?? '') ?: ($member['phone'] ?? ''));
         }
 
         //下单前砍价验证

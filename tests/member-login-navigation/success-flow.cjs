@@ -9,16 +9,17 @@ const login='前端代码/uniapp/pages/users/wechat_login/index.vue',modal='前�
 async function scenario({mp=true,depth=1,failBack=false,legacy=false,authorized=true,cancel=false,saveFailure=false}={}){
  const timers=[],nav=[],events=[],pages=Array.from({length:depth},(_,i)=>({route:i===depth-1?'pages/users/wechat_login/index':'pages/store/home/index'})),interceptors={};
  const state={userInfo:authorized?{phone:'LOCAL_TEST_PHONE'}:{phone:''}},store={state:{app:state},getters:{isLogin:authorized},commit(k,v){if(k==='LOGIN')this.getters.isLogin=true;if(k==='UPDATE_USERINFO')state.userInfo=v;}};
- const context={app:{globalData:{spid:0,code:''}},history:{back:()=>navigate('historyBack',{})},setTimeout:fn=>timers.push(fn),getCurrentPages:()=>pages,console,Cache:{get:()=>undefined},LOGIN_STATUS:'TOKEN',USER_INFO:'USER',
+ const context={getMemberSessionRecovery:()=>null,app:{globalData:{spid:0,code:''}},history:{back:()=>navigate('historyBack',{})},setTimeout:fn=>timers.push(fn),getCurrentPages:()=>pages,console,Cache:{get:()=>undefined},LOGIN_STATUS:'TOKEN',USER_INFO:'USER',
   getUserInfo:()=>Promise.resolve({data:{uid:1,phone:authorized?'LOCAL_TEST_PHONE':''}}),routineBindingPhone:()=>Promise.resolve({data:{token:'LOCAL_FAKE_ONLY',expires_time:9999,store_user_avatar:1}}),
   userEdit:()=>saveFailure?Promise.reject('LOCAL_SAVE_FAILED'):Promise.resolve({msg:'LOCAL_SAVED'})};
  context.uni={addInterceptor:(k,h)=>interceptors[k]=h,hideLoading(){},showToast(){},
   reLaunch:o=>navigate('reLaunch',o),navigateBack:o=>navigate('navigateBack',o),navigateTo:o=>navigate('navigateTo',o),redirectTo:o=>navigate('redirectTo',o)};
  function navigate(k,o){if(interceptors[k]&&interceptors[k].invoke(o)===false)return;if(k==='navigateBack'&&(failBack||pages.length===1)){o.fail&&o.fail();return;}nav.push({method:k,url:o.url,delta:o.delta});}
+ vm.runInNewContext(fs.readFileSync(root+'/前端代码/uniapp/utils/memberLoginReturn.js','utf8').replace(/export /g,''),context);
  const gate=fs.readFileSync(root+'/前端代码/uniapp/utils/memberPhoneGate.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'');vm.runInNewContext(gate+'\ninstallMemberPhoneGate(store);',{...context,store});
  const methods=vm.runInNewContext('('+objectSource(login,'methods',mp)+')',context),computed=vm.runInNewContext('('+objectSource(login,'computed',mp)+')',context),props=vm.runInNewContext('('+objectSource(modal,'props',mp)+')',context);
  const util=vm.runInNewContext('('+objectSource('前端代码/uniapp/utils/util.js',null,mp)+')',context);
- const owner={...methods,$store:store,$Cache:{time:()=>0,clear(){}},$util:util,userInfo:state.userInfo,isShow:true,authKey:'LOCAL_ONLY'};
+ const owner={...methods,loginReturnUrl:'',$store:store,$Cache:{time:()=>0,clear(){},get:()=>undefined},$util:util,userInfo:state.userInfo,isShow:true,authKey:'LOCAL_ONLY'};
  const child={...vm.runInNewContext('('+objectSource(modal,'methods',mp)+')',context),$util:util,userInfo:{avatar:'https://example.invalid/local.png'},configData:{wechat_auth_switch:1},
   navigateOnSuccess:legacy?(props.navigateOnSuccess?props.navigateOnSuccess.default:true):(computed.profileEditNavigatesBack?computed.profileEditNavigatesBack.call(owner):true),$emit(name){events.push(name);if(!legacy&&name==='editSuccess')owner.editSuccess();}};
  if(cancel)owner.closeEdit();else child.formSubmit({detail:{value:{nickname:'LOCAL_NICK'}}});

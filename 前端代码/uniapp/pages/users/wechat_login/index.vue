@@ -32,7 +32,7 @@
 						class="bg-color btn1">授权登录</button>
 				</template>
 				<view class="acea-row row-center-wrapper fs-30 text--w111-999">授权手机号后可使用会员权益</view>
-				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @tap="browseHome">先浏览首页</view>
+				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @tap="browseHome">{{publicActivityReturn ? '返回活动，暂不授权' : '先浏览首页'}}</view>
 				<!-- #endif -->
 			</view>
 		</view>
@@ -124,6 +124,11 @@
 			privacyAgreementPopup
 		},
 		computed: {
+			// 取消购买授权只回活动展示页，不能借登录返回进入订单或个人业务页。
+			publicActivityReturn() {
+				const url = normalizeMemberLoginReturn(this.loginReturnUrl);
+				return /^\/pages\/activity\/goods_(details|combination_status)\/index\?/.test(url) ? url : '';
+			},
 			// 小程序登录由本页统一收尾，资料弹窗只报告保存结果，避免再次返回上一页。
 			profileEditNavigatesBack() {
 				// #ifdef MP
@@ -184,8 +189,13 @@
 			uni.removeStorageSync('form_type_cart');
 		},
 		methods: {
-			// 访客主动退出登录页只回公开首页，领取权益等受保护操作仍由全局门禁拦截。
+			// 访客可回原活动继续浏览；其他受保护深链仍只能退出到公开首页。
 			browseHome() {
+				if (this.publicActivityReturn) {
+					this.$Cache.clear('login_back_url');
+					uni.reLaunch({url: this.publicActivityReturn});
+					return;
+				}
 				uni.switchTab({ url: '/pages/index/index' });
 			},
 			getErrorMessage(error, fallback = '登录失败，请稍后重试') {
@@ -340,6 +350,7 @@
 				this.showPhoneAuthorizationRequired();
 			},
 			back() {
+				if (this.publicActivityReturn) return this.browseHome();
 				this.showPhoneAuthorizationRequired();
 			},
 			home() {

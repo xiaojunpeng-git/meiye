@@ -261,6 +261,7 @@
 		mapGetters
 	} from 'vuex';
 	import {
+		getCombinationPublicActivity,
 		getCombinationPink,
 		postCombinationRemove,
 		getCombinationPosterData,
@@ -274,6 +275,7 @@
 		TOKENNAME,
 		HTTP_REQUEST_URL
 	} from '@/config/app.js';
+	import { hasMemberPhoneAuthorization } from '@/utils/memberPhoneGate';
 	import { resolveServerAssetUrl } from '@/utils/memberAssetUrl';
 	const app = getApp();
 	export default {
@@ -300,6 +302,8 @@
 				storeCombination: [], //拼团产品
 				storeCombinationHost: [], //拼团推荐
 				pinkId: 0,
+				resumePurchase: false,
+				purchaseSelection: null,
 				count: 0, //拼团剩余人数
 				iShidden: false,
 				isOpen: false, //是否打开属性组件
@@ -362,18 +366,24 @@
 				homeHide: false
 			};
 		},
-		computed: mapGetters({
-			'isLogin': 'isLogin',
-			'userData': 'userInfo'
-		}),
+		computed: {
+			...mapGetters({'isLogin': 'isLogin', 'userData': 'userInfo'}),
+			purchaseAuthorized() {
+				// #ifdef MP-WEIXIN
+				return hasMemberPhoneAuthorization(this.$store);
+				// #endif
+				// #ifndef MP-WEIXIN
+				return this.isLogin;
+				// #endif
+			}
+		},
 		watch: {
 			isLogin: {
 				handler: function(newV, oldV) {
-					if (newV) {
+					if (newV && this.purchaseAuthorized) {
 						this.getCombinationPink();
-					} else {
-						this.getIsLogin();
 					}
+					// 登录跳转会先清会话；这里不能再次重定向，覆盖用户刚打开的授权页。
 				},
 				deep: true
 			},
@@ -381,7 +391,7 @@
 				handler: function(newV, oldV) {
 					if (newV) {
 						this.userInfo = newV;
-						this.memberStoreId = Number(newV.belong_store_id) || 0;
+						if (!(this.purchaseSelection && this.purchaseSelection.storeId)) this.memberStoreId = Number(newV.belong_store_id) || 0;
 						app.globalData.openPages = this.groupSharePath();
 					}
 				},
@@ -408,8 +418,11 @@
 			this.memberStoreId = Number(this.userData && this.userData.belong_store_id) || 0;
 			// 记录推广人uid；
 			if (options.spid) app.globalData.spid = options.spid;
-			if (that.isLogin == false) {
-				this.getIsLogin();
+			this.resumePurchase = options.resume_purchase === '1';
+			this.purchaseSelection = {unique: options.selected_unique || '', quantity: Number(options.quantity) || 1, storeId: Number(options.selected_store_id) || 0};
+			this.memberStoreId = Number(options.selected_store_id) || this.memberStoreId;
+			if (!this.purchaseAuthorized) {
+				this.loadPublicActivity();
 			} else {
 				this.getCombinationPink();
 			}
@@ -453,10 +466,18 @@
 				this.getCombinationPink();
 				this.isShowAuth = false;
 			},
+			/** 访客先看原团对应的活动；不调用会读会员订单并推进结算的认证查询。 */
+			loadPublicActivity() {
+				return getCombinationPublicActivity(this.pinkId).then(res => {
+					uni.redirectTo({url: '/pages/activity/goods_details/index?type=3&id=' + encodeURIComponent(res.data.combination_id)
+						+ '&pinkId=' + encodeURIComponent(res.data.pink_id) + '&spid=' + encodeURIComponent(this.shareUid || 0)});
+				}).catch(error => this.$util.Tips({title: (error && error.msg) || '拼团信息暂时无法查看，请重试'}));
+			},
 			getIsLogin() {
 				// 显式交给登录服务保存，避免先写缓存后被默认无参 route 覆盖。
 				toLogin(undefined, undefined, '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.pinkId)
-					+ '&spid=' + encodeURIComponent(this.shareUid || 0));
+					+ '&spid=' + encodeURIComponent(this.shareUid || 0) + '&resume_purchase=1&selected_store_id=' + encodeURIComponent(this.store_id || this.memberStoreId || 0)
+					+ '&selected_unique=' + encodeURIComponent(this.attr.productSelect.unique || '') + '&quantity=' + encodeURIComponent(this.attr.productSelect.cart_num || 1));
 			},
 			// 授权关闭
 			authColse: function(e) {
@@ -705,11 +726,13 @@
 				that.$set(that, 'attr', attr);
 			},
 			pay: function() {
+				if (!this.purchaseAuthorized) return this.getIsLogin();
 				var that = this;
 				that.attr.cartAttr = true;
 				that.isOpen = true;
 			},
 			goPay() {
+				if (!this.purchaseAuthorized) return this.getIsLogin();
 				if (!(Number(this.store_id) > 0)) return this.$util.Tips({ title: '请先选择购买门店' });
 				var that = this;
 				var data = {};
@@ -790,6 +813,18 @@
 						//#endif
 						that.setProductSelect();
 						if (that.attr.productAttr != 0) that.DefaultSelect();
+						// 登录返回只恢复有效 SKU／数量并重开确认面板，不触发加购或支付。
+						const selection = that.purchaseSelection || {};
+						const key = Object.keys(that.productValue).find(key => String(that.productValue[key].unique) === selection.unique);
+						if (key !== undefined) {
+							that.ChangeAttr(key);
+							const sku = that.productValue[key];
+							that.attr.productSelect.cart_num = Math.min(Math.max(1, Math.floor(selection.quantity || 1)), Number(sku.stock) || 1, Number(sku.quota) || 1);
+						}
+						if (that.resumePurchase && that.userBool === 0 && that.pinkBool === 0 && !that.endTime) {
+							that.resumePurchase = false;
+							that.pay();
+						}
 						if (res.data.is_ok == 1 && res.data.userBool == 0) {
 							return this.$util.Tips({
 								title: '你不是该团的成员',

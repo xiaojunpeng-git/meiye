@@ -179,6 +179,8 @@ Route::group('api', function () {
 		Route::get('bargain/detail/:id', 'v1.activity.StoreBargain/detail')->name('bargainDetail');//砍价商品详情
 		//活动---拼团
 		Route::get('combination/list', 'v1.activity.StoreCombination/lst')->name('combinationList');//拼团商品列表
+		// 访客参团入口仅解析活动身份，不开放下方会员拼团查询／写操作。
+		Route::get('combination/public_activity/:id', 'v1.activity.StoreCombination/publicActivity')->pattern(['id' => '[1-9][0-9]*']);
 		Route::get('combination/detail/:id', 'v1.activity.StoreCombination/detail')->name('combinationDetail');//拼团商品详情
 		Route::get('combination/detail_code/:id', 'v1.activity.StoreCombination/detailCode')->name('detailCode');//拼团商品详情二维码
 		//用户类
