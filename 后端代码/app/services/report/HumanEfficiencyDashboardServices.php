@@ -35,7 +35,6 @@ final class HumanEfficiencyDashboardServices
         // 分门店读取共享事实，避免集团跨月查询一次加载所有宽事实而耗尽工作进程内存。
         $entities = [];
         foreach ($roster as $key => $person) $entities[$key] = $this->emptyEntity($person);
-        $unknownRoles = 0;
         foreach (array_chunk($stores,4) as $scopeChunk) {
         foreach ((new StoreUnifiedReportPhaseSixServices())->humanEfficiencyFacts($scopeChunk, $range, $this->retainFacts) as $fact) {
             if($selfEmployee && (int)$fact['employee_id']!==$selfEmployee)continue;
@@ -68,7 +67,6 @@ final class HumanEfficiencyDashboardServices
             if ($entity['role_code'] === 'beauty') $beauty[] = $entity;
             elseif ($entity['role_code'] === 'advisor') $advisors[] = $entity;
             elseif ($entity['role_code'] === 'leader') $leaders[] = $entity;
-            elseif ($entity['_has_facts']) $unknownRoles++;
         }
         unset($entity);
         // 全部门店保留可见行；未配置店长时明确显示空岗位，不伪造人员或个人业绩。
@@ -88,7 +86,7 @@ final class HumanEfficiencyDashboardServices
         $beautySummary = $this->summary($beauty);
         foreach ($cohorts as &$cohort) {
             $cohort['share'] = HumanEfficiencyRules::ratio($cohort['count'], $beautySummary['count']);
-            foreach (['cash','consume','items','visits','orders'] as $metric) $cohort['contribution'][$metric] = HumanEfficiencyRules::ratio($cohort[$metric], $beautySummary[$metric]);
+            foreach (['cash','consume','items','visits','orders','active','buyers'] as $metric) $cohort['contribution'][$metric] = HumanEfficiencyRules::ratio($cohort[$metric], $beautySummary[$metric]);
         }
         unset($cohort);
         $managerResult = $selfEmployee?['rows'=>[],'warnings'=>['当前为个人数据权限，仅展示本人期间贡献和期末人数，不展示全店或经理汇总。']]:$this->managers($reader, $stores, $range, $targets);
@@ -99,8 +97,9 @@ final class HumanEfficiencyDashboardServices
             'manager' => HumanEfficiencyRules::page($managerResult['rows'], 'manager', max(1, (int)($input['manager_page'] ?? 1))),
         ];
         $warnings = $managerResult['warnings'];
-        if ($unknownRoles) $warnings[] = $unknownRoles . '条人员归属缺少可核实的岗位，已保留原单供核对，未猜测归入角色榜单。';
-        $result = ['ranking_layouts'=>$metadata['ranking_layouts'],'categories'=>$this->categories,'beauty'=>$beautySummary,'cohorts'=>$cohorts,
+        // 表头从完整榜单生成，分页和导出复用同一分类显隐规则。
+        $rankingRows = ['advisor'=>array_merge($advisors,$leaders),'leader'=>$leaders,'manager'=>$managerResult['rows']];
+        $result = ['ranking_layouts'=>(new HumanEfficiencyMetadataServices())->layouts($this->categories,$rankingRows),'categories'=>$this->categories,'beauty'=>$beautySummary,'cohorts'=>$cohorts,
             'leader_summary'=>$this->summary($leaders),'advisor_summary'=>$this->summary($advisors),
             'manager_summary'=>$this->summary($managerResult['rows']),
             'personal_summary'=>$this->summary(array_merge($leaders,$advisors)), 'tables'=>$tables,
@@ -164,13 +163,10 @@ final class HumanEfficiencyDashboardServices
             'role_code'=>$this->role($job,[]),'role'=>$job['position_name']??'未设置岗位','employed'=>false,'tenure_group'=>'unknown'];
     }
 
-    /** 店长以岗位标记为准，顾问按既有标准岗位名，美容师复用人员手艺人能力。 */
+    /** 共用纯规则确保在职名册与离职人员的岗位归类一致。 */
     private function role(?array $job, array $staff): string
     {
-        if ((int)($job['is_store_manager']??0)===1) return 'leader';
-        if (($job['position_name']??'')==='顾问') return 'advisor';
-        if (($job['position_name']??'')==='美容师' || (int)($staff['cashier_craftsman_enabled']??0)===1) return 'beauty';
-        return 'unknown';
+        return HumanEfficiencyRules::role($job, $staff);
     }
 
     private function entryDate($value): ?string
@@ -253,7 +249,12 @@ final class HumanEfficiencyDashboardServices
     /** 产品经理改为当前归属：期间原单金额不改，经理归集和目标使用同一当前组织绑定。 */
     private function managers(HumanEfficiencyFactReader $reader,array $stores,array $range,array $targets):array
     {
-        $current=$reader->currentManagers($stores);$rows=[];
+        // 未配置经理的门店不进入经理榜单及汇总，也不混入经理下钻和导出。原业务事实不改。
+        $current=array_filter($reader->currentManagers($stores),static fn(array $m):bool=>(string)$m['organization_id']!=='unknown');
+        $stores=array_values(array_map('intval',array_keys($current)));
+        if(!$stores)return ['rows'=>[],'warnings'=>[]];
+        $targets=array_values(array_filter($targets,static fn(array $t):bool=>in_array((int)$t['store_id'],$stores,true)));
+        $rows=[];
         $resolve=static fn(array $f):array=>$current[(int)$f['store_id']];
         // 目标仍按查询覆盖的自然日分摊，但每一天均归当前经理；不是伪造历史管辖资料。
         $history=['days'=>[],'managers'=>[],'complete'=>true];
@@ -303,10 +304,9 @@ final class HumanEfficiencyDashboardServices
             foreach($r['_stores'] as $id=>$_)$r['_stores'][$id]=$names[$id]??('门店'.$id);
             $completion=(new HumanEfficiencyTargetProjector())->managerCompletion($r['cash_cents'],$r['manager_id'],$projection);
             $r['target_cents']=$completion['target_cents'];$r['completion']=$completion['completion'];$r['target_status']=$completion['message'];
-            if($r['manager_id']==='unknown'){$r['completion']=null;$r['target_status']='未配置当前城市经理';}
             $r['stores']=count($r['_stores']);$r['visits']=count($r['_visits']);$this->finish($r);
         }unset($r);
-        return ['rows'=>array_values($rows),'warnings'=>isset($rows['unknown'])?['部分门店未配置当前城市经理，已单列其业绩，不计经理完成率。']:[]];
+        return ['rows'=>array_values($rows),'warnings'=>[]];
     }
 
     private function exportRows(array $entities,array $managers):array
@@ -317,8 +317,9 @@ final class HumanEfficiencyDashboardServices
             if(isset($sections[$r['role_code']]))$sections[$r['role_code']][]=$r;
         }
         $sections['advisor']=array_merge($sections['advisor'],$sections['leader']);
-        $rows=[];
+        $rows=[];$sectionCategories=[];
         foreach($sections as $kind=>$members){
+            $sectionCategories[$kind]=HumanEfficiencyRules::visibleCategories($this->categories,$members);
             if(in_array($kind,['beauty','unknown'],true))$ordered=$members;
             else{
                 $first=HumanEfficiencyRules::page($members,$kind,1);$ordered=$first['rows'];
@@ -326,7 +327,7 @@ final class HumanEfficiencyDashboardServices
             }
             foreach($ordered as $r){$r['section']=$kind;$rows[]=$r;}
         }
-        return $this->publicResult(['categories'=>$this->categories,'rows'=>$rows]);
+        return $this->publicResult(['categories'=>$this->categories,'section_categories'=>$sectionCategories,'rows'=>$rows]);
     }
 
     /** 私有去重集合与完整原单不随汇总泄露；明细必须重新经过同一权限及筛选。 */

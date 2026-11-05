@@ -17,6 +17,27 @@ final class HumanEfficiencyRules
         return array_map(static fn(array $r): array => ['id' => (int)$r['id'], 'name' => (string)$r['cate_name']], $roots);
     }
 
+    /** 副店长即顾问，必须先于兼任店长标记判断；保留既有顾问岗位别名。 */
+    public static function role(?array $job, array $staff): string
+    {
+        if (in_array($job['position_name'] ?? '', ['副店长', '顾问'], true)) return 'advisor';
+        if ((int)($job['is_store_manager'] ?? 0) === 1) return 'leader';
+        if (($job['position_name'] ?? '') === '美容师' || (int)($staff['cashier_craftsman_enabled'] ?? 0) === 1) return 'beauty';
+        return 'unknown';
+    }
+
+    /** 完整命中榜单决定分类显隐，禁止按当前页或净额抵消判断；人头或分值非零即保留。 */
+    public static function visibleCategories(array $categories, array $rows): array
+    {
+        return array_values(array_filter($categories, static function (array $category) use ($rows): bool {
+            foreach ($rows as $row) {
+                $value = $row['category_values'][$category['id']] ?? [];
+                if ((int)($value['cash_cents'] ?? 0) !== 0 || (int)($value['buyers'] ?? 0) !== 0) return true;
+            }
+            return false;
+        }));
+    }
+
     /** 历史归属只按事实的组织路径和发生日匹配，禁止回退到当前门店组织。有效截止日包含当天。 */
     public static function historicalManager(string $path, string $day, array $dimensions): ?array
     {

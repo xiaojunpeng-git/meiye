@@ -61,3 +61,15 @@ $collector=new app\services\report\HumanEfficiencyDetailCollector(['entity_id'=>
 for($i=1;$i<=45;$i++)$collector->add(['id'=>'1:1','name'=>'测试'],['business_date'=>'2026-11-05','cash_cents'=>101,'store_id'=>1,'member_id'=>(int)ceil($i/2)]);
 $detail=$collector->result('测试');
 check($detail['total']===23&&$detail['page']===3&&count($detail['rows'])===3,'成交顾客去重及越界末页一致');
+
+// 线上反馈回归：岗位标记冲突、跨页分类及跨组顾客占比。
+check(R::role(['position_name'=>'副店长','is_store_manager'=>1],[])==='advisor','副店长优先归顾问，不重复计入店长');
+check(R::role(['position_name'=>'店长','is_store_manager'=>1],[])==='leader','店长岗位保留');
+check(R::role(['position_name'=>'顾问','is_store_manager'=>0],[])==='advisor','既有顾问岗位兼容');
+$catalog=[['id'=>1,'name'=>'甲'],['id'=>2,'name'=>'乙'],['id'=>3,'name'=>'丙']];
+$full=array_fill(0,10,['category_values'=>[]]);
+$full[]=['category_values'=>[1=>['cash_cents'=>1,'buyers'=>0],2=>['cash_cents'=>0,'buyers'=>1]]];
+check(array_column(R::visibleCategories($catalog,$full),'id')===[1,2],'第二页非零分类及仅有成交顾客分类保留');
+check(R::visibleCategories($catalog,array_slice($full,0,10))===[],'纯零分类隐藏');
+check(R::visibleCategories($catalog,[['category_values'=>[1=>['cash_cents'=>-1]]]])===[$catalog[0]],'负分值不能误判为零');
+check(R::ratio(2,3)+R::ratio(2,3)>1,'跨组去重人数占比允许超过100%');
