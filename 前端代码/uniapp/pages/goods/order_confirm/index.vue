@@ -220,7 +220,8 @@
 					</view>
 				</view>
 				<!-- 购买身份沿用登录会员，不再重复采集联系人和联系电话。 -->
-				<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32">
+				<!-- 购买确认不提供开票入口；只在有优惠券或积分选项时保留此卡片，避免留下空白。 -->
+				<view class="mt-20 bg--w111-fff rd-16rpx pt-32 pr-24 pl-24 pb-32" v-if="[0, 6, 10, 11, 12, 13].includes(type) && ((!noCoupon && goodsType != 7 && priceGroup.firstOrderPrice==0) || integral_ratio_status == 1)">
 					<view class="cell flex-between-center" v-if="[0, 6, 10, 11, 12, 13].includes(type) && !noCoupon && goodsType != 7 && priceGroup.firstOrderPrice==0" @tap='couponTap'>
 						<text class="text--w111-333 fs-28">优惠券</text>
 						<view class="flex-1 min-w-0 pl-8 text-right line1">
@@ -237,13 +238,6 @@
 							<checkbox-group @change="ChangeIntegral">
 								<checkbox :disabled="integral<=0 && !useIntegral" :checked='useIntegral ? true : false' />
 							</checkbox-group>
-						</view>
-					</view>
-					<view class="cell flex-between-center" v-if="(invoice_func || special_invoice) && !tableId" @tap='goInvoice'>
-						<text class="text--w111-333 fs-28">开具发票</text>
-						<view>
-							<text class="text--w111-333 fs-28">{{invTitle}}</text>
-							<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 pl-8"></text>
 						</view>
 					</view>
 				</view>
@@ -491,8 +485,6 @@
 		<giftDrawer :visible="showGiftDrawer" :giveCartInfo="giveCartInfo" :giveData="giveData" @closeDrawer="closeDrawer"></giftDrawer>
 		<couponListWindow :coupon='coupon' @ChangCouponsClone="ChangCouponsClone" :openType='openType' :cartId='cartId' @ChangCoupons="ChangCoupons"></couponListWindow>
 		<addressWindow ref="addressWindow" @changeTextareaStatus="changeTextareaStatus" :news='news' :address='address' :pagesUrl="pagesUrl" @OnChangeAddress="OnChangeAddress" @changeClose="changeClose"></addressWindow>
-		<invoice-picker :inv-show="invShow" :inv-list="invList" :inv-checked="invChecked" :is-special="special_invoice" :url-query="urlQuery" @inv-close="invClose" @inv-change="invChange" @inv-cancel="invCancel">
-		</invoice-picker>
 		<timeranges :isShow='isShow' :time='timeranges' @confrim="confrim" @cancel="cancels"></timeranges>
 		<areaWindow ref="areaWindow" :display="display" :address='addressInfoArea' :cityShow='cityShow' @submit="OnAreaAddress" @changeClose="changeAddressClose"></areaWindow>
 		<home :isHide="homeHide"></home>
@@ -596,9 +588,7 @@
 	import {
 		getAddressDefault,
 		getUserInfo,
-		getAddressDetail,
-		invoiceList,
-		invoiceOrder
+		getAddressDetail
 	} from '@/api/user.js';
 	import {
 		openPaySubscribe
@@ -619,7 +609,6 @@
 	} from '@/config/cache.js';
 	import couponListWindow from '@/components/couponListWindow';
 	import addressWindow from '@/components/addressWindow';
-	import invoicePicker from '../components/invoicePicker';
 	import timeranges from '@/components/timeranges';
 	import areaWindow from '@/components/areaWindow';
 	import giftDrawer from '../components/giftDrawer/index.vue'
@@ -642,7 +631,6 @@
 	import home from '@/components/home/index.vue';
 	export default {
 		components: {
-			invoicePicker,
 			couponListWindow,
 			addressWindow,
 			timeranges,
@@ -727,15 +715,7 @@
 				isShowAuth: false, //是否隐藏授权
 				from: '',
 				news: 1,
-				invTitle: '不开发票',
-				special_invoice: false,
-				invoice_func: false,
 				integral_ratio_status: 1,
-				header_type: '',
-				invShow: false,
-				invList: [],
-				invChecked: '',
-				urlQuery: '',
 				pay_close: false,
 				noCoupon: 0,
 				valid_count: 0,
@@ -903,22 +883,9 @@
 			this.cartId = options.cartId;
 			this.is_address = options.is_address ? true : false;
 			this.news = !options.new || options.new === '0' ? 0 : 1;
-			this.invChecked = options.invoice_id || '';
-			this.header_type = options.header_type || '1';
 			this.couponTitle = options.couponTitle || '请选择'
 			this.luckRecordId = options.luckRecordId || ''
 			this.productTypeNum = options.productType || 0;
-			switch (options.invoice_type) {
-				case '1':
-					this.invTitle = '增值税电子普通发票';
-					break;
-				case '2':
-					this.invTitle = '增值税电子专用发票';
-					break;
-			}
-			if (options.invoice_name) {
-				this.invTitle = options.invoice_name;
-			}
 			if (this.isLogin) {
 				// 所有会员购买默认归属会员门店；用户可在提交页选择实际购买门店。
 				const loadCheckout = () => {
@@ -1057,62 +1024,6 @@
 				this.$util.uploadImageOne('upload/image', function(res) {
 					that.confirm[xindex][index].value.push(res.data.url);
 				});
-			},
-			// 不开发票
-			invCancel() {
-				this.invChecked = '';
-				this.invTitle = '不开发票';
-				this.invShow = false;
-			},
-			// 选择发票
-			invChange(id) {
-				this.invChecked = id;
-				this.invShow = false;
-				const result = this.invList.find(item => item.id === id);
-				let name = '';
-				name += result.header_type === 1 ? '个人' : '企业';
-				name += result.type === 1 ? '普通' : '专用';
-				name += '发票';
-				this.invTitle = name;
-			},
-			// 关闭发票
-			invClose() {
-				this.invShow = false;
-				this.getInvoiceList()
-			},
-			getInvoiceList() {
-				uni.showLoading({
-					title: '正在加载…'
-				})
-				invoiceList().then(res => {
-					uni.hideLoading();
-					this.invList = res.data.map(item => {
-						item.id = item.id.toString();
-						return item;
-					});
-					const result = this.invList.find(item => item.id == this.invChecked);
-					if (result) {
-						let name = '';
-						name += result.header_type === 1 ? '个人' : '企业';
-						name += result.type === 1 ? '普通' : '专用';
-						name += '发票';
-						this.invTitle = name;
-					}
-				}).catch(err => {
-					uni.showToast({
-						title: err,
-						icon: 'none'
-					});
-				});
-			},
-			/**
-			 * 开发票
-			 */
-			goInvoice: function() {
-				this.getInvoiceList()
-				this.invShow = true;
-				this.urlQuery =
-					`new=${this.news}&cartId=${this.cartId}&pinkId=${this.pinkId}&couponId=${this.couponId}&addressId=${this.addressId}&specialInvoice=${this.special_invoice}&couponTitle=${this.couponTitle}&store_id=${this.storeId}&store_name=${this.system_store.name}&product_id=${this.product_id}&is_store=${this.isStore}&productType=${this.productTypeNum}&delivery_type=${this.deliveryType}`;
 			},
 			goPay() {
 				this.formVerify();
@@ -1374,9 +1285,7 @@
 					that.$set(that, 'BargainId', parseInt(res.data.bargain_id));
 					that.$set(that, 'combinationId', parseInt(res.data.combination_id));
 					that.$set(that, 'discountId', parseInt(res.data.discount_id));
-					that.$set(that, 'invoice_func', res.data.invoice_func);
 					that.$set(that, 'integral_ratio_status', res.data.integral_ratio_status);
-					that.$set(that, 'special_invoice', res.data.special_invoice);
 					that.$set(that, 'store_self_mention', res.data.store_self_mention);
 					that.$set(that, 'svip_status', res.data.svip_status);
 					that.$set(that, 'svip_price', res.data.svip_price);
@@ -1722,7 +1631,8 @@
 					'from': that.from,
 					shipping_type: that.tableId ? 4 : that.shippingType, // 桌码订单为：4
 					'new': that.news,
-					'invoice_id': that.invChecked,
+					// 入口隐藏后新订单不申请开票，旧链接里的发票选择也不能隐式带入。
+					'invoice_id': 0,
 					is_store_delivery_type: that.isStoreDeliveryType,
 					estimate_time: '',
 					// #ifdef H5
