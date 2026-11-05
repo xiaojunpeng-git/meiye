@@ -951,8 +951,11 @@
 		methods: {
 			goStore() {
 				if (!this.collage_id) {
+					// 拼团换店沿用确认报价中的活动身份，不能退回普通商品的进店区域范围。
+					const activityQuery = this.isGroupOrder ? '&product_id=' + encodeURIComponent(this.product_id)
+						+ '&combination_id=' + encodeURIComponent(this.combinationId) : '';
 					uni.navigateTo({
-						url: '/pages/store/list/index?type=1&isCollage=1&storeId=' + (this.storeId || 0) + (this.isGroupOrder ? '&product_id=' + this.product_id : '')
+						url: '/pages/store/list/index?type=1&isCollage=1&storeId=' + (this.storeId || 0) + activityQuery
 					})
 				}
 			},

@@ -9,6 +9,15 @@ fn.call({storeShow:true,type:1,shopType:2,belongShow:true,storeInfo:{id:99},stor
 const list=fs.readFileSync('前端代码/uniapp/pages/store/list/index.vue','utf8');start=list.indexOf('onLoad(options) {');end=list.indexOf('\n\t\tonShow()',start);let method=list.slice(start,end).replace(/,\s*$/,'');
 const onLoad=vm.runInNewContext('({'+method+'}).onLoad');let query;
 const page={content:{},isReservationMode:false,getlist(){query={...this.content}}};onLoad.call(page,{type:1,storeId:1,isCollage:1,product_id:8996,combination_id:4});assert.equal(query.combination_id,4);assert.equal(query.product_id,8996);
+// Execute the other entry as well: changing purchase store from confirmation
+// must pass its quoted activity through the same list/search/region lifecycle.
+const confirmation=fs.readFileSync('前端代码/uniapp/pages/goods/order_confirm/index.vue','utf8');
+start=confirmation.indexOf('goStore() {');end=confirmation.indexOf('\n\t\t\t},',start)+7;
+const goStore=vm.runInNewContext('({'+confirmation.slice(start,end)+'}).goStore',{uni:{navigateTo:x=>calls.push(x.url)},encodeURIComponent});
+goStore.call({isGroupOrder:true,product_id:11059,combinationId:12,storeId:1});u=new URL('https://local.invalid'+calls.pop());assert.equal(u.searchParams.get('combination_id'),'12');assert.equal(u.searchParams.get('product_id'),'11059');assert.equal(u.searchParams.get('storeId'),'1');
+const checkoutList={content:{},isReservationMode:false,getlist(){query={...this.content}}};onLoad.call(checkoutList,Object.fromEntries(u.searchParams));assert.equal(query.combination_id,'12');assert.equal(query.product_id,'11059');
+goStore.call({isGroupOrder:false,product_id:11059,combinationId:12,storeId:134});u=new URL('https://local.invalid'+calls.pop());assert.equal(u.searchParams.has('combination_id'),false);assert.equal(u.searchParams.has('product_id'),false);assert.equal(u.searchParams.get('storeId'),'134');
+goStore.call({collage_id:9,isGroupOrder:true,combinationId:12});assert.equal(calls.length,0,'table order store remains fixed');
 console.log('COMBINATION STORES FRONTEND PASS: activity/source identity, ordinary mode, original permission gate, list query inheritance');
 const windowSource=fs.readFileSync('前端代码/uniapp/components/productWindow/index.vue','utf8');
 start=windowSource.indexOf('getList: function(id) {');end=windowSource.indexOf('\n\t\t\tdefaultStore()',start);const getMethod=windowSource.slice(start,end).replace(/,\s*$/,'');
