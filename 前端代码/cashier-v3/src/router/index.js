@@ -142,6 +142,13 @@ const routes = [
     meta: { platformReport: true, title: '客户分析' }
   },
   {
+    // 平台人效报表复用统一权限接口，不初始化门店收银会话。
+    path: '/platform/human-efficiency',
+    name: 'platform-human-efficiency',
+    component: () => import('@/views/HumanEfficiencyView.vue'),
+    meta: { platformReport: true, title: '人效看板' }
+  },
+  {
     // 集团平台员工看板原型；section 仅用于保留平台入口的兼容路径。
     path: '/platform/employee-dashboard/:section?',
     name: 'cashier-v3-platform-employee-dashboard',

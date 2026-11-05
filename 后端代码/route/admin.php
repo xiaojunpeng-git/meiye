@@ -1804,6 +1804,9 @@ Route::group('adminapi', function () {
         Route::get('product-dashboard', 'v1.report.UnifiedReport/productDashboard')->option(['real_name' => '商品看板查询']);
         Route::get('customer-analytics', 'v1.report.UnifiedReport/customerAnalytics')->option(['real_name' => '客户分析查询']);
         Route::get('customer-analytics/export', 'v1.report.UnifiedReport/customerAnalyticsExport')->option(['real_name' => '客户分析导出']);
+        // 人效列契约沿用统一报表权限中间件，分类不在前端硬编码。
+        Route::get('human-efficiency', 'v1.report.UnifiedReport/humanEfficiency')->option(['real_name' => '人效看板']);
+        Route::get('human-efficiency/metadata', 'v1.report.UnifiedReport/humanEfficiencyMetadata')->option(['real_name' => '人效看板列元数据']);
         Route::get('employee-dashboard', 'v1.report.UnifiedReport/employeeDashboard')->option(['real_name' => '员工看板查询']);
         Route::get('staffing-quota', 'v1.report.UnifiedReport/staffingQuota')->option(['real_name' => '岗位编制列表']);
         Route::post('staffing-quota', 'v1.report.UnifiedReport/saveStaffingQuota')->option(['real_name' => '保存岗位编制']);

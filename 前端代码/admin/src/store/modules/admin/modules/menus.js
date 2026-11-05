@@ -78,6 +78,20 @@ function withEmployeeDashboardMenu(menuData, prefix) {
   });
 }
 
+// 仅在现有员工看板之后插入人效入口；继承原菜单权限，不创建组织或门店权限。
+function withHumanEfficiencyMenu(items, prefix) {
+  return (items || []).flatMap(item => {
+    if (!item) return [];
+    const next = { ...item };
+    if (Array.isArray(item.children)) next.children = withHumanEfficiencyMenu(item.children, prefix);
+    const path = String(item.path || item.menu_path || '').replace(/\/$/, '');
+    if (path !== `${prefix}/report/employee-dashboard`) return [next];
+    if (items.some(child => String(child.path || child.menu_path || '') === `${prefix}/report/human-efficiency`)) return [next];
+    return [next, { ...item, id: 'human-efficiency', title: '人效看板', menu_name: '人效看板',
+      path: `${prefix}/report/human-efficiency`, menu_path: `${prefix}/report/human-efficiency`, children: [] }];
+  });
+}
+
 function relocateCustomerAnalyticsToMember(menuData, prefix) {
   if (!Array.isArray(menuData)) return [];
   const authPrefix = 'admin-customer-analytics-';
@@ -323,7 +337,7 @@ function normalizeMenus(menuData, prefix) {
     normalizeOrganizationWorkspaceMenu(cleaned, prefix),
     prefix
   );
-  return disambiguateDuplicateMenuPaths(withEmployeeDashboardMenu(normalized, prefix));
+  return disambiguateDuplicateMenuPaths(withHumanEfficiencyMenu(withEmployeeDashboardMenu(normalized, prefix), prefix));
 }
 
 function getMenusName() {

@@ -1293,6 +1293,23 @@ final class StoreUnifiedReportPhaseSixServices
      * display rounding or category-column projection. The caller supplies its
      * already-authorized store scope; this read never changes salary facts.
      */
+    /**
+     * 人效复用已核实的人员业务行、服务份额和卡内项目分摊；不套用薪资的售前独立列。
+     * 这里只扩展读取投影，不改变已有薪资页的默认分类、金额与客户计数规则。
+     */
+    public function humanEfficiencyFacts(array $stores, array $range, bool $withReferences = true): array
+    {
+        if (!$stores) throw new \InvalidArgumentException('当前账号没有可查看的门店范围');
+        $facts = $this->salaryServiceProductCategories($this->salaryFactsWithServiceCustomerMetrics($stores, $range, true), $stores);
+        $references = $withReferences ? $this->salaryOrderReferences($facts) : [];
+        foreach ($facts as &$fact) {
+            $key = (int)$fact['store_id'] . '|' . (string)($fact['checkout_request_id'] ?? '');
+            $fact['order_no_snapshot'] = (string)($references[$key]['number'] ?? '');
+        }
+        unset($fact);
+        return $facts;
+    }
+
     public function salaryRankingRows(array $stores,array $range):array
     {
         return $this->salarySummary($stores,$range,[],true);
@@ -2083,7 +2100,7 @@ final class StoreUnifiedReportPhaseSixServices
         return implode('/',array_slice($parts,0,2));
     }
 
-    private function salaryFacts(array $stores,array $range):array
+    private function salaryFacts(array $stores,array $range,bool $includePresaleCategories=false):array
     {
         $query=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
@@ -2164,14 +2181,14 @@ final class StoreUnifiedReportPhaseSixServices
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
             $isPresale=$this->salaryIsPresale($sale);
-            $allocation=$isPresale?[]:(isset($sale['supplement_category_weights'])
+            $allocation=($isPresale&&!$includePresaleCategories)?[]:(isset($sale['supplement_category_weights'])
                 ? $this->salaryCategoryAllocationFromWeights(
                     (int)$sale['amount_cents'],
                     (array)$sale['supplement_category_weights'],
                     (array)($sale['supplement_category_paths']??[])
                 )
                 : $this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]));
-            if(!$isPresale&&((string)$sale['source_type']==='card'||isset($sale['supplement_category_weights'])))
+            if((!$isPresale||$includePresaleCategories)&&((string)$sale['source_type']==='card'||isset($sale['supplement_category_weights'])))
                 $sale['category_path']=$this->salaryAllocationCategoryPath($allocation);
             // A presale salesperson's cash is an independent reporting component.
             // Keep it off the service row so service counts and consumption retain their product category.
@@ -2202,7 +2219,7 @@ final class StoreUnifiedReportPhaseSixServices
             $grouped[$salesKey]=$sale;
         }
         // 退款分配是独立负向业绩，按退款业务日计入员工薪资；不冲销或改写原销售人的正向分配。
-        foreach($this->salaryRefundSalespersonFacts($stores,$range) as $refund){
+        foreach($this->salaryRefundSalespersonFacts($stores,$range,$includePresaleCategories) as $refund){
             $key='refund|'.(string)$refund['row_key'];
             $grouped[$key]=$refund;
         }
@@ -2227,7 +2244,7 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /** 退款人员事实按退款操作定位；分类复用已核实的退款项目身份，无法核实时保留未分类。 */
-    private function salaryRefundSalespersonFacts(array $stores,array $range):array
+    private function salaryRefundSalespersonFacts(array $stores,array $range,bool $includePresaleCategories=false):array
     {
         $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_order_lifecycle_operation refund_op',
@@ -2274,8 +2291,8 @@ final class StoreUnifiedReportPhaseSixServices
             }
             $sale=$source+['amount_cents'=>(int)$row['amount_cents'],'source_type'=>'','category_id'=>0,'category_path'=>''];
             $sale['amount_cents']=(int)$row['amount_cents'];
-            $allocation=$isPresale?[]:$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
-            if (!$isPresale && ($row['target_type'] ?? '') === 'card') {
+            $allocation=($isPresale&&!$includePresaleCategories)?[]:$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
+            if ((!$isPresale || $includePresaleCategories) && ($row['target_type'] ?? '') === 'card') {
                 // A component refund cannot inherit every category of the original card sale.
                 $parts = $refundCardCategories[(string)$row['refund_operation_id']] ?? [];
                 $allocation = $this->salaryVerifiedRefundAllocation((int)$row['amount_cents'], $parts);
@@ -2464,12 +2481,12 @@ final class StoreUnifiedReportPhaseSixServices
      * service-object rules: the shared reader is the only owner of member,
      * guest, friend-counting and employee-split semantics.
      */
-    private function salaryFactsWithServiceCustomerMetrics(array $stores, array $range): array
+    private function salaryFactsWithServiceCustomerMetrics(array $stores, array $range, bool $includePresaleCategories = false): array
     {
         $metrics = $this->serviceCustomerMetrics($stores, $range);
         $byLaborKey = $metrics['detail_by_labor_key'];
         $peopleByLaborKey = $metrics['people_by_labor_key'];
-        $facts = $this->salaryFacts($stores, $range);
+        $facts = $this->salaryFacts($stores, $range, $includePresaleCategories);
         $present = [];
         foreach ($facts as &$fact) {
             $laborKey = $this->laborMetricKey($fact);
