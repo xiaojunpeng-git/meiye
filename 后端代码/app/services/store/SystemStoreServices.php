@@ -421,7 +421,7 @@ class SystemStoreServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0, bool $regionOptions = false)
+    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0, bool $regionOptions = false, ?array $activityStoreIds = null)
     {
         $where = array_merge($where, ['status' => 1]);
         if ($limit) {
@@ -479,6 +479,14 @@ class SystemStoreServices extends BaseServices
                     return [];
                 }
             }
+        }
+        // 活动指定门店必须与常用门店、原商品可售范围在 SQL 前取交集；空集合绝不能回退全部。
+        // null 表示无活动额外限制，保留所有既有调用行为；地区选项、列表与数量共用此范围。
+        if ($activityStoreIds !== null) {
+            $ids = array_values(array_unique(array_filter(array_map('intval', $activityStoreIds), static function ($id) { return $id > 0; })));
+            if (isset($where['ids'])) $ids = array_values(array_intersect($ids, $where['ids']));
+            if (!$ids) return [];
+            $where['ids'] = $ids;
         }
         $storeList = [];
         if (isset($where['ids'])) {

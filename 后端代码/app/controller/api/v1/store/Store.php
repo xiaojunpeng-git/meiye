@@ -11,6 +11,7 @@
 namespace app\controller\api\v1\store;
 
 use app\jobs\user\UserBelongStoreJob;
+use app\services\activity\combination\StoreCombinationServices;
 use app\services\order\StoreCartServices;
 use app\services\store\SystemStoreServices;
 use app\services\store\SystemStoreStaffServices;
@@ -206,7 +207,7 @@ class Store
      */
     public function getStoreList(Request $request)
     {
-        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options, $member_directory] = $request->getMore([
+        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options, $member_directory, $combination_id] = $request->getMore([
             ['store_type', 1],
             ['keyword', ''],
             ['latitude', ''],
@@ -223,6 +224,7 @@ class Store
             ['is_all', 0],//预约等场景：展示全部门店，不依赖定位
             ['region_options', 0],//同一可选门店范围的地区投影，不返回门店资料
             ['member_directory', 0],//会员端公开门店目录，不用于订单选店或管理范围
+            ['combination_id', 0],//拼团选店：按真实活动范围，不受进店区域裁剪
         ], true);
         // 沿用原坐标校验：空坐标合法，有定位则继续距离排序；地区筛选不提升进店权限。
         if (!$is_all && !checkCoordinates($longitude, $latitude)) {
@@ -230,12 +232,31 @@ class Store
         }
         // 地区选项忽略已选地区，其他搜索、常用、进店隔离和商品范围全部共用下方原路径。
         if ($region_options) $province = $city = $area = $street = 0;
+        // 拼团是独立的公开选店场景；仅取消进店区域限制，不放宽活动和原商品的适用范围。
+        // 原商品必须由活动关联确定，不能信任客户端把活动 ID/其他商品 ID 混用。
+        $activityStoreIds = null;
+        $isCombination = (int)$combination_id > 0;
+        if ($isCombination) {
+            $activity = app()->make(StoreCombinationServices::class)->getOne([
+                'id' => (int)$combination_id, 'is_del' => 0, 'is_show' => 1,
+            ], 'product_id,applicable_type,applicable_store_id');
+            if (!$activity || !(int)$activity['product_id']) return app('json')->fail('拼团活动不存在或已下架');
+            $product_id = (int)$activity['product_id'];
+            if ((int)$activity['applicable_type'] !== 1) {
+                $activityStoreIds = (int)$activity['applicable_type'] === 2
+                    ? (is_array($activity['applicable_store_id']) ? $activity['applicable_store_id'] : explode(',', (string)$activity['applicable_store_id'])) : [];
+            }
+        }
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
         $intersection = [];
         $product = [];
         if ($product_id) {
-            $product = $productServices->get($product_id,['pid','product_type','applicable_type','applicable_store_id']);
+            $fields = ['pid','product_type','applicable_type','applicable_store_id'];
+            $product = $isCombination
+                ? $productServices->getOne(['id' => $product_id, 'is_del' => 0, 'is_show' => 1], implode(',', $fields))
+                : $productServices->get($product_id, $fields);
+            if ($isCombination && !$product) return app('json')->fail('拼团关联商品不存在或已下架');
             if ($product && $product['pid']) {
                 $product = $productServices->get($product['pid'],['pid','product_type','applicable_type','applicable_store_id']);
             }
@@ -266,7 +287,7 @@ class Store
             // 商品/卡项/订单选店仍走原隔离规则，目录标记不能放宽交易范围或后台/门店端权限。
             $publicDirectory = (int)$member_directory === 1 && !(int)$product_id && !(int)$card_product_id && !(int)$store_id && !(int)$is_select;
             if ($publicDirectory) $where = array_merge($where, ['is_del' => 0, 'is_show' => 1]);
-			if (!$publicDirectory && !$is_all && !$keywords) {//无搜索门店 进店规则匹配
+			if (!$publicDirectory && !$is_all && !$keywords) {//保留独立门店和运营模式，仅拼团不按区域裁剪
 				$entryRules = $this->services->getStoreIdByEntryRules($uid, ['latitude' => $latitude, 'longitude' => $longitude]);
 				$entryStoreId = $entryRules['store_id'] ?? 0;
 				$shop_operation_type = $entryRules['shop_operation_type'] ?? 1;
@@ -278,8 +299,11 @@ class Store
 				}
 				if ($is_select || $shop_operation_type == 1) {//切换门店 || 多门店+平台模式
 					if (!isset($where['id'])) {//未进入隔离门店 查询当前区域门店
-						$ids = $this->services->getRegionStoreIds((int)$entryStoreId);
-						if ($ids) $where['ids'] = $ids;
+                        // 拼团只取消进入门店所在的区域限制，独立门店与活动范围继续生效。
+                        if (!$isCombination) {
+                            $ids = $this->services->getRegionStoreIds((int)$entryStoreId);
+                            if ($ids) $where['ids'] = $ids;
+                        }
 						//去除隔离门店
 						$where['is_alone'] = 0;
 					}
@@ -287,7 +311,7 @@ class Store
 					$store_id = $entryStoreId;
 				}
 			}
-			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id, (bool)$region_options);
+			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id, (bool)$region_options, $activityStoreIds);
         }
         $data = [];
         if($intersection && $storeList) {

@@ -98,6 +98,7 @@
 					area: 0,
 					is_select: 0,
 					card_product_id: 0,
+					combination_id: 0,
 					is_all: 0,
 				},
 				display: false,
@@ -121,6 +122,8 @@
 			this.sortIndex = options.storeId
 			this.isCollage = options.isCollage
 			this.content.product_id = options.product_id || 0
+			// 查询、搜索和地区选项共用拼团身份，不能切换筛选后回到进店区域范围。
+			this.content.combination_id = options.combination_id || 0
 			this.content.is_select = options.is_select || 0
 			this.content.card_product_id = options.card_product_id || 0
 			if (this.isReservationMode) {

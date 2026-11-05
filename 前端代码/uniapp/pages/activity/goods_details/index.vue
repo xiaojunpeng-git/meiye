@@ -851,8 +851,8 @@
 			uni.$off('activeFn');
 			uni.$on('activeFn', data => {
 				if(data){
-					this.storeList = data;
-					this.storeId = data.id;
+					// 展示、规格和提交共用同一次选择，不能只更新名称而保留原购买门店。
+					this.onstoreId(data);
 				}
 			})
 		},
@@ -885,9 +885,12 @@
 			showStoreList: function() {
 				// 拼团允许会员在活动适用门店之间改选；普通商品继续沿用原有门店切换开关。
 				if (!this.storeShow || (Number(this.type) !== 3 && (this.shopType != 1 || !this.belongShow))) return
-				let id = this.storeInfo.pid?this.storeInfo.pid:this.storeInfo.id
+				// 活动编号不能当作普通商品编号；后端根据拼团身份确认原商品及适用门店。
+				const isCombination = Number(this.type) === 3;
+				const id = isCombination ? this.storeInfo.product_id : (this.storeInfo.pid || this.storeInfo.id);
+				const activityQuery = isCombination ? '&combination_id=' + encodeURIComponent(this.id) : '';
 				uni.navigateTo({
-					url:'/pages/store/list/index?type=1&isCollage=1&storeId='+this.storeList.id+'&product_id='+id
+					url:'/pages/store/list/index?type=1&isCollage=1&storeId='+this.storeList.id+'&product_id='+id+activityQuery
 				})
 			},
 			// 登录只回到本次活动深链；小程序默认 route 不含参数，会丢失活动和分享人。
