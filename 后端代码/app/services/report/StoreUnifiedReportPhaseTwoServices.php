@@ -1534,19 +1534,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return ['store_id'=>(int)($fact['store_id']??0),'employee_id'=>(int)($fact['employee_id']??0)];
         },$facts));
         foreach ($facts as &$row) {
-            $rowMemberIds = array_values((array)($row['member_ids'] ?? [$row['member_id'] ?? 0]));
-            if (count($rowMemberIds) > 1) {
-                // 跨会员合并后的经营行不能冒充某一位会员；完整身份仍留在内部成员集合中。
-                $row['member_id'] = null;
-                $row['member_name_snapshot'] = count($rowMemberIds) . '位顾客';
-                $row['phone'] = '-';
-            } else {
-                $memberId = (int)($rowMemberIds[0] ?? 0);
-                $row['member_id'] = $memberId;
-                $row['member_name_snapshot'] = $memberId === 0 ? '游客'
-                    : (string)(($row['member_names'][$memberId] ?? null) ?: ($row['member_name_snapshot'] ?? ''));
-                $row['phone'] = $memberId > 0 ? (string)($phones[$memberId] ?? '') : '';
-            }
+            // 每行只代表一名会员；姓名沿该会员成交快照，手机号读取当前登记资料。
+            $memberId = (int)($row['member_id'] ?? 0);
+            $row['member_name_snapshot'] = $memberId === 0 ? '游客'
+                : (string)(($row['member_names'][$memberId] ?? null) ?: ($row['member_name_snapshot'] ?? ''));
+            $row['phone'] = $memberId > 0 ? (string)($phones[$memberId] ?? '') : '';
             // 岗位是当前人员维度，仅补充展示；大单达标与分期仍完全读取原业绩事实。
             $row['position_name'] = $positions[(int)($row['store_id']??0).'|'.(int)($row['employee_id']??0)] ?? '-';
             $refundOnly = !empty($row['refund_only']);
@@ -1585,19 +1577,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $explanations = [
             'division_name' => '显示达标业绩或成功退款所属的分公司，仅包含当前账号有权查看的范围。',
             'store_name' => '显示达标业绩或成功退款所在门店；按现有人员月度规则统计，不扩大门店权限。',
-            'award_month' => '该销售人或销售经理在同一门店、同一入选商品分类中跨顾客累计现金业绩达标的整月，也是开始分摊的月份。例如10月达标，第1期计入10月，第2期计入11月；未达标退款行显示“-”。',
+            'award_month' => '本行销售人或销售经理在本门店、本会员、入选商品分类中正向现金业绩累计达标的月份，也是第1期应计月份。不同会员分别判断达标，未达标退款行显示“-”。',
             'salesperson' => '取得这笔现金业绩的销售人或销售经理。两种角色分别按自己的业绩计算，不合并判断是否达标，也不能将两种角色的金额相加当作门店实收。',
             'position_name' => '显示该人员当前有效岗位；跨组织参与人员依次读取业务门店任职、直属岗位和其他有效任职。岗位只供查看，不改变历史业绩、达标金额或分期结果。',
-            'member_name_snapshot' => '同一人员、门店、商品分类、月份的不同顾客合并计算达标；仅有一位顾客时显示发生时姓名，游客显示“游客”；涉及多人时显示顾客人数，不冒充某一位顾客。',
-            'phone' => '仅有一位会员时显示其当前登记手机号；业务事实没有保存历史号码，会员改号后此列会更新。多人合并时显示“-”，不冒充某一位会员的手机号。',
+            'member_name_snapshot' => '每名会员分别累计现金业绩并判断达标，显示成交时保存的会员姓名，游客显示“游客”。',
+            'phone' => '显示本行会员当前登记的手机号。业务事实没有保存历史号码，会员改号后此列会更新；游客或未登记时留空。',
             'classification' => '属于生美的显示“生美”；非生美且商品分类已开启合作方的显示“合作方”。同时符合两项时优先按生美计算，同一笔业绩不重复计入合作方。',
             'beauty_category' => '取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员在同一门店跨顾客按整月累计，生美、合作方各取累计业绩最高的一个分类；不同分类不拼凑金额达标。',
             'tier' => '生美：正向现金业绩满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：正向现金业绩满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。退款不降低档位，也不参与达标判断；未达标退款行显示“-”。',
-            'award_amount' => '该人员在达标整月、同一门店、入选商品分类中跨顾客的正向现金业绩，是分摊计算的唯一基数，按实际金额计算、不按档位金额封顶。销售收款、欠款补交计入各自业务月；退款不扣减本列，也不参与达标、档位或分期计算。未达标退款行显示“-”。',
-            'refund_amount' => '按退款成功业务日显示本人员、本门店、本分类跨顾客的现金退款，并以正数合计。已达标的入选分类与达标行同列；未达标或非入选分类的退款按人员、分类、月份合并单独列示，达标与应计栏为“-”。退款不扣减达标本金，不参与档位及分期计算；作废不计。',
+            'award_amount' => '本行人员在达标月、本门店、本会员的入选商品分类中取得的正向累计现金业绩。不同会员、人员、角色、门店不合并凑门槛，退款仅展示，未达标退款行显示“-”。',
+            'refund_amount' => '已成功的现金退款金额，按本门店、本会员、人员、商品分类和月份分别展示。达标组的退款显示在该会员行；未达标退款独立显示。退款不改变正向达标本金或分期，作废不计。',
             'accrual_month' => '查询时选择的月份。统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；不重复计入整笔达标金额。未达标退款行没有应计月份，显示“-”。',
             'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。退款仅展示，不改变总期数或当前期次；未达标退款行显示“-”。',
-            'monthly_due' => '本行销售人、门店与分类在达标月跨顾客的正向累计现金业绩×本月对应比例，退款不加、不减，也不改变期次。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。未达标退款行显示“-”且不进入应计合计。',
+            'monthly_due' => '本行会员对应的达标月正向累计现金业绩乘以当前期次比例。退款不改变本金或期次。合计取当前查询范围内全部会员本月应计金额。计算和导出保留分，尾差归最后一期；页面按元四舍五入。未达标退款行不进入应计合计。',
         ];
         foreach (range(1, 6) as $i) {
             $key = 'installment_' . $i;
@@ -1619,7 +1611,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $result = $this->result('销售人生美大单统计表', $columns, $facts,
             $detailKey === '' ? $input : array_merge($input, ['_internal_all' => true]));
         if ($detailKey !== '') return $this->largeOrderDetail($result, $detailFacts, $detailKey, $detailMetric, $input, $selectedMonth);
-        $result['metric_version'] = 'large-order-person-month-category-v13';
+        $result['metric_version'] = 'large-order-member-month-category-v14';
         $result['range'] = $range;
         $result['filter_schema'][] = ['key' => 'month', 'type' => 'month', 'label' => '应计月份'];
         return $result;
@@ -1644,6 +1636,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 || (string)($fact['role_snapshot'] ?? '') !== (string)$row['role_snapshot']
                 || (int)($fact['employee_id'] ?? 0) !== (int)$row['employee_id']
                 || (int)($fact['store_id'] ?? 0) !== (int)$row['store_id']
+                || (int)($fact['member_id'] ?? 0) !== (int)$row['member_id']
                 || substr((string)($fact['business_date'] ?? ''), 0, 7) !== (!empty($row['refund_only']) ? $selectedMonth : (string)$row['award_month'])
                 || (string)($fact['rule_type'] ?? '') !== (string)$row['rule_type']
                 || (int)($fact['award_category_id'] ?? 0) !== (int)$row['award_category_id']) continue;
@@ -1680,7 +1673,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return ['title' => '销售人生美大单明细', 'columns' => $columns, 'records' => $visible, 'total' => $total,
             'page' => $page, 'page_size' => $limit,
             'summary_row' => ['receipt_amount' => $this->money(array_sum(array_map(fn(array $item): int => $this->decimalCents($item['receipt_amount']), $details)))],
-            'metric_version' => 'large-order-person-month-category-v13', 'data_as_of' => date('Y-m-d H:i:s')];
+            'metric_version' => 'large-order-member-month-category-v14', 'data_as_of' => date('Y-m-d H:i:s')];
     }
 
     /**
@@ -2040,7 +2033,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $winner = $facts[$index];
             if (substr((string)$winner['business_date'], 0, 7) !== $month) continue;
             $key = json_encode([(string)$winner['tenant_id'], (int)$winner['store_id'], (string)$winner['role_snapshot'],
-                (int)$winner['employee_id'], $month,
+                (int)$winner['employee_id'], (int)($winner['member_id'] ?? 0), $month,
                 (string)$winner['rule_type'], (int)$winner['award_category_id']], JSON_UNESCAPED_UNICODE);
             $qualified[$key] = true;
         }
@@ -2049,7 +2042,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $amount = (int)($fact['amount_cents'] ?? 0);
             if ($amount >= 0 || substr((string)($fact['business_date'] ?? ''), 0, 7) !== $month) continue;
             $key = json_encode([(string)$fact['tenant_id'], (int)$fact['store_id'], (string)$fact['role_snapshot'],
-                (int)$fact['employee_id'], $month,
+                (int)$fact['employee_id'], (int)($fact['member_id'] ?? 0), $month,
                 (string)$fact['rule_type'], (int)$fact['award_category_id']], JSON_UNESCAPED_UNICODE);
             if (isset($qualified[$key])) continue;
             if (!isset($rows[$key])) {
@@ -2188,7 +2181,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             // Each rule family selects one highest category; beauty/partner never share thresholds.
             $rule = (string)($fact['rule_type'] ?? 'beauty');
             $scope = implode('|', [(string)($fact['tenant_id'] ?? ''), (int)($fact['store_id'] ?? 0),
-                (string)($fact['role_snapshot'] ?? ''), (string)($fact['employee_id'] ?? ''), $month, $rule]);
+                (string)($fact['role_snapshot'] ?? ''), (string)($fact['employee_id'] ?? ''),
+                (int)($fact['member_id'] ?? 0), $month, $rule]);
             $categoryKey = $scope . '|' . ($fact['award_category_id'] ?? $category);
             if (!isset($monthly[$scope][$categoryKey])) {
                 $monthly[$scope][$categoryKey] = [
