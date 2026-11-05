@@ -27,7 +27,7 @@
 			<template v-if="businessSourceChildren().length > 0"><text class="reservation-page__field-label">二级来源</text><view class="reservation-page__choices"><view v-if="!businessSourceRequiresSecondary()" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedBusinessSecondaryId == 0 }" @tap="chooseBusinessSecondary(null)"><text>不选择</text></view><view v-for="source in businessSourceChildren()" :key="source.id" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedBusinessSecondaryId == Number(source.id) }" @tap="chooseBusinessSecondary(source)"><text>{{ source.name }}</text></view></view></template></template>
 			<text class="reservation-page__field-label">预约时间</text><view class="reservation-page__datetime"><picker mode="date" :value="appointmentDate" @change="changeAppointmentDate($event.detail.value)"><view class="reservation-page__select"><text>{{ appointmentDate || '选择日期' }}</text><text>›</text></view></picker><picker mode="time" :value="appointmentStartClock" @change="changeAppointmentStart($event.detail.value)"><view class="reservation-page__select"><text>{{ appointmentStartClock || '开始时间' }}</text><text>›</text></view></picker><picker mode="time" :value="appointmentEndClock" @change="changeAppointmentEnd($event.detail.value)"><view class="reservation-page__select"><text>{{ appointmentEndClock || '结束时间' }}</text><text>›</text></view></picker></view>
 			<text class="reservation-page__field-label">预约项目（可不选）</text><view class="reservation-page__source-tabs"><view class="reservation-page__source-tab" :class="{ 'reservation-page__source-tab--active': projectSource == 'card' }" @tap="projectSource = 'card'"><text>已购买项目</text></view><view class="reservation-page__source-tab" :class="{ 'reservation-page__source-tab--active': projectSource == 'all' }" @tap="projectSource = 'all'"><text>全部项目</text></view></view><input class="reservation-page__input" :value="projectKeyword" placeholder="搜索项目名称" @input="projectKeyword = $event.detail.value" /><view class="reservation-page__choices"><view v-for="project in visibleProjects()" :key="projectKey(project)" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedProject(project) }" @tap="toggleProject(project)"><text>{{ project.name }}</text><text class="reservation-page__choice-note">{{ project.source == 'card' ? '已购' : '未购' }}</text></view></view><text v-if="visibleProjects().length == 0" class="reservation-page__helper">{{ selectedMember == null ? '先选择会员后查看项目。' : '没有符合条件的项目，可不选。' }}</text>
-			<text class="reservation-page__field-label">手艺人（可不选）</text><view class="reservation-page__choices"><view v-for="staff in craftsmanOptions" :key="staff.staffId || staff.id" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedCraftsman(staff), 'reservation-page__choice--disabled': staff.selectable === false }" @tap="toggleCraftsman(staff)"><text>{{ staff.name || staff.staffName }}</text></view></view>
+			<text class="reservation-page__field-label">手艺人（可不选）</text><view class="reservation-page__choices"><view v-for="staff in craftsmanOptions" :key="staff.staffId || staff.id" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedCraftsman(staff), 'reservation-page__choice--disabled': staff.selectable === false }" @tap="toggleCraftsman(staff)"><text>{{ staff.name || staff.staffName }}{{ staff.selectable === false ? ' · 该时段不可预约' : '' }}</text></view></view>
 			<text class="reservation-page__field-label">房间（可不选）</text><view class="reservation-page__choices"><view class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedRoomId == 0 }" @tap="chooseRoom(null)"><text>暂不分配</text></view><view v-for="room in roomOptions" :key="room.id || room.roomId" class="reservation-page__choice" :class="{ 'reservation-page__choice--active': selectedRoomId == Number(room.id || room.roomId), 'reservation-page__choice--disabled': room.selectable === false }" @tap="chooseRoom(room)"><text>{{ room.name || room.label }}</text></view></view>
 			<text class="reservation-page__field-label">备注（可选）</text><textarea class="reservation-page__textarea" :value="remark" placeholder="填写预约说明" @input="remark = $event.detail.value" /><text v-if="editorError.length > 0" class="reservation-page__action-error">{{ editorError }}</text><view class="reservation-page__submit" @tap="submitReservation"><text>{{ submitting ? '正在保存…' : '保存预约' }}</text></view>
 		</scroll-view></view>
@@ -40,7 +40,7 @@
 
 <script setup lang="uts">
   import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
-	import { cancelMobileReservation, changeMobileReservationServiceDuration, changeMobileReservationServiceProjects, createMobileReservation, endMobileReservationService, openMobileReservationEditor, queryMobileReservationDetail, queryMobileReservationMembers, queryMobileReservationProjectCatalog, queryMobileReservations, startMobileReservationService, updateMobileReservation } from '../../../shared/api/mobile-reservation-client.uts'
+	import { cancelMobileReservation, recalculateMobileReservation, changeMobileReservationServiceDuration, changeMobileReservationServiceProjects, createMobileReservation, endMobileReservationService, openMobileReservationEditor, queryMobileReservationDetail, queryMobileReservationMembers, queryMobileReservationProjectCatalog, queryMobileReservations, startMobileReservationService, updateMobileReservation } from '../../../shared/api/mobile-reservation-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { openMerchantBootstrap, openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
 	import { confirmMobileAction, currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
@@ -194,7 +194,7 @@
 			let start = scheduleParts(draft.appointmentStartAt || draft.appointmentTime || '')
 			let end = scheduleParts(draft.appointmentEndAt || '')
 			appointmentDate.value = start.date; appointmentStartClock.value = start.clock; appointmentEndClock.value = end.clock
-			remark.value = String(draft.remark || ''); editorOpen.value = true
+			remark.value = String(draft.remark || ''); editorOpen.value = true; refreshStaffAvailability()
 		})
 	}
 	function scheduleParts(value : any) : any { let text = String(value || '').replace('T', ' '); let numeric = Number(text); if (text.indexOf('-') < 0 && text.indexOf(':') < 0 && !Number.isNaN(numeric) && numeric > 0) { let date = new Date(numeric < 100000000000 ? numeric * 1000 : numeric); return { date: date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0'), clock: date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0') } }; return { date: text.slice(0, 10), clock: text.length >= 16 ? text.slice(11, 16) : '' } }
@@ -234,7 +234,7 @@
 	function chooseBusinessSecondary(source : any) : void { sourceChoiceSerial++; selectedBusinessSecondaryId.value = source == null ? 0 : Number(source.id || 0) }
 	function changeAppointmentDate(value : any) : void { appointmentDate.value = String(value || '').slice(0, 10); refreshSuggestedEnd() }
 	function changeAppointmentStart(value : any) : void { appointmentStartClock.value = String(value || '').slice(0, 5); refreshSuggestedEnd() }
-	function changeAppointmentEnd(value : any) : void { appointmentEndClock.value = String(value || '').slice(0, 5) }
+	function changeAppointmentEnd(value : any) : void { appointmentEndClock.value = String(value || '').slice(0, 5); refreshStaffAvailability() }
 	// 项目切换时给出同日结束时间建议；跨日时要求用户调整时段，最终时长仍由 V3 服务端校验。
 	function refreshSuggestedEnd() : void {
 		let start = appointmentStartAt()
@@ -244,6 +244,19 @@
 		let end = new Date(new Date(start.replace(' ', 'T')).getTime() + (minutes > 0 ? minutes : 60) * 60000)
 		let date = end.getFullYear().toString() + '-' + (end.getMonth() + 1).toString().padStart(2, '0') + '-' + end.getDate().toString().padStart(2, '0')
 		appointmentEndClock.value = date == appointmentDate.value ? end.getHours().toString().padStart(2, '0') + ':' + end.getMinutes().toString().padStart(2, '0') : ''
+		refreshStaffAvailability()
+	}
+	// 三端读取同一个后端投影。序号只丢弃晚到的界面响应，不参与业务保存。
+	let staffAvailabilitySerial = 0
+	function refreshStaffAvailability() : void {
+		let serial = ++staffAvailabilitySerial
+		if (!editorOpen.value || appointmentStartAt().length == 0 || appointmentEndAt().length == 0 || appointmentEndClock.value <= appointmentStartClock.value) return
+		recalculateMobileReservation({ reservationId: editingReservationId.value, reservation: reservationDraft(), recalculationRequestId: 'staff-availability-' + serial.toString() + '-' + Date.now().toString() }, (response : any) => {
+			if (serial != staffAvailabilitySerial || !editorOpen.value) return
+			let payload = payloadOf(response); let plan = payload != null && payload.data != null ? payload.data.reservationPlan : null
+			if (!succeeded(response) || plan == null) { editorError.value = errorMessage(response, '人员时段暂未核对。'); return }
+			if (Array.isArray(plan.craftsmenOptions)) craftsmanOptions.value = plan.craftsmenOptions
+		})
 	}
 	function projectKey(project : any) : string { return String(project.source || 'unpaid') + ':' + String(project.projectId || project.id || 0) + ':' + String(project.skuId || 0) + ':' + String(project.entitlementSourceDetailId || 0) }
 	function visibleProjects() : Array<any> { let values = new Array<any>(); let keyword = projectKeyword.value.trim().toLowerCase(); for (let i = 0; i < projectOptions.value.length; i++) { let project = projectOptions.value[i]; if (project.selectable === false || (projectSource.value == 'card' && project.source != 'card')) continue; if (keyword.length > 0 && String(project.name || '').toLowerCase().indexOf(keyword) < 0) continue; values.push(project) }; return values }

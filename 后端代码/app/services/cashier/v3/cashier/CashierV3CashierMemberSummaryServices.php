@@ -6,6 +6,7 @@ use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\member\CashierV3MemberExclusiveSelectionServices;
+use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
 use think\facade\Db;
 
 /** 收银顶部当前会员的权威摘要；不写会员、权益或欠款事实。 */
@@ -144,15 +145,16 @@ final class CashierV3CashierMemberSummaryServices
                 'remainingTimes' => (int)$state['shared_remaining_times'],
             ];
         }
+        // 退款现金可手填超额；权益只累计已落账的前后余值差额，避免重复或负向扣次。
         $sharedRefunds = [];
         if ($sharedRules) {
             foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
                 ->whereIn('card_holder_id', array_keys($sharedRules))
                 ->where('status', 'effective')
-                ->field('card_holder_id,refund_amount_cents,times_removed')
+                ->field('card_holder_id,times_removed,' . CashierV3CardRefundQuotaPolicy::RIGHTS_ADJUSTMENT_FIELDS)
                 ->select()) as $refund) {
                 $id = (int)$refund['card_holder_id'];
-                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + CashierV3CardRefundQuotaPolicy::returnedRightsCents($refund);
                 $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
             }
         }
@@ -166,9 +168,16 @@ final class CashierV3CashierMemberSummaryServices
             ->field('id,oid,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,cart_info')
             ->order('oid asc,id asc')
             ->select());
-        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
-            array_keys($holderOrderIds),
-            $carts
+        // Exhausted rows are hidden from the summary but remain part of the
+        // original card total. Include them while freezing the whole-yuan
+        // component allocation so remainder ownership never moves over time.
+        $amountCarts = $this->rows(Db::name('store_order_cart_info')
+            ->whereIn('oid', array_keys($holderOrderIds))
+            ->where('cart_type', 2)->where('product_type', 6)
+            ->field('id,oid,product_id,cart_info')->order('oid asc,id asc')->select());
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(
+            $validOrders,
+            $amountCarts
         );
         // 顶部可用权益金额同步排除取消额，不能与权益选择器形成两个余额。
         $orderMap = array_column($validOrders, null, 'id');
@@ -256,7 +265,7 @@ final class CashierV3CashierMemberSummaryServices
                 ->order('id asc')->select());
             $authorities = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
                 ->authoritiesForHolder($tenantId, $holderId);
-            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $comboCarts);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$order], $comboCarts);
             $groupsCounted = [];
             $cardAmount = '0.00';
             foreach ($comboCarts as $cart) {
@@ -284,9 +293,7 @@ final class CashierV3CashierMemberSummaryServices
                         CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
                         '组合卡项目金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
                         ['reason' => 'cashier_member_combination_project_amount_missing']);
-                    $version = $amount % 100 === 0
-                        ? CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION
-                        : 'operation-cent-combination-project-v1';
+                    $version = CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
                     $snapshot['amountCalculationVersion'] = $version;
                     $cardAmount = bcadd($cardAmount,
                         CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(

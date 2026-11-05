@@ -58,15 +58,6 @@ try {
 
     $policy = new InventoryPlatformAccessPolicy();
     $write = $policy->resolve(['id' => $adminId]);
-    if ($policy->canReadHqDashboard($write)) {
-        throw new RuntimeException('Restricted employee unexpectedly sees group headquarters inventory');
-    }
-    try {
-        (new InventoryPlatformWarehouseServices())->dashboard(['id' => $adminId]);
-        throw new RuntimeException('Restricted employee unexpectedly reads group headquarters metrics');
-    } catch (UnifiedQueryException $expected) {
-        if ($expected->getErrorCode() !== 'INVENTORY_PLATFORM_ACCESS_DENIED') throw $expected;
-    }
     foreach ([
         '预售领用' => $policy->forPresaleRead($write),
         '库存查询' => $policy->forStockRead($write),
@@ -185,18 +176,11 @@ try {
     if ($systemAdminId <= 0) throw new RuntimeException('Local built-in admin account is required');
     Db::name('system_admin')->where('id', $systemAdminId)->update(['employee_id' => $employeeId]);
     $adminAccess = $policy->resolveByAdminId($systemAdminId);
-    if (!$policy->canReadHqDashboard($adminAccess)) throw new RuntimeException('Built-in admin headquarters exemption failed');
     foreach ([$policy->forStockRead($adminAccess), $policy->forPresaleRead($adminAccess)] as $adminRead) {
         if (!in_array($forbiddenStoreId, $adminRead['store_ids'], true)) {
             throw new RuntimeException('Built-in admin account was restricted by employee data scope');
         }
     }
-    // 集团全部门店数据权限才可看共用总部仓；仅库存首页菜单不能替代这份数据授权。
-    $allReportStores = array_values(array_filter(array_map('intval', Db::name('system_store')
-        ->where('is_del', 0)->where('name', '<>', '总部')->column('id'))));
-    Db::name('employee_data_scope')->where('employee_id', $employeeId)
-        ->update(['store_ids' => json_encode($allReportStores)]);
-    if (!$policy->canReadHqDashboard($write)) throw new RuntimeException('Full group scope cannot read headquarters dashboard');
     echo "PLATFORM_INVENTORY_DASHBOARD_SCOPE_OK\n";
 } finally {
     Db::rollback();

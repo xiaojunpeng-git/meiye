@@ -23,7 +23,7 @@ class StoreStaffScheduleServices extends BaseServices
      */
     public function isScheduleManageEnabled(): bool
     {
-        return (int)sys_config('reservation_schedule_manage', 0) === 1;
+        return \app\services\store\roster\StaffRosterSwitch::enabled();
     }
 
     /**
@@ -37,41 +37,12 @@ class StoreStaffScheduleServices extends BaseServices
         if ($filterStaffId) {
             $where['id'] = $filterStaffId;
         }
-        if (!$this->isScheduleManageEnabled()) {
-            $where['is_reservable'] = 1;
-            return $staffServices->getColumn($where, 'id,staff_name,phone');
-        }
+        $where['is_reservable'] = 1;
         $allStaff = $staffServices->getColumn($where, 'id,staff_name,phone');
-        if (!$allStaff) {
-            return [];
-        }
-        $scheduleList = $this->dao->getByStoreDate($storeId, $date);
-        $scheduleMap = [];
-        foreach ($scheduleList as $row) {
-            $scheduleMap[(int)$row['staff_id']][] = $row;
-        }
-        $result = [];
-        foreach ($allStaff as $staff) {
-            $staffId = (int)$staff['id'];
-            $rows = $scheduleMap[$staffId] ?? [];
-            if (!$rows) {
-                continue;
-            }
-            $hasWork = false;
-            $fullDayRest = false;
-            foreach ($rows as $row) {
-                if ((int)$row['schedule_type'] === 1) {
-                    $hasWork = true;
-                } elseif ((int)$row['schedule_type'] === 0 && !$row['start_time'] && !$row['end_time']) {
-                    $fullDayRest = true;
-                }
-            }
-            if ($fullDayRest && !$hasWork) {
-                continue;
-            }
-            $result[] = $staff;
-        }
-        return $result;
+        if (!$this->isScheduleManageEnabled()) return $allStaff;
+        $availability = new \app\services\store\roster\StaffRosterAvailability();
+        $working = $availability->workingStaffIds(array_column($allStaff, 'id'), $storeId, $date);
+        return array_values(array_filter($allStaff, static fn($staff): bool => in_array((int)$staff['id'], $working, true)));
     }
 
     /**
@@ -95,92 +66,9 @@ class StoreStaffScheduleServices extends BaseServices
      */
     public function isStaffScheduledForSlot(int $staffId, int $storeId, string $date, int $rangeStart, int $rangeEnd): bool
     {
-        if (!$this->isScheduleManageEnabled() || !$staffId || !$storeId || !$date || !$rangeStart || !$rangeEnd || $rangeEnd <= $rangeStart) {
-            return true;
-        }
-        $rows = $this->dao->getByStoreDate($storeId, $date, $staffId);
-        if (!$rows) {
-            return false;
-        }
-        /** @var StoreStaffShiftServices $shiftServices */
-        $shiftServices = app()->make(StoreStaffShiftServices::class);
-        $shiftMap = $shiftServices->getShiftMap($storeId);
-        $hasWork = false;
-        $fullDayRest = false;
-        foreach ($rows as $row) {
-            if ((int)$row['schedule_type'] === 0 && !$row['start_time'] && !$row['end_time']) {
-                $fullDayRest = true;
-                continue;
-            }
-            if ((int)$row['schedule_type'] !== 1) {
-                continue;
-            }
-            $hasWork = true;
-            $shiftId = (int)($row['shift_id'] ?? 0);
-            $workStart = $row['start_time'] ?? '';
-            $workEnd = $row['end_time'] ?? '';
-            if ($shiftId && isset($shiftMap[$shiftId])) {
-                $workStart = $shiftMap[$shiftId]['start_time'] ?? $workStart;
-                $workEnd = $shiftMap[$shiftId]['end_time'] ?? $workEnd;
-            }
-            if (!$workStart || !$workEnd) {
-                return !$this->slotOverlapsScheduleRest($rows, $shiftMap, $storeId, $date, $rangeStart, $rangeEnd);
-            }
-            $workStartTs = strtotime($date . ' ' . $workStart . ':00');
-            $workEndTs = strtotime($date . ' ' . $workEnd . ':00');
-            if ($workStartTs && $workEndTs && $rangeStart >= $workStartTs && $rangeEnd <= $workEndTs) {
-                if (!$this->slotOverlapsScheduleRest($rows, $shiftMap, $storeId, $date, $rangeStart, $rangeEnd)) {
-                    return true;
-                }
-            }
-        }
-        if ($fullDayRest && !$hasWork) {
-            return false;
-        }
-        return false;
-    }
-
-    /**
-     * 预约时段是否与排班休息/班次休息段重叠
-     */
-    protected function slotOverlapsScheduleRest(array $rows, array $shiftMap, int $storeId, string $date, int $rangeStart, int $rangeEnd): bool
-    {
-        /** @var StoreReservationStaffServices $reservationStaffServices */
-        $reservationStaffServices = app()->make(StoreReservationStaffServices::class);
-        $staffId = (int)($rows[0]['staff_id'] ?? 0);
-        $restSlots = $reservationStaffServices->getStaffScheduleRestSlots($staffId, $storeId, $date);
-        foreach ($restSlots as $slot) {
-            $restStart = strtotime($slot[0]);
-            $restEnd = strtotime($slot[1]);
-            if ($restStart && $restEnd && $this->isTimeRangeOverlap($rangeStart, $rangeEnd, $restStart, $restEnd)) {
-                return true;
-            }
-        }
-        foreach ($rows as $row) {
-            if ((int)$row['schedule_type'] !== 1) {
-                continue;
-            }
-            $shiftId = (int)($row['shift_id'] ?? 0);
-            if (!$shiftId || !isset($shiftMap[$shiftId])) {
-                continue;
-            }
-            /** @var StoreStaffShiftServices $shiftServices */
-            $shiftServices = app()->make(StoreStaffShiftServices::class);
-            $breaks = $shiftServices->decodeBreakPeriods($shiftMap[$shiftId]['break_periods'] ?? '');
-            foreach ($breaks as $break) {
-                $bStart = trim((string)($break['start'] ?? $break['start_time'] ?? ''));
-                $bEnd = trim((string)($break['end'] ?? $break['end_time'] ?? ''));
-                if (!$bStart || !$bEnd) {
-                    continue;
-                }
-                $breakStartTs = strtotime($date . ' ' . $bStart . (strlen($bStart) <= 5 ? ':00' : ''));
-                $breakEndTs = strtotime($date . ' ' . $bEnd . (strlen($bEnd) <= 5 ? ':00' : ''));
-                if ($breakStartTs && $breakEndTs && $this->isTimeRangeOverlap($rangeStart, $rangeEnd, $breakStartTs, $breakEndTs)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        // 预约适配入口与三端共用上班/休息规则；关闭时完全保持原路径。
+        if (!$this->isScheduleManageEnabled()) return true;
+        return (new \app\services\store\roster\StaffRosterAvailability())->allows($staffId, $storeId, $rangeStart, $rangeEnd);
     }
 
     /**
@@ -283,7 +171,17 @@ class StoreStaffScheduleServices extends BaseServices
         return $this->dao->getByStoreMonth($storeId, $month, $staffId);
     }
 
+    /** 旧老师休息写入口保留原契约，但与新排班/三端预约共用员工锁及预约冲突保护。 */
     public function saveSchedule(int $storeId, array $data): bool
+    {
+        return Db::transaction(function () use ($storeId, $data): bool {
+            \app\services\store\roster\StaffRosterSwitch::enabled();
+            \app\services\store\roster\StaffRosterAvailability::lock([(int)($data['staff_id'] ?? 0)]);
+            return $this->saveScheduleInTransaction($storeId, $data);
+        });
+    }
+
+    private function saveScheduleInTransaction(int $storeId, array $data): bool
     {
         $staffId = (int)($data['staff_id'] ?? 0);
         $date = (string)($data['schedule_date'] ?? '');
@@ -319,6 +217,12 @@ class StoreStaffScheduleServices extends BaseServices
             'start_time' => $save['start_time'],
             'end_time' => $save['end_time'],
         ]);
+        // 旧休息以同一员工/日期的完整候选检查，不自动取消预约，也不创建另一套休息数据。
+        $rows = $this->dao->getByStoreDate($storeId, $date, $staffId);
+        $candidate = array_values(array_filter($rows, static fn($row) => !$exist || (int)$row['id'] !== (int)$exist['id']));
+        $candidate[] = $save;
+        (new \app\services\store\roster\StaffRosterServices())->assertNoConflicts($storeId, [$staffId], [$date], $candidate,
+            [$staffId => is_object($staff) ? $staff->toArray() : (array)$staff]);
         if ($exist) {
             return (bool)$this->dao->update($exist['id'], $save);
         }

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useModalFocusTrap } from '@/composables/useModalFocusTrap'
 
 /**
@@ -404,6 +404,24 @@ function withCalculatedEnd(value) {
     : '未填写项目，结束时间默认开始后60分钟；仍可手动调整。'
   return next
 }
+
+// 排班只影响人员可用性；时间输入与已有人员选择原样保留，避免偷偷换人/改时间。
+let availabilitySerial = 0, availabilityTimer
+const availabilityMessage = ref('')
+watch(() => [readAppointmentStart(draft.value), readAppointmentEnd(draft.value)], () => {
+  const serial = ++availabilitySerial
+  clearTimeout(availabilityTimer)
+  availabilityMessage.value = ''
+  if (!props.onRecalculate || !readAppointmentStart(draft.value) || !readAppointmentEnd(draft.value)) return
+  availabilityTimer = setTimeout(async () => {
+    try {
+      const result = await props.onRecalculate({ draft: cloneDraft(draft.value), changeReason: 'staff-availability', recalculationRequestId: `availability-${Date.now()}-${serial}` })
+      if (serial !== availabilitySerial) return
+      availabilityMessage.value = result?.success === false ? result.message : result?.conflicts?.length ? '已选手艺人在该时段不可预约，请调整时间或人员。' : ''
+    } catch (e) { if (serial === availabilitySerial) availabilityMessage.value = e.message || '人员时段暂未核对，请稍后重试。' }
+  }, 200)
+}, { immediate: true })
+onBeforeUnmount(() => { availabilitySerial++; clearTimeout(availabilityTimer) })
 
 function applyScheduleChange(nextDraft) {
   commit(withCalculatedEnd(nextDraft))
@@ -961,6 +979,7 @@ useModalFocusTrap({
             <button type="button" class="reservation-editor-link" :disabled="editorFieldsLocked || isSelecting" @click="clearCraftsmen">暂不分配</button>
           </div>
         </div>
+          <p v-if="availabilityMessage" role="status">{{ availabilityMessage }}</p>
           <div v-if="isCraftsmanPickerOpen && availableCraftsmen.length" class="reservation-editor-craftsmen-list" aria-label="后端返回的可选手艺人；先选中手艺人，再勾选点客">
           <div
             v-for="craftsman in availableCraftsmen"
@@ -974,7 +993,7 @@ useModalFocusTrap({
               :disabled="editorFieldsLocked || craftsman.selectable !== true"
               @click="toggleCraftsman(craftsman)"
             >
-              <strong>{{ craftsman.name || craftsman.staffName }}</strong>
+              <strong>{{ craftsman.name || craftsman.staffName }}</strong><small v-if="craftsman.selectable !== true">{{ craftsman.disabledReason || '该时段不可预约' }}</small>
             </button>
             <label class="reservation-editor-craftsmen-list__point" @click.stop>
               <input

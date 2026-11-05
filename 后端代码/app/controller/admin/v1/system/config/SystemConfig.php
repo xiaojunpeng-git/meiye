@@ -291,6 +291,11 @@ class SystemConfig extends AuthController
     public function save_basics(Request $request)
     {
         $post = $this->request->post();
+        // 排班已迁至独立版本化保存；旧标签页不能绕过版本保护覆盖该开关。
+        if (array_key_exists('reservation_schedule_manage', $post)) {
+            if ((int)$post['reservation_schedule_manage'] !== (\app\services\store\roster\StaffRosterSwitch::enabled()?1:0)) return $this->fail('启用排班已更新，请在该参数处单独保存。');
+            unset($post['reservation_schedule_manage']);
+        }
         // 新开关缺少配置定义时拒绝整张表单，避免界面显示保存成功但语音范围未落库。
         if (array_key_exists('reservation_service_voice_mode', $post)) {
             if (!in_array((string)$post['reservation_service_voice_mode'], ['1', '2', '3'], true)) {
@@ -299,6 +304,13 @@ class SystemConfig extends AuthController
             if (!$this->services->getOne(['menu_name' => 'reservation_service_voice_mode', 'is_store' => 0])) {
                 return $this->fail('服务语音播报配置缺失，请先完成配置升级');
             }
+        }
+        // The member selector switch is rendered with an off fallback before its
+        // config definition exists. Reject that incomplete installation before
+        // saving any form fields, instead of reporting success for a lost choice.
+        if (array_key_exists('cashier_member_default_all_switch', $post)
+            && !$this->services->getOne(['menu_name' => 'cashier_member_default_all_switch', 'is_store' => 0])) {
+            return $this->fail('选择会员默认全部配置缺失，请先完成配置升级');
         }
 
         foreach ($post as $k => $v) {

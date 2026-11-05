@@ -18,7 +18,8 @@
 				</view>
 
 				<!-- 销售类型取后台共用投影，数量和现金业绩分别展示，不能与实际业绩混算。 -->
-				<view class="merchant-home-page__sale-grid">
+				<view class="merchant-home-page__sale-grid" :class="{ 'merchant-home-page__sale-grid--with-recharge': rechargeCard != null }">
+					<view v-if="rechargeCard != null" class="merchant-home-page__sale-card"><text class="merchant-home-page__card-title">充值</text><text class="merchant-home-page__card-note">充值本金</text><text class="merchant-home-page__sale-money">{{ formatDashboardMoney(rechargeCard.amount_cents) }}</text></view>
 					<view v-for="card in saleTypeCards" :key="card.code" class="merchant-home-page__sale-card">
 						<text class="merchant-home-page__card-title">{{ card.title }}</text>
 						<text class="merchant-home-page__card-note">销售数量</text><text class="merchant-home-page__sale-quantity">{{ card.sales_quantity }}</text>
@@ -86,6 +87,7 @@
 	const nativeTrendImage = ref('')
 	const canvasHost : any = getCurrentInstance().proxy
 	const overviewMetrics = ref<Array<any>>([])
+	const rechargeCard = ref<any>(null)
 	const saleTypeCards = ref<Array<any>>([])
 	const categoryCards = ref<Array<any>>([])
 	const sourceCards = ref<Array<any>>([])
@@ -142,6 +144,7 @@
 
 	// 条件变化或服务端拒绝后清掉旧期间/旧权限数值，不能把历史结果当成新查询结果。
 	function clearHomeData() : void {
+		rechargeCard.value = null
 		saleTypeCards.value = []
 		categoryCards.value = []
 		sourceCards.value = []
@@ -182,6 +185,8 @@
 			return { key: code, label: String(metric.name || ''), source: String(metric.source_explanation || ''), tone: tone, icon: icons[tone], value: metric.value_type === 'money' ? formatDashboardMoney(metric.value_cents) : metric.value == null ? '—' : String(metric.value) }
 		})
 		currentPeriod.value = payload.period || {}
+		// 后端仅在授权范围内充值本金有值时返回此卡，零值不占销售卡片位置。
+		rechargeCard.value = payload.recharge_card || null
 		saleTypeCards.value = Array.isArray(payload.sale_type_cards) ? payload.sale_type_cards : []
 		// 分类次序与显隐均由后台决定；手机端不按金额重新排序。
 		categoryCards.value = (Array.isArray(payload.categories) ? payload.categories : []).filter((category : any) : boolean => category.visible === true)
@@ -281,6 +286,9 @@
 	.merchant-home-page__inline-state { display: flex; min-height: 105px; align-items: center; justify-content: center; font-size: 12px; color: #8493a1; }
 	/* 销售类型固定三项；动态分类单列，来源卡可换行，长名称不撑破视口。 */
 	.merchant-home-page__sale-grid { display: flex; flex-direction: row; gap: 7px; margin-top: 10px; }
+	/* 充值出现时四张卡在手机窄屏分两行，保持金额可读。 */
+	.merchant-home-page__sale-grid--with-recharge { flex-wrap: wrap; }
+	.merchant-home-page__sale-grid--with-recharge .merchant-home-page__sale-card { box-sizing: border-box; flex: 1 0 calc(50% - 4px); }
 	.merchant-home-page__sale-card { flex: 1; min-width: 0; padding: 11px 8px; border-radius: 12px; background-color: #ffffff; border-top: 2px solid #4f8fc5; }
 	.merchant-home-page__sale-card .merchant-home-page__card-title { font-size: 12px; }
 	.merchant-home-page__sale-quantity { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; color: #357a72; }

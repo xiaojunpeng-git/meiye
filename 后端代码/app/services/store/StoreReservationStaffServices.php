@@ -6,6 +6,7 @@ use app\services\BaseServices;
 use app\services\cashier\v3\reservation\CashierV3ReservationLifecycleServices;
 use think\exception\ValidateException;
 use think\facade\Db;
+use app\services\store\roster\StaffRosterAvailability;
 
 /**
  * 预约选人 / 可用时段（按门店员工，无距离筛选）
@@ -101,19 +102,18 @@ class StoreReservationStaffServices extends BaseServices
         if ($this->isStaffBlockedByOffWorkTime($staffId, $appointmentTs, $durationMinutes)) {
             return false;
         }
-        $busyIds = $this->getBusyStaffIds($storeId, $appointmentTs, $durationMinutes, $excludeReservationId);
-        if (in_array($staffId, $busyIds, true)) {
-            return false;
-        }
-        $date = date('Y-m-d', $appointmentTs);
-        $restSlots = $this->getStaffScheduleRestSlots($staffId, $storeId, $date);
-        $rangeStart = $appointmentTs;
-        $rangeEnd = $appointmentTs + $durationMinutes * 60;
-        foreach ($restSlots as $slot) {
-            $restStart = strtotime($slot[0]);
-            $restEnd = strtotime($slot[1]);
-            if ($this->isTimeOverlap($rangeStart, $rangeEnd, $restStart, $restEnd)) {
-                return false;
+        if (\app\services\store\roster\StaffRosterSwitch::enabled()) {
+            // 开启后，员工跨店占用与完整上班/休息时段使用唯一权威规则。
+            foreach ($this->getActiveStaffReservations($storeId, $staffId, date('Y-m-d', $appointmentTs - 86400), $excludeReservationId) as $order) {
+                [$busyStart, $busyEnd] = $this->getReservationTimeRange($order);
+                if ($this->isTimeOverlap($appointmentTs, $appointmentTs + $durationMinutes * 60, $busyStart, $busyEnd)) return false;
+            }
+            if (!(new StaffRosterAvailability())->allows($staffId, $storeId, $appointmentTs, $appointmentTs + $durationMinutes * 60)) return false;
+        } else {
+            // 关闭时保持原预约行为；旧老师休息照旧生效，新排班记录不介入。
+            if (in_array($staffId, $this->getBusyStaffIds($storeId, $appointmentTs, $durationMinutes, $excludeReservationId), true)) return false;
+            foreach ($this->getTeacherPersonalRestSlots($staffId, $storeId, date('Y-m-d', $appointmentTs)) as $slot) {
+                if ($this->isTimeOverlap($appointmentTs, $appointmentTs + $durationMinutes * 60, strtotime($slot[0]), strtotime($slot[1]))) return false;
             }
         }
         return true;
@@ -283,8 +283,7 @@ class StoreReservationStaffServices extends BaseServices
             if (!$isPast && $staffIds) {
                 $rangeEnd = $slotStart + $durationSec;
                 foreach ($staffIds as $staffId) {
-                    if ($scheduleServices->isScheduleManageEnabled()
-                        && !$scheduleServices->isStaffScheduledForSlot($staffId, $storeId, $serviceDate, $slotStart, $rangeEnd)) {
+                    if (!$scheduleServices->isStaffScheduledForSlot($staffId, $storeId, $serviceDate, $slotStart, $rangeEnd)) {
                         continue;
                     }
                     if ($this->isStaffAvailable($staffId, $storeId, $slotStart, $serviceDuration, $excludeReservationId)) {
@@ -437,23 +436,15 @@ class StoreReservationStaffServices extends BaseServices
         return $conflicts;
     }
 
-    /**
-     * 不可预约时段：老师个人休息 + 排班管理（启用时）
-     */
+    /** 选时与提交使用同一排班：未排班沿用原规则，明确休息及上班范围始终生效。 */
     public function getStaffScheduleRestSlots(int $staffId, int $storeId, string $serviceDate): array
     {
-        $slots = $this->getTeacherPersonalRestSlots($staffId, $storeId, $serviceDate);
-        /** @var StoreStaffScheduleServices $scheduleServices */
-        $scheduleServices = app()->make(StoreStaffScheduleServices::class);
-        if ($scheduleServices->isScheduleManageEnabled()) {
-            $slots = array_merge($slots, $this->getScheduleManageDisabledSlots($staffId, $storeId, $serviceDate));
-        }
-        return $slots;
+        return \app\services\store\roster\StaffRosterSwitch::enabled()
+            ? (new StaffRosterAvailability())->disabled($staffId, $storeId, $serviceDate)
+            : $this->getTeacherPersonalRestSlots($staffId, $storeId, $serviceDate);
     }
 
-    /**
-     * 老师中心设置的休息（始终生效）
-     */
+    /** 关闭新排班时保留既有个人休息的原始时段语义，不读取新排班记录。 */
     protected function getTeacherPersonalRestSlots(int $staffId, int $storeId, string $serviceDate): array
     {
         if (!$staffId || !$storeId || !$serviceDate) {
@@ -462,6 +453,7 @@ class StoreReservationStaffServices extends BaseServices
         /** @var \app\dao\store\StoreStaffScheduleDao $scheduleDao */
         $scheduleDao = app()->make(\app\dao\store\StoreStaffScheduleDao::class);
         $rows = $scheduleDao->getByStoreDate($storeId, $serviceDate, $staffId);
+        $rows = array_values(array_filter($rows, static fn($row) => empty($row['roster_managed'])));
         if (!$rows) {
             return [];
         }
@@ -488,47 +480,23 @@ class StoreReservationStaffServices extends BaseServices
         return $slots;
     }
 
-    /**
-     * 排班管理：上班时段外的不可预约时间
-     */
-    protected function getScheduleManageDisabledSlots(int $staffId, int $storeId, string $serviceDate): array
+    /** 关闭新排班时保留既有个人休息的原始时段语义，不读取新排班记录。 */
+    protected function buildScheduleSlotDatetime(string $serviceDate, string $time, bool $isEnd = false): string
     {
-        /** @var \app\dao\store\StoreStaffScheduleDao $scheduleDao */
-        $scheduleDao = app()->make(\app\dao\store\StoreStaffScheduleDao::class);
-        $rows = $scheduleDao->getByStoreDate($storeId, $serviceDate, $staffId);
-        if (!$rows) {
-            return [];
+        $time = trim($time);
+        if ($time === '') {
+            return $isEnd ? $serviceDate . ' 23:59:59' : $serviceDate . ' 00:00:00';
         }
-        $slots = [];
-        $hasWork = false;
-        $fullDayRest = false;
-        foreach ($rows as $row) {
-            if ((int)$row['schedule_type'] === 1) {
-                $hasWork = true;
-                if ($row['start_time'] && $row['end_time']) {
-                    if ($row['start_time'] > '00:00') {
-                        $slots[] = [
-                            $serviceDate . ' 00:00:00',
-                            $this->buildScheduleSlotDatetime($serviceDate, (string)$row['start_time'], false),
-                        ];
-                    }
-                    if ($row['end_time'] < '23:59') {
-                        $slots[] = [
-                            $this->buildScheduleSlotDatetime($serviceDate, (string)$row['end_time'], false),
-                            $serviceDate . ' 23:59:59',
-                        ];
-                    }
-                }
-            } elseif ((int)$row['schedule_type'] === 0) {
-                if (!$row['start_time'] && !$row['end_time']) {
-                    $fullDayRest = true;
-                }
-            }
+        if (strpos($time, ' ') !== false) {
+            return $time;
         }
-        if ($fullDayRest && !$hasWork) {
-            return [[$serviceDate . ' 00:00:00', $serviceDate . ' 23:59:59']];
+        if (preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $time)) {
+            return $serviceDate . ' ' . $time;
         }
-        return $slots;
+        if (preg_match('/^\d{1,2}:\d{2}$/', $time)) {
+            return $serviceDate . ' ' . $time . ($isEnd ? ':59' : ':00');
+        }
+        return $serviceDate . ' ' . $time;
     }
 
     /** New-generation V3 is the only availability authority after cutover. */
@@ -537,14 +505,31 @@ class StoreReservationStaffServices extends BaseServices
         $query = Db::name('cashier_v3_reservation')
             ->where('tenant_id', \app\services\cashier\v3\CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
-            ->where('store_id', $storeId)
             ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE']);
+        $rosterEnabled = \app\services\store\roster\StaffRosterSwitch::enabled();
+        $aliases = $staffId > 0 ? ($rosterEnabled ? StaffRosterAvailability::aliases([$staffId]) : [$staffId]) : [];
+        if ($staffId <= 0 || !$rosterEnabled) $query->where('store_id', $storeId);
         if ($excludeReservationId > 0) $query->where('id', '<>', $excludeReservationId);
         $fromTs = $fromDate ? strtotime($fromDate) : 0;
-        if ($fromTs > 0) $query->where('appointment_end_at', '>=', $fromTs);
-        $headers = $query->field('id,appointment_start_at,appointment_end_at,status')->order('appointment_start_at asc,id asc')->select();
+        if ($fromTs > 0) {
+            $query->where('appointment_end_at', '>=', $fromTs);
+            if ($staffId > 0) $query->where('appointment_start_at', '<', $fromTs + 3 * 86400);
+        }
+        $headers = $staffId > 0 && $rosterEnabled
+            ? StaffRosterAvailability::reservations([$staffId], $fromTs ?: 1, $fromTs > 0 ? $fromTs + 3 * 86400 : PHP_INT_MAX, $excludeReservationId)
+            : $query->field('id,appointment_start_at,appointment_end_at,status')->order('appointment_start_at asc,id asc')->select();
         $headers = is_object($headers) && method_exists($headers, 'toArray') ? $headers->toArray() : (array)$headers;
         if (!$headers) return [];
+        if ($staffId > 0 && $rosterEnabled) {
+            // 权威关联查询已限定统一员工；直接投影到当前任职，不能再从RR旧快照
+            // 二次读取人员关系，否则会把刚刚提交的预约误判为无人预约。
+            return array_map(static function (array $header) use ($staffId): array {
+                $start = (int)$header['appointment_start_at']; $end = (int)$header['appointment_end_at'];
+                return ['id' => (int)$header['id'], 'service_staff_id' => $staffId, 'staff_choose' => [['staff_id' => $staffId]],
+                    'reservation_time' => $start, 'reservation_start' => date('H:i:s', $start), 'reservation_end' => date('H:i:s', $end),
+                    'service_duration_minutes' => max(1, (int)ceil(($end - $start) / 60)), 'status' => $header['status']];
+            }, $headers);
+        }
         $reservationIds = array_values(array_unique(array_map('intval', array_column($headers, 'id'))));
         $staffByReservation = [];
         // New time-only appointments have no project line. Their booking
@@ -576,7 +561,7 @@ class StoreReservationStaffServices extends BaseServices
         $list = [];
         foreach ($headers as $header) {
             $ids = array_values($staffByReservation[(int)$header['id']] ?? []);
-            if (!$ids || ($staffId > 0 && !in_array($staffId, $ids, true))) continue;
+            if (!$ids || ($staffId > 0 && !array_intersect($aliases, $ids))) continue;
             $start = (int)$header['appointment_start_at'];
             $end = max($start + 60, (int)$header['appointment_end_at']);
             $list[] = [
@@ -591,8 +576,8 @@ class StoreReservationStaffServices extends BaseServices
             ];
         }
         if ($staffId) {
-            $list = array_values(array_filter($list, function ($item) use ($staffId) {
-                return in_array($staffId, $this->extractReservationStaffIds($item), true);
+            $list = array_values(array_filter($list, function ($item) use ($aliases) {
+                return (bool)array_intersect($aliases, $this->extractReservationStaffIds($item));
             }));
         } else {
             $list = array_values(array_filter($list, function ($item) {
@@ -648,24 +633,6 @@ class StoreReservationStaffServices extends BaseServices
     /**
      * 排班/休息时段拼接为完整 datetime（兼容 HH:mm 与 HH:mm:ss）
      */
-    protected function buildScheduleSlotDatetime(string $serviceDate, string $time, bool $isEnd = false): string
-    {
-        $time = trim($time);
-        if ($time === '') {
-            return $isEnd ? $serviceDate . ' 23:59:59' : $serviceDate . ' 00:00:00';
-        }
-        if (strpos($time, ' ') !== false) {
-            return $time;
-        }
-        if (preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $time)) {
-            return $serviceDate . ' ' . $time;
-        }
-        if (preg_match('/^\d{1,2}:\d{2}$/', $time)) {
-            return $serviceDate . ' ' . $time . ($isEnd ? ':59' : ':00');
-        }
-        return $serviceDate . ' ' . $time;
-    }
-
     /**
      * 预约选人：指定日期时段是否可选
      */
@@ -685,7 +652,9 @@ class StoreReservationStaffServices extends BaseServices
         }
         $serviceTime = trim($serviceTime);
         if ($serviceTime === '') {
-            return true;
+            // 尚未选择具体时间时仍须属于当天上班名单；开关关闭不增加新的预约限制。
+            return !\app\services\store\roster\StaffRosterSwitch::enabled()
+                || in_array($staffId, (new StaffRosterAvailability())->workingStaffIds([$staffId], $storeId, $serviceDate ?: date('Y-m-d')), true);
         }
         if (!$serviceDate) {
             $serviceDate = date('Y-m-d');
@@ -701,8 +670,7 @@ class StoreReservationStaffServices extends BaseServices
         $rangeEnd = $appointmentTs + $serviceDuration * 60;
         /** @var StoreStaffScheduleServices $scheduleServices */
         $scheduleServices = app()->make(StoreStaffScheduleServices::class);
-        if ($scheduleServices->isScheduleManageEnabled()
-            && !$scheduleServices->isStaffScheduledForSlot($staffId, $storeId, $serviceDate, $appointmentTs, $rangeEnd)) {
+        if (!$scheduleServices->isStaffScheduledForSlot($staffId, $storeId, $serviceDate, $appointmentTs, $rangeEnd)) {
             return false;
         }
         return $this->isStaffAvailable($staffId, $storeId, $appointmentTs, $serviceDuration, $excludeReservationId);

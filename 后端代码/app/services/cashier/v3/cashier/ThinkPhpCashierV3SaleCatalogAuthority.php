@@ -18,6 +18,8 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         'allow_negative_stock', 'card_num', 'card_num_type', 'card_rule_type',
         'card_rule_version', 'card_choice_limit', 'card_shared_times',
         'block_writeoff_on_debt',
+        // 只投影商品已有统计类型，供目录分组；不参与价格、卡项规则或结账版本。
+        'card_statistics_type',
     ];
 
     private const SKU_FIELDS = [
@@ -72,6 +74,32 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
                 (string)($row['product_cate_id'] ?? ''),
                 $categories
             );
+        }
+        unset($row);
+        return $this->withCardStatisticsTypes($rows);
+    }
+
+    /**
+     * 门店副本沿用总部商品当前统计类型；独立门店卡沿用自身配置。
+     * 仅批量补充已在本店目录里的卡，不追加总部/外店商品，不改变结账权威快照。
+     */
+    private function withCardStatisticsTypes(array $rows): array
+    {
+        $parentIds = [];
+        foreach ($rows as $row) {
+            if ((int)($row['product_product_type'] ?? 0) === 5 && (int)($row['product_pid'] ?? 0) > 0) {
+                $parentIds[] = (int)$row['product_pid'];
+            }
+        }
+        if (!$parentIds) return $rows;
+        $types = Db::name('store_product')->whereIn('id', array_values(array_unique($parentIds)))
+            ->where('type', 0)->where('relation_id', 0)->where('product_type', 5)
+            ->column('card_statistics_type', 'id');
+        foreach ($rows as &$row) {
+            $parentId = (int)($row['product_pid'] ?? 0);
+            if ((int)($row['product_product_type'] ?? 0) === 5 && array_key_exists($parentId, $types)) {
+                $row['product_card_statistics_type'] = (int)$types[$parentId];
+            }
         }
         unset($row);
         return $rows;

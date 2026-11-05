@@ -26,6 +26,8 @@ class CashierV3StaffFeatureOverrideServices
         return [
             'cashier.v3.cashier.recharge', 'cashier.v3.cashier.gift', 'cashier.v3.cashier.checkout',
             'cashier.v3.cashier.old_card_entry',
+            // 根投影只下发按钮显示选择；这两项不参与命令权限策略。
+            'cashier.v3.cashier.custom_card_entry', 'cashier.v3.cashier.ordinary_card_edit',
             'cashier.v3.cashier.card.upgrade', 'cashier.v3.cashier.card.extend',
             'cashier.v3.cashier.card.transfer', 'cashier.v3.cashier.card.disable',
             'cashier.v3.cashier.card.enable', 'cashier.v3.cashier.card.project_replace',

@@ -178,7 +178,7 @@ final class CashierV3ReservationModule
                     'draft' => $draft,
                     'catalogOptions' => $options,
                     'businessSources' => (new CashierV3BusinessConfigServices())->sourceTree(true),
-                    'craftsmenOptions' => self::craftsmen($operator),
+                    'craftsmenOptions' => self::craftsmen($operator, $draft, (int)($payload['reservationId'] ?? 0)),
                     'rooms' => $rooms->roomCandidates($operator, $dataScope),
                 ]], 'message' => '预约编辑器已准备完成。'];
             });
@@ -291,7 +291,11 @@ final class CashierV3ReservationModule
                 $reservation['appointmentEndAt'] = $endAt;
                 $reservation['scheduleCalculationReady'] = true;
                 $reservation['scheduleRecalculationRequestId'] = $requestId;
-                return ['data' => ['reservationPlan' => ['recalculationRequestId' => $requestId, 'draft' => $reservation, 'hasConflict' => false, 'conflicts' => []]], 'message' => '预约时长已计算。'];
+                // 只投影可用性；不替换用户确认的时段，正式提交仍在事务内重新校验。
+                $options = self::craftsmen($scope['operator_scope'], $reservation, (int)($payload['reservationId'] ?? 0));
+                $selected = self::positiveIds($reservation['craftsmen'] ?? []);
+                $conflicts = array_values(array_filter($options, static fn(array $row): bool => in_array($row['staffId'], $selected, true) && !$row['selectable']));
+                return ['data' => ['reservationPlan' => ['recalculationRequestId' => $requestId, 'draft' => $reservation, 'craftsmenOptions' => $options, 'hasConflict' => (bool)$conflicts, 'conflicts' => $conflicts]], 'message' => '预约时段已核对。'];
             });
         }
 
@@ -1200,9 +1204,26 @@ final class CashierV3ReservationModule
         Db::name('cashier_v3_reservation_operation')->insert(['tenant_id' => $tenantId, 'command_idempotency_key' => $key, 'reservation_id' => $reservationId, 'operation_type' => $type, 'version_before' => $before, 'version_after' => $after, 'result_json' => self::json($result), 'occurred_at' => $now, 'recorded_at' => $now]);
     }
 
-    private static function craftsmen(CashierV3OperatorScope $operator): array
+    /** 准备页与重算页使用同一完整服务时段，供门店和商家展示可选/不可预约员工。 */
+    private static function craftsmen(CashierV3OperatorScope $operator, array $draft = [], int $excludeId = 0): array
     {
-        return array_map(static function (array $row): array { return ['id' => (int)$row['id'], 'staffId' => (int)$row['id'], 'name' => (string)$row['staff_name'], 'selectable' => true]; }, self::rows(Db::name('system_store_staff')->where('store_id', $operator->storeId())->where('is_del', 0)->where('status', 1)->field('id,staff_name')->order('id asc')->select()));
+        $enabled = \app\services\store\roster\StaffRosterSwitch::enabled();
+        $start = $draft['appointmentTime'] ?? $draft['appointmentStartAt'] ?? '';
+        $end = $draft['appointmentEndAt'] ?? '';
+        $startAt = $start ? self::timestamp($start, '请选择有效的开始时间。') : 0;
+        $endAt = $end ? self::timestamp($end, '请选择有效的结束时间。') : 0;
+        $availability = app()->make(\app\services\store\StoreReservationStaffServices::class);
+        $query = Db::name('system_store_staff')->where('store_id', $operator->storeId())->where('is_del', 0)->where('status', 1);
+        if ($enabled) $query->where('cashier_craftsman_enabled', 1);
+        $staffRows = self::rows($query->field('id,staff_name')->order('id asc')->select());
+        $date = $startAt > 0 ? date('Y-m-d', $startAt) : (string)($draft['appointmentDate'] ?? date('Y-m-d'));
+        $working = $enabled ? (new \app\services\store\roster\StaffRosterAvailability())->workingStaffIds(array_column($staffRows, 'id'), $operator->storeId(), $date) : [];
+        return array_map(static function (array $row) use ($operator, $startAt, $endAt, $excludeId, $availability, $enabled, $working): array {
+            $selectable = !$enabled ? true : ($startAt > 0 && $endAt > $startAt
+                ? $availability->isStaffSelectableForReservation((int)$row['id'], $operator->storeId(), date('Y-m-d', $startAt), date('H:i:s', $startAt), (int)ceil(($endAt - $startAt) / 60), $excludeId)
+                : in_array((int)$row['id'], $working, true) && $availability->isStaffOnDuty((int)$row['id']));
+            return ['id' => (int)$row['id'], 'staffId' => (int)$row['id'], 'name' => (string)$row['staff_name'], 'selectable' => $selectable, 'disabledReason' => $selectable ? '' : '该时段不可预约'];
+        }, $staffRows);
     }
 
     private static function onlyCatalogSku(int $projectId, array $options): int

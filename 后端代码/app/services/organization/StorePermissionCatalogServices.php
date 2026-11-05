@@ -70,6 +70,8 @@ final class StorePermissionCatalogServices
     public static function navigationItems(): array
     {
         $items=[];
+        // 排班入口复用人员管理资格，导航元数据本身不新增岗位授权。
+        $items[-34001]=['id'=>-34001,'title'=>'排班管理','navigation_key'=>'staff.roster','owner_feature'=>'cashier.v3.management.staff','parent_id'=>301060,'sort'=>40];
         $items[-29001]=['id'=>-29001,'title'=>'合作方品项汇总','navigation_key'=>'report.partner_item_summary','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>0];
         $items[-29002]=['id'=>-29002,'title'=>'合作方品项明细','navigation_key'=>'report.partner_item_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>10];
         $items[-29003]=['id'=>-29003,'title'=>'会员消费明细','navigation_key'=>'report.member_consumption_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>20];
@@ -238,6 +240,53 @@ final class StorePermissionCatalogServices
             $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
             Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
             Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'R59_STORE_PROFILE_PERMISSION','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
+    /**
+     * 显式的一次性按钮显示升级：仅现有收银岗位继承原显示效果。
+     * 审计标记与配置同事务提交，重复执行不得勾回管理员后来取消的选项。
+     * 不注册命令策略，不修改系统开关或任何收银业务事实。
+     */
+    public function initializeCardButtonVisibilityPermissions(): int
+    {
+        return Db::transaction(function (): int {
+            $before = Db::name(self::TABLE)->where('id', 1)->lock(true)->find();
+            if (!$before) throw new \RuntimeException('请先初始化门店端权限目录');
+            $action = 'R4_CARD_BUTTON_VISIBILITY';
+            if (Db::name('store_v3_permission_audit')->where('action', $action)->count()) return 0;
+            $rows = json_decode((string)$before['rules_json'], true);
+            if (!is_array($rows)) throw new \RuntimeException('门店端权限目录格式无效');
+            $definitions = self::definitions();
+            $byId = array_column($rows, null, 'id');
+            foreach ([301052, 301053] as $id) {
+                if (isset($byId[$id]) && $byId[$id]['feature_code'] !== $definitions[$id]['feature_code']) {
+                    throw new \RuntimeException('卡按钮显示权限编号冲突');
+                }
+                if (!isset($byId[$id])) $rows[] = $definitions[$id];
+            }
+            $this->validateRows($rows);
+            $changes = [];
+            // 含停用岗位：日后重新启用时仍保持升级前的显示效果，不打开其他渠道。
+            $rules = Db::name('job_position_channel_rule')->where('channel', 'store_v3')
+                ->order('id asc')->lock(true)->select()->toArray();
+            foreach ($rules as $row) {
+                $ids = array_values(array_filter(array_map('intval', explode(',', (string)$row['rules']))));
+                if (!in_array('cashier.v3.cashier', self::explicitFeatures($ids), true)) continue;
+                $next = array_values(array_unique(array_merge($ids, [301052, 301053])));
+                if ($ids === $next) continue;
+                $after = ['rules' => implode(',', $next), 'version' => (int)$row['version'] + 1, 'update_time' => time()];
+                Db::name('job_position_channel_rule')->where('id', (int)$row['id'])->update($after);
+                $changes[] = ['before' => $row, 'after' => array_replace($row, $after)];
+            }
+            $json = json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id', 1)->update(['rules_json' => $json,
+                'revision' => (int)$before['revision'] + 1, 'updated_at' => time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id' => 0, 'action' => $action,
+                'before_json' => json_encode(['catalog' => $before, 'positions' => array_column($changes, 'before')], JSON_UNESCAPED_UNICODE),
+                'after_json' => json_encode(['catalog' => $rows, 'positions' => array_column($changes, 'after')], JSON_UNESCAPED_UNICODE),
+                'created_at' => time()]);
+            return count($changes);
         });
     }
 

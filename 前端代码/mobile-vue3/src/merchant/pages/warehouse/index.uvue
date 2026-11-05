@@ -280,6 +280,12 @@
 			openMerchantEmployeePerformance(Number(row.entityId || 0), periodMode.value, month.value, customStartDate.value, customEndDate.value, selectedRankingCode.value === 'staff_labor_performance' ? 'labor' : 'cash')
 			return
 		}
+		if (String(row.entityType || '') === 'store') {
+			// 两处门店排行都进入同一单店详情：保留日期，切到该店员工业绩栏目。
+			selectedRankingCode.value = 'staff_cash_performance'
+			loadNode('store', Number(row.entityId || 0))
+			return
+		}
 		loadNode(String(row.entityType || ''), Number(row.entityId || 0))
 	}
 	function selectMetric(metric : any) : void {
@@ -462,6 +468,8 @@
 		// 总部指定门店授权可逐级查看组织排行；服务端始终将节点限制在
 		// 当前授权门店的投影内，本店权限不因此获得组织导航入口。
 		if (selectedRankingCode.value === 'organization') return (organizationPickerEnabled.value || selectedStoreRankingScope.value) && (type === 'organization' || type === 'branch' || type === 'manager' || type === 'store')
+		// 门店排行直接复用组织排行的单店节点读取，沿用日期筛选及后端授权校验。
+		if (selectedRankingCode.value === 'store') return type === 'store' && Number(row.entityId || 0) > 0
 		return type === 'employee' && (selectedRankingCode.value === 'staff_cash_performance' || selectedRankingCode.value === 'staff_labor_performance' || selectedRankingCode.value === 'staff_designated_customer')
 	}
 	function trendMetricName() : string { return String((trend.value || {}).metricName || '现金业绩') }

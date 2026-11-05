@@ -406,6 +406,8 @@ function configuredNavigation(items) {
 const topNavigationEntries = computed(() => [
   ...configuredNavigation(menuDefinitions).filter(item => canUseFeature(item.featureCode)),
   ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
+  // 排班复用人员管理资格，保留独立入口名称，避免岗位配置标题覆盖成另一个人员列表。
+  ...(canUseFeature('cashier.v3.management.staff') ? [{ key: 'staff-roster', navigationKey: 'staff.roster', label: '排班管理', featureCode: 'cashier.v3.management.staff', to: { name: 'cashier-v3-staff-roster' } }] : []),
   ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
   // 基础报表独立授权；旧“数据”岗位继续可用，且不因新勾选获得其他数据报表。
   ...(canUseFeature('cashier.v3.basic_reports')
@@ -441,7 +443,7 @@ const allowedTopActions = new Set([
   'open-recharge',
   'open-gift'
 ])
-const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer', 'imported-card-refund'])
+const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer'])
 const memberSelectorActions = {
   writeoff: 'select-writeoff-member',
   reservation: 'select-reservation-member'
@@ -487,6 +489,7 @@ const headerlessPageNames = new Set([
   'cashier-v3-care',
   'cashier-v3-order-center',
   'cashier-v3-staff-list',
+  'cashier-v3-staff-roster',
   'cashier-v3-store-business-reports',
   'cashier-v3-store-target-dashboard'
 ])
@@ -968,15 +971,12 @@ async function queryMemberSelector(query) {
   }
   const selectorContext = memberSelectorContext.value === 'card-transfer'
     ? 'cashier'
-    : memberSelectorContext.value === 'imported-card-refund'
-      ? 'imported-card-refund'
     : memberSelectorContext.value
   // member-referrer constrains the result set, but is not an authorization
   // entry. This selector is opened from cashier and must use its grant.
-  // 退款会员范围须由后端按本店/全部处理，授权仍固定走订单中心入口。
   const selectorEntry = selectorContext === 'member-referrer'
     ? 'cashier'
-    : selectorContext === 'imported-card-refund' ? 'order_center' : selectorContext
+    : selectorContext
   const result = await requestCashierV3Action('query-member-selector', {
     ...query,
     selectorContext,
@@ -1019,7 +1019,7 @@ async function queryRecentMemberSelector({ memberIds, memberScope }) {
 }
 
 async function selectMemberFromSelector(record) {
-  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer', 'imported-card-refund'].includes(memberSelectorContext.value)) {
+  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer'].includes(memberSelectorContext.value)) {
     // 转让和预约都只回填选择结果。预约没有收银工作台上下文，也不需要
     // 为选择会员发送一笔服务端写命令；正式保存时仅写预约单据本身。
     isMemberSelectorOpen.value = false
@@ -3089,13 +3089,11 @@ onBeforeUnmount(() => {
     :page-size="memberSelector.pageSize || 20"
     :is-loading="Boolean(memberSelector.isLoading)"
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
-    :title="memberSelectorContext === 'imported-card-refund' ? '选择退款会员' : '选择会员'"
-    :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
-    :show-scope-toggle="['cashier', 'reservation', 'imported-card-refund'].includes(memberSelectorContext)"
+    title="选择会员"
+    :allow-create="canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
+    :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
     :default-scope="['cashier', 'reservation'].includes(memberSelectorContext) && state.storeDisplayOptions?.memberDefaultAll === true ? 'all' : 'store'"
     :hide-scope-controls="['cashier', 'reservation'].includes(memberSelectorContext) && state.storeDisplayOptions?.memberDefaultAll === true"
-    :align-scope-right="memberSelectorContext === 'imported-card-refund'"
-    :show-name-initials-hint="memberSelectorContext !== 'imported-card-refund'"
     :current-store-name="state.storeName || ''"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"

@@ -324,6 +324,9 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.cashier.gift': false,
     'cashier.v3.cashier.checkout': false,
     'cashier.v3.cashier.old_card_entry': false,
+    // 岗位仅控制这两个按钮可见性，不新增提交校验。
+    'cashier.v3.cashier.custom_card_entry': false,
+    'cashier.v3.cashier.ordinary_card_edit': false,
     'cashier.v3.cashier.card.upgrade': false,
     'cashier.v3.cashier.card.extend': false,
     'cashier.v3.cashier.card.transfer': false,
@@ -522,6 +525,9 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.cashier.checkout': true,
     // The standalone historical-card route requires an explicit position grant, even in local previews.
     'cashier.v3.cashier.old_card_entry': false,
+    // 岗位仅控制这两个按钮可见性，不新增提交校验。
+    'cashier.v3.cashier.custom_card_entry': true,
+    'cashier.v3.cashier.ordinary_card_edit': true,
     'cashier.v3.cashier.card.upgrade': true,
     'cashier.v3.cashier.card.extend': true,
     'cashier.v3.cashier.card.transfer': true,

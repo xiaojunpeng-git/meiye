@@ -2,8 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
+import GiftCouponUsageOverlay from '@/components/order/GiftCouponUsageOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
+import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
 import { guideRequiredField, REQUIRED_FIELD_GUIDANCE_EVENT, REQUIRED_FIELD_GUIDANCE_DURATION_MS } from '@/services/requiredFieldGuidance'
 import { memberDetailActionAllowed } from '@/services/memberDetailActionPolicy'
@@ -36,6 +38,7 @@ import {
 import {
   openSalesOrderReceiptPrint
 } from '@/services/salesOrderReceiptPrint'
+import { readOrderReceipt } from '@/services/orderReceiptQuery'
 import {
   businessReceiptFromRecord,
   businessReceiptRefreshQuery,
@@ -172,6 +175,11 @@ const visibleRefundCatalogItems = computed(() => unifiedRefundCatalogItems.value
     && (!keyword || [item.name, item.specification, item.code].some((part) => String(part || '').toLocaleLowerCase().includes(keyword)))
 }))
 const unifiedRefundComponentId = ref('')
+// 每次打开默认整卡；它与项目选择是不同目标，不能继承一个隐藏的项目编号。
+const unifiedCardRefundScope = ref('whole')
+let refundMemberQuerySerial = 0
+const refundMemberSelectorOpen = ref(false)
+const refundMemberSelector = ref({ records: [], total: 0, page: 1, pageSize: 20 })
 const unifiedRefundKeyword = ref('')
 const unifiedRefundBalanceAmount = ref('0')
 // 退款业务日可补录过去日期；实际提交时间仍由服务端记录，不能由表单回填。
@@ -209,9 +217,11 @@ const importedCardRefundTotal = ref(0)
 const selectedUnifiedRefundCard = computed(() => importedCardRefundCards.value.find(
   (card) => String(card.holderId) === String(importedCardRefundHolderId.value)
 ))
-watch(importedCardRefundHolderId, () => {
+watch([importedCardRefundHolderId, unifiedCardRefundScope], () => {
   // A shared-count card has one whole-card refund target, not one per project.
-  unifiedRefundComponentId.value = selectedUnifiedRefundCard.value?.ruleType === 'choice_count' ? '0' : ''
+  unifiedRefundComponentId.value = unifiedCardRefundScope.value === 'whole'
+    ? '0' : selectedUnifiedRefundCard.value?.ruleType === 'choice_count' ? '0' : ''
+  unifiedRefundVoid.value = unifiedRefundMode.value === 'card' && unifiedCardRefundScope.value === 'whole'
   const end = Number(selectedUnifiedRefundCard.value?.validThrough || 0)
   unifiedRefundValidThrough.value = end > 0
     ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(end * 1000))
@@ -369,7 +379,7 @@ const ORDER_TABS = [
     fields: [
       field('gift_record_no', '赠送记录号', 'text', { quickFilterHidden: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
-      field('member_name', '会员姓名'), field('gift_source', '赠送来源'),
+      field('member_name', '会员姓名'), field('phone', '手机号码'), field('gift_source', '赠送来源'),
       field('gift_type', '赠送类型'), field('gift_content', '赠送内容'), field('gift_quantity', '赠送数量', 'number'),
       field('effective_at', '生效时间', 'date'), field('expires_at', '到期时间', 'date'),
       field('gift_status', '赠送状态', 'status'), field('store', '办理门店', 'store'),
@@ -618,6 +628,10 @@ const isSalesDetailLoading = ref(false)
 const salesDetailLoadError = ref('')
 const SALES_DETAIL_REQUEST_TIMEOUT_MS = 15000
 const genericDetailRecord = ref(null)
+const giftUsageRecordId = ref('')
+const giftUsageType = ref('coupon')
+// 详情跟随当前会话和组织范围；旧范围弹窗不得留在新范围下继续翻页。
+watch([activeTabKey, platformScopeStoreIds, () => state.stateContextId], () => { giftUsageRecordId.value = '' }, { deep: true })
 const initialDetailLifecycleAction = ref('')
 const salesPrintLoading = ref({})
 const salesOrderActionIds = ref({})
@@ -823,14 +837,50 @@ function requestAction(action, payload = {}) {
 
 function openImportedCardRefundMemberSelector() {
   importedCardRefundError.value = ''
-  window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
-    detail: { context: 'imported-card-refund', requireMember: true }
-  }))
+  // 退款选客由共用订单页承接，两端均复用同一选择器，不依赖门店壳层事件。
+  refundMemberQuerySerial++
+  refundMemberSelector.value = { records: [], total: 0, page: 1, pageSize: 20 }
+  refundMemberSelectorOpen.value = true
+}
+
+/** 组织筛选只提示本次办理门店；管理员身份与最终数据范围仍由同一服务端核验。 */
+function requestRefundAction(action, payload = {}) {
+  return requestAction(action, isPlatformContext.value ? {
+    ...applyPlatformScope(payload),
+    ...(platformScopeStoreIds.value.length === 1 ? { operationStoreId: platformScopeStoreIds.value[0] } : {})
+  } : payload)
+}
+
+async function queryRefundMembers(query) {
+  // 晚到的查询不能覆盖重新打开的选择器或下一次筛选结果。
+  const serial = ++refundMemberQuerySerial
+  const response = await requestRefundAction('query-member-selector', {
+    ...query, selectorContext: 'imported-card-refund', selectorEntry: 'order_center', preserveRootState: true
+  })
+  if (serial === refundMemberQuerySerial && refundMemberSelectorOpen.value
+    && ['success', 'succeeded'].includes(actionStatus(response))) {
+    const data = actionData(response)
+    refundMemberSelector.value = { records: data.records || [], total: Number(data.total) || 0,
+      page: Number(data.page) || 1, pageSize: Number(data.pageSize) || 20 }
+  }
+  return response
+}
+
+function closeRefundMemberSelector() {
+  refundMemberQuerySerial++
+  refundMemberSelectorOpen.value = false
+}
+
+function selectRefundMember(record) {
+  closeRefundMemberSelector()
+  void loadImportedCardRefundCards(record)
+  return { result: { status: 'success' } }
 }
 
 function changeUnifiedRefundMode(mode) {
   if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value || unifiedRefundMode.value === mode) return
   unifiedRefundMode.value = mode
+  unifiedCardRefundScope.value = 'whole'
   // 卡项与单据使用不同的搜索字段，切换时不能沿用上一模式的筛选词。
   unifiedRefundKeyword.value = ''
   importedCardRefundHolderId.value = ''
@@ -878,7 +928,7 @@ async function loadImportedCardRefundCards(member, page = 1) {
   importedCardRefundError.value = ''
   importedCardRefundLoading.value = true
   try {
-    const response = await requestAction('query-unified-refund-candidates', {
+    const response = await requestRefundAction('query-unified-refund-candidates', {
       memberId, mode: unifiedRefundMode.value, page, pageSize: 50,
       keyword: unifiedRefundKeyword.value
     })
@@ -932,11 +982,6 @@ function selectUnifiedRefundCatalogItem(item) {
   importedCardRefundAmount.value = ''
 }
 
-function handleImportedCardRefundMemberSelected(event) {
-  if (event?.detail?.context !== 'imported-card-refund') return
-  void loadImportedCardRefundCards(event.detail.record)
-}
-
 function closeImportedCardRefund() {
   if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value) return
   importedCardRefundQuerySerial++
@@ -956,6 +1001,7 @@ function closeImportedCardRefund() {
   importedCardRefundAmount.value = ''
   unifiedRefundBalanceAmount.value = '0'
   // 每次新开退款都从卡项模式开始；余额退款不继承上次的账户版本。
+  unifiedCardRefundScope.value = 'whole'
   unifiedRefundBusinessDate.value = ''
   unifiedRefundMode.value = 'card'
   unifiedRefundKeyword.value = ''
@@ -988,7 +1034,7 @@ watch(
       || (mode === 'card' ? !holderId : mode === 'document' ? !lineId : mode === 'catalog' ? !catalogItemId : false)) return
     unifiedRefundPersonnelLoading.value = true
     try {
-      const response = await requestAction('query-unified-refund-salespeople', {
+      const response = await requestRefundAction('query-unified-refund-salespeople', {
         mode, memberId: Number(memberId), holderId: Number(holderId || 0), lineId: String(lineId || ''), catalogItemId: Number(catalogItemId || 0)
       })
       if (serial !== unifiedRefundPersonnelSerial) return
@@ -1172,8 +1218,9 @@ async function submitImportedCardRefund() {
   const balanceAmount = String(unifiedRefundBalanceAmount.value || '0').trim()
   const reason = String(importedCardRefundReason.value || '').trim()
   const businessDate = String(unifiedRefundBusinessDate.value || '').trim()
-  if (unifiedRefundMode.value === 'card' && (!card?.canRefund || unifiedRefundComponentId.value === '')) {
-    importedCardRefundError.value = '请选择一张卡的可退款项目。'; return
+  const entireCard = mode === 'card' && unifiedCardRefundScope.value === 'whole'
+  if (unifiedRefundMode.value === 'card' && (!card?.canRefund || (!entireCard && unifiedRefundComponentId.value === ''))) {
+    importedCardRefundError.value = entireCard ? '请选择一张可退款的卡。' : '请选择一张卡的可退款项目。'; return
   }
   if (mode === 'document' && !line) {
     importedCardRefundError.value = '请选择单据中的一条购买项目或产品明细。'; return
@@ -1196,20 +1243,13 @@ async function submitImportedCardRefund() {
   if (mode === 'balance' && Number(balanceAmount) <= 0) {
     importedCardRefundError.value = '扣减余额必须大于 0。'; return
   }
-  // Card candidates expose the debt-adjusted amount separately; the gross
-  // unconsumed value remains the immutable rights/refund history basis.
-  const remaining = mode === 'card'
-    ? Number(card?.usableRemainingAmountCents || 0) / 100 : Number(line?.remainingAmountCents || 0) / 100
-  const targetRemaining = mode === 'card'
-    ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.usableRemainingAmountCents || 0) / 100
-    : remaining
-  // Only a zero-price card with zero cash refund may grant extra bonus credit;
-  // all cash refunds and paid-card bonus transfers retain their source cap.
-  const zeroPriceBonusGrant = mode === 'card' && Number(card?.purchaseAmountCents || 0) === 0 && Number(amount) === 0
+  // 卡项的现金与转入余额都由用户手填，不以成交额／余值作上限；
+  // 单据和钱包模式仍保留原金额校验，权益扣减由后端锁定后单独计算。
+  const remaining = Number(line?.remainingAmountCents || 0) / 100
   if (mode === 'balance' && Number(balanceAmount) > Number(unifiedRefundWallet.value.totalCents) / 100) {
     importedCardRefundError.value = '扣减余额超过当前剩余余额，请重新查询。'; return
   }
-  if (!['catalog', 'balance'].includes(mode) && (Number(amount) > targetRemaining || (!zeroPriceBonusGrant && Number(balanceAmount) > remaining))) {
+  if (mode === 'document' && (Number(amount) > remaining || Number(balanceAmount) > remaining)) {
     importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
   }
   if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
@@ -1226,10 +1266,11 @@ async function submitImportedCardRefund() {
   importedCardRefundUncertain.value = true
   importedCardRefundError.value = ''
   try {
-    const response = await requestAction('refund-card-or-line', {
+    const response = await requestRefundAction('refund-card-or-line', {
       mode,
+      cardRefundScope: mode === 'card' ? unifiedCardRefundScope.value : 'partial',
       holderId: card?.holderId || 0,
-      componentId: Number(unifiedRefundComponentId.value || 0),
+      componentId: entireCard ? 0 : Number(unifiedRefundComponentId.value || 0),
       lineId: line?.lineId || '',
       catalogItemId: mode === 'catalog' ? Number(catalogItem.skuId) : 0,
       memberId: Number(importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id || 0),
@@ -1241,8 +1282,8 @@ async function submitImportedCardRefund() {
       salespeople: refundPersonnelPayload(unifiedRefundSalespeople.value),
       guideSelections: unifiedRefundGuides.value.map((person) => ({ staffId: Number(person.employeeId || person.staffId || person.id), guideRoundNo: 0 })),
       salesManagerSelections: unifiedRefundSalesManagers.value.map((person) => ({ staffId: Number(person.employeeId || person.staffId || person.id) })),
-      voidTarget: unifiedRefundVoid.value,
-      validThrough: unifiedRefundMode.value === 'card' && card?.isTimeCard
+      voidTarget: entireCard || unifiedRefundVoid.value,
+      validThrough: unifiedRefundMode.value === 'card' && card?.isTimeCard && !entireCard
         ? Math.floor(new Date(`${unifiedRefundValidThrough.value}T23:59:59+08:00`).getTime() / 1000) : 0,
       reason,
       idempotencyKey: importedCardRefundCommandId
@@ -1643,6 +1684,25 @@ function giftVoidRecordId(record) {
     if (markerIndex >= 0) return value.slice(markerIndex)
   }
   return ''
+}
+
+function openGiftUsage(record) {
+  // 动作能力由后端逐行显式给出；不能以显示名称猜测赠送来源或权益身份。
+  const projectId = String(record?.projectUsageRecordId || '')
+  const couponId = String(record?.couponUsageRecordId || '')
+  if (/^(?:v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+|gift:[1-9]\d*)$/.test(projectId)) {
+    giftUsageType.value = 'project'
+    giftUsageRecordId.value = projectId
+  } else if (/^v3-(?:direct-gift|gift):[A-Za-z0-9:._-]+$/.test(couponId)) {
+    giftUsageType.value = 'coupon'
+    giftUsageRecordId.value = couponId
+  }
+}
+function loadGiftUsage(payload) {
+  // 与列表共用当前组织收窄条件；只读详情回包不替换根工作台状态。
+  return requestAction(giftUsageType.value === 'project' ? 'query-gift-project-usage' : 'query-gift-coupon-usage', {
+    ...applyPlatformScope(payload), silent: true, preserveRootState: true
+  })
 }
 
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
@@ -3420,16 +3480,8 @@ async function printSalesOrderRecord(record = {}) {
   servicePrintError.value = ''
   salesPrintLoading.value = { ...salesPrintLoading.value, [orderId]: true }
   try {
-    const result = await requestAction('open-sales-order-detail', { orderId })
-    if (['failed', 'conflict', 'result_unknown'].includes(actionStatus(result))) {
-      servicePrintError.value = result?.result?.message || result?.message || '销售小票读取失败，请稍后重试。'
-      return
-    }
-    const detail = salesOrderProjectionFromResult(result)?.salesOrderDetail
-    if (!detail || String(detail.id || detail.orderId || detail.salesOrderId) !== orderId) {
-      servicePrintError.value = '销售订单详情尚未完整返回，请稍后重试。'
-      return
-    }
+    // 与收银成功页共用已落账订单详情，不接受列表行或购物车作为打印数据。
+    const detail = await readOrderReceipt(requestAction, orderId)
     const printed = openSalesOrderReceiptPrint(detail)
     if (!printed.ok) servicePrintError.value = printed.message
   } catch (error) {
@@ -4071,7 +4123,6 @@ onMounted(() => {
   window.addEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.addEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.addEventListener('cashier-v3:state-context-changed', resetLocalContext)
-  window.addEventListener('cashier-v3:member-selector-selected', handleImportedCardRefundMemberSelected)
   void loadSourceFilterOptions()
 })
 
@@ -4159,7 +4210,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.removeEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.removeEventListener('cashier-v3:state-context-changed', resetLocalContext)
-  window.removeEventListener('cashier-v3:member-selector-selected', handleImportedCardRefundMemberSelected)
 })
 </script>
 
@@ -4520,6 +4570,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <button v-if="activeTabKey === 'gift' && (record.couponUsageRecordId || record.projectUsageRecordId)" type="button"
+                class="button button--text" @click="openGiftUsage(record)">使用情况</button>
               <button v-if="canPrintBusinessRecord(record)" type="button" class="button button--text"
                 :disabled="Boolean(salesPrintLoading[String(record.id || '')])"
                 @click="printBusinessRecord(record)"
@@ -4685,6 +4737,9 @@ onBeforeUnmount(() => {
       @confirm="prepareRefundAttributionReason"
     />
 
+    <GiftCouponUsageOverlay v-if="giftUsageRecordId" :record-id="giftUsageRecordId" :usage-type="giftUsageType"
+      :load-usage="loadGiftUsage" @close="giftUsageRecordId = ''" />
+
     <BusinessRecordDetailOverlay
       v-if="genericDetailRecord"
       :title="`${recordTab(genericDetailRecord).label}详情`"
@@ -4746,16 +4801,24 @@ onBeforeUnmount(() => {
               </div>
             </section>
             <section class="unified-refund-dialog__component-panel" aria-label="选择卡内项目">
-              <div class="unified-refund-dialog__column-head"><h3>{{ selectedUnifiedRefundCard?.ruleType === 'choice_count' ? '整卡共享次数' : '卡内项目' }}</h3><span v-if="selectedUnifiedRefundCard">共 {{ selectedUnifiedRefundCard.components.length }} 项</span></div>
+              <div class="unified-refund-dialog__column-head unified-refund-dialog__component-head">
+                <h3>{{ selectedUnifiedRefundCard?.ruleType === 'choice_count' ? '整卡共享次数' : '卡内项目' }}</h3>
+                <div class="unified-refund-dialog__scope" role="radiogroup" aria-label="卡项退款范围">
+                  <label><input v-model="unifiedCardRefundScope" type="radio" name="unified-card-refund-scope" value="whole" :disabled="importedCardRefundUncertain" /> 整张卡</label>
+                  <label><input v-model="unifiedCardRefundScope" type="radio" name="unified-card-refund-scope" value="partial" :disabled="importedCardRefundUncertain" /> 部分项目</label>
+                </div>
+                <span v-if="selectedUnifiedRefundCard">共 {{ selectedUnifiedRefundCard.components.length }} 项</span>
+              </div>
               <template v-if="selectedUnifiedRefundCard">
-                <div class="unified-refund-dialog__component-list" role="radiogroup" aria-label="卡内项目">
-                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0) }">
-                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="(component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0)) || importedCardRefundUncertain" />
+                <p v-if="unifiedCardRefundScope === 'whole'" class="unified-refund-dialog__whole-hint">退款后作废本卡，无需选择项目。</p>
+                <div class="unified-refund-dialog__component-list" :role="unifiedCardRefundScope === 'partial' ? 'radiogroup' : 'list'" aria-label="卡内项目">
+                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--readonly': unifiedCardRefundScope === 'whole', 'unified-refund-dialog__component--disabled': component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0) }">
+                    <input v-if="unifiedCardRefundScope === 'partial'" v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="(component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0)) || importedCardRefundUncertain" />
                     <span class="unified-refund-dialog__component-name">{{ component.name }}</span>
                     <span class="unified-refund-dialog__component-remaining"><strong>{{ importedCardRefundMoney(component.usableRemainingAmountCents) }}</strong><small>剩余 {{ component.remainingTimes }} 次</small></span>
                   </label>
                 </div>
-                <div v-if="selectedUnifiedRefundCard.isTimeCard" class="unified-refund-dialog__field">
+                <div v-if="selectedUnifiedRefundCard.isTimeCard && unifiedCardRefundScope === 'partial'" class="unified-refund-dialog__field">
                   <label class="service-void-modal__label" for="unified-refund-valid-through">退款后有效期</label>
                   <input id="unified-refund-valid-through" v-model="unifiedRefundValidThrough" type="date" class="service-void-modal__textarea" required :readonly="importedCardRefundUncertain" />
                 </div>
@@ -4812,9 +4875,9 @@ onBeforeUnmount(() => {
         </div>
         <div class="unified-refund-dialog__field-row">
           <div class="unified-refund-dialog__choices" role="group" aria-label="作废选择">
-            <template v-if="!['catalog', 'balance'].includes(effectiveRefundMode)">
-              <label><input v-model="unifiedRefundVoid" type="radio" :value="false" /> 不作废</label>
-              <label><input v-model="unifiedRefundVoid" type="radio" :value="true" /> {{ unifiedRefundMode === 'card' ? '作废本卡' : '作废明细' }}</label>
+            <template v-if="!['catalog', 'balance'].includes(effectiveRefundMode) && !(effectiveRefundMode === 'card' && unifiedCardRefundScope === 'whole')">
+              <label><input v-model="unifiedRefundVoid" type="radio" :value="false" :disabled="importedCardRefundUncertain" /> 不作废</label>
+              <label><input v-model="unifiedRefundVoid" type="radio" :value="true" :disabled="importedCardRefundUncertain" /> {{ unifiedRefundMode === 'card' ? '作废本卡' : '作废明细' }}</label>
             </template>
           </div>
           <div class="unified-refund-dialog__field">
@@ -5128,6 +5191,17 @@ onBeforeUnmount(() => {
         </footer>
       </section>
     </div>
+    <MemberSelectorOverlay
+      v-if="refundMemberSelectorOpen"
+      v-bind="refundMemberSelector"
+      title="选择退款会员"
+      show-scope-toggle
+      align-scope-right
+      :show-name-initials-hint="false"
+      :on-query="queryRefundMembers"
+      :on-select="selectRefundMember"
+      @close="closeRefundMemberSelector"
+    />
     <MemberDetailOverlay
       v-if="isPlatformContext && platformMemberDetailOpen"
       :detail="platformMemberDetail || {}"
@@ -5356,6 +5430,11 @@ onBeforeUnmount(() => {
 .unified-refund-dialog__column-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex: none; margin-bottom: 10px; }
 .unified-refund-dialog__column-head h3 { margin: 0; color: #2c3c51; font-size: 14px; }
 .unified-refund-dialog__column-head > span { color: #66758b; font-size: 12px; white-space: nowrap; }
+.unified-refund-dialog__component-head { flex-wrap: wrap; }
+.unified-refund-dialog__scope { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.unified-refund-dialog__scope label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.unified-refund-dialog__whole-hint { flex: none; margin: 0 0 8px; color: #66758b; font-size: 12px; }
+.unified-refund-dialog__component.unified-refund-dialog__component--readonly { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
 .imported-card-refund-dialog__cards { display: grid; gap: 8px; max-height: 240px; padding-right: 4px; overflow: auto; }
 .unified-refund-dialog__card-column > .imported-card-refund-dialog__cards { flex: 1; min-height: 0; max-height: none; align-content: start; }
 .imported-card-refund-dialog__card { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #dce4ef; border-radius: 6px; cursor: pointer; }

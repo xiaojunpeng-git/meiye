@@ -305,6 +305,11 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)
             ->where('cashier_craftsman_enabled', 1)->field('id,staff_name')->order('id asc')->select();
         $staffRows = is_object($staffRows) && method_exists($staffRows, 'toArray') ? $staffRows->toArray() : (array)$staffRows;
+        // 排班只限制预约日历的人员列；关闭时保留原名单，房间、预约记录及状态统计不参与过滤。
+        if (\app\services\store\roster\StaffRosterSwitch::enabled()) {
+            $working = (new \app\services\store\roster\StaffRosterAvailability())->workingStaffIds(array_column($staffRows, 'id'), $storeId, $date);
+            $staffRows = array_values(array_filter($staffRows, static fn(array $staff): bool => in_array((int)$staff['id'], $working, true)));
+        }
         foreach ($staffRows as $staff) {
             $staffId = (int)($staff['id'] ?? 0);
             if ($staffId > 0) $resources[] = ['id' => 'staff:' . $staffId, 'type' => 'staff', 'name' => (string)($staff['staff_name'] ?? ('手艺人 ' . $staffId))];

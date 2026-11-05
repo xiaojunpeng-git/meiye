@@ -807,14 +807,15 @@ final class CashierV3EntitlementProjectionServices
         }
         // Shared-count refunds belong to the whole card, not any of its project
         // carts. Batch their effective facts so source totals cannot re-sum stale carts.
+        // 退款现金可手填超额；权益只累计已落账的前后余值差额，避免重复或负向扣次。
         $sharedRefunds = [];
         $holderIds = array_keys($ruleAuthoritiesByHolder);
         if ($holderIds) {
             foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
                 ->whereIn('card_holder_id', $holderIds)->where('status', 'effective')
-                ->field('card_holder_id,refund_amount_cents,times_removed')->select()->toArray() as $refund) {
+                ->field('card_holder_id,times_removed,' . CashierV3CardRefundQuotaPolicy::RIGHTS_ADJUSTMENT_FIELDS)->select()->toArray() as $refund) {
                 $id = (int)$refund['card_holder_id'];
-                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + CashierV3CardRefundQuotaPolicy::returnedRightsCents($refund);
                 $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
             }
         }

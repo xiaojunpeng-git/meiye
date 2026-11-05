@@ -36,6 +36,7 @@ use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutRequestRepositor
 use app\services\order\store\WriteOffOrderServices;
 use app\services\product\inventory\completion\InventoryCompletionDataScope;
 use app\services\product\inventory\completion\InventoryEntitlementCompletionContract;
+use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
 use think\facade\Db;
 use think\facade\Log;
 
@@ -1272,15 +1273,16 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 // 最终锁定必须与选择器、退款使用同一整卡金额；项目销售分摊
                 // 仅供销售追溯，不能再次覆盖共享次数池的核销基数。
                 if (!isset($sharedRefundsByHolder[$holderId])) {
+                    // 退款现金可手填超额；权益只累计已落账的前后余值差额，避免重复或负向扣次。
                     $sharedRefundsByHolder[$holderId] = ['returned' => 0, 'removed' => 0];
                     foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
                         ->where('tenant_id', $operatorScope->tenantId())
                         ->where('card_holder_id', $holderId)
                         ->where('status', 'effective')
-                        ->field('refund_amount_cents,times_removed')
+                        ->field('times_removed,' . CashierV3CardRefundQuotaPolicy::RIGHTS_ADJUSTMENT_FIELDS)
                         ->lock(true)
                         ->select()) as $refund) {
-                        $sharedRefundsByHolder[$holderId]['returned'] += (int)$refund['refund_amount_cents'];
+                        $sharedRefundsByHolder[$holderId]['returned'] += CashierV3CardRefundQuotaPolicy::returnedRightsCents($refund);
                         $sharedRefundsByHolder[$holderId]['removed'] += (int)$refund['times_removed'];
                     }
                 }

@@ -154,6 +154,16 @@ final class CashierV3UnifiedRefundServices
         if ($reason === '' || mb_strlen($reason) > 255) throw self::fail('请填写退款原因（不超过255字）。', 'refund_reason_invalid');
         $holderId = (int)($payload['holderId'] ?? 0);
         $componentId = (int)($payload['componentId'] ?? 0);
+        // 新页面明确提交整卡／部分项目；旧请求保留原项目语义，不能默认为作废整卡。
+        $cardRefundScope = (string)($payload['cardRefundScope'] ?? 'partial');
+        if (!in_array($cardRefundScope, ['whole', 'partial'], true)
+            || ($mode !== 'card' && $cardRefundScope !== 'partial')) {
+            throw self::fail('请选择有效的卡项退款方式。', 'refund_card_scope_invalid');
+        }
+        $entireCard = $mode === 'card' && $cardRefundScope === 'whole';
+        if ($entireCard && (!$void || $componentId !== 0)) {
+            throw self::fail('整张卡退款需要作废本卡，无需选择项目。', 'refund_whole_card_target_invalid');
+        }
         $lineId = trim((string)($payload['lineId'] ?? ''));
         $catalogItemId = (int)($payload['catalogItemId'] ?? 0);
         if (($mode === 'card' && $holderId <= 0)
@@ -182,7 +192,7 @@ final class CashierV3UnifiedRefundServices
             throw self::fail((string)$snapshot['unavailableReason'], 'refund_target_unavailable');
         }
         $wholeCardRule = $mode === 'card' && in_array($snapshot['ruleType'], ['choice_count', 'combination'], true);
-        if ($mode === 'card' && (($wholeCardRule && $componentId !== 0)
+        if ($mode === 'card' && !$entireCard && (($wholeCardRule && $componentId !== 0)
             || (!$wholeCardRule && $componentId <= 0))) {
             throw self::fail('请重新选择可退款的卡项项目。', 'refund_component_invalid');
         }
@@ -191,27 +201,32 @@ final class CashierV3UnifiedRefundServices
             throw self::fail('组合卡仅支持整卡退款，请选择整卡作废。', 'refund_combination_whole_card_required');
         }
         $target = $mode === 'card'
-            ? ($wholeCardRule ? $snapshot['components'][0]
-                : $this->selectedCardComponent($snapshot, $componentId))
+            ? ($entireCard ? array_replace($snapshot, ['id' => 0]) : ($wholeCardRule ? $snapshot['components'][0]
+                : $this->selectedCardComponent($snapshot, $componentId)))
             : $snapshot;
         $remaining = (int)$target['usableRemainingAmountCents'];
-        // PM-approved exception: a zero-price imported card may grant bonus credit
-        // without original cash. Never use it to lift cash refunds or paid-card caps.
+        // 卡项退款现金、转入赠金均按手填值登记，不以原成交或剩余权益作上限。
+        // 权益扣减只消耗当前目标的正向余值，现金、赠金和权益分别留事实，不能产生负权益。
+        $rightsRefundCents = $mode === 'card'
+            ? CashierV3CardRefundQuotaPolicy::rightsReductionCents($refundCents, (int)$target['remainingAmountCents']) : $refundCents;
+        // 保留零价卡转赠金的既有审计标记，不再把它作为允许超额登记的特殊条件。
         $zeroPriceBonusGrant = $mode === 'card' && (int)$snapshot['purchaseAmountCents'] === 0
             && $refundCents === 0;
-        if (!in_array($mode, ['catalog', 'balance'], true) && ($refundCents > $remaining
-            || (!$zeroPriceBonusGrant && $balanceCents > (int)$snapshot['usableRemainingAmountCents']))) {
+        if ($mode === 'document' && ($refundCents > $remaining
+            || $balanceCents > (int)$snapshot['usableRemainingAmountCents'])) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
-        // 退款登记与转入赠金是独立事实，不相加占用现金上限；赠金仍受上方剩余权益限制。
-        // 现金退款单独排除原单券抵付和余额支付，不能将非现金结算转成可退现金。
-        if (!in_array($mode, ['catalog', 'balance'], true) && !$zeroPriceBonusGrant && $refundCents
+        // 单据退款继续排除原单券抵付和余额支付；卡项手填登记不复用这项原单金额上限。
+        if ($mode === 'document' && $refundCents
             > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
             throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
         }
         $newEnd = (int)($payload['validThrough'] ?? 0);
         if ($mode === 'card' && $snapshot['isTimeCard']) {
-            if ($newEnd <= 0 || $newEnd > (int)$snapshot['validThrough']) {
+            if ($entireCard) {
+                // 作废整卡不修改历史有效期，也无需用户再填写一个不会生效的新期限。
+                $newEnd = (int)$snapshot['validThrough'];
+            } elseif ($newEnd <= 0 || $newEnd > (int)$snapshot['validThrough']) {
                 throw self::fail('时间卡新有效期只能保持或缩短。', 'refund_time_expiry_invalid');
             }
         } elseif ($newEnd !== 0) {
@@ -244,13 +259,15 @@ final class CashierV3UnifiedRefundServices
                     'balanceCreditCents' => $mode === 'balance' ? 0 : $balanceCents,
                     'balanceDebitCents' => $mode === 'balance' ? $balanceCents : 0,
                     'voidTarget' => $void,
+                    'cardRefundScope' => $mode === 'card' ? $cardRefundScope : null,
+                    'cardRightsReductionCents' => $mode === 'card' ? $rightsRefundCents : 0,
                     'zeroPriceBonusGrantCents' => $zeroPriceBonusGrant ? $balanceCents : 0],
             ]);
         // 卡项作废必须能精确恢复整张卡的既有状态；请求事实同时保存前后快照，
         // 不用当前卡规则猜测退款前哪些项目原本已停用。
         $rightsBefore = $mode === 'card' ? $this->refundReversalRightsSnapshotInTx($scope->tenantId(), $holderId) : null;
         $after = $mode === 'card'
-            ? $this->adjustCard($snapshot, $target, $refundCents, $void, $newEnd, $scope->tenantId(), $now)
+            ? $this->adjustCard($snapshot, $target, $rightsRefundCents, $void, $newEnd, $scope->tenantId(), $now, $entireCard)
             : ($mode === 'document' ? $this->adjustLine($snapshot, $refundCents, $void)
                 : ['remainingAmountCents' => $mode === 'balance' ? $remaining - $balanceCents : 0,
                     'closedRemainingCents' => 0, 'remainingTimes' => 0,
@@ -258,6 +275,7 @@ final class CashierV3UnifiedRefundServices
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
         $requestSnapshot = $payload;
+        if ($mode === 'card') $requestSnapshot['_cardRightsReductionCents'] = $rightsRefundCents;
         if ($zeroPriceBonusGrant && $balanceCents > 0) {
             $requestSnapshot['_zeroPriceBonusGrantCents'] = $balanceCents;
         }
@@ -515,7 +533,7 @@ final class CashierV3UnifiedRefundServices
             $history = Db::name(self::TABLE)->where('tenant_id', $tenantId)
                 ->where('card_holder_id', $holderId)->where('status', 'effective')
                 ->lock($lock)->select()->toArray();
-            $refunded = array_sum(array_map(static fn(array $row): int => (int)$row['refund_amount_cents'], $history));
+            $refunded = array_sum(array_map([CashierV3CardRefundQuotaPolicy::class, 'returnedRightsCents'], $history));
             $removed = array_sum(array_map(static fn(array $row): int => (int)$row['times_removed'], $history));
             $used = $total - $left - $removed;
             if ($total <= 0 || $left < 0 || $left > $total || $used < 0
@@ -885,9 +903,10 @@ final class CashierV3UnifiedRefundServices
             'remainingTimes' => 0, 'timesRemoved' => 0, 'timesClosed' => 0];
     }
 
-    private function adjustCard(array $card, array $target, int $refund, bool $void, int $newEnd, string $tenantId, int $now): array
+    private function adjustCard(array $card, array $target, int $refund, bool $void, int $newEnd, string $tenantId, int $now, bool $entireCard = false): array
     {
-        if ($card['ruleType'] === 'combination') {
+        // 整卡使用整张卡的已锁定余值，不伪造一个项目或重复逐项目登记退款。
+        if ($entireCard || $card['ruleType'] === 'combination') {
             if (!$void) throw self::fail('组合卡只能整卡退款。', 'refund_combination_whole_card_required');
             $this->voidCard($card['holderId'], $tenantId, $now);
             return ['remainingAmountCents' => 0,
@@ -898,7 +917,6 @@ final class CashierV3UnifiedRefundServices
         if ($card['ruleType'] === 'choice_count') {
             return $this->adjustSharedCard($card, $target, $refund, $void, $tenantId, $now);
         }
-        $targetLeft = (int)$target['remainingAmountCents'] - $refund;
         $removed = 0;
         $newTimes = (int)$target['remainingTimes'];
         if (!$card['isTimeCard'] && (int)$target['purchaseAmountCents'] > 0) {
