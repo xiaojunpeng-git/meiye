@@ -505,9 +505,10 @@ const isAwaitingCustomCardUpgradeTarget = computed(() => (
   previewCardOperation.value?.awaitingTarget === true
   && previewCardOperation.value.mode === 'card-upgrade'
 ))
-// 卡升级的新建入口与普通收银目录使用同一服务端开关，不能单独漏出。
+// 岗位选择只裁剪入口显示；系统开关仍由目录决定，不修改业务提交逻辑。
 const isCustomCardEntryVisible = computed(() => (
   Array.isArray(catalog.value.types) && catalog.value.types.includes('定制卡')
+  && canUseCashierV3Operation('cashier.v3.cashier.custom_card_entry')
 ))
 const productTypes = computed(() => {
   if (previewCardOperation.value?.awaitingTarget) {
@@ -516,7 +517,8 @@ const productTypes = computed(() => {
   const available = catalog.value.types && catalog.value.types.length
     ? catalog.value.types
     : defaultTypes
-  const known = preferredCatalogTypeOrder.filter((type) => available.includes(type))
+  const known = preferredCatalogTypeOrder.filter((type) => available.includes(type)
+    && (type !== '定制卡' || isCustomCardEntryVisible.value))
   const other = available.filter((type) => !preferredCatalogTypeOrder.includes(type))
   return [...known, ...other]
 })
@@ -8884,7 +8886,8 @@ onBeforeUnmount(() => {
             </template>
             <template v-else>
               <button type="button" class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="closePendingCardPurchase">取消</button>
-              <button v-if="pendingCardPurchase.ordinaryCardSaleEditable && pendingCardPurchase.cardPreview.ruleType === 'normal'"
+              <!-- 岗位仅决定修改按钮是否显示，原有改价与次数校验沿用原流程。 -->
+              <button v-if="pendingCardPurchase.ordinaryCardSaleEditable && pendingCardPurchase.cardPreview.ruleType === 'normal' && canUseCashierV3Operation('cashier.v3.cashier.ordinary_card_edit')"
                 class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="editOrdinaryCardPurchase">修改</button>
               <button type="button" class="button button--primary" :disabled="isConfirmingCardPurchase" @click="confirmPendingCardPurchase">
                 {{ isConfirmingCardPurchase ? '正在加入…' : '确认加入购物车' }}
