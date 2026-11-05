@@ -18,8 +18,8 @@ final class CustomerAnalyticsServices
 {
     public const METRIC_VERSION = 'customer-analytics-store-visits-v2';
 
-    /** Keep IN predicates below MySQL packet/optimizer limits on all-store queries. */
-    private const UNCONSUMED_BATCH_SIZE = 500;
+    /** Bound each entitlement lookup while avoiding hundreds of database round trips. */
+    private const UNCONSUMED_BATCH_SIZE = 2000;
 
     private const REPORTS = [
         'customer_overview' => '客户概况',
@@ -805,6 +805,7 @@ final class CustomerAnalyticsServices
             // employee when the participant relation cannot be established.
             return $empty($columns, '当前门店卡项余额缺少员工参与关系，个人范围暂不返回数据。', $input);
         }
+        $hasOrderId = $this->hasColumn('store_order', 'order_id');
 
         try {
             $holderQuery = Db::name('user_card_holder')->alias('h')
@@ -818,25 +819,29 @@ final class CustomerAnalyticsServices
                 ->where('o.refund_status', 0);
             if ($this->hasColumn('store_order', 'terminal_action')) $holderQuery->where('o.terminal_action', 0);
             if ($this->hasColumn('store_order', 'card_upgrade_use_oid')) $holderQuery->where('o.card_upgrade_use_oid', 0);
-            if ($this->hasColumn('store_order', 'order_id')) {
-                // Legacy entitlement balance has no immutable current-state
-                // fact yet. The successful V3 void authority must still
-                // remove its holder from normal unconsumed statistics.
-                $holderQuery->whereNotExists(function ($void): void {
-                    $void->name('cashier_v3_order_lifecycle_operation')->alias('unconsumed_sale_void')
-                        ->where('unconsumed_sale_void.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                        ->whereRaw('unconsumed_sale_void.source_order_id=o.order_id')
-                        ->where('unconsumed_sale_void.source_type', 'sales')
-                        ->where('unconsumed_sale_void.operation_type', 'void')
-                        ->where('unconsumed_sale_void.status', 'succeeded');
-                });
-            }
             if ($participantMode === 'self_participant') {
                 (new StoreReportParticipantScopeServices())->applyOrder($holderQuery, 'o.order_id', $participantEmployeeId);
             }
             $holders = $holderQuery
-                ->field('h.uid,h.oid,h.store_id,h.write_surplus_times,h.write_start,h.write_end')
+                ->field('h.uid,h.oid,h.store_id,h.write_surplus_times,h.write_start,h.write_end' . ($hasOrderId ? ',o.order_id' : ''))
                 ->select()->toArray();
+            // Read successful sales voids once, after the holder query, so a
+            // recent void is excluded before any entitlement enters the
+            // report. The former correlated NOT EXISTS scanned per holder and
+            // timed out for all stores.
+            $voidOrderIds = [];
+            if ($hasOrderId && $holders !== []) {
+                foreach (Db::name('cashier_v3_order_lifecycle_operation')
+                    ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->where('source_type', 'sales')
+                    ->where('operation_type', 'void')
+                    ->where('status', 'succeeded')
+                    ->column('source_order_id') as $sourceOrderId) {
+                    // Prefix keeps leading-zero order numbers distinct as
+                    // strings instead of PHP coercing numeric array keys.
+                    $voidOrderIds['id:' . (string)$sourceOrderId] = true;
+                }
+            }
         } catch (\Throwable $e) {
             return $empty($columns, '当前卡项权益事实暂不可读取，页面显示空态，不以0代替未知值。', $input);
         }
@@ -849,6 +854,7 @@ final class CustomerAnalyticsServices
             $oid = (int)($holder['oid'] ?? 0);
             $uid = (int)($holder['uid'] ?? 0);
             if ($oid <= 0 || $uid <= 0) continue;
+            if (isset($voidOrderIds['id:' . (string)($holder['order_id'] ?? '')])) continue;
             $startsAt = max(0, (int)($holder['write_start'] ?? 0));
             $endsAt = max(0, (int)($holder['write_end'] ?? 0));
             if (($startsAt > 0 && $startsAt > $now) || ($endsAt > 0 && $endsAt < $now)) continue;
@@ -859,6 +865,7 @@ final class CustomerAnalyticsServices
                 'remaining_count' => max(0, (int)($holder['write_surplus_times'] ?? 0)),
             ];
         }
+        unset($holders, $voidOrderIds);
         if ($oids === []) return $empty($columns, '当前权限范围内没有有效卡项权益。', $input);
 
         // Do not build one unbounded IN (...) predicate for an all-store
