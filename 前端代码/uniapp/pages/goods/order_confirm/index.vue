@@ -1560,8 +1560,10 @@
 					})
 				}).catch(err => {
 					uni.hideLoading();
+					// 请求层返回完整错误对象；原生提示只接收文字，必须取服务端原因，不能吞掉资格校验失败。
+					const message = typeof err === 'string' ? err : err && err.msg;
 					return that.$util.Tips({
-						title: err
+						title: typeof message === 'string' && message.trim() ? message : '订单提交失败，请稍后重试'
 					});
 				});
 			},
