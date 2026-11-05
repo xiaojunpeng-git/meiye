@@ -954,10 +954,12 @@
 						payload.request_token = this.organizationRequest.token;
 						this.saving = true;
 						storeUpdateApi(this.formItem.id,payload).then(async res => {
+							// 旧请求拦截器在网络异常时可能返回空值，不能把它当成保存成功。
+							if (!res) throw new Error('门店保存失败，请稍后重试');
 							this.$Message.success(res.msg);
 							this.$router.push({ path: this.listRoutePath, query: this.listRouteQuery });
 						}).catch(res => {
-							this.$Message.error(res.msg);
+							this.$Message.error((res && (res.msg || res.message)) || '门店保存失败，请稍后重试');
 						}).finally(() => { this.saving = false; });
 					} else {
 						return false;

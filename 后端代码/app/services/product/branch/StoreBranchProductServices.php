@@ -569,9 +569,8 @@ class StoreBranchProductServices extends BaseServices
             /** @var StoreProductRelationServices $storeProductRelationServices */
             $storeProductRelationServices = app()->make(StoreProductRelationServices::class);
             $storeProductRelationServices->setShow([$id], (int)$is_show);
-            /** @var StoreCardRelatedServices $relatedService */
-            $relatedService = app()->make(StoreCardRelatedServices::class);
-            $relatedService->setStatusInGuard($catalogLease, [$id], (int)$is_show);
+            // 门店项目进仓库不移除卡内关联；已有卡的项目组成不随单卖状态变化。
+            // 删除或取消门店适用范围仍由独立删除路径处理。
             if (!$res) throw new AdminException('操作失败！');
         });
     }

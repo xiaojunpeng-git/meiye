@@ -39,8 +39,9 @@ try {
     $reject(fn() => $service->saveStoreWithOrganization($storeId, $target, $oldOrg, $data, [], $admin, $token()), '已被修改');
     $reject(fn() => $service->saveStoreWithOrganization($storeId, 0, $target, $data, [], $admin, $token()), '不能清空');
     $reject(fn() => $service->saveStoreWithOrganization($storeId, 2147483647, $target, $data, [], $admin, $token()), '不存在');
-    $denied = $admin; $denied['level'] = 1;
-    $reject(fn() => $service->saveStoreWithOrganization($storeId, $oldOrg, $target, $data, [], $denied, $token()), '无权限');
+    // 普通编辑不再因级别被拒；无效登录身份仍不能调整门店归属。
+    $denied = $admin; $denied['id'] = 0;
+    $reject(fn() => $service->saveStoreWithOrganization($storeId, $oldOrg, $target, $data, [], $denied, $token()), '登录身份');
     // 故意让审计失败：资料名称和组织绑定都必须恢复，不能吞错。
     OrganizationWorkspaceWriteServices::armCliAuditFaultOnce();
     $changed = $data; $changed['name'] = 'R27事务回滚探针';

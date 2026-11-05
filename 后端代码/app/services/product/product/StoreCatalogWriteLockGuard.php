@@ -126,7 +126,8 @@ final class StoreCatalogWriteLockGuard
                         $this->assertPostWriteGraphCovered(
                             $lease,
                             $seed['expandReverseCards'],
-                            $seed['expandTransitiveCards'] ? $lease->productIds() : $this->positiveIds($reverseProducts)
+                            $seed['expandTransitiveCards'] ? $lease->productIds() : $this->positiveIds($reverseProducts),
+                            !$seed['expandTransitiveCards']
                         );
                         return $result;
                     } finally {
@@ -254,9 +255,10 @@ final class StoreCatalogWriteLockGuard
                     }
                 }
                 if ($seed['expandReverseCards'] && ($seed['expandTransitiveCards'] || $firstPass)) {
-                    $reverseCards = Db::name('store_card_related')
-                        ->whereIn('product_id', $this->positiveIds($productIds))
-                        ->column('card_product_id');
+                    $reverseCards = $this->reverseCardIds(
+                        $this->positiveIds($productIds),
+                        !$seed['expandTransitiveCards']
+                    );
                     $cardIds = array_merge($cardIds, $reverseCards ?: []);
                 }
             }
@@ -383,7 +385,8 @@ final class StoreCatalogWriteLockGuard
     private function assertPostWriteGraphCovered(
         StoreCatalogWriteLease $lease,
         bool $checkReverseCards = true,
-        ?array $reverseProductIds = null
+        ?array $reverseProductIds = null,
+        bool $existingReverseCardsOnly = false
     ): void
     {
         $lease->assertActive();
@@ -392,7 +395,7 @@ final class StoreCatalogWriteLockGuard
         $products = array_keys($coveredProducts);
         $reverseProductIds = $reverseProductIds ?? $products;
         if ($checkReverseCards && $reverseProductIds) {
-            $reverse = Db::name('store_card_related')->whereIn('product_id', $reverseProductIds)->column('card_product_id');
+            $reverse = $this->reverseCardIds($reverseProductIds, $existingReverseCardsOnly);
             foreach ($reverse ?: [] as $cardId) {
                 if (!isset($coveredCards[(int)$cardId])) {
                     throw new AdminException('商品目录引用集合在写入期间发生变化');
@@ -413,6 +416,22 @@ final class StoreCatalogWriteLockGuard
             }
         }
         $this->assertNoDuplicateSkuIdentity($this->readSkuRows($products));
+    }
+
+    /**
+     * 普通项目的一跳编辑只覆盖仍存在的反向卡项；遗留孤儿关联不代表待修改的卡定义。
+     * 规划与写后复核复用相同范围，避免保存后再次被同一残留拦截。显式卡目标及默认
+     * 递归写入口仍严格校验，不删除关联，也不跳过有效卡的组成、SKU 或并发覆盖检查。
+     * @return int[]
+     */
+    private function reverseCardIds(array $productIds, bool $existingOnly): array
+    {
+        $ids = $this->positiveIds(Db::name('store_card_related')
+            ->whereIn('product_id', $productIds)->column('card_product_id') ?: []);
+        if ($existingOnly && $ids) {
+            $ids = $this->positiveIds(Db::name('store_product')->whereIn('id', $ids)->column('id') ?: []);
+        }
+        return $ids;
     }
 
     /** @return string[] */

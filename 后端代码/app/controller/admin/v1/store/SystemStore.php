@@ -408,12 +408,17 @@ class SystemStore extends AuthController
             $orgId = (int)$post['organization_id'];
             $expectedOrgId = (int)$post['expected_organization_id'];
             if ($orgId !== $expectedOrgId) {
-                $result = app()->make(\app\services\organization\OrganizationWorkspaceWriteServices::class)
-                    ->saveStoreWithOrganization((int)$id, $orgId, $expectedOrgId, $data, $staff_data,
-                        is_array($this->adminInfo) ? $this->adminInfo : [], [
-                            'body_token' => (string)($post['request_token'] ?? ''),
-                            'operator_ip' => (string)$this->request->ip(),
-                        ]);
+                try {
+                    $result = app()->make(\app\services\organization\OrganizationWorkspaceWriteServices::class)
+                        ->saveStoreWithOrganization((int)$id, $orgId, $expectedOrgId, $data, $staff_data,
+                            is_array($this->adminInfo) ? $this->adminInfo : [], [
+                                'body_token' => (string)($post['request_token'] ?? ''),
+                                'operator_ip' => (string)$this->request->ip(),
+                            ]);
+                } catch (\Exception $e) {
+                    // 与组织工作台共用业务失败响应，避免 HTTP 500 吞掉原因；事务已由共享服务回滚。
+                    return $this->fail($e->getMessage());
+                }
                 [$id, $is_new, $is_synchronous] = $result['data']['saved'];
                 $replay = (bool)$result['replay'];
             } else {

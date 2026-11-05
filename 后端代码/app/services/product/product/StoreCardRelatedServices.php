@@ -61,8 +61,25 @@ class StoreCardRelatedServices extends BaseServices
     ) {
         $rows = $this->normalizeRelatedRows($cardProductId, $related);
         $lease->assertCoversCards([$cardProductId]);
+        $activeProductIds = [];
         foreach ($rows as $row) {
             $lease->assertCoversIdentity((int)$row['product_id'], (string)$row['product_attr_unique']);
+            if ((int)$row['status'] === 1) $activeProductIds[] = (int)$row['product_id'];
+        }
+        // 锁定身份后再复核可配置资格：仓库项目允许入卡，已删除/未审核
+        // 项目不能因旧关联恢复而启用。先检查整批，再替换关系，失败保留原卡。
+        if ($activeProductIds) {
+            $products = Db::name('store_product')->whereIn('id', array_unique($activeProductIds))
+                ->field('id,is_del,is_verify')->select()->toArray();
+            $products = array_column($products, null, 'id');
+            foreach ($activeProductIds as $productId) {
+                if (!isset($products[$productId]) || (int)$products[$productId]['is_del'] !== 0) {
+                    throw new AdminException('卡内项目已删除，请先从卡项配置中移除后再保存');
+                }
+                if ((int)$products[$productId]['is_verify'] !== 1) {
+                    throw new AdminException('卡内项目未审核通过，请核对后再保存');
+                }
+            }
         }
         $this->dao->delete(['card_product_id' => $cardProductId]);
         return $this->dao->saveAll($rows);

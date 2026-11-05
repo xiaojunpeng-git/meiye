@@ -22,6 +22,32 @@ class StoreCardRuleServices
         self::COMBINATION,
     ];
 
+    /**
+     * 门店继承卡编辑先规划、后持锁写入；比对平台拥有的卡内关系和计次规则，排除易变展示字段。
+     * 这是编辑事务的并发保护，不签发收银版本或第二份购买快照。
+     */
+    public function inheritedDefinitionSignature(array $definition): string
+    {
+        $header = [];
+        foreach (['card_rule_type','card_rule_version','card_choice_limit','card_shared_times','card_num','card_num_type'] as $key) {
+            $header[$key] = (string)($definition[$key] ?? '');
+        }
+        $rows = [];
+        foreach ((array)($definition['related'] ?? []) as $row) {
+            $values = [];
+            foreach (['product_id','product_type','product_attr_unique','cost','price','write_times','writeoff_amount',
+                'labor_fee_cents','craftsman_default_mode','craftsman_default_unit_amount_cents','combination_group_no',
+                'combination_group_name','combination_group_rule','combination_choice_limit','combination_shared_times','status'] as $key) {
+                $values[$key] = (string)($row[$key] ?? '');
+            }
+            $rows[] = $values;
+        }
+        usort($rows, static function(array $a,array $b):int {
+            return [$a['product_id'],$a['product_attr_unique']] <=> [$b['product_id'],$b['product_attr_unique']];
+        });
+        return hash('sha256', json_encode([$header,$rows], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
+    }
+
     public function preserveLockedDefinition(array $submitted, array $definition): array
     {
         foreach ([
@@ -64,7 +90,8 @@ class StoreCardRuleServices
         return $submitted;
     }
 
-    public function normalizeForSave(array $data): array
+    /** 显式定义保存启用已选项目；继承卡由服务端传 false 保留平台锁定的关联状态。 */
+    public function normalizeForSave(array $data, bool $rebuildSelectedMembership = true): array
     {
         if ((int)($data['product_type'] ?? 0) !== 5) {
             $data['card_rule_type'] = '';
@@ -103,6 +130,10 @@ class StoreCardRuleServices
         $groups = $type === self::COMBINATION ? $this->validateCombinationGroups($related) : [];
 
         foreach ($related as $index => &$row) {
+            // 显式保存的已选项目就是本次卡项定义。旧客户端回传的停用状态
+            // 可能来自历史上下架联动，不能使页面有项目、落库却形成空组合。
+            // 此处不修改读取结果或已售权益；删除项目的资格在持锁写入时复核。
+            if ($rebuildSelectedMembership) $row['status'] = 1;
             // 卡内手工费按关联项目保存，允许 0 元；和项目通用默认值、已完成服务事实分开。
             $defaultLaborFee = 0;
             if (!array_key_exists('labor_fee', $row)) {
@@ -124,9 +155,18 @@ class StoreCardRuleServices
                 throw new AdminException('第' . ($index + 1) . '个项目的默认手艺人业绩设置无效');
             }
             $row['craftsman_default_mode'] = $craftsmanMode;
+            $craftsmanAmount = $row['craftsman_default_unit_amount'] ?? null;
+            // 继承卡的 related 已由服务端锁定定义覆盖，数据库字段单位为分。
+            // 仅对整元的可信原值补回表单单位，避免门店保存丢失金额；不截断历史小数。
+            if (!$rebuildSelectedMembership && $craftsmanAmount === null
+                && isset($row['craftsman_default_unit_amount_cents'])
+                && ctype_digit((string)$row['craftsman_default_unit_amount_cents'])
+                && (int)$row['craftsman_default_unit_amount_cents'] % 100 === 0) {
+                $craftsmanAmount = intdiv((int)$row['craftsman_default_unit_amount_cents'], 100);
+            }
             $row['craftsman_default_unit_amount_cents'] = $craftsmanMode === 'manual_amount'
                 ? $this->nonNegativeMoney(
-                    $row['craftsman_default_unit_amount'] ?? null,
+                    $craftsmanAmount,
                     '第' . ($index + 1) . '个项目的默认手艺人业绩'
                 ) * 100 : 0;
             $usesIndependentTimes = in_array($type, [self::NORMAL, self::CHOICE_KIND], true)

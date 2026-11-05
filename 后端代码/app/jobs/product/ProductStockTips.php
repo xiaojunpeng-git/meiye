@@ -13,7 +13,6 @@ namespace app\jobs\product;
 
 
 use app\jobs\system\SocketPushJob;
-use app\services\product\product\StoreCardRelatedServices;
 use app\services\product\product\StoreCatalogWriteLease;
 use app\services\product\product\StoreCatalogWriteLockGuard;
 use app\services\product\product\StoreProductServices;
@@ -48,14 +47,12 @@ class ProductStockTips extends BaseJobs
             /** @var StoreProductServices $make */
             $make = app()->make(StoreProductServices::class);
             $product = $make->get(['id' => $productId], ['stock', 'id', 'is_police', 'is_sold', 'product_type', 'is_inventory']);
-            // 卡项、项目和不管理库存的产品不会因零库存触发警报或停用关联。
+            // 卡项、项目和不管理库存的产品不会因零库存触发警报。
             if (!$product || !ProductStockEligibility::appliesTo($product)) {
                 return false;
             }
             /** @var StoreProductAttrValueServices $storeValueService */
             $storeValueService = app()->make(StoreProductAttrValueServices::class);
-            /** @var StoreCardRelatedServices $relatedService */
-            $relatedService = app()->make(StoreCardRelatedServices::class);
             $count = $storeValueService->getPolice([
                 ['type', '=', 0],
                 ['stock', '<=', $store_stock],
@@ -68,9 +65,7 @@ class ProductStockTips extends BaseJobs
                 ['product_id', '=', $productId]
             ]);
             $product->is_sold = $soldCount ? 1 : 0;
-            if ($soldCount) {
-                $relatedService->setStatusInGuard($catalogLease, [$productId], 0);
-            }
+            // 缺货只更新库存派生状态，不改变卡内组成；实际领用仍校验库存余额。
             $shouldSend = $store_stock >= $product['stock'] || $count;
             $product->is_police = $shouldSend ? 1 : 0;
             $product->save();
