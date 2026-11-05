@@ -254,9 +254,10 @@ class Store
         if ($product_id) {
             $fields = ['pid','product_type','applicable_type','applicable_store_id'];
             $product = $isCombination
-                ? $productServices->getOne(['id' => $product_id, 'is_del' => 0, 'is_show' => 1], implode(',', $fields))
+                ? $productServices->getOne(['id' => $product_id, 'is_del' => 0], implode(',', $fields))
                 : $productServices->get($product_id, $fields);
-            if ($isCombination && !$product) return app('json')->fail('拼团关联商品不存在或已下架');
+            // 拼团独立上下架，原商品下架不影响已上架活动；只排除失去来源的已删除商品。
+            if ($isCombination && !$product) return app('json')->fail('拼团关联商品不存在或已删除');
             if ($product && $product['pid']) {
                 $product = $productServices->get($product['pid'],['pid','product_type','applicable_type','applicable_store_id']);
             }

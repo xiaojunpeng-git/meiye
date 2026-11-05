@@ -31,6 +31,8 @@ $api=function($input=[])use($request,$controller){$request->input=$input;return 
 checkStores(count($rows(['product_id'=>4]))===5,'ordinary entry still shows its original five-store region');
 $all=$rows(['combination_id'=>4,'product_id'=>4]);$ids=array_map('intval',array_column($all,'id'));sort($ids);$expected=array_keys($storeNames);sort($expected);checkStores($ids===$expected,'valid combination binds source product8996 and returns all12 active non-isolated stores');
 checkStores(count($rows(['combination_id'=>4,'product_id'=>999999]))===12,'caller cannot redirect activity identity to another or missing product');
+// 008真实发布边界：原商品下架，活动独立上架，选店不能因此失败。
+Db::name('store_product')->where('id',8996)->update(['is_show'=>0]);checkStores(count($rows(['combination_id'=>4]))===12,'offline source product with active combination still exposes eligible stores');Db::name('store_product')->where('id',8996)->update(['is_show'=>1]);
 checkStores(count($rows(['combination_id'=>-1]))===5,'invalid negative activity cannot bypass normal region');
 checkStores($api(['combination_id'=>999999])['status']!==200,'missing combination fails before widening scope');
 checkStores($rows(['combination_id'=>4,'keyword'=>'滨北'])[0]['name']==='滨北店','search finds an allowed store outside entry region');
