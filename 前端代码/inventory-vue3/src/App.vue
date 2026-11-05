@@ -436,11 +436,12 @@ const visibleStockQueryFields = computed(() => {
     : stockQueryFields.value
   return fields.map((field) => ({
     ...field,
+    ...(field.key === 'expiry_status' ? { label: '过期筛选', type: 'enum', options: ['已过期', '未过期', '到期日未知'].map(value => ({ value, label: value })) } : {}),
     // Both hosts use the same stock quantity presets; warehouse scope is still enforced by the server.
     ...(field.key === 'available_quantity'
       ? { label: '库存数量', quickRangePresets: true }
       : {}),
-    defaultQuick: ['product_name', 'available_quantity'].includes(field.key),
+    defaultQuick: ['product_name', 'expiry_status', 'available_quantity'].includes(field.key),
     quickRange: field.key === 'available_quantity'
   }))
 })
@@ -453,9 +454,12 @@ const stockQuerySettings = computed(() => {
   const usesLegacyDefaults = quickFields.every((key) => legacyScopeFields.has(key) || legacyDefaults.includes(key))
     && comparableQuickFields.length === legacyDefaults.length
     && legacyDefaults.every((key, index) => comparableQuickFields[index] === key)
-  return usesLegacyDefaults
-    ? { ...settings, quickFields: ['product_name', 'available_quantity'] }
-    : settings
+  // 新筛选固定放在库存数量之前，保留账号已有的其他快捷条件。
+  const selected = usesLegacyDefaults || !quickFields.length ? ['product_name', 'available_quantity'] : [...quickFields]
+  const ordered = selected.filter(key => key !== 'expiry_status')
+  const quantityIndex = ordered.indexOf('available_quantity')
+  ordered.splice(quantityIndex < 0 ? ordered.length : quantityIndex, 0, 'expiry_status')
+  return { ...settings, quickFields: ordered }
 })
 
 async function saveStockQuerySettings(settings, options = {}) {
@@ -787,7 +791,11 @@ function selectPage(key, options = {}) {
   }
   if (options.tab) activeStatisticsTab.value = options.tab
   if (key === 'statistics') {
-    statisticsInitialQuery.value = options.query && typeof options.query === 'object' ? options.query : {}
+    // 下钻带入的分档同步到可见筛选，重新进入不沿用上次草稿。
+    statisticsProductFilter.value = ''
+    statisticsBandFilter.value = options.expiryBand || ''
+    statisticsSupplementalFilters.value = options.expiryBand ? expiryRiskQuery(options.expiryBand).filters : []
+    statisticsInitialQuery.value = !options.expiryBand && options.query && typeof options.query === 'object' ? options.query : {}
     statisticsExecutedQuery.value = statisticsInitialQuery.value
   }
   sidebarOpen.value = false
@@ -813,6 +821,9 @@ watch(() => props.entryPage, (page) => {
 })
 
 function selectStatisticsTab(key) {
+  statisticsSupplementalFilters.value = []
+  statisticsProductFilter.value = ''
+  statisticsBandFilter.value = ''
   statisticsRequestSequence += 1
   analysisLoading.value = false
   movementStatisticsLoading.value = false
@@ -821,6 +832,30 @@ function selectStatisticsTab(key) {
   statisticsExecutedQuery.value = {}
   statisticsDateRange.value = statisticsMonthRange()
   if (mode.value === 'platform') queryStatisticsPage({})
+}
+
+const statisticsProductFilter = ref('')
+const statisticsBandFilter = ref('')
+// 快捷分档与原高级条件分别保留；任一查询入口都通过同一 AND 条件执行。
+const statisticsSupplementalFilters = ref([])
+const statisticsBandOptions = computed(() => activeStatisticsTab.value === 'expiry'
+  ? [['OVERDUE', '已过期'], ['WITHIN_30', '30天内临期'], ['DAYS_31_60', '31至60天'], ['DAYS_61_90', '61至90天'], ['SAFE_OVER_90', '90天以上'], ['UNKNOWN', '到期日未知']]
+  : [['0:30', '0-30天'], ['31:90', '31-90天'], ['91:180', '91-180天'], ['181:365', '181-365天'], ['366:', '1年以上'], ['UNKNOWN', '入库日期未知']])
+
+/** 显式条件交给统一后端查询；临期区间与看板六档一致，库龄仍按正式入库日计算。 */
+function applyStatisticsFilters(reset = false) {
+  if (reset) { statisticsProductFilter.value = ''; statisticsBandFilter.value = '' }
+  const filters = []
+  if (statisticsProductFilter.value.trim()) filters.push({ fieldKey: 'product_name', operator: 'contains', value: statisticsProductFilter.value.trim() })
+  const band = statisticsBandFilter.value
+  if (band && activeStatisticsTab.value === 'expiry') filters.push(...expiryRiskQuery(band).filters)
+  else if (band === 'UNKNOWN') filters.push({ fieldKey: 'inventory_age_days', operator: 'is_null', value: null })
+  else if (band) {
+    const [min, max] = band.split(':')
+    filters.push({ fieldKey: 'inventory_age_days', operator: max ? 'between' : 'greater_than', value: max ? [Number(min), Number(max)] : Number(min) - 1 })
+  }
+  statisticsSupplementalFilters.value = filters
+  queryStatisticsPage(statisticsExecutedQuery.value)
 }
 
 function expiryRiskQuery(code) {
@@ -837,7 +872,7 @@ function expiryRiskQuery(code) {
 }
 
 function openExpiryRisk(bucket) {
-  selectPage('statistics', { tab: 'expiry', focus: bucket.label, query: expiryRiskQuery(bucket.code), dashboardScope: dashboardSelection.value })
+  selectPage('statistics', { tab: 'expiry', expiryBand: bucket.code, focus: bucket.label, query: expiryRiskQuery(bucket.code), dashboardScope: dashboardSelection.value })
 }
 
 function expiryRiskPercent(bucket) {
@@ -1862,6 +1897,8 @@ async function queryStatisticsPage(query, requestedPage = 1) {
       // 门店端的业务日期周期已在统一查询 topFilters 中，避免重复日期条件；
       // 平台端仍由本页周期控件收窄同一权威查询。
       topFilterConditions: [
+        // 快捷筛选不覆盖高级筛选，翻页也沿用已提交的快捷条件而非未提交草稿。
+        ...(!isMovement ? statisticsSupplementalFilters.value.map(({ fieldKey, operator, value }) => ({ field: fieldKey, operator, value })) : []),
         ...(Array.isArray(statisticsExecutedQuery.value.topFilterConditions) ? statisticsExecutedQuery.value.topFilterConditions : []),
         ...(mode.value === 'platform' && isMovement && period.min && period.max
           ? [{ field: 'business_date', operator: 'between', value: [period.min, period.max] }]
@@ -2348,6 +2385,11 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'statistics'">
           <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><button class="secondary-button" @click="selectPage('overview')"><ArrowLeft :size="16" />返回库存首页</button><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <div class="statistics-tabs"><button v-for="tab in statisticsTabs" :key="tab.key" :class="{ active: activeStatisticsTab === tab.key }" @click="selectStatisticsTab(tab.key)">{{ tab.label }}</button></div>
+          <section v-if="['expiry', 'age'].includes(activeStatisticsTab)" class="filter-card" aria-label="批次分析筛选">
+            <label>商品名称 <input v-model="statisticsProductFilter" placeholder="请输入商品名称" @keyup.enter="applyStatisticsFilters()" /></label>
+            <label>{{ activeStatisticsTab === 'expiry' ? '过期筛选' : '库龄筛选' }} <select v-model="statisticsBandFilter"><option value="">全部</option><option v-for="option in statisticsBandOptions" :key="option[0]" :value="option[0]">{{ option[1] }}</option></select></label>
+            <button class="primary-button" :disabled="analysisLoading" @click="applyStatisticsFilters()">查询</button><button class="secondary-button" :disabled="analysisLoading" @click="applyStatisticsFilters(true)">重置</button>
+          </section>
           <div v-if="mode === 'platform' && ['inbound', 'outbound'].includes(activeStatisticsTab)" class="inventory-period-filter inventory-statistics-period"><UnifiedQueryDateRange :model-value="statisticsDateRange" label="业务日期周期" @change="applyStatisticsDateRange" /></div>
           <component
             :is="InventoryOperationalUnifiedQueryToolbar"

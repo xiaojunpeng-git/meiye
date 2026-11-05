@@ -37,6 +37,8 @@ final class InventoryBatchStockQueryContract
             self::field('received_date', '正式入库日期', 'date', true),
             self::field('manufactured_date', '生产日期', 'date', true),
             self::field('expire_date', '到期日', 'date', true),
+            // 过期筛选只按截止日与到期日判断，不把残次等库存质量状态混入。
+            self::field('expiry_status', '过期筛选', 'text', false, true, ['quick', 'filter', 'sort']),
             self::field('available_quantity', '数量范围', 'decimal', false, true, ['quick', 'filter', 'sort']),
             self::field('batch_balance_quantity', '批次结存数量', 'decimal', true, false, ['display', 'filter', 'sort', 'summary', 'export']),
             // 合计金额必须由服务端在完整筛选结果上计算；该字段仅允许汇总，不能作为明细列绕过既有自定义金额字段。

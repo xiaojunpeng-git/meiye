@@ -247,6 +247,8 @@ final class InventoryBatchStockQueryProvider
             'received_date' => $this->nullableDate($row['received_date'] ?? null),
             'manufactured_date' => $this->nullableDate($row['manufactured_date'] ?? null),
             'expire_date' => $expireDate,
+            // 列表、合计及导出使用同一个后端截止日；当天到期仍属于未过期。
+            'expiry_status' => $expireDate === null ? '到期日未知' : ($expireDate < $cutoffDate ? '已过期' : '未过期'),
             'batch_balance_quantity' => InventoryBatchStockQueryContract::unitsToDecimal(
                 (int)$row['balance_quantity_units'],
                 $scale
