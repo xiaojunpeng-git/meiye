@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace app\services\member;
+namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
@@ -12,15 +12,18 @@ use think\facade\Db;
  * authority consumed by store redemption. Carriers are technical projections of
  * the V3 sale, never an additional sale or an already completed service.
  */
-final class MemberProjectEntitlementServices
+final class CashierV3PurchasedProjectEntitlementServices
 {
+    /** Called only after final catalog locks; inserts no second sale or collection. */
     public function issueInTx(CashierV3SalesOrderPlanV1 $plan, int $now): array
     {
         CashierV3TransactionGuard::assertInTransaction('memberProjectRights');
         $header = $plan->header();
+        $memberPurchase = ($header['source_document_type'] ?? '') === 'member_checkout';
         $result = [];
         foreach ($plan->lines() as $line) {
             if ($line['item_type'] !== 'project') continue;
+            CashierV3ProjectPurchasePolicy::assertMember((int)$header['member_id']);
             $technicalNo = 'v3p' . substr(hash('sha256', $line['order_line_id']), 0, 28);
             $existing = Db::name('store_order')->where('order_id', $technicalNo)->lock(true)->find();
             if ($existing) {
@@ -44,17 +47,17 @@ final class MemberProjectEntitlementServices
                 'order_id' => $technicalNo, 'uid' => (int)$header['member_id'], 'store_id' => (int)$header['store_id'],
                 'type' => 12, 'product_type' => 6, 'paid' => 1, 'status' => 0, 'pay_type' => 'cashier_v3',
                 'real_name' => (string)($member['real_name'] ?: $member['nickname']), 'user_phone' => $member['phone'],
-                'total_num' => (int)$line['quantity'], 'total_price' => MemberCommerceServices::money((int)$line['original_amount_cents']),
-                'pay_price' => MemberCommerceServices::money($sale), 'settle_price' => MemberCommerceServices::money($sale),
+                'total_num' => (int)$line['quantity'], 'total_price' => self::money((int)$line['original_amount_cents']),
+                'pay_price' => self::money($sale), 'settle_price' => self::money($sale),
                 'cash_pay_price' => '0.00', 'yue_pay_price' => '0.00', 'shipping_type' => 2,
                 'pay_time' => $now, 'add_time' => $now, 'unique' => md5($technicalNo),
-                'channel_type' => 'member_v3', 'mark' => '会员已购项目权益', 'sales_handled' => 1,
+                'channel_type' => $memberPurchase ? 'member_v3' : 'cashier_v3', 'mark' => '已购项目待用权益', 'sales_handled' => 1,
                 'verify_code' => substr(hash('sha256', $technicalNo), 0, 12),
                 'custom_form' => '[[]]', 'remark' => 'V3 sales order ' . $header['order_no']]);
-            $snapshot = ['sourceType' => 'member_v3_project_purchase', 'salesOrderId' => $header['order_id'],
+            $snapshot = ['sourceType' => $memberPurchase ? 'member_v3_project_purchase' : 'cashier_v3_project_purchase', 'salesOrderId' => $header['order_id'],
                 'salesOrderLineId' => $line['order_line_id'], 'product_id' => (int)$line['item_id'],
                 'product_type' => 6, 'product_attr_unique' => (string)$sku['unique'], 'write_times' => $times,
-                'writeoff_amount_cents' => $sale, 'pay_price' => MemberCommerceServices::money($sale),
+                'writeoff_amount_cents' => $sale, 'pay_price' => self::money($sale),
                 'productInfo' => ['id' => (int)$line['item_id'], 'store_name' => $name, 'product_type' => 6,
                     'attrInfo' => ['unique' => (string)$sku['unique']]]];
             $detailId = (int)Db::name('store_order_cart_info')->insertGetId([
@@ -62,11 +65,11 @@ final class MemberProjectEntitlementServices
                 'cart_type' => 2, 'type' => 1, 'relation_id' => (int)$header['store_id'],
                 'product_id' => (int)$line['item_id'], 'product_type' => 6, 'sku_unique' => (string)$sku['unique'],
                 'cart_num' => $times, 'surplus_num' => $times, 'split_surplus_num' => $times,
-                'pay_price' => MemberCommerceServices::money($sale), 'total_price' => MemberCommerceServices::money($sale),
-                'settle_price' => MemberCommerceServices::money($sale), 'write_times' => $times,
+                'pay_price' => self::money($sale), 'total_price' => self::money($sale),
+                'settle_price' => self::money($sale), 'write_times' => $times,
                 'write_surplus_times' => $times, 'write_start' => $start, 'write_end' => $end,
                 'cart_info' => json_encode($snapshot, JSON_UNESCAPED_UNICODE), 'unique' => md5('detail:' . $technicalNo),
-                'source_type' => 'member_v3', 'add_time' => $now]);
+                'source_type' => $memberPurchase ? 'member_v3' : 'cashier_v3', 'add_time' => $now]);
             Db::name('store_order')->where('id', $oid)->update(['cart_id' => json_encode([(string)$detailId])]);
             $holderData = [
                 'uid' => (int)$header['member_id'], 'oid' => $oid, 'card_name' => $name,
@@ -82,5 +85,11 @@ final class MemberProjectEntitlementServices
             $result[] = $oid;
         }
         return $result;
+    }
+
+    /** Currency storage format only; final settlement has already enforced whole yuan. */
+    private static function money(int $cents): string
+    {
+        return bcdiv((string)$cents, '100', 2);
     }
 }

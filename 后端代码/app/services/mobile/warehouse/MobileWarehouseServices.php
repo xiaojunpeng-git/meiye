@@ -318,12 +318,7 @@ final class MobileWarehouseServices
         $rechargeAmounts = $this->detailRechargeAmounts($detailRows);
         $calculated=\app\services\payroll\PayrollAlgorithmPolicy::calculated();
         $commission=$calculated ? (new \app\services\payroll\ProjectLaborCommissionReadServices($metricReader))->read($storeIds,$metricRange,[$employeeId]) : null;
-        $commissionAmount=0;$commissionComplete=true;
-        // 提成分组与明细分页总数独立命名，不能覆盖后面的分页契约。
-        if ($commission!==null) foreach ($commission['totals'] as $commissionTotal) {
-            $commissionComplete=$commissionComplete && $commissionTotal['complete'];
-            if ($commissionTotal['amount_cents']!==null) $commissionAmount+=$commissionTotal['amount_cents'];
-        }
+        $commissionSummary=self::employeeCommissionSummary($commission);
         $details = [];
         foreach ($detailRows as $row) {
             $amount = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['metric_value'] ?? 0));
@@ -362,6 +357,8 @@ final class MobileWarehouseServices
                 'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                // 仅无会员身份的历史销售事实显示游客；有会员 ID 但姓名缺失不能误判为游客。
+                'isGuest' => (int)($row['member_id'] ?? 0) <= 0,
                 'memberPhone' => (string)($contactPhones[$factId] ?? ''),
                 'serviceObject' => $hasService ? self::detailServiceObject((string)($context['service_object'] ?? ''), $context['friend_counts_as_customer'] ?? null) : '',
                 'serviceQuantity' => $hasService ? (string)($context['service_quantity'] ?? '') : '',
@@ -381,7 +378,7 @@ final class MobileWarehouseServices
             'employeePerformance' => [
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
                 'laborAlgorithm'=>\app\services\payroll\PayrollAlgorithmPolicy::projection(),
-                'commission'=>['visible'=>$calculated,'complete'=>$commissionComplete,'displayValue'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对'],
+                'commission'=>['visible'=>$calculated,'complete'=>$commissionSummary['complete'],'displayValue'=>$commissionSummary['displayValue'],'pendingCount'=>$commissionSummary['pendingCount']],
                 'period' => $period,
                 'metrics' => [
                     // 人员现金业绩是销售人分配事实，不是整店收款；页面按产品用语展示。
@@ -392,8 +389,7 @@ final class MobileWarehouseServices
                     ['code' => 'staff_project_num', 'name' => '项目数', 'value' => self::displayScaledCount($metricAmounts['staff_project_num'], 6), 'unit' => 'count'],
                     ['code' => 'staff_labor_fee', 'name' => '手工费', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_fee']), 'unit' => 'amount'],
                 ] + ($calculated ? [
-                    6=>['code'=>'staff_net_sales','name'=>'净销售业绩','value'=>\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)(new \app\services\report\StoreSalespersonNetReadServices())->matrix($storeIds,$metricRange,[$employeeId])['summary']['total_metric_value']),'unit'=>'amount'],
-                    7=>['code'=>'project_labor_commission','name'=>'劳动提成（预计）','value'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对','unit'=>'amount'],
+                    6=>['code'=>'project_labor_commission','name'=>'劳动提成（预计）','value'=>$commissionSummary['displayValue'],'unit'=>'amount'],
                 ] : []),
                 'detailMode' => $detailMode,
                 'details' => $details,
@@ -403,6 +399,19 @@ final class MobileWarehouseServices
                 'aggregation_caught_up' => true,
             ],
         ];
+    }
+
+    /** Sum every authorized fact across the selected dates, not the visible page; unresolved facts stay explicit. */
+    private static function employeeCommissionSummary(?array $commission): array
+    {
+        $amount=0;$pending=0;
+        foreach ($commission['details'] ?? [] as $detail) {
+            if (($detail['amount_cents'] ?? null) === null) $pending++;
+            else $amount+=(int)$detail['amount_cents'];
+        }
+        $display=\app\services\query\metric\MetricMoneyFormatter::integerYuan($amount);
+        if ($pending>0) $display='已计算 '.$display.'（'.$pending.'笔待核对）';
+        return ['complete'=>$pending===0,'pendingCount'=>$pending,'displayValue'=>$display];
     }
 
     /**
@@ -1212,7 +1221,7 @@ final class MobileWarehouseServices
         $base = ['selectedRankingCode' => $rankingCode, 'rankingRange' => $range, 'data_as_of' => time()];
         if ($storeIds === []) return self::paginateRankingRows([], $page) + $base;
         if ($rankingCode === 'staff_designated_customer') {
-            return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder, 0), $page) + $base;
+            return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder), $page) + $base;
         }
         if ($rankingCode === 'project_count') {
             return $this->serviceProjectRankingPage($storeIds, $period, $rankingOrder, $projectSortMetric, $page) + $base;
@@ -1312,145 +1321,22 @@ final class MobileWarehouseServices
         return $rows;
     }
 
-    /**
-     * "员工点客" has the same customer-counting rule as the legacy service
-     * report, but reads only the V3 immutable service fact and its frozen
-     * craftsman snapshot.  A member is counted once per day; a friend/guest
-     * service line is counted separately.  All point-customer craftsmen in a
-     * group split one customer in hundredths, with the final remainder given
-     * to the largest staff id for deterministic results.
-     */
-    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder, int $limit = 10): array
+    /** 与员工详情共用点客指标和十分位展示，原始服务记录由指标服务统一识别和去重。 */
+    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder): array
     {
-        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('service')
-            ->where('service.tenant_id', '0')->whereIn('service.store_id', $storeIds)
-            ->whereBetween('service.business_date', [$period['startDate'], $period['endDate']])
-            ->where('service.service_status', 'completed');
-        // Point-customer rankings share normal service visibility with report
-        // lists, so a successful service or sales void removes its original day.
-        (new \app\services\report\StoreReportNormalDataScopeServices())
-            ->excludeVoidedSalesOrderServices($query, 'service');
-        $facts = $query->field('service.service_fact_id,service.business_date,service.member_id,service.service_object,service.craftsmen_snapshot_json')
-            ->select()->toArray();
-
-        // groupKey => [staff id => immutable employee identity]
-        $groups = [];
-        foreach ($facts as $fact) {
-            $pointCraftsmen = $this->pointCraftsmenFromSnapshot($fact['craftsmen_snapshot_json'] ?? null);
-            if ($pointCraftsmen === []) {
-                continue;
-            }
-
-            $day = (string)($fact['business_date'] ?? '');
-            $memberId = (int)($fact['member_id'] ?? 0);
-            $serviceObject = trim((string)($fact['service_object'] ?? ''));
-            $isFriendOrGuest = $memberId <= 0 || $serviceObject === 'friend' || $serviceObject === '朋友';
-            $groupKey = $isFriendOrGuest
-                ? 'g_' . $day . '_' . (string)($fact['service_fact_id'] ?? '')
-                : 'm_' . $day . '_' . $memberId;
-            if (!isset($groups[$groupKey])) {
-                $groups[$groupKey] = [];
-            }
-            foreach ($pointCraftsmen as $staffId => $identity) {
-                $groups[$groupKey][$staffId] = $identity;
-            }
-        }
-
-        // employee id => immutable display identity plus scaled customer count
-        $employees = [];
-        foreach ($groups as $group) {
-            ksort($group, SORT_NUMERIC);
-            $staffIds = array_keys($group);
-            $count = count($staffIds);
-            if ($count === 0) {
-                continue;
-            }
-            $base = intdiv(100, $count);
-            $remainder = 100 - $base * $count;
-            foreach ($staffIds as $index => $staffId) {
-                $identity = $group[$staffId];
-                $employeeId = (int)$identity['employeeId'];
-                if (!isset($employees[$employeeId])) {
-                    $employees[$employeeId] = ['name' => (string)$identity['name'], 'hundredths' => 0];
-                }
-                $employees[$employeeId]['hundredths'] += $base + ($index === $count - 1 ? $remainder : 0);
-            }
-        }
-
-        $rows = [];
-        foreach ($employees as $employeeId => $employee) {
-            $rows[] = [
-                'entity_id' => (int)$employeeId,
-                'entity_name' => (string)$employee['name'],
-                'ranking_value' => (int)$employee['hundredths'],
-            ];
-        }
-        usort($rows, static function (array $left, array $right) use ($rankingOrder): int {
-            $leftValue = (int)$left['ranking_value'];
-            $rightValue = (int)$right['ranking_value'];
-            if ($leftValue === $rightValue) {
-                return (int)$left['entity_id'] <=> (int)$right['entity_id'];
-            }
-            return $rankingOrder === 'asc' ? $leftValue <=> $rightValue : $rightValue <=> $leftValue;
-        });
-        return $this->fractionalCustomerRankingRows($limit > 0 ? array_slice($rows, 0, $limit) : $rows);
-    }
-
-    /**
-     * Reads only frozen V3 service-row snapshots.  The entitlement completion
-     * stream has a historical snake_case snapshot shape while the sales stream
-     * uses the canonical camelCase shape; both explicitly carry the point
-     * flag.  A pre-fix snapshot without that flag is intentionally ignored.
-     *
-     * @return array<int,array{employeeId:int,name:string}>
-     */
-    private function pointCraftsmenFromSnapshot($json): array
-    {
-        if (!is_string($json) || trim($json) === '') {
-            return [];
-        }
-        $rows = json_decode($json, true);
-        if (!is_array($rows)) {
-            return [];
-        }
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $rows = $reader->pointVisitRanking('0', $storeIds, [
+            'start' => $period['startDate'], 'end' => $period['endDate'],
+        ], $rankingOrder);
         $result = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $hasPointFlag = array_key_exists('isPointCustomer', $row) || array_key_exists('is_point_customer', $row);
-            $isPointCustomer = !empty($row['isPointCustomer']) || !empty($row['is_point_customer']);
-            if (!$hasPointFlag || !$isPointCustomer) {
-                continue;
-            }
-            $staffId = (int)($row['staffId'] ?? $row['staff_id'] ?? 0);
-            $employeeId = (int)($row['employeeId'] ?? $row['employee_id'] ?? 0);
-            if ($staffId <= 0 || $employeeId <= 0) {
-                continue;
-            }
-            $result[$staffId] = [
-                'employeeId' => $employeeId,
-                'name' => trim((string)($row['name'] ?? $row['staff_name_snapshot'] ?? '')),
-            ];
-        }
-        return $result;
-    }
-
-    /** @param array<int,array<string,mixed>> $rows */
-    private function fractionalCustomerRankingRows(array $rows): array
-    {
-        $result = [];
-        foreach ($rows as $row) {
-            $hundredths = (int)($row['ranking_value'] ?? 0);
-            $value = $hundredths / 100;
-            $display = number_format($value, 2, '.', '');
-            $display = rtrim(rtrim($display, '0'), '.');
+            $count = (int)$row['metric_value'];
             $result[] = [
                 'entityType' => 'employee',
-                'entityId' => (int)($row['entity_id'] ?? 0),
-                'name' => trim((string)($row['entity_name'] ?? '')) ?: '未命名员工',
-                'rankingValue' => $value,
-                'displayValue' => $display === '' ? '0' : $display,
+                'entityId' => (int)$row['entity_id'],
+                'name' => trim((string)$row['entity_name']) ?: '未命名员工',
+                'rankingValue' => $count / 10,
+                'displayValue' => self::displayScaledCount($count, 1),
                 'unit' => 'count',
                 'hasChildren' => false,
             ];

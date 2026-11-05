@@ -560,9 +560,15 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 // A mixed checkout settles purchased projects as completed services too.
                 // Write them before request success in this transaction; entitlement lines
                 // already have their own completion facts and must not be duplicated.
-                $saleProjectServices = (new CashierV3SaleProjectServiceCompletionServices($this->salesOrders))
-                    ->completeInTx($salesPlan, $salesOrder, (int)$authority['settledAt'],
-                        (string)$checkoutCompleted['event_no']);
+                if (CashierV3ProjectPurchasePolicy::deferred($saleOrderHeader)) {
+                    (new CashierV3PurchasedProjectEntitlementServices())
+                        ->issueInTx($salesPlan, (int)$authority['settledAt']);
+                    $saleProjectServices = ['services' => []];
+                } else {
+                    $saleProjectServices = (new CashierV3SaleProjectServiceCompletionServices($this->salesOrders))
+                        ->completeInTx($salesPlan, $salesOrder, (int)$authority['settledAt'],
+                            (string)$checkoutCompleted['event_no']);
+                }
                 foreach ($saleProjectServices['services'] as $service) {
                     $input = [
                         'event_type' => 'service.completed',

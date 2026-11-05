@@ -147,6 +147,8 @@ class CashierV3RootDomainAssembler
             'navigationRules' => (new \app\services\organization\StorePermissionCatalogServices())->snapshot()['rules'],
             // 实例级展示开关随每次权威根投影下发；缺少配置时保持原有入口可见。
             'storeDisplayOptions' => [
+                // Same policy as the display snapshot; no separate checkout configuration.
+                'projectAutoComplete' => \app\services\cashier\v3\settlement\CashierV3ProjectPurchasePolicy::enabled(),
                 // 缺省为开，仅下发显示策略；人员快照里的售前标记仍按原业务事实保留。
                 'preSaleEnabled' => (int)sys_config('cashier_presale_switch', 1) === 1,
                 'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
@@ -154,6 +156,8 @@ class CashierV3RootDomainAssembler
                 'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
                 // 计算法仅是显隐选项名称；缺失定义/null 均保持现有金额与入口。
                 'laborFeeVisible' => (int)sys_config('cashier_labor_fee_mode', 0) !== 1,
+                // 只下发选择器默认范围，历史会员事实与可见权限继续由查询服务保护。
+                'memberDefaultAll' => (int)sys_config('cashier_member_default_all_switch', 0) === 1,
             ],
             'featurePermissions' => $features ?: new \stdClass(),
             'operationPermissions' => $operationFeatures ?: new \stdClass(),

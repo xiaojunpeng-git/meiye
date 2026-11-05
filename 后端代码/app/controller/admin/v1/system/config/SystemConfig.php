@@ -305,6 +305,16 @@ class SystemConfig extends AuthController
                 return $this->fail('服务语音播报配置缺失，请先完成配置升级');
             }
         }
+        // Reject an uninstalled/invalid fulfillment option before any config
+        // writes, rather than displaying success while checkout keeps its old mode.
+        if (array_key_exists('cashier_project_auto_complete_switch', $post)) {
+            if (!in_array((string)$post['cashier_project_auto_complete_switch'], ['0', '1'], true)) {
+                return $this->fail('门店端购买项目自动核销选项无效');
+            }
+            if (!$this->services->getOne(['menu_name' => 'cashier_project_auto_complete_switch', 'is_store' => 0])) {
+                return $this->fail('购买项目核销配置缺失，请先完成配置升级');
+            }
+        }
         // The member selector switch is rendered with an off fallback before its
         // config definition exists. Reject that incomplete installation before
         // saving any form fields, instead of reporting success for a lost choice.

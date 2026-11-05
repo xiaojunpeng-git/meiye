@@ -85,11 +85,27 @@ try {
     $purchase = $item['cardPurchaseSnapshot'];
     $base = $purchase['ordinarySaleBaseline']['definition']['purchase'];
     $purchase['components'][0]['configuredAmountCents'] =
-        $base['components'][0]['configuredPriceCents'] * $base['components'][0]['writeTimes'] + 200;
+        ($purchase['ordinarySaleBaseline']['definition']['componentSaleAmountsCents'][0]
+            ?? $base['components'][0]['configuredPriceCents'] * $base['components'][0]['writeTimes']) + 200;
     $purchase['components'][0]['writeTimes'] += 2;
     $price = Rule::minimumPrice($purchase, Rule::validate($purchase, [], $store, (int)$item['id']));
-    $makeSnapshot = static function (int $member, array $card, int $amount) use ($item): array {
-        return ['memberId' => $member, 'occurredAt' => time(), 'businessDate' => date('Y-m-d'), 'lines' => [[
+    // A complete final snapshot includes its confirmed source. Reuse the real
+    // local directory rather than omitting this unrelated settlement prerequisite.
+    $sourceConfig = new \app\services\cashier\v3\config\CashierV3BusinessConfigServices();
+    $sourceSnapshot = null;
+    foreach ($sourceConfig->existingSources() as $source) {
+        if ((int)($source['status'] ?? 0) !== 1) continue;
+        try {
+            $sourceConfig->assertCheckoutSourceAllowed((int)$source['id']);
+            $child = (int)($source['require_secondary'] ?? 0) === 1
+                ? (int)($source['children'][0]['id'] ?? 0) : 0;
+            $sourceSnapshot = $sourceConfig->resolveSourceSnapshot((int)$source['id'], $child);
+            break;
+        } catch (\Throwable $e) { /* Try another existing eligible test source. */ }
+    }
+    if ($sourceSnapshot === null) throw new RuntimeException('Local checkout source fixture unavailable');
+    $makeSnapshot = static function (int $member, array $card, int $amount) use ($item, $sourceSnapshot): array {
+        return ['memberId' => $member, 'source' => $sourceSnapshot, 'occurredAt' => time(), 'businessDate' => date('Y-m-d'), 'lines' => [[
             'lineId' => 'ordinary-card', 'lineRole' => 'sale', 'itemId' => (int)$item['id'], 'quantity' => 1,
             'lineAmountCents' => $amount, 'originalLineAmountCents' => $amount,
             'cardPurchaseSnapshot' => $card,
@@ -177,11 +193,11 @@ try {
     } catch (CashierV3CommandException $e) { $denied = true; }
     $check($denied, 'consumed hang still fails closed against duplicate checkout');
     $successfulKeys = [$firstKey, $secondKey, $thirdKey];
-    foreach (['unchanged', 'times-only', 'amount-only', 'quantity-two', 'multi-project'] as $case) {
+    foreach (['unchanged', 'times-only', 'amount-only', 'quantity-two', 'multi-project', 'card-total-only', 'card-total-and-times'] as $case) {
         $card = $base;
         $card['ordinarySaleBaseline'] = $purchase['ordinarySaleBaseline'];
         $currentItem = $item;
-        if ($case === 'multi-project') {
+        if (in_array($case, ['multi-project', 'card-total-only', 'card-total-and-times'], true)) {
             foreach ($items as $candidate) {
                 if (($candidate['cardRuleType'] ?? '') === 'normal'
                     && count($candidate['cardPurchaseSnapshot']['components'] ?? []) > 1) {
@@ -193,14 +209,18 @@ try {
         $original = $card['ordinarySaleBaseline']['definition']['purchase']['components'];
         if ($case !== 'unchanged') {
             foreach ($card['components'] as $i => &$component) {
-                $component['configuredAmountCents'] = $original[$i]['configuredPriceCents'] * $original[$i]['writeTimes']
-                    + ($case === 'times-only' ? 0 : 200);
-                $component['writeTimes'] += $case === 'amount-only' ? 0 : 1;
+                $component['configuredAmountCents'] = ($card['ordinarySaleBaseline']['definition']['componentSaleAmountsCents'][$i]
+                    ?? $original[$i]['configuredPriceCents'] * $original[$i]['writeTimes'])
+                    + (in_array($case, ['times-only', 'card-total-only', 'card-total-and-times'], true) ? 0 : 200);
+                $component['writeTimes'] += in_array($case, ['amount-only', 'card-total-only'], true) ? 0 : 1;
             }
             unset($component);
         }
         $delta = Rule::validate($card, [], $store, (int)$currentItem['id']);
         $unit = Rule::minimumPrice($card, $delta) ?? $card['ordinarySaleBaseline']['definition']['priceCents'];
+        // The new editor changes only one card total; signed row amounts stay
+        // weights. Real checkout, payment, allocation and void must reconcile it.
+        if (in_array($case, ['card-total-only', 'card-total-and-times'], true)) $unit += 10000;
         $quantity = $case === 'quantity-two' ? 2 : 1;
         $snapshot = $makeSnapshot($members[0], $card, $unit * $quantity);
         $snapshot['lines'][0]['itemId'] = (int)$currentItem['id'];
@@ -209,6 +229,20 @@ try {
         $check(Db::name('cashier_v3_card_purchase_receipt')->where('command_idempotency_key', $caseKey)->count() === $quantity
             && (int)Db::name('cashier_v3_payment_fact')->where('command_idempotency_key', $caseKey)->sum('amount_cents') === $unit * $quantity,
             'real final checkout reconciles sale payment and rights: ' . $case);
+        if (in_array($case, ['card-total-only', 'card-total-and-times'], true)) {
+            $orderId = Db::name('cashier_v3_sales_order')->where('command_idempotency_key', $caseKey)->value('order_id');
+            $check((int)Db::name('cashier_v3_card_sale_item_allocation_fact')->where('order_id', $orderId)->where('status', 'effective')->sum('sale_amount_cents') === $unit * $quantity,
+                'backend allocation conserves the single edited card total: ' . $case);
+            $receipts = Db::name('cashier_v3_card_purchase_receipt')->where('sales_order_id', $orderId)->select()->toArray();
+            $legacyIds = array_column($receipts, 'legacy_order_id');
+            $orders = Db::name('store_order')->whereIn('id', $legacyIds)->select()->toArray();
+            // Match the live entitlement reader: the card's outer sale row is not a project right.
+            $details = Db::name('store_order_cart_info')->whereIn('oid', $legacyIds)->where('cart_type', 2)->where('product_type', 6)->select()->toArray();
+            $pools = (new \app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices())->wholeYuanForOrders($orders, $details);
+            $check(array_sum($pools) === $unit * $quantity && count($pools) === count($details)
+                && count(array_filter($pools, static fn($amount) => $amount >= 0 && $amount % 100 === 0)) === count($details),
+                'issued entitlement pools conserve the single edited total in whole yuan: ' . $case);
+        }
     }
     $recorder = new CashierV3BusinessEventRecorder();
     $lifecycle = new CashierV3OrderLifecycleServices();

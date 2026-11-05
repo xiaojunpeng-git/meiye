@@ -2260,7 +2260,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'reservation_service_voice_mode', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'cashier_member_default_all_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'cashier_project_auto_complete_switch', 'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'reservation_service_voice_mode', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'cashier_member_default_all_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2294,8 +2294,8 @@ WSS;
                 Build::switch('cashier_debt_pay_switch', $data['cashier_debt_pay_switch']['info'] ?? '是否允许欠款', (int)($data['cashier_debt_pay_switch']['value'] ?? 0))->trueValue('是', 1)->falseValue('否', 0)->info($data['cashier_debt_pay_switch']['desc'] ?? '关闭后收银台购物车和充值页面隐藏欠款按钮'),
                 // 仅管理收银目录入口，不能把已存在的定制卡或卡项操作一同禁用。
                 Build::switch('cashier_custom_card_entry_switch', '开启定制卡', ($data['cashier_custom_card_entry_switch']['value'] ?? '') === '' ? 1 : (int)$data['cashier_custom_card_entry_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info('仅控制收银页定制卡入口显示，不影响已有定制卡及其他卡项操作'),
-                // 默认关闭，仅允许本次普通卡销售逐项增额、增次，不改商品配置或历史权益。
-                Build::switch('cashier_ordinary_card_sale_edit_switch', '普通卡销售可修改', (int)($data['cashier_ordinary_card_sale_edit_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后普通卡销售可逐项修改总金额和次数，均不得低于原配置'),
+                // 默认关闭；本次普通卡销售只编辑整卡总价与各项目次数，不改商品配置、内部权重或历史权益。
+                Build::switch('cashier_ordinary_card_sale_edit_switch', '普通卡销售可修改', (int)($data['cashier_ordinary_card_sale_edit_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后普通卡销售可修改整卡售价和各项目次数，均不得低于原配置'),
                 // 售前只控制人员分配中的标记入口与列，不能清空已保存的销售人售前事实。
                 Build::switch('cashier_presale_switch', '售前', (int)($data['cashier_presale_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银和订单管理业务分配中的售前选项及是否售前列，历史标记保留'),
                 // 其他开关仅控制门店端入口和订单列表列；历史归属与体验事实仍保留。
@@ -2309,6 +2309,8 @@ WSS;
                 Build::switch('cashier_member_default_all_switch', '选择会员默认全部', (int)($data['cashier_member_default_all_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后收银和预约选择会员默认查询全部，并隐藏本店／全部切换；关闭时默认本店，可手动切换'),
                 // 仅控制预约倒计时的两次语音提醒；自动结束服务在两端均由服务端统一执行。
                 Build::radio('reservation_service_voice_mode', '服务语音播报', (int)($data['reservation_service_voice_mode']['value'] ?? 1))->options([['value' => 1, 'label' => '手机端'], ['value' => 2, 'label' => '门店端'], ['value' => 3, 'label' => '全部']])->info('服务剩余五分钟和五秒时播报；手动结束不播报'),
+                // 默认保持购买即核销；关闭后只发放待用项目权益，不提前计算服务业绩。
+                Build::switch('cashier_project_auto_complete_switch', '门店端购买项目自动核销', ($data['cashier_project_auto_complete_switch']['value'] ?? '') === '' ? 1 : (int)$data['cashier_project_auto_complete_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启保持购买项目即核销；关闭后须选择会员，购买项目生成待用权益，实际使用时再核销'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),

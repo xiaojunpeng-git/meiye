@@ -17,6 +17,15 @@ class UserBalanceAtomicServices extends BaseServices
     private const MAX_COMPONENT_AMOUNT = '99999999.99';
 
     private const TYPE_META = [
+        // 平台人工余额修正沿用旧版流水类型，通过同一原子钱包保持本赠金守恒。
+        'system_add' => [
+            'ledger_type' => 'system_add', 'pm' => 1,
+            'title' => '系统操作增加余额', 'mark' => '系统增加{%num%}余额',
+        ],
+        'system_sub' => [
+            'ledger_type' => 'system_sub', 'pm' => 0,
+            'title' => '系统操作减少余额', 'mark' => '系统扣除{%num%}余额',
+        ],
         'user_recharge' => [
             'ledger_type' => 'user_recharge', 'pm' => 1,
             'title' => '会员储值', 'mark' => '会员储值{%num%}元',

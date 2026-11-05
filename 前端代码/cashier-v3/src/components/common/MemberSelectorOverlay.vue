@@ -1,6 +1,8 @@
 <script setup>
 import CornerDownLeft from '@lucide/vue/dist/esm/icons/corner-down-left.mjs'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import RequiredFieldGuidance from '@/components/common/RequiredFieldGuidance.vue'
+import { useFieldGuidance } from '@/composables/useFieldGuidance'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 import { readRecentCashierMemberIds, rememberRecentCashierMember } from '@/services/recentCashierMembers'
 
@@ -9,6 +11,7 @@ import { readRecentCashierMemberIds, rememberRecentCashierMember } from '@/servi
  * 建议记录字段：id、name、phone、memberNo、status、storeName、organizationName、selectable（可选）。
  */
 const props = defineProps({
+  requiredSelectionMessage: { type: String, default: '' },
   records: {
     type: Array,
     default: () => []
@@ -108,6 +111,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+// Business callers can open this selector at the missing required member.
+// Reuse the standard focus/highlight/3.2-second guidance, never auto-select.
+const guidanceRoot = ref(null)
+const { guidance, clear: clearMemberGuidance, guide: guideMemberField } = useFieldGuidance(guidanceRoot)
 
 const keyword = ref('')
 const isQuerying = ref(false)
@@ -247,9 +254,13 @@ function clearQuery() {
 
 // 打开选择器即加载当前数据权限范围内的第一页。此前只有手动点击“查询”
 // 才会发起请求，首次打开会把尚未加载误显示成“暂无可显示的会员”。
-onMounted(() => {
-  runQuery(1)
+onMounted(async () => {
+  await runQuery(1)
   loadRecentMembers()
+  if (props.requiredSelectionMessage) {
+    await nextTick()
+    guideMemberField('required-member', props.requiredSelectionMessage)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -258,6 +269,7 @@ onBeforeUnmount(() => {
 })
 
 async function selectMember(record) {
+  clearMemberGuidance()
   if (isUnavailable(record) || selectingRecordId.value || isBusy.value) return
   selectError.value = ''
 
@@ -338,7 +350,7 @@ async function handleCreated(payload = {}) {
 <template>
   <Teleport to="body">
     <div class="member-selector" role="presentation" @click.self="$emit('close', { reason: 'dismiss' })">
-      <section class="member-selector__dialog" role="dialog" aria-modal="true" :aria-label="dialogTitle">
+      <section ref="guidanceRoot" class="member-selector__dialog" role="dialog" aria-modal="true" :aria-label="dialogTitle">
       <header class="member-selector__header">
         <div class="member-selector__heading">
           <button v-if="activeView === 'creator'" type="button" class="member-selector__back" aria-label="返回选择会员" @click="returnToSelector">←</button>
@@ -349,9 +361,10 @@ async function handleCreated(payload = {}) {
 
       <template v-if="activeView === 'selector'">
       <form class="member-selector__search" :class="{ 'member-selector__search--scope-right': alignScopeRight }" @submit.prevent="submitQuery">
-        <label class="member-selector__search-field">
+        <label class="member-selector__search-field" style="position: relative">
           <span>查询会员</span>
-          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle && showNameInitialsHint ? '姓名或拼音首字母、手机号片段或会员编号片段' : '姓名、手机号片段或会员编号片段'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
+          <RequiredFieldGuidance v-if="guidance.target === 'required-member'" :message="guidance.message" />
+          <input v-model="keyword" data-field="required-member" :style="guidance.target === 'required-member' ? { outline: '2px solid #1677ff', outlineOffset: '2px' } : undefined" @input="clearMemberGuidance" @pointerdown="clearMemberGuidance" type="search" autocomplete="off" :placeholder="showScopeToggle && showNameInitialsHint ? '姓名或拼音首字母、手机号片段或会员编号片段' : '姓名、手机号片段或会员编号片段'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
         <fieldset v-if="showScopeToggle && !hideScopeControls" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
           <legend>查询范围</legend>

@@ -360,6 +360,8 @@ final class CashierV3PaymentCollectionPlanV1
 
     private static function normalizeRequest(array $request): array
     {
+        // Fulfillment mode never changes collection amounts or payment authority.
+        unset($request['project_auto_complete']);
         self::assertExactKeys(
             $request,
             self::REQUEST_KEYS,

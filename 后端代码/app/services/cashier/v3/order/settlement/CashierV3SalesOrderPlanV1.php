@@ -378,6 +378,7 @@ final class CashierV3SalesOrderPlanV1
             'reversal_of_order_id' => '',
             'reversal_reason_snapshot' => '',
         ];
+        if ((int)$request['project_auto_complete'] === 0) $header['project_auto_complete'] = 0;
         $headerFingerprintInput = $header;
         $headerFingerprintInput['line_fingerprints'] = array_column(
             $orderLines,
@@ -514,8 +515,13 @@ final class CashierV3SalesOrderPlanV1
 
     private static function normalizeRequest(array $request): array
     {
+        // The additive fulfillment column is absent on pre-switch fixtures.
+        $projectAutoComplete = (int)($request['project_auto_complete'] ?? 1);
+        if (!in_array($projectAutoComplete, [0, 1], true)) throw self::failure('project_auto_complete_invalid');
+        unset($request['project_auto_complete']);
         self::assertExactKeys($request, self::REQUEST_KEYS, 'locked_checkout_request_shape_invalid');
         $normalized = [
+            'project_auto_complete' => $projectAutoComplete,
             'request_id' => self::opaqueId($request['request_id'], 'CKR', 'checkout_request_id_invalid'),
             'tenant_id' => self::token($request['tenant_id'], 32, 'checkout_tenant_id_invalid'),
             'organization_id' => self::token(

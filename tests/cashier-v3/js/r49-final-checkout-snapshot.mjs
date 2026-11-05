@@ -17,6 +17,7 @@ assert.ok(start >= 0 && end > start)
 const clone = value => JSON.parse(JSON.stringify(value))
 const identity = value => value || []
 const context = vm.createContext({
+  projectAutoComplete: { value: true },
   clonePlain: clone, isRecord: v => v !== null && typeof v === 'object' && !Array.isArray(v),
   checkoutSnapshotBusinessLines: lines => lines.filter(line => line.lineRole === 'sale'),
   cartLineRole: line => line.lineRole, checkoutLineRole: line => line.lineRole,
@@ -39,6 +40,14 @@ context.input = { memberId: 49, customerMode: 'member', source: {}, lines: [{
   originalAmount: 800, cardPurchaseSnapshot: fixture.purchase,
   productVersion: 999, nestedProjection: { recordVersion: 999, ordinaryValue: 1 }
 }] }
+// Fulfillment is part of the same final business snapshot; a refreshed root
+// must not replace the choice shown when checkout opened.
+context.input.projectAutoComplete = false
+context.projectAutoComplete.value = true
+const frozenProjectMode = JSON.parse(JSON.stringify(vm.runInContext('buildCheckoutSnapshot(input)', context)))
+assert.equal(frozenProjectMode.projectAutoComplete, false)
+delete context.input.projectAutoComplete
+console.log('PASS final checkout retains confirmed deferred project mode')
 const actual = JSON.parse(JSON.stringify(vm.runInContext('buildCheckoutSnapshot(input)', context)))
 assert.deepEqual(actual.lines[0].cardPurchaseSnapshot, fixture.purchase)
 assert.equal(actual.lines[0].productVersion, undefined)
@@ -52,7 +61,8 @@ const result = execFileSync('php', [phpTest], {
 process.stdout.write(result)
 console.log('PASS final unique snapshot contains no versions and preserves signed row amounts/times')
 
-// Repeat against the live local catalogue/key for the reported 2368->3368, 16->18 case.
+// Repeat against the live local catalogue/key. New snapshots start from the
+// card sale allocation (2380), while an old signed 2368 floor stays compatible.
 const localTest = fs.readFileSync(new URL('../php/r49-ordinary-card-local.php', import.meta.url))
 const dockerArgs = ['exec', '-i', '-e', 'R49_LOCAL_ONLY=1', '-e', 'R49_CONFIG_FIXTURE=enabled', '-e', 'R49_PRODUCT_ID=92820', '-e', 'R49_INCREASE_CENTS=100000']
 const live = JSON.parse(execFileSync('docker', [...dockerArgs, '-e', 'R49_SETUP=export-transport', 'mohe-cashier-app', 'php'], {
@@ -62,7 +72,8 @@ context.input.lines[0].cardPurchaseSnapshot = live.purchase
 context.input.lines[0].amount = context.input.lines[0].finalAmount = context.input.lines[0].originalAmount = live.amountCents / 100
 const liveFinal = JSON.parse(JSON.stringify(vm.runInContext('buildCheckoutSnapshot(input)', context)))
 assert.equal(liveFinal.lines[0].lineAmountCents, 338000)
-assert.equal(liveFinal.lines[0].cardPurchaseSnapshot.components[0].configuredAmountCents, 336800)
+assert.equal(liveFinal.lines[0].cardPurchaseSnapshot.components[0].configuredAmountCents,
+  (live.purchase.ordinarySaleBaseline.definition.componentSaleAmountsCents?.[0] ?? 236800) + 100000)
 assert.equal(liveFinal.lines[0].cardPurchaseSnapshot.components[0].writeTimes, 18)
 assert.ok(!/"[^"\n]*(?:version|revision)"\s*:/i.test(JSON.stringify(liveFinal)))
 process.stdout.write(execFileSync('docker', [...dockerArgs, '-e', 'R49_SETUP=verify-transport',

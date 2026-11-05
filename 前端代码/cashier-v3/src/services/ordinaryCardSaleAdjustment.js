@@ -1,16 +1,28 @@
-// R49 edits use per-row TOTAL amounts. Never divide by times or overwrite catalogue unit prices.
+// One editable card price and per-project times. Server-signed component amounts
+// remain internal allocation weights; this editor never exposes or redistributes them.
+function originalAmount(definition, original, index) {
+  const amounts = definition?.componentSaleAmountsCents
+  // Existing signed hangs have no allocation field and keep their accepted floors.
+  if (amounts === undefined) return Number(original.configuredPriceCents) * Number(original.writeTimes)
+  const amount = amounts?.[index]
+  if (!Array.isArray(amounts) || !Number.isSafeInteger(amount) || amount < 0 || amount % 100 !== 0) {
+    throw new Error('卡内项目金额不完整，请重新选择。')
+  }
+  return amount
+}
+
 export function ordinaryCardRows(item) {
   const purchase = item?.cardPurchaseSnapshot
-  const base = purchase?.ordinarySaleBaseline?.definition?.purchase
+  const definition = purchase?.ordinarySaleBaseline?.definition
+  const base = definition?.purchase
   if (purchase?.ruleType !== 'normal' || !Array.isArray(base?.components)) return []
   return purchase.components.map((row, index) => {
     const original = base.components[index]
-    const minimumCents = Number(original.configuredPriceCents) * Number(original.writeTimes)
+    const minimumCents = originalAmount(definition, original, index)
     return {
       relationId: row.relationId, name: row.nameSnapshot,
       specification: row.skuNameSnapshot,
       minimumCents, minimumTimes: original.writeTimes,
-      amount: String((row.configuredAmountCents ?? minimumCents) / 100),
       times: String(row.writeTimes)
     }
   })
@@ -44,7 +56,7 @@ export function validateOrdinaryCardSale(purchase, amountCents, quantity = 1) {
       if (String(row[key] ?? '') !== String(base[key] ?? '')) throw new Error(`${label}不得更换或删减。`)
     }
     const times = integer(row.writeTimes, 99999999)
-    const minimum = Number(base.configuredPriceCents) * Number(base.writeTimes)
+    const minimum = originalAmount(baseline, base, index)
     const total = row.configuredAmountCents ?? minimum
     if (!Number.isSafeInteger(total) || total > 99999999900 || total % 100 !== 0 || total < minimum
       || times < Number(base.writeTimes)) throw new Error(`${label}的总金额和次数不能低于原配置，且必须为整数。`)
@@ -63,8 +75,9 @@ export function validateOrdinaryCardSale(purchase, amountCents, quantity = 1) {
   }
 }
 
-// Produces a new sale intent; the signed baseline and every noneditable field remain intact.
-export function applyOrdinaryCardRows(item, rows) {
+// Save a single whole-yuan card price. Existing backend validation still owns
+// signed floors, final allocation, issuance and coupons; no catalogue is changed.
+export function applyOrdinaryCardRows(item, rows, totalPrice = Number(item?.price)) {
   if (item?.ordinaryCardSaleEditable !== true) throw new Error('普通卡销售修改未开启。')
   const next = JSON.parse(JSON.stringify(item))
   const originalRows = ordinaryCardRows(item)
@@ -73,18 +86,24 @@ export function applyOrdinaryCardRows(item, rows) {
   next.cardPurchaseSnapshot.components.forEach((component, index) => {
     const baseline = originalRows[index]
     const row = rows[index]
-    const amountCents = integer(row.amount, 999999999) * 100
+    // Previously confirmed row weights (including saved hangs) stay intact.
+    // Editing times must not reweight the card or create a second sale total.
+    if (Object.prototype.hasOwnProperty.call(row, 'amount')) throw new Error('项目只能修改次数，请在整卡售价处修改金额。')
+    const amountCents = component.configuredAmountCents ?? baseline.minimumCents
     const times = integer(row.times, 99999999)
-    if (row.relationId !== baseline.relationId || amountCents < baseline.minimumCents || times < baseline.minimumTimes) {
-      throw new Error(`${baseline.name}的总金额和次数不能低于原配置。`)
+    if (row.relationId !== baseline.relationId || times < baseline.minimumTimes) {
+      throw new Error(`${baseline.name}的次数不能低于原配置。`)
     }
     component.configuredAmountCents = amountCents
     component.writeTimes = times
     increase += amountCents - baseline.minimumCents
     next.cardPreview.components[index].writeTimes = times
   })
-  const price = next.cardPurchaseSnapshot.ordinarySaleBaseline.definition.priceCents + increase
-  if (!Number.isSafeInteger(price) || price % 100 !== 0) throw new Error('整卡金额必须为整数元。')
+  const minimumPrice = next.cardPurchaseSnapshot.ordinarySaleBaseline.definition.priceCents + increase
+  const price = integer(totalPrice, 999999999) * 100
+  if (!Number.isSafeInteger(minimumPrice) || price < minimumPrice) {
+    throw new Error(`整卡售价不能低于原配置${minimumPrice / 100}元。`)
+  }
   next.price = price / 100
   validateOrdinaryCardSale(next.cardPurchaseSnapshot, price)
   return next

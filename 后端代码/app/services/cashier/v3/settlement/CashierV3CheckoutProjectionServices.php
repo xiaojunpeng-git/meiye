@@ -1169,6 +1169,8 @@ final class CashierV3CheckoutProjectionServices
                 'operatorNameSnapshot' => (string)($request['supplement_operator_name_snapshot'] ?? ''),
                 'operatedAt' => (int)($request['supplement_operated_at'] ?? 0),
             ],
+            // Recovery displays the checkout's saved fulfillment decision.
+            'projectAutoComplete' => (int)($request['project_auto_complete'] ?? 1) === 1,
             'sourceDocumentType' => $sourceDocumentType,
             'sourceDocumentId' => $sourceDocumentId,
             'sourceDocumentNo' => (string)($request['source_document_no'] ?? ''),

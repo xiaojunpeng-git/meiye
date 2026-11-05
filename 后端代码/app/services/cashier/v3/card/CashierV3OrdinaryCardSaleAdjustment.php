@@ -26,6 +26,13 @@ final class CashierV3OrdinaryCardSaleAdjustment
         $purchase = self::withoutVersions($purchase);
         $baseline = ['storeId' => $storeId, 'skuId' => $skuId,
             'priceCents' => $price, 'purchase' => $purchase];
+        // Project configuration values are allocation weights, not another sale
+        // total. Freeze the editor's whole-yuan amounts in this same signed
+        // business proof: a single zero-weight project still owns the card price.
+        // Legacy fractional catalogue prices keep their existing validation path.
+        if ($price >= 0 && $price % 100 === 0) {
+            $baseline['componentSaleAmountsCents'] = self::componentSaleAmounts($purchase, $price);
+        }
         $purchase['ordinarySaleBaseline'] = ['definition' => $baseline, 'signature' => self::signature($baseline)];
         return $purchase;
     }
@@ -80,7 +87,7 @@ final class CashierV3OrdinaryCardSaleAdjustment
             $price = $row['configuredPriceCents'] ?? -1;
             if (!is_int($baseTimes) || $baseTimes <= 0 || !is_int($price) || $price < 0
                 || $price > intdiv(PHP_INT_MAX, $baseTimes)) self::fail();
-            $floor = $price * $baseTimes;
+            $floor = self::originalAmount($definition, $i, $price * $baseTimes);
             $amount = $selected['configuredAmountCents'] ?? $floor;
             if (!is_int($times) || $times < $baseTimes || $times > 99999999
                 || ($times !== $baseTimes && !array_key_exists('configuredAmountCents', $selected))
@@ -95,6 +102,55 @@ final class CashierV3OrdinaryCardSaleAdjustment
         }
         if ($changed && !self::enabled()) self::fail('普通卡销售修改已关闭，请恢复原配置后重试。');
         return $increase;
+    }
+
+    /**
+     * Allocate the card price once, on the server, without changing catalogue
+     * prices or times. Zero weights stay zero when paid weights exist; if all
+     * weights are zero, equal weights include every row. Whole-yuan truncation
+     * leaves the remainder on the last participating row in snapshot order.
+     */
+    private static function componentSaleAmounts(array $purchase, int $price): array
+    {
+        $rows = $purchase['components'] ?? [];
+        if (!is_array($rows) || !$rows || array_keys($rows) !== range(0, count($rows) - 1)) self::fail();
+        $weights = [];
+        $total = '0';
+        foreach ($rows as $row) {
+            $unit = $row['configuredPriceCents'] ?? null;
+            $times = $row['writeTimes'] ?? null;
+            if (!is_int($unit) || $unit < 0 || !is_int($times) || $times <= 0) self::fail();
+            // BCMath prevents large catalogue weights from overflowing native
+            // multiplication; only the bounded sale amount is cast back to int.
+            $weight = bcmul((string)$unit, (string)$times, 0);
+            $weights[] = $weight;
+            $total = bcadd($total, $weight, 0);
+        }
+        if (bccomp($total, '0', 0) === 0) {
+            $weights = array_fill(0, count($rows), '1');
+            $total = (string)count($rows);
+        }
+        $last = 0;
+        foreach ($weights as $i => $weight) if (bccomp($weight, '0', 0) > 0) $last = $i;
+        $remaining = $price;
+        $amounts = [];
+        foreach ($weights as $i => $weight) {
+            $amount = $i === $last ? $remaining
+                : (int)bcdiv(bcmul((string)intdiv($price, 100), $weight, 0), $total, 0) * 100;
+            $amounts[] = $amount;
+            $remaining -= $amount;
+        }
+        return $amounts;
+    }
+
+    /** Existing signed carts/hangs retain their original project floors. */
+    private static function originalAmount(array $definition, int $index, int $legacyFloor): int
+    {
+        if (!array_key_exists('componentSaleAmountsCents', $definition)) return $legacyFloor;
+        $amounts = $definition['componentSaleAmountsCents'];
+        $amount = is_array($amounts) ? ($amounts[$index] ?? null) : null;
+        if (!is_int($amount) || $amount < 0 || $amount % 100 !== 0) self::fail();
+        return $amount;
     }
 
     /** Signed original price plus independent row increases; never replace it with the row sum. */

@@ -116,7 +116,7 @@ final class CashierV3SalesOrderReversalServices
             $holders = Db::name('user_card_holder')->where('oid', (int)$carrier['id'])->lock(true)->select()->toArray();
             $detail = Db::name('store_order_cart_info')->where('oid', (int)$carrier['id'])->where('cart_type', 2)->lock(true)->find();
             $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
-            if (count($holders) !== 1 || ($snapshot['sourceType'] ?? '') !== 'member_v3_project_purchase'
+            if (count($holders) !== 1 || !in_array(($snapshot['sourceType'] ?? ''), ['member_v3_project_purchase', 'cashier_v3_project_purchase'], true)
                 || ($snapshot['salesOrderLineId'] ?? '') !== $projectLine['order_line_id']
                 || ($snapshot['salesOrderId'] ?? '') !== $source['sourceId']) {
                 throw self::failure('sales_reversal_member_project_mapping_invalid');

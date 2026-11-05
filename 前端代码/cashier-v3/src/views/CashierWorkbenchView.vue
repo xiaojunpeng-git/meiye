@@ -103,6 +103,7 @@ const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.va
 const guidedBusinessMode = ref('')
 const pendingCardPurchase = ref(null)
 const ordinaryCardEditRows = ref(null)
+const ordinaryCardEditPrice = ref('')
 const ordinaryCardEditError = ref('')
 const isConfirmingCardPurchase = ref(false)
 const personnelOverlay = ref(null)
@@ -168,6 +169,8 @@ const cardOperationNoticeType = ref('')
 const entitlementSelectorRequestId = ref(null)
 const pendingEntitlementSelector = ref(false)
 const pendingCustomCardEntry = ref(false)
+// Only the guest purchase that explicitly requested this member choice may cross the guest-to-member boundary.
+const pendingDeferredGuestPurchase = ref(null)
 const pendingEntitlementProjectKey = ref('')
 const addedEntitlementProjectKey = ref('')
 const addedEntitlementLineId = ref('')
@@ -211,6 +214,12 @@ const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled
 const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled === true)
 // 仅控制两种业务分配模式里的售前操作展示，不删除草稿中的既有标记。
 const preSaleEnabled = computed(() => state.storeDisplayOptions?.preSaleEnabled === true)
+// This store-wide setting controls newly purchased projects only; existing rights still complete service.
+const projectAutoComplete = computed(() => state.storeDisplayOptions?.projectAutoComplete !== false)
+function needsImmediateProjectService(line) {
+  return isProjectLine(line) && (cartLineRole(line) !== 'sale' || projectAutoComplete.value)
+}
+
 const experienceEnabled = computed(() => state.storeDisplayOptions?.experienceEnabled === true)
 const craftsmanExcludeCountsEnabled = computed(() => state.storeDisplayOptions?.craftsmanExcludeCountsEnabled === true)
 function initialBusinessSource(kind) {
@@ -2243,6 +2252,13 @@ function reportCheckoutEntryFailure(result, fallback = '结账资料保存失败
   const code = String(result?.result?.code || result?.code || '')
   // 必填缺失直接定位页面中的第一个目标，避免用户先关闭一层无意义的错误弹窗。
   // 其它接口或业务错误仍走原反馈通道，不能被必填提示吞掉。
+  if (code === 'CASHIER_PROJECT_MEMBER_REQUIRED') {
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
+      detail: { context: 'cashier', selectorContext: 'cashier', requireMember: true,
+        requiredSelectionMessage: '请在这里选择会员，以保存待用项目权益' }
+    }))
+    return result
+  }
   if (code === 'CASHIER_CRAFTSMAN_REQUIRED') {
     guideRequiredField({
       target: 'first-missing-craftsman',
@@ -2633,15 +2649,19 @@ function closePendingCardPurchase() {
   pendingCardPurchase.value = null
 }
 
-// Editing is isolated from the cart until every row passes the original signed floors.
+// Edit one card total and independent project times; allocation weights remain
+// frozen business data and are never shown as independently editable prices.
 function editOrdinaryCardPurchase() {
   ordinaryCardEditRows.value = ordinaryCardRows(pendingCardPurchase.value)
+  // Catalogue money may arrive as "5800.00"; display the same whole-yuan
+  // value without decimal text so an unchanged save passes integer validation.
+  ordinaryCardEditPrice.value = String(Number(pendingCardPurchase.value.price))
   ordinaryCardEditError.value = ''
 }
 
 function saveOrdinaryCardPurchase() {
   try {
-    pendingCardPurchase.value = applyOrdinaryCardRows(pendingCardPurchase.value, ordinaryCardEditRows.value)
+    pendingCardPurchase.value = applyOrdinaryCardRows(pendingCardPurchase.value, ordinaryCardEditRows.value, ordinaryCardEditPrice.value)
     ordinaryCardEditRows.value = null
     ordinaryCardEditError.value = ''
   } catch (error) {
@@ -4155,7 +4175,7 @@ async function queryPersonnelCandidates(scope, line, keyword = '') {
 
 async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
   // 卡/项目升级在收款成功前只形成销售草稿，不创建服务或劳动业绩。
-  const showCraftsmen = roleScope === 'personnel' && isProjectLine(line) && !cardOperationUpgradeBinding(line)
+  const showCraftsmen = roleScope === 'personnel' && needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line)
   // 卡内权益只形成服务和劳动业绩，不形成销售业绩；不能加载或提交销售人。
   const showSalespeople = roleScope === 'personnel' && !isEntitlementLine(line)
   // 权益护理也有到店导购轮次，但没有本次销售人或销售经理归属。
@@ -4278,7 +4298,7 @@ async function searchPersonnelOverlay({ scope, keyword, target, organizationNode
 }
 
 async function openCartLineCraftsmen(line) {
-  if (!isProjectLine(line) || cardOperationUpgradeBinding(line)) return
+  if (!needsImmediateProjectService(line) || cardOperationUpgradeBinding(line)) return
   clearCraftsmanGuidance()
   activeCartLineId.value = line.id
   await loadPersonnelOverlay(line, 'craftsmen')
@@ -4682,7 +4702,7 @@ async function confirmPersonnelAssignment(result = {}) {
       // 权益项目同样需要把手艺人及其项目数写回结账草稿。此前这里仅
       // 识别现金项目，时间卡/卡项权益在完整分配中看似已确认，实际请求
       // 却没有 craftsmen，结账只能沿用初始化的项目数 0。
-      if ((isProjectLine(line) || isEntitlementLine(line)) && !cardOperationUpgradeBinding(line)) {
+      if ((needsImmediateProjectService(line) || isEntitlementLine(line)) && !cardOperationUpgradeBinding(line)) {
         payload.craftsmen = craftsmen
       }
       if (!isEntitlementLine(line)) payload.salespeople = salespeople
@@ -4810,14 +4830,14 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     const payload = { craftsmen, salespeople }
     appendLocalCashierDraftOperation({ action: 'apply-cashier-personnel-to-all-lines', payload }, (draft) => {
       for (const line of draft.lines || []) {
-        if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(craftsmen)
+        if (craftsmen.length && needsImmediateProjectService(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(craftsmen)
         if (salespeople.length && !isEntitlementLine(line)) line.salespeople = clonePlain(result.salespeople || [])
       }
     })
     const assignments = { ...localPersonnelAssignments.value }
     for (const line of cartLines.value) {
       const current = { ...(assignments[line.id] || {}) }
-      if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) {
+      if (craftsmen.length && needsImmediateProjectService(line) && !isCustomCardPurchase(line)) {
         current.craftsmen = clonePlain(craftsmen)
       }
       if (salespeople.length && !isEntitlementLine(line)) {
@@ -5148,6 +5168,21 @@ function handleMemberSelectedForEntitlement(event = {}) {
     return
   }
   if (event.detail?.context !== 'cashier') return
+  const pendingPurchase = pendingDeferredGuestPurchase.value
+  pendingDeferredGuestPurchase.value = null
+  if (pendingPurchase) {
+    nextTick(() => {
+      if (String(state.currentStore?.id || '') !== pendingPurchase.storeId
+        || String(state.stateContextId || '') !== pendingPurchase.stateContextId
+        || Number(currentMemberId.value || 0) !== Number(event.detail.record?.id || event.detail.record?.memberId || 0)) return
+      const draft = pendingPurchase.draft
+      draft.memberId = Number(currentMemberId.value)
+      draft.customerMode = 'member'
+      draft.workspaceId = String(state.workspace?.id || '')
+      draft.stateContextId = String(state.stateContextId || '')
+      commitLocalCashierDraft(draft)
+    })
+  }
   // Explicit member selection starts a fresh choice; root refreshes and retries
   // do not run this initializer or clear a source already confirmed in this bill.
   localCheckoutBusinessSource.value = initialBusinessSource('purchase')
@@ -5384,6 +5419,7 @@ function handleMemberSelectorClosedForEntitlement(event = {}) {
   if (event.detail?.context === 'cashier' && event.detail?.reason !== 'selected') {
     pendingEntitlementSelector.value = false
     pendingCustomCardEntry.value = false
+    pendingDeferredGuestPurchase.value = null
   }
 }
 
@@ -5800,9 +5836,11 @@ function localCheckoutPreviewSnapshot() {
       // string IDs cannot reach the final authority as invalid staffId values.
       ...(saleLine || entitlementLine
         ? {
-            craftsmen: entitlementLine
-              ? canonicalCheckoutEntitlementCraftsmen(craftsmen)
-              : canonicalCheckoutCraftsmen(craftsmen)
+            craftsmen: saleLine && projectLine && !projectAutoComplete.value
+              ? []
+              : entitlementLine
+                ? canonicalCheckoutEntitlementCraftsmen(craftsmen)
+                : canonicalCheckoutCraftsmen(craftsmen)
           }
         : {}),
       ...(saleLine
@@ -5860,6 +5898,7 @@ function localCheckoutPreviewSnapshot() {
   ), 0))
   return {
     localDraftPreview: true,
+    projectAutoComplete: projectAutoComplete.value,
     status: 'editing',
     requestStatus: 'editing',
     businessType: 'sale',
@@ -6021,6 +6060,13 @@ function buildCheckoutSnapshot(preview = {}) {
       'amountSourceVersion', 'sourceSelectionVersion'
     ].forEach((key) => { delete next[key] })
     if (role === 'sale') {
+      // A deferred purchase is not today's service. Freeze no premature staff
+      // allocation in the same final snapshot displayed by the checkout wizard.
+      if (isProjectLine(line) && (snapshot.projectAutoComplete ?? projectAutoComplete.value) === false) {
+        next.craftsmen = []
+        delete next.manualLaborFeeCents
+        delete next.laborManualFeeCents
+      }
       // Cart sale rows keep a unit amount for local editing. The final
       // snapshot carries immutable line totals so settlement cannot mistake
       // a unit price for the whole line when quantity is greater than one.
@@ -6106,6 +6152,8 @@ function buildCheckoutSnapshot(preview = {}) {
     // server can bind the payment lines to the selected member.
     memberId: Number(snapshot.memberId || snapshot.member?.id || snapshot.member?.memberId || 0),
     customerMode: String(snapshot.customerMode || 'guest'),
+    // Preserve the choice confirmed when this checkout opened, not a later root projection.
+    projectAutoComplete: snapshot.projectAutoComplete ?? projectAutoComplete.value,
     occurredAt: Number(snapshot.occurredAt || 0),
     businessDate: String(snapshot.businessDate || ''),
     businessDateReason: String(snapshot.businessDateReason || ''),
@@ -6151,6 +6199,20 @@ function buildCheckoutSnapshot(preview = {}) {
 }
 
 async function openCheckout() {
+  // Pending project rights need a member owner before source/staff/payment steps.
+  if (!projectAutoComplete.value && currentCustomerMode.value !== 'member'
+    && cartLines.value.some((line) => cartLineRole(line) === 'sale' && isProjectLine(line))) {
+    // Preserve only unowned sale rows, never another member's rights, coupons,
+    // balances or card operations. Normal member switching still clears the cart.
+    pendingDeferredGuestPurchase.value = cartLines.value.every((line) => cartLineRole(line) === 'sale')
+      ? { storeId: String(state.currentStore?.id || ''), stateContextId: String(state.stateContextId || ''),
+          draft: clonePlain(localCashierDraft.value || localDraftBase()) }
+      : null
+    const blocked = { result: { status: 'failed', code: 'CASHIER_PROJECT_MEMBER_REQUIRED',
+      message: '请选择会员以保存待用项目权益' } }
+    reportCheckoutEntryFailure(blocked)
+    return blocked
+  }
   if (isRefreshingLineCoupon.value) {
     const blocked = { result: { status: 'failed', message: '优惠券正在按新数量校验，请稍候再结账。' } }
     reportCheckoutEntryFailure(blocked, blocked.result.message)
@@ -7517,6 +7579,7 @@ function clearEntitlementBoundSnapshots({ preservePending = false } = {}) {
   )
   if (!preservePending) pendingEntitlementSelector.value = false
   if (!preservePending) pendingCustomCardEntry.value = false
+  if (!preservePending) pendingDeferredGuestPurchase.value = null
 }
 
 function resetCashierLocalContext() {
@@ -7913,7 +7976,7 @@ watch(
     const businessScopeChanged = true
     // 会员选择会改变收银业务范围，但这次变化本身就是定制卡/权益
     // 入口的必要步骤；不能把触发选会员的原始意图当成过期上下文清掉。
-    const preservePending = pendingCustomCardEntry.value || shouldPreservePendingEntitlementSelector({
+    const preservePending = pendingCustomCardEntry.value || Boolean(pendingDeferredGuestPurchase.value) || shouldPreservePendingEntitlementSelector({
       pending: pendingEntitlementSelector.value,
       current,
       previous
@@ -8427,7 +8490,7 @@ onBeforeUnmount(() => {
                     :class="{ 'is-guided': String(craftsmanGuidanceLineId) === String(line.id) }"
                   >
                     <button
-                      v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                      v-if="needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line)"
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled cart-line__meta-action--craftsmen"
                       :class="{ 'is-required-missing': !hasCartLineCraftsmen(line) }"
@@ -8443,13 +8506,13 @@ onBeforeUnmount(() => {
                     />
                   </div>
                   <div
-                    v-if="isInventoryManagedProductLine(line) || (experienceEnabled && isProjectLine(line) && !cardOperationUpgradeBinding(line))"
+                    v-if="isInventoryManagedProductLine(line) || (experienceEnabled && needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line))"
                     class="cart-line__meta-slot cart-line__meta-slot--service-object"
                     :class="{ 'cart-line__meta-slot--inventory': isInventoryManagedProductLine(line) }"
                   >
                     <!-- 库存分段外观只改变展示，三种出库模式仍调用原有命令。 -->
                     <div
-                      v-if="(isProjectLine(line) && !cardOperationUpgradeBinding(line)) || isInventoryManagedProductLine(line)"
+                      v-if="(needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line)) || isInventoryManagedProductLine(line)"
                       class="cart-line__service-controls"
                       :class="{ 'cart-line__service-object cart-line__service-controls--inventory': isInventoryManagedProductLine(line) }"
                       :aria-label="isInventoryManagedProductLine(line) ? '出库方式' : undefined"
@@ -8480,7 +8543,7 @@ onBeforeUnmount(() => {
                         @click.stop="setCartLineInventoryMode(line, 'presale')"
                       >预售</button>
                       <button
-                        v-if="experienceEnabled && isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                        v-if="experienceEnabled && needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line)"
                         type="button"
                         class="cart-line__experience"
                         :class="{ 'is-active': cartLineExperienceSelected(line) }"
@@ -8491,7 +8554,7 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                   <div
-                    v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                    v-if="needsImmediateProjectService(line) && !cardOperationUpgradeBinding(line)"
                     class="cart-line__service-object cart-line__service-object--footer"
                     aria-label="服务对象与客数"
                   >
@@ -8880,10 +8943,13 @@ onBeforeUnmount(() => {
           </header>
           <p>{{ cardPreviewRuleDescription(pendingCardPurchase.cardPreview) }}</p>
           <p>有效期：{{ cardPreviewValidityText(pendingCardPurchase.cardPreview.validity) }}</p>
+          <!-- 整卡只编辑一个总价，项目只编辑次数；内部金额分摊由原后端执行。 -->
+          <label v-if="ordinaryCardEditRows" class="ordinary-card-sale-editor__price">整卡售价（元）
+            <input v-model="ordinaryCardEditPrice" type="number" step="1" min="0" max="999999999">
+          </label>
           <section v-if="ordinaryCardEditRows" class="ordinary-card-sale-editor" aria-label="修改普通卡项目">
             <div v-for="row in ordinaryCardEditRows" :key="row.relationId" class="ordinary-card-sale-editor__row">
               <strong>{{ row.name }}<template v-if="row.specification"> · {{ row.specification }}</template></strong>
-              <label>项目总金额（元）<input v-model="row.amount" type="number" step="1" :min="Math.ceil(row.minimumCents / 100)" max="999999999"></label>
               <label>次数<input v-model="row.times" type="number" step="1" :min="row.minimumTimes" max="99999999"></label>
             </div>
             <p v-if="ordinaryCardEditError" role="alert" class="ordinary-card-sale-editor__error">{{ ordinaryCardEditError }}</p>
@@ -8896,7 +8962,7 @@ onBeforeUnmount(() => {
               <strong v-else-if="pendingCardPurchase.cardPreview.ruleType !== 'choice_count'">{{ component.writeTimes }} 次</strong>
             </div>
           </section>
-          <p v-if="pendingCardPurchase.ordinaryCardSaleEditable">整卡售价：{{ formatMoney(pendingCardPurchase.price) }}</p>
+          <p v-if="pendingCardPurchase.ordinaryCardSaleEditable && !ordinaryCardEditRows">整卡售价：{{ formatMoney(pendingCardPurchase.price) }}</p>
           <footer>
             <template v-if="ordinaryCardEditRows">
               <button class="button button--secondary" @click="ordinaryCardEditRows = null">取消修改</button>
@@ -8946,20 +9012,22 @@ onBeforeUnmount(() => {
 }
 .ordinary-card-sale-editor__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 100px;
+  align-items: center;
   gap: 8px;
   padding-bottom: 12px;
   border-bottom: 1px solid #e5e9f0;
 }
 .ordinary-card-sale-editor__row > strong {
-  grid-column: 1 / -1;
   overflow-wrap: anywhere;
 }
+.ordinary-card-sale-editor__price,
 .ordinary-card-sale-editor__row label {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
+.ordinary-card-sale-editor__price input,
 .ordinary-card-sale-editor__row input {
   width: 100%;
   min-width: 0;

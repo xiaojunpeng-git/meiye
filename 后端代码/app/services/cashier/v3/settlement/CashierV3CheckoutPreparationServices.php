@@ -840,6 +840,22 @@ final class CashierV3CheckoutPreparationServices
         foreach ((array)($authority['lines'] ?? []) as $line) {
             $saleLines[] = $this->saleSnapshotLine((array)$line);
         }
+        // The final transaction owns fulfillment mode. Member checkout keeps
+        // its existing deferred behavior; changing settings later cannot reclassify this sale.
+        $hasPurchasedProject = in_array('project', array_column($saleLines, 'sourceType'), true);
+        $projectAutoComplete = !$hasPurchasedProject || CashierV3ProjectPurchasePolicy::resolve(
+            ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member',
+            (array)($authority['browserSnapshot'] ?? [])
+        );
+        foreach ($saleLines as &$saleLine) {
+            if (($saleLine['sourceType'] ?? '') !== 'project' || $projectAutoComplete) continue;
+            CashierV3ProjectPurchasePolicy::assertMember($memberId);
+            // No service took place at purchase: stale hidden service assignments
+            // must not generate labor facts; the later redemption chooses actual staff.
+            $saleLine['craftsmen'] = [];
+            unset($saleLine['manualLaborFeeCents']);
+        }
+        unset($saleLine);
         $salesAmountCents = array_sum(array_column($saleLines, 'saleAmountCents'));
         if ($debtAmountCents > 0
             && ($memberId <= 0
@@ -912,6 +928,7 @@ final class CashierV3CheckoutPreparationServices
                 'operatorNameSnapshot' => (string)($authority['storedDraft']['supplement_operator_name_snapshot'] ?? ''),
                 'operatedAt' => (int)($authority['storedDraft']['supplement_operated_at'] ?? 0),
             ],
+            'projectAutoComplete' => $projectAutoComplete,
             'sourceDocument' => $this->sourceDocument($contexts, $workspaceId),
             'saleLines' => $saleLines,
             'entitlementLines' => $entitlementLines,
