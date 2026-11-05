@@ -334,7 +334,7 @@ final class CashierV3MemberModule
                     // 原样保存到会员券；不允许从本店直接发放其他门店的券。
                     $coupons = Db::name('store_coupon_issue')->where('status', 1)->where('is_del', 0)
                         ->whereIn('relation_id', [0, $scope['operator_scope']->storeId()])
-                        ->field('id,title,coupon_price,use_min_price,applicable_type,applicable_store_id,coupon_issue_type,relation_id')
+                        ->field('id,title,coupon_type,allow_gift_face_edit,coupon_price,use_min_price,applicable_type,applicable_store_id,coupon_issue_type,relation_id')
                         ->order('id desc')->limit(500)->select()->toArray();
                     $applicableIds = [];
                     foreach ($coupons as $coupon) {

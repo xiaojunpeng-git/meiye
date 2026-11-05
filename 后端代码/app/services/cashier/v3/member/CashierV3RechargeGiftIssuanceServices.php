@@ -375,6 +375,10 @@ final class CashierV3RechargeGiftIssuanceServices
     {
         $coupon = (array)Db::name('store_coupon_issue')->where('id', (int)$item['couponIssueId'])->where('status', 1)->where('is_del', 0)->lock(true)->find();
         if (!$coupon) throw self::failure('recharge_gift_coupon_unavailable', '充值套餐中的优惠券已停用或删除。');
+        // Direct gifts may freeze their own face. Recharge/other issuers always keep the template amount.
+        $face = $projectionSource === 'cashier_v3_direct_gift'
+            ? \app\services\activity\coupon\StoreCouponGiftFaceRule::override($coupon, $item['couponFaceValue'] ?? null)
+            : null;
         $ids = [];
         $issueMappings = [];
         for ($i = 0; $i < (int)$item['quantity']; $i++) {
@@ -388,7 +392,7 @@ final class CashierV3RechargeGiftIssuanceServices
                 // Freeze gifting/recharge store; recipient transfers never rewrite it.
                 'original_recipient_uid' => $memberId, 'issuance_store_id' => $issuanceStoreId,
                 'cid' => (int)$coupon['id'], 'uid' => $memberId, 'coupon_title' => (string)$coupon['title'],
-                'coupon_price' => (string)$coupon['coupon_price'], 'use_min_price' => (string)$coupon['use_min_price'],
+                'coupon_price' => $face ?? (string)$coupon['coupon_price'], 'use_min_price' => (string)$coupon['use_min_price'],
                 'add_time' => $now, 'start_time' => (int)$item['validityStart'], 'end_time' => (int)$item['validityEnd'],
                 'use_time' => 0, 'type' => $projectionSource, 'status' => 0, 'is_fail' => 0, 'oid' => 0,
             ]);

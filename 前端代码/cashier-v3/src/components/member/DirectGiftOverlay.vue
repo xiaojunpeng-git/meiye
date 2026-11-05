@@ -1,8 +1,12 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { InventoryProductSelector } from '@mohe/inventory-vue3'
-import { requestCashierV3Action } from '../../services/cashierV3Bridge'
+import { formatMoney, requestCashierV3Action } from '../../services/cashierV3Bridge'
 import { reconcileGiftProducts } from './directGiftProducts'
+import { giftCouponEntry, giftFacePayload, validGiftFace } from './directGiftCoupons'
+import { nextWholeYuanInputValue } from '../../services/refundWholeYuanInput'
+import RequiredFieldGuidance from '../common/RequiredFieldGuidance.vue'
+import { guideRequiredField, REQUIRED_FIELD_GUIDANCE_EVENT, REQUIRED_FIELD_GUIDANCE_DURATION_MS } from '../../services/requiredFieldGuidance'
 
 const props = defineProps({
   session: { type: Object, default: () => ({}) },
@@ -16,6 +20,24 @@ const catalogKeyword = ref('')
 const selected = ref([])
 const reason = ref('')
 const validationMessage = ref('')
+const faceInputs = new Map()
+const faceGuidance = ref({ key: '', message: '' })
+let faceGuideTimer
+function clearFaceGuide() { clearTimeout(faceGuideTimer); faceGuidance.value = { key: '', message: '' } }
+// Reuse the shared required-field signal for the newly editable value, without a blocking modal.
+async function handleFaceGuide(event) {
+  const target = String(event.detail?.target || '')
+  if (!target.startsWith('direct-gift-face:')) return
+  clearFaceGuide()
+  const key = target.slice('direct-gift-face:'.length)
+  faceGuidance.value = { key, message: event.detail.message }
+  await nextTick()
+  const input = faceInputs.get(key)
+  input?.scrollIntoView({ behavior: 'smooth', block: 'center' }); input?.focus()
+  faceGuideTimer = setTimeout(clearFaceGuide, REQUIRED_FIELD_GUIDANCE_DURATION_MS)
+}
+onMounted(() => window.addEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, handleFaceGuide))
+onBeforeUnmount(() => { clearFaceGuide(); window.removeEventListener(REQUIRED_FIELD_GUIDANCE_EVENT, handleFaceGuide) })
 
 const member = computed(() => props.session.member || {})
 // Direct-gift commands and their resource versions are keyed by the member's
@@ -56,6 +78,7 @@ const items = computed(() => {
     key: `coupon:${item.id}`,
     kind: 'coupon',
     couponIssueId: String(item.id),
+    ...giftCouponEntry(item),
     name: item.name || item.title || '未命名优惠券',
     specification: item.applicableStoreLabel || item.description || ''
   }))
@@ -105,6 +128,13 @@ function removeSelected(item) {
   selected.value = selected.value.filter((entry) => entry.key !== item.key)
 }
 
+// Reject the whole malformed edit instead of stripping punctuation: 100.5 must never become 1005.
+function updateGiftFace(item, event) {
+  item.couponFaceValue = nextWholeYuanInputValue(String(item.couponFaceValue), event.target.value)
+  event.target.value = item.couponFaceValue
+  clearFaceGuide()
+}
+
 function openCatalog(kind) {
   activeKind.value = kind
   // A previous type's query must not make the next type appear empty.
@@ -117,6 +147,11 @@ function isPositiveInteger(value) {
 }
 
 function submit() {
+  const invalidFace = selected.value.find((item) => item.faceEditable && !validGiftFace(item.couponFaceValue))
+  if (invalidFace) {
+    guideRequiredField({ target: `direct-gift-face:${invalidFace.key}`, message: '请在这里填写正整数元的赠送面值' })
+    return
+  }
   if (!memberId.value) validationMessage.value = '会员信息已失效，请重新选择会员。'
   else if (!selected.value.length) validationMessage.value = '请至少选择一项赠送内容。'
   else if (selected.value.some((item) => !isPositiveInteger(item.quantity))) validationMessage.value = '每项赠送数量必须是 1 到 999 的整数。'
@@ -135,6 +170,7 @@ function submit() {
       catalogItemId: item.catalogItemId,
       couponIssueId: item.couponIssueId,
       quantity: Number(item.quantity),
+      ...giftFacePayload(item),
       validityEnd: item.validityEnd || ''
     }))
   })
@@ -162,12 +198,25 @@ function submit() {
           <div class="direct-gift-overlay__section-title"><strong>赠送清单</strong><span>已选 {{ selectedCount }} 项，共 {{ selectedQuantity }} 件</span></div>
           <div v-if="selected.length" class="direct-gift-overlay__table-wrap">
             <table class="direct-gift-overlay__table">
-              <thead><tr><th>内容</th><th>类型</th><th>数量</th><th>有效期</th><th>操作</th></tr></thead>
+              <thead><tr><th>内容</th><th>类型</th><th>数量</th><th>面值</th><th>有效期</th><th>操作</th></tr></thead>
               <tbody>
                 <tr v-for="item in selected" :key="item.key">
                   <td>{{ item.name }}</td>
                   <td>{{ kindLabel(item.kind) }}</td>
                   <td><input v-model="item.quantity" inputmode="numeric" autocomplete="off" aria-label="赠送数量"></td>
+                  <td class="direct-gift-overlay__face">
+                    <template v-if="item.kind === 'coupon'">
+                      <div v-if="item.faceEditable" class="direct-gift-overlay__face-input">
+                        <input :ref="(el) => el ? faceInputs.set(item.key, el) : faceInputs.delete(item.key)"
+                          :value="item.couponFaceValue" inputmode="numeric" autocomplete="off"
+                          :aria-label="`${item.name}赠送面值`" :class="{ 'is-guided': faceGuidance.key === item.key }"
+                          @pointerdown="clearFaceGuide" @input="updateGiftFace(item, $event)">
+                        <RequiredFieldGuidance v-if="faceGuidance.key === item.key" :message="faceGuidance.message" />
+                      </div>
+                      <span v-else>{{ item.couponType === 2 ? `${Number(item.couponFaceValue)}%` : formatMoney(Math.round(Number(item.couponFaceValue))) }}</span>
+                    </template>
+                    <span v-else>—</span>
+                  </td>
                   <td><input v-model="item.validityEnd" type="date" aria-label="有效期（选填）"></td>
                   <td><button type="button" class="button button--text" @click="removeSelected(item)">移除</button></td>
                 </tr>
@@ -206,6 +255,11 @@ function submit() {
 </template>
 
 <style scoped>
+.direct-gift-overlay__face { min-width: 100px; }
+.direct-gift-overlay__face-input { position: relative; width: 110px; }
+.direct-gift-overlay__face-input input.is-guided { outline: 3px solid #f59e0b; }
+/* Keep the shared arrow hint inside the scrollable table, including narrow screens. */
+.direct-gift-overlay__face-input :deep(.required-field-guidance) { position: relative; display: block; top: auto; margin-top: 10px; width: 110px; max-width: 110px; box-sizing: border-box; white-space: normal; }
 .direct-gift-overlay { position: fixed; inset: 88px 0 0 130px; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(21,31,47,.26); }
 .direct-gift-overlay__dialog { width: min(1080px,100%); max-height: calc(100% - 48px); overflow: auto; border: 1px solid #dfe5ec; border-radius: 8px; background: #fff; box-shadow: 0 20px 56px rgba(18,34,54,.24); }
 .direct-gift-overlay__dialog > header, .direct-gift-overlay__dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; }

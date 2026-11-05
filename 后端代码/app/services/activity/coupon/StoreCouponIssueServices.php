@@ -155,6 +155,9 @@ class StoreCouponIssueServices extends BaseServices
     public function saveCoupon($data, $id, $coupon_issue_type)
     {
         $existing = $id ? $this->dao->get($id) : null;
+        // Missing fields from old editors preserve the switch; unrelated coupon types never enable it.
+        $data['allow_gift_face_edit'] = (int)($data['coupon_type'] ?? 1) === StoreCouponAllowanceServices::TYPE
+            ? (int)((int)($data['allow_gift_face_edit'] ?? $existing['allow_gift_face_edit'] ?? 0) === 1) : 0;
         // Published eligibility cannot be reinterpreted by an older editor. New
         // policies require a new template, so historical coupons keep their terms.
         foreach (['usage_target', 'new_user_only'] as $field) {
@@ -209,6 +212,19 @@ class StoreCouponIssueServices extends BaseServices
         return true;
     }
 
+
+    /** The template switch governs future gifts only; existing claims keep their issued face. */
+    public function setGiftFaceEditing(int $id, int $enabled): void
+    {
+        $this->transaction(function () use ($id, $enabled): void {
+            $issue = \think\facade\Db::name('store_coupon_issue')->where('id', $id)->where('is_del', 0)->lock(true)->find();
+            if (!$issue || (int)$issue['coupon_type'] !== StoreCouponAllowanceServices::TYPE) {
+                throw new AdminException('仅多次抵用券支持赠送时修改面值');
+            }
+            \think\facade\Db::name('store_coupon_issue')->where('id', $id)
+                ->update(['allow_gift_face_edit' => $enabled === 1 ? 1 : 0]);
+        });
+    }
 
 	/**
 	 * 修改状态
