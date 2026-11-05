@@ -78,7 +78,20 @@ final class CashierV3SaleCatalogServices
             // directory item must already contain its complete component
             // definition before it can be selected. Final confirmation must
             // never have to reload that definition from the catalogue.
-            $normalized = $this->normalizeAuthorityRow($row, true);
+            try {
+                $normalized = $this->normalizeAuthorityRow($row, true);
+            } catch (CashierV3CommandException $exception) {
+                // 单品资料错误只隔离本行；权限、数据库及其他技术故障仍须失败。
+                // 异常行不签发购买快照，选品/最终结账继续执行原权威校验。
+                if ($exception->getResultCode() !== CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE) {
+                    throw $exception;
+                }
+                $unavailable = $this->unavailableCatalogItem($row, $operatorScope->storeId(), $exception);
+                if ($unavailable['kindCode'] === 'custom_card') continue;
+                $catalogItems[] = ['unavailable' => $unavailable];
+                foreach ($unavailable['categoryNames'] as $name) $categories[$name] = true;
+                continue;
+            }
             // 定制卡壳是隐藏的配置依赖，不是普通目录商品。页面只提供一个
             // “新建定制卡”入口，避免把价格为零的旧壳再次展示给收银员。
             if ($normalized['kindCode'] === 'custom_card') {
@@ -100,6 +113,10 @@ final class CashierV3SaleCatalogServices
         $inventoryAvailability = $this->catalogInventoryAvailability($catalogItems, $dataScope);
         $items = [];
         foreach ($catalogItems as $entry) {
+            if (isset($entry['unavailable'])) {
+                $items[] = $entry['unavailable'];
+                continue;
+            }
             $catalogItem = $entry['item'];
             $inventory = $inventoryAvailability[self::inventoryItemKey($catalogItem)] ?? null;
             $publicItem = $this->publicCatalogItem($catalogItem, $inventory);
@@ -1860,6 +1877,7 @@ final class CashierV3SaleCatalogServices
     {
         $managed = [];
         foreach ($catalogItems as $entry) {
+            // 仅展示的异常行没有 item，也不参加库存、价格或购买快照投影。
             $item = is_array($entry['item'] ?? null) ? $entry['item'] : [];
             if ((int)($item['productType'] ?? -1) !== 0 || empty($item['isInventory'])) {
                 continue;
@@ -1969,6 +1987,47 @@ final class CashierV3SaleCatalogServices
         $integer = substr($digits, 0, -$scale);
         $decimal = rtrim(substr($digits, -$scale), '0');
         return $decimal === '' ? $integer : $integer . '.' . $decimal;
+    }
+
+    /**
+     * 只展示已确认属于本店的异常商品身份；不补价格、不重编号卡组，
+     * 不返回签名/卡预览/购买快照，不能把不完整定义变成可结账来源。
+     */
+    private function unavailableCatalogItem(array $row, int $storeId, CashierV3CommandException $exception): array
+    {
+        $productId = (int)($row['product_id'] ?? 0);
+        $skuId = (int)($row['sku_id'] ?? 0);
+        $productType = (int)($row['product_product_type'] ?? -1);
+        $name = is_string($row['product_store_name'] ?? null) ? trim($row['product_store_name']) : '';
+        if ($productId <= 0 || $skuId <= 0 || $name === ''
+            || (int)($row['sku_product_id'] ?? 0) !== $productId
+            || (int)($row['product_relation_id'] ?? 0) !== $storeId
+            || (int)($row['product_type'] ?? 0) !== 1
+            || (int)($row['product_is_del'] ?? 1) !== 0
+            || (int)($row['product_is_show'] ?? 0) !== 1
+            || (int)($row['product_is_verify'] ?? 0) !== 1
+            || (int)($row['sku_type'] ?? -1) !== 0
+            || (int)($row['sku_is_show'] ?? 0) !== 1
+            || !in_array($productType, [0, 4, 5, 6], true)) {
+            // 不能借容错暴露外店、隐藏、已删除或无法识别的目录资料。
+            throw $exception;
+        }
+        $names = [];
+        foreach ((array)($row['category_names'] ?? []) as $category) {
+            if (is_string($category) && trim($category) !== '') $names[] = trim($category);
+        }
+        $names = array_values(array_unique($names));
+        $kind = CashierV3CustomCardTemplateServices::isTemplate($row)
+            ? ['code' => 'custom_card', 'label' => '定制卡']
+            : self::kind($productType, $productId, (int)($row['product_pid'] ?? 0));
+        return [
+            'id' => $skuId, 'catalogItemId' => $skuId, 'productId' => $productId, 'skuId' => $skuId,
+            'name' => $name, 'kind' => $kind['label'], 'kindCode' => $kind['code'],
+            'category' => $names[0] ?? '', 'categoryNames' => $names,
+            'code' => is_string($row['sku_code'] ?? null) ? $row['sku_code'] : '',
+            'price' => null, 'catalogUnavailable' => true, 'disabled' => true,
+            'disabledReason' => $exception->getMessage(),
+        ];
     }
 
     private function publicCatalogItem(array $item, ?array $inventory = null): array
