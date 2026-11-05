@@ -90,7 +90,7 @@ final class CustomerAnalyticsServices
             ? false : (bool)($result['aggregation_caught_up'] ?? true);
         $existingAggregationStatus = trim((string)($result['aggregation_status'] ?? ''));
         $result['aggregation_status'] = $report === 'customer_unconsumed_analysis'
-            ? '以下指标尚未完整接入统一事实：' . implode('、', (array)($result['pending_metrics'] ?? [])) . '。未知值保持空态，不用 0 代替。'
+            ? ($existingAggregationStatus !== '' ? $existingAggregationStatus : '未耗率、未耗同比尚未完整接入统一事实。')
             : (($report === 'customer_refund_performance' && isset($pendingByReport[$report]))
                 ? '退款成功事实已接入；退款率因同期成功收款分母尚未接入，显示“-”。'
                 : (($report === 'customer_cash_performance' && isset($pendingByReport[$report]))
@@ -392,7 +392,8 @@ final class CustomerAnalyticsServices
                 'store_name' => '取当前有效卡项权益所属门店名称。',
                 'product_id' => '取卡项权益明细中的项目稳定编号，用于精确筛选和下钻。',
                 'item_name' => '取购买卡项时保存的项目名称快照；无法取得快照时显示“-”。',
-                'unconsumed_amount' => '按当前有效卡项权益剩余次数乘购买时锁定的单次金额，退款、作废和已核销次数不计入；金额来源不完整时显示“-”。',
+                'unconsumed_amount' => '仅汇总当前有效卡项权益中可按购买金额和剩余次数核实的金额；退款、作废和已核销次数不计入，缺金额依据的权益不估价。',
+                'unconsumed_unpriced_count' => '当前剩余权益中缺少可追溯购买金额或有效项目明细的次数；不计入已核实未耗金额。',
                 'unconsumed_people' => '按当前有效卡项权益关联会员去重计数。',
                 'remaining_count' => '取当前有效卡项权益的剩余可核销次数。',
                 'unconsumed_rate' => '未耗金额除以同期有效收款金额；当前接口未提供可靠分母，显示“-”。',
@@ -777,7 +778,8 @@ final class CustomerAnalyticsServices
             ['key' => 'store_name', 'label' => '门店', 'source_explanation' => '取当前有效卡项权益所属门店名称。'],
             ['key' => 'product_id', 'label' => '品项编号', 'source_explanation' => '取卡项权益明细中的项目稳定编号，用于精确筛选和下钻。'],
             ['key' => 'item_name', 'label' => '未耗品项', 'source_explanation' => '取购买卡项时保存的项目名称快照；无法取得快照时显示“-”。'],
-            ['key' => 'unconsumed_amount', 'label' => '未耗金额', 'source_explanation' => '按当前有效卡项权益剩余次数乘购买时锁定的单次金额；金额来源不完整时显示“-”。', 'summable' => true, 'value_type' => 'money'],
+            ['key' => 'unconsumed_amount', 'label' => '已核实未耗金额', 'source_explanation' => '仅汇总当前有效卡项权益中可按购买金额和剩余次数核实的金额；缺少金额依据的权益不估价，另列待核实次数。', 'summable' => true, 'value_type' => 'money'],
+            ['key' => 'unconsumed_unpriced_count', 'label' => '金额待核实次数', 'source_explanation' => '当前剩余权益中缺少可追溯购买金额或有效项目明细的次数；不计入已核实未耗金额。', 'summable' => true, 'value_type' => 'integer'],
             ['key' => 'unconsumed_people', 'label' => '未耗人数', 'source_explanation' => '按当前有效卡项权益关联会员去重计数。', 'value_type' => 'integer'],
             ['key' => 'remaining_count', 'label' => '剩余次数', 'source_explanation' => '取当前有效卡项权益的剩余可核销次数。', 'summable' => true, 'value_type' => 'integer'],
             ['key' => 'unconsumed_rate', 'label' => '未耗率', 'source_explanation' => '未耗金额除以同期有效收款金额；可靠分母尚未接入，显示“-”。'],
@@ -790,6 +792,7 @@ final class CustomerAnalyticsServices
             $result['aggregation_status'] = $status;
             $result['pending_metrics'] = ['未耗率', '未耗同比'];
             $result['unconsumed_snapshot'] = 'current_card_entitlement';
+            $result['unconsumed_amount_coverage'] = ['status' => 'complete', 'pending_groups' => 0, 'pending_count' => 0];
             $result['rankings'] = ['top_items' => [], 'top_stores' => [], 'company_amount' => []];
             return $result;
         };
@@ -934,7 +937,6 @@ final class CustomerAnalyticsServices
         $groups = [];
         $cartRemainingByOid = [];
         $cartSeenByOid = [];
-        $amountComplete = true;
         foreach ($carts as $index => $cart) {
             $oid = (int)($cart['oid'] ?? 0);
             $holder = $holderByOid[$oid] ?? null;
@@ -954,17 +956,19 @@ final class CustomerAnalyticsServices
             $times = (int)($cart['write_times'] ?? 0);
             $hasAmount = $times > 0 && array_key_exists('pay_price', $cart) && trim((string)$cart['pay_price']) !== '';
             $amountCents = $hasAmount ? intdiv($this->cents($cart['pay_price']) * $remaining, $times) : 0;
-            if (!$hasAmount) $amountComplete = false;
             $storeId = (int)$holder['store_id'];
             $itemKey = $productId > 0 ? (string)$productId : 'unknown';
             $key = $storeId . '|' . $itemKey;
             if (!isset($groups[$key])) $groups[$key] = [
                 'store_id' => $storeId, 'product_id' => $productId > 0 ? (string)$productId : '-',
                 'item_name' => trim((string)$product['item_name']) !== '' ? trim((string)$product['item_name']) : '-',
-                'amount_cents' => 0, 'amount_known' => true, 'members' => [], 'remaining_count' => 0,
+                'amount_cents' => 0, 'known_count' => 0, 'unpriced_count' => 0,
+                'members' => [], 'remaining_count' => 0,
             ];
+            // Keep the priced portion of a mixed item/store group usable, while
+            // exposing every unpriced remaining use separately for reconciliation.
             $groups[$key]['amount_cents'] += $amountCents;
-            $groups[$key]['amount_known'] = $groups[$key]['amount_known'] && $hasAmount;
+            $groups[$key][$hasAmount ? 'known_count' : 'unpriced_count'] += $remaining;
             $groups[$key]['members'][(string)$holder['uid']] = true;
             $groups[$key]['remaining_count'] += $remaining;
         }
@@ -980,12 +984,12 @@ final class CustomerAnalyticsServices
             $key = (int)$holder['store_id'] . '|unknown';
             if (!isset($groups[$key])) $groups[$key] = [
                 'store_id' => (int)$holder['store_id'], 'product_id' => '-', 'item_name' => '-',
-                'amount_cents' => 0, 'amount_known' => false, 'members' => [], 'remaining_count' => 0,
+                'amount_cents' => 0, 'known_count' => 0, 'unpriced_count' => 0,
+                'members' => [], 'remaining_count' => 0,
             ];
-            $groups[$key]['amount_known'] = false;
+            $groups[$key]['unpriced_count'] += $missing;
             $groups[$key]['members'][(string)$holder['uid']] = true;
             $groups[$key]['remaining_count'] += $missing;
-            $amountComplete = false;
         }
         if ($groups === []) return $empty($columns, '当前筛选条件下没有剩余卡项权益。', $input);
 
@@ -1011,18 +1015,21 @@ final class CustomerAnalyticsServices
                 'store_name' => trim((string)($storeNames[$storeId] ?? '')) !== '' ? (string)$storeNames[$storeId] : '-',
                 'product_id' => (string)$group['product_id'],
                 'item_name' => (string)$group['item_name'],
-                'unconsumed_amount' => !empty($group['amount_known']) ? $this->moneyValue((int)$group['amount_cents']) : '-',
+                'unconsumed_amount' => (int)$group['known_count'] > 0 ? $this->moneyValue((int)$group['amount_cents']) : '-',
+                'unconsumed_unpriced_count' => (int)$group['unpriced_count'],
                 'unconsumed_people' => count($group['members']),
                 'remaining_count' => (int)$group['remaining_count'],
                 'unconsumed_count' => (int)$group['remaining_count'],
                 'unconsumed_rate' => '-', 'unconsumed_yoy' => '-',
-                '_amount_cents' => (int)$group['amount_cents'], '_amount_known' => !empty($group['amount_known']),
+                '_amount_cents' => (int)$group['amount_cents'], '_known_count' => (int)$group['known_count'],
             ];
         }
         usort($records, static fn(array $a, array $b): int => ((int)$b['_amount_cents'] <=> (int)$a['_amount_cents']) ?: strcmp((string)$a['item_name'], (string)$b['item_name']));
         $itemRanks = []; $storeRanks = []; $companyRanks = [];
         foreach ($records as $record) {
-            if ($record['_amount_known']) {
+            if ($record['_known_count'] > 0) {
+                // Ranking amounts and counts cover the same priced rights;
+                // unpriced rights stay visible in the detail and pending total.
                 // The ranking is displayed by business item name.  Multiple
                 // catalogue IDs can represent the same named service across
                 // stores; keeping the ID as the grouping key made the UI show
@@ -1033,13 +1040,13 @@ final class CustomerAnalyticsServices
                 $companyKey = (string)$record['company_name'];
                 if (!isset($itemRanks[$itemKey])) $itemRanks[$itemKey] = ['name' => $record['item_name'], 'amount_cents' => 0, 'remaining_count' => 0];
                 $itemRanks[$itemKey]['amount_cents'] += (int)$record['_amount_cents'];
-                $itemRanks[$itemKey]['remaining_count'] += (int)$record['remaining_count'];
+                $itemRanks[$itemKey]['remaining_count'] += (int)$record['_known_count'];
                 if (!isset($storeRanks[$storeKey])) $storeRanks[$storeKey] = ['name' => $record['store_name'], 'amount_cents' => 0, 'remaining_count' => 0];
                 $storeRanks[$storeKey]['amount_cents'] += (int)$record['_amount_cents'];
-                $storeRanks[$storeKey]['remaining_count'] += (int)$record['remaining_count'];
+                $storeRanks[$storeKey]['remaining_count'] += (int)$record['_known_count'];
                 if (!isset($companyRanks[$companyKey])) $companyRanks[$companyKey] = ['name' => $record['company_name'], 'amount_cents' => 0, 'remaining_count' => 0];
                 $companyRanks[$companyKey]['amount_cents'] += (int)$record['_amount_cents'];
-                $companyRanks[$companyKey]['remaining_count'] += (int)$record['remaining_count'];
+                $companyRanks[$companyKey]['remaining_count'] += (int)$record['_known_count'];
             }
         }
         $rankRows = function (array $rows, int $totalCents = 0): array {
@@ -1055,22 +1062,33 @@ final class CustomerAnalyticsServices
                 ];
             }, $rows);
         };
-        $result = $this->customerResult('客户未耗分析', $columns, array_map(static function (array $record): array { unset($record['_amount_cents'], $record['_amount_known']); return $record; }, $records), $input);
+        $result = $this->customerResult('客户未耗分析', $columns, array_map(static function (array $record): array { unset($record['_amount_cents'], $record['_known_count']); return $record; }, $records), $input);
         $allPeople = [];
-        $summaryCents = 0; $summaryAmountKnown = true; $summaryCount = 0;
-        foreach ($records as $record) { $summaryCents += (int)$record['_amount_cents']; $summaryAmountKnown = $summaryAmountKnown && !empty($record['_amount_known']); $summaryCount += (int)$record['remaining_count']; }
+        $summaryCents = 0; $summaryKnownCount = 0; $summaryPendingCount = 0; $summaryPendingGroups = 0; $summaryCount = 0;
+        foreach ($records as $record) {
+            $summaryCents += (int)$record['_amount_cents'];
+            $summaryKnownCount += (int)$record['_known_count'];
+            $summaryPendingCount += (int)$record['unconsumed_unpriced_count'];
+            if ((int)$record['unconsumed_unpriced_count'] > 0) ++$summaryPendingGroups;
+            $summaryCount += (int)$record['remaining_count'];
+        }
         // Distinct people are reconstructed from the grouped rows below; the
         // report deliberately does not sum people across item rows.
         foreach ($groups as $group) foreach (array_keys($group['members']) as $memberId) $allPeople[(string)$memberId] = true;
         $result['summary_row'] = [
             'company_name' => '合计', 'store_name' => '-', 'product_id' => '-', 'item_name' => '-',
-            'unconsumed_amount' => $summaryAmountKnown ? $this->moneyValue($summaryCents) : '-',
+            'unconsumed_amount' => $summaryKnownCount > 0 ? $this->moneyValue($summaryCents) : '-',
+            'unconsumed_unpriced_count' => $summaryPendingCount,
             'unconsumed_people' => count($allPeople), 'remaining_count' => $summaryCount,
             'unconsumed_count' => $summaryCount,
             'unconsumed_rate' => '-', 'unconsumed_yoy' => '-',
         ];
         $result['pending_metrics'] = ['未耗率', '未耗同比'];
         $result['unconsumed_snapshot'] = 'current_card_entitlement';
+        $result['unconsumed_amount_coverage'] = [
+            'status' => $summaryPendingCount > 0 ? ($summaryKnownCount > 0 ? 'partial' : 'unknown') : 'complete',
+            'pending_groups' => $summaryPendingGroups, 'pending_count' => $summaryPendingCount,
+        ];
         $itemTotalCents = array_sum(array_map(static fn(array $row): int => (int)$row['amount_cents'], $itemRanks));
         $itemRankRows = $rankRows($itemRanks, $itemTotalCents);
         $topItems = array_slice($itemRankRows, 0, 6);
@@ -1091,9 +1109,9 @@ final class CustomerAnalyticsServices
         $result['item_proportions'] = array_map(static fn(array $row): array => ['item_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'amount_share' => $row['amount_share']], $itemProportions);
         $result['stores'] = array_map(static fn(array $row): array => ['store_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'unconsumed_count' => $row['unconsumed_count']], $topStores);
         $result['branches'] = array_map(static fn(array $row): array => ['company_name' => $row['name'], 'unconsumed_amount' => $row['unconsumed_amount'], 'unconsumed_count' => $row['unconsumed_count']], $companyAmount);
-        $result['aggregation_status'] = $amountComplete && $summaryAmountKnown
+        $result['aggregation_status'] = $summaryPendingCount === 0
             ? '当前有效卡项权益和项目剩余次数已读取；未耗率、未耗同比因缺少同期分母和历史余额快照显示“-”。'
-            : '当前有效卡项权益已读取；部分项目金额缺少可追溯购买金额，未知金额显示“-”；未耗率、未耗同比显示“-”。';
+            : '已汇总可核实的未耗金额；另有 ' . $summaryPendingCount . ' 次权益金额待核实，未纳入金额合计；未耗率、未耗同比显示“-”。';
         return $result;
     }
 

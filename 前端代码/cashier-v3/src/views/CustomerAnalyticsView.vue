@@ -381,9 +381,16 @@ function applyCustomerPayload(payload) {
     }
     if (storeRows.length) data.unconsumed.stores = storeRows.map(row => [row[0], row[1]])
     const amount = cents(field(summary, 'unconsumed_amount', 'amount', 'total_amount'))
+    // The service returns only traceable card entitlement amounts. Show its
+    // coverage beside the total so a partial sum cannot be read as all rights.
+    const coverage = payload?.unconsumed_amount_coverage || {}
+    const pendingCount = numericOrNull(coverage.pending_count) || 0
+    const amountNote = pendingCount > 0
+      ? `仅含可核实金额；${number(pendingCount)}次权益金额待核实`
+      : '按接口汇总（展示四舍五入，接口保留分）'
     const people = numericOrNull(field(summary, 'unconsumed_people', 'people', 'member_count'))
     const rate = numericOrNull(String(field(summary, 'unconsumed_rate', 'rate') ?? '').replace('%', ''))
-    data.unconsumed.cards = [['未耗金额', amount === null ? '-' : money(amount), '按接口汇总（展示四舍五入，接口保留分）', 'blue'], ['未耗人数', people === null ? '-' : `${number(people)}人`, '按接口汇总', 'green'], ['未耗率', rate === null ? '-' : pct(rate), '按接口汇总', 'amber']]
+    data.unconsumed.cards = [['已核实未耗金额', amount === null ? '-' : money(amount), amountNote, 'blue'], ['未耗人数', people === null ? '-' : `${number(people)}人`, '按接口汇总', 'green'], ['未耗率', rate === null ? '-' : pct(rate), '按接口汇总', 'amber']]
     if (!branchRows.length && !itemRows.length && !storeRows.length && !Object.keys(summary).length) demoState.value = 'empty'
   }
 }
