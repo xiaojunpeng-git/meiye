@@ -256,16 +256,20 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         $rows = Db::name('inventory_stock_count_document')->alias('d')->leftJoin('inventory_stock_count_line l', 'l.document_id=d.id')->leftJoin('inventory_location p', 'p.id=d.location_id')
             ->leftJoin('system_store s', 's.id=p.store_id')
             ->where('d.tenant_id', $tenantId)->whereIn('d.location_id', $locationIds)
-            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.operator_name_snapshot' => 'operator_name', 'd.location_id', 'p.location_name', 'SUM(CASE WHEN l.difference_quantity_units <> 0 THEN 1 ELSE 0 END)' => 'detail_count'])
+            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.operator_name_snapshot' => 'operator_name', 'd.location_id', 'p.store_id' => 'store_id', 'p.location_name', 'SUM(CASE WHEN l.difference_quantity_units <> 0 THEN 1 ELSE 0 END)' => 'detail_count'])
             ->fieldRaw($storeName . ' AS store_name')
-            ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.location_name,p.location_type,p.store_name_snapshot,s.name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+            ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.store_id,p.location_name,p.location_type,p.store_name_snapshot,s.name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         // 已确认单据只用服务端完成时间形成盘点日期；草稿不借用保存日伪造完成日期。
         foreach ($rows as &$row) {
             $row['count_date'] = InventoryStockCountDate::fromConfirmedAt((int)$row['confirmed_at']);
         }
         unset($row);
         if ($canViewCost && $rows) {
-            $amounts = Db::name('inventory_batch_movement_fact')->where('tenant_id', $tenantId)->where('store_id', $storeId)->whereIn('location_id', $locationIds)->where('fact_status', 'SETTLED')->whereIn('source_type', ['stock_count_gain', 'stock_count_loss'])
+            $amountQuery = Db::name('inventory_batch_movement_fact')->where('tenant_id', $tenantId)->whereIn('location_id', $locationIds)->where('fact_status', 'SETTLED')->whereIn('source_type', ['stock_count_gain', 'stock_count_loss']);
+            // 跨店首页下钻的 store_id=0 是查询哨兵，金额仍按可信门店集合与仓库交集读取。
+            if (!empty($context['inventory_organization_read'])) $amountQuery->whereIn('store_id', (array)$context['inventory_scope_store_ids']);
+            else $amountQuery->where('store_id', $storeId);
+            $amounts = $amountQuery
                 ->field('source_id, SUM(CASE WHEN direction=1 THEN cost_amount_cents ELSE -cost_amount_cents END) change_amount_cents')->group('source_id')->select()->toArray();
             $index = array_column($amounts, 'change_amount_cents', 'source_id'); foreach ($rows as &$row) $row['change_amount_cents'] = (int)($index[(string)$row['order_sn']] ?? 0); unset($row);
         } else foreach ($rows as &$row) $row['change_amount_cents'] = null;

@@ -142,8 +142,9 @@ final class InventoryPlatformUnifiedQueryContextFactory
             $context['inventory_count_creator_id'] = $adminId;
             $context['inventory_count_operator_name'] = (string)($adminInfo['real_name'] ?? $adminInfo['account'] ?? '');
         }
-        // 仅供已验权的读取投影使用；不得把这一范围带入写命令或客户端原样回传。
-        if ($selectedOrganizationId !== null) {
+        // 组织选择及“当前权限范围”的跨店读取都必须携带服务端门店集合；
+        // 不能把未选单店的 store_id=0 解释为真实门店，也不得把这份范围带入写命令。
+        if ($subject === 'STORE' && ($selectedOrganizationId !== null || $selectedStoreId === 0)) {
             $context['inventory_organization_read'] = true;
             $context['inventory_scope_store_ids'] = array_keys($storeIds);
             $context['inventory_location_by_store'] = $locationByStore;

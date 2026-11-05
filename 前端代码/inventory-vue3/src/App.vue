@@ -62,14 +62,15 @@ const platformCanCreateCurrent = computed(() => !platformReadScopeMode.value && 
 const platformTransferFromParty = ref('ALL:0')
 const platformTransferToParty = ref('ALL:0')
 const platformStockSubject = ref('HQ')
+const platformStockOrganizationId = ref(null)
 const platformHqLocationId = ref(0)
 // The operational document lists use a warehouse descriptor so the filter
 // can distinguish the headquarters warehouse from a store warehouse. Keep the
 // stock page's numeric selector separate because it drives the stock query
 // subject directly.
 const platformListWarehouseSelection = ref('HQ:0')
-// 组织只负责定位单店；0 始终表示既有的平台端总部查询。
-const platformOrganizationPages = new Set(['inbound', 'outbound', 'request', 'transfer', 'usage'])
+// 组织可定位授权门店集合；HQ:0 始终表示既有的平台端总部查询。
+const platformOrganizationPages = new Set(['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'])
 const platformOrganizationSelection = ref('HQ:0')
 const platformOrganizationTree = ref([])
 const platformOrganizationLoading = ref(false)
@@ -80,6 +81,12 @@ const platformLocations = ref([])
 // 首页的总部仓总量只使用后端单独授权的清单；单据页原有仓库候选不授予首页查看权。
 const platformDashboardHqLocations = ref([])
 const platformCanViewHqDashboard = ref(false)
+const platformCanViewStoreDashboard = ref(false)
+const platformDashboardStoreTree = ref([])
+const dashboardSelection = ref('HQ:0')
+const dashboardSelectionType = computed(() => dashboardSelection.value.split(':')[0])
+const dashboardSelectionId = computed(() => Number(dashboardSelection.value.split(':')[1]) || 0)
+const dashboardStoreSubject = computed(() => mode.value === 'platform' && dashboardSelectionType.value !== 'HQ')
 const platformDashboardScopeReady = ref(false)
 const platformDashboardScopeError = ref('')
 // 库存查询专用目录可覆盖全部有效门店；业务单据继续使用原组织授权目录。
@@ -199,7 +206,7 @@ const dashboard = ref({ stock_amount_cents: null, stock_product_count: 0, expiri
 const dashboardLoading = ref(false)
 const dashboardWarehouseId = ref(0)
 const dashboardError = ref('')
-const dashboardScopeDenied = computed(() => mode.value === 'platform' && platformDashboardScopeReady.value && !platformDashboardScopeError.value && !platformCanViewHqDashboard.value)
+const dashboardScopeDenied = computed(() => mode.value === 'platform' && platformDashboardScopeReady.value && !platformDashboardScopeError.value && !platformCanViewHqDashboard.value && !platformCanViewStoreDashboard.value)
 let dashboardRequestVersion = 0
 const selectedDetail = ref(null)
 const statisticsQueryToolbar = ref(null)
@@ -387,7 +394,7 @@ async function stockQueryRequestAction(action, payload = {}) {
   if (!client) throw new Error('库存查询服务尚未初始化。')
   // 平台端只允许按已授权门店收窄，实际库存仓由服务端从门店范围计算。
   const storeScope = mode.value === 'platform'
-    ? { subject: platformStockSubject.value, hq_location_id: platformStockSubject.value === 'HQ' ? Number(platformHqLocationId.value) : 0, ...(platformStockSubject.value === 'STORE' && Number(platformStoreId.value) > 0 ? { storeId: Number(platformStoreId.value) } : {}) }
+    ? { subject: platformStockSubject.value, hq_location_id: platformStockSubject.value === 'HQ' ? Number(platformHqLocationId.value) : 0, ...(platformStockSubject.value === 'STORE' && Number(platformStoreId.value) > 0 ? { storeId: Number(platformStoreId.value) } : {}), ...(platformStockSubject.value === 'STORE' && platformStockOrganizationId.value !== null ? { organizationId: Number(platformStockOrganizationId.value) } : {}) }
     : {}
   if (action === 'query-unified-query-capabilities') {
     const data = await client.unifiedQueryCapabilities(storeScope)
@@ -595,6 +602,7 @@ const platformStoreSelection = computed({
   get: () => String(Number(platformStoreId.value) || 0),
   set: (value) => {
     platformStoreId.value = Number(value) || 0
+    platformStockOrganizationId.value = null
     onPlatformLocationChanged()
   }
 })
@@ -736,6 +744,14 @@ function selectPage(key, options = {}) {
   active.value = key
   platformOrganizationSelection.value = 'HQ:0'
   if (mode.value === 'platform' && platformOrganizationPages.has(key)) platformListWarehouseSelection.value = `HQ:${Number(platformHqLocationId.value) || 0}`
+  // 首页下钻保留选定的授权组织/门店；普通菜单切换继续使用页面自身默认范围。
+  if (mode.value === 'platform' && options.dashboardScope && platformOrganizationPages.has(key)) platformOrganizationSelection.value = options.dashboardScope
+  if (mode.value === 'platform' && options.dashboardScope && key === 'stock') {
+    platformStockSubject.value = options.dashboardScope === 'HQ:0' ? 'HQ' : 'STORE'
+    platformStockOrganizationId.value = options.dashboardScope.startsWith('ORG:') ? Number(options.dashboardScope.split(':')[1]) : null
+    platformStoreId.value = options.dashboardScope.startsWith('STORE:') ? Number(options.dashboardScope.split(':')[1]) : 0
+    platformHqLocationId.value = Number(dashboardWarehouseId.value) || 0
+  }
   if (mode.value === 'platform' && platformOrganizationPages.has(key)) loadPlatformOrganizationScope(key)
   if (key !== 'transfer') {
     transferSavedNotice.value = ''
@@ -747,10 +763,12 @@ function selectPage(key, options = {}) {
   groupedListVersion += 1
   resetGroupedDetails()
   if (usesBusinessDatePeriod(key)) businessDateRange.value = todayRange()
+  if (options.dashboardAllDates && usesBusinessDatePeriod(key)) businessDateRange.value = { min: '', max: '' }
   if (key === 'count') countDateRange.value = todayRange()
   if (key === 'statistics') statisticsDateRange.value = statisticsMonthRange()
   listDateRange.value = null
   statusFocus.value = options.focus || ''
+  if (mode.value === 'platform' && options.dashboardScope && key === 'transfer' && options.focus === '在途') platformTransferStatus.value = 'DISPATCHED'
   storeOperationalStatus.value = ''
   storeTransferUnreceivedOnly.value = false
   if (mode.value === 'store' && operationalQueryPages[key]) {
@@ -819,7 +837,7 @@ function expiryRiskQuery(code) {
 }
 
 function openExpiryRisk(bucket) {
-  selectPage('statistics', { tab: 'expiry', focus: bucket.label, query: expiryRiskQuery(bucket.code) })
+  selectPage('statistics', { tab: 'expiry', focus: bucket.label, query: expiryRiskQuery(bucket.code), dashboardScope: dashboardSelection.value })
 }
 
 function expiryRiskPercent(bucket) {
@@ -1338,7 +1356,13 @@ async function confirmTransferAction() {
 }
 
 function goDashboardTarget(item) {
-  selectPage(item.target, { focus: item.focus, tab: item.tab })
+  selectPage(item.target, { focus: item.focus, tab: item.tab, dashboardScope: dashboardSelection.value, dashboardAllDates: ['transfer', 'request'].includes(item.target) })
+}
+
+function onDashboardSelectionChanged(value) {
+  dashboardSelection.value = value
+  dashboardWarehouseId.value = 0
+  loadDashboard()
 }
 
 function applyRequestedPage() {
@@ -1527,6 +1551,7 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       query.subject = platformStockSubject.value
       if (platformStockSubject.value === 'HQ') query.hq_location_id = Number(platformHqLocationId.value)
       if (platformStockSubject.value === 'STORE' && Number(platformStoreId.value) > 0) query.storeId = Number(platformStoreId.value)
+      if (platformStockSubject.value === 'STORE' && platformStockOrganizationId.value !== null) query.organizationId = Number(platformStockOrganizationId.value)
     }
     if (active.value === 'stock') {
       query.page = stockPage.value
@@ -1601,6 +1626,10 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       page: Number(query.page) || 1, limit: platformListPageSize,
       topFilterConditions: [
         ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
+        // 首页待办下钻与卡片计数使用同一状态集合；范围仍由服务端授权交集决定。
+        ...(statusFocus.value === '在途' && active.value === 'transfer' ? [{ field: 'status_name', operator: 'eq', value: '在途' }] : []),
+        ...(statusFocus.value === '待处理' && active.value === 'request' ? [{ field: 'status_name', operator: 'in', value: ['申请中', '部分履约'] }] : []),
+        ...(statusFocus.value === '待处理' && active.value === 'count' ? [{ field: 'status_name', operator: 'neq', value: 'CONFIRMED' }, { field: 'status_name', operator: 'neq', value: 'CANCELLED' }] : []),
         ...(filtersBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
           ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }] : [])
       ]
@@ -1818,10 +1847,9 @@ async function queryStatisticsPage(query, requestedPage = 1) {
   else { analysisLoading.value = true; analysisError.value = '' }
   try {
     const platformScope = mode.value === 'platform'
-      ? {
-          subject: 'HQ',
-          hq_location_id: Number(dashboardWarehouseId.value) || 0
-        }
+      ? dashboardStoreSubject.value
+        ? { subject: 'STORE', ...(dashboardSelectionType.value === 'ORG' ? { organizationId: dashboardSelectionId.value } : {}), ...(dashboardSelectionType.value === 'STORE' ? { storeId: dashboardSelectionId.value } : {}) }
+        : { subject: 'HQ', hq_location_id: Number(dashboardWarehouseId.value) || 0 }
       : {}
     const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
     const period = statisticsDateRange.value
@@ -1887,8 +1915,13 @@ async function loadDashboard() {
   }
   dashboardLoading.value = true
   dashboardError.value = ''
+  // 切换组织/门店时先清空上一个范围的汇总，晚到响应由请求序号拦截。
+  if (mode.value === 'platform') dashboard.value = { stock_amount_cents: null, stock_product_count: 0, expiring_90_batch_count: 0, expiry_risk_buckets: [], count_pending_count: 0, request_pending_count: 0 }
   try {
-    const result = await client.dashboard(mode.value === 'platform' ? { hq_location_id: Number(dashboardWarehouseId.value) } : {})
+    const platformScope = dashboardStoreSubject.value
+      ? { subject: 'STORE', ...(dashboardSelectionType.value === 'ORG' ? { organizationId: dashboardSelectionId.value } : {}), ...(dashboardSelectionType.value === 'STORE' ? { storeId: dashboardSelectionId.value } : {}) }
+      : { subject: 'HQ', hq_location_id: Number(dashboardWarehouseId.value) }
+    const result = await client.dashboard(mode.value === 'platform' ? platformScope : {})
     if (requestVersion === dashboardRequestVersion && !dashboardScopeDenied.value) dashboard.value = result
   } catch (error) {
     if (requestVersion === dashboardRequestVersion) {
@@ -1932,11 +1965,21 @@ async function loadPlatformLocations() {
     platformCreatePermissions.value = response?.can_create || {}
     platformLocations.value = Array.isArray(response?.list) ? response.list : []
     platformCanViewHqDashboard.value = response?.can_view_hq_dashboard === true
+    platformCanViewStoreDashboard.value = response?.can_view_store_dashboard === true
+    platformDashboardStoreTree.value = Array.isArray(response?.dashboard_store_tree) ? response.dashboard_store_tree : []
     platformDashboardHqLocations.value = platformCanViewHqDashboard.value && Array.isArray(response?.dashboard_hq_locations)
       ? response.dashboard_hq_locations : []
+    if (!platformCanViewHqDashboard.value && platformCanViewStoreDashboard.value && dashboardSelectionType.value === 'HQ') dashboardSelection.value = 'SCOPE:0'
+    if (!platformCanViewStoreDashboard.value) {
+      dashboardSelection.value = platformCanViewHqDashboard.value ? 'HQ:0' : 'SCOPE:0'
+    }
     if (!platformDashboardHqLocations.value.some((item) => Number(item.id) === Number(dashboardWarehouseId.value))) dashboardWarehouseId.value = 0
     platformDashboardScopeReady.value = true
     platformStockStoreLocations.value = Array.isArray(response?.stock_store_locations) ? response.stock_store_locations : []
+    if (['STORE', 'ORG'].includes(dashboardSelectionType.value)) {
+      const containsSelection = nodes => nodes.some(node => (node.node_type === dashboardSelectionType.value.toLowerCase() && Number(node.id) === dashboardSelectionId.value) || containsSelection(node.children || []))
+      if (!containsSelection(platformDashboardStoreTree.value)) dashboardSelection.value = platformCanViewHqDashboard.value ? 'HQ:0' : 'SCOPE:0'
+    }
     if (platformStoreId.value > 0 && !platformStockStoreLocations.value.some((item) => Number(item.store_id) === Number(platformStoreId.value))) platformStoreId.value = 0
     if (platformHqLocationId.value > 0 && !platformHqLocations.value.some((item) => Number(item.id) === Number(platformHqLocationId.value))) platformHqLocationId.value = 0
     if (platformHqLocationId.value <= 0 && platformHqLocations.value.length >= 1) platformHqLocationId.value = Number((platformHqLocations.value.find((item) => item.location_status === 'ACTIVE') || platformHqLocations.value[0])?.id || 0)
@@ -1952,6 +1995,8 @@ async function loadPlatformLocations() {
     platformLocations.value = []
     platformDashboardHqLocations.value = []
     platformCanViewHqDashboard.value = false
+    platformCanViewStoreDashboard.value = false
+    platformDashboardStoreTree.value = []
     platformDashboardScopeReady.value = true
     platformDashboardScopeError.value = error instanceof Error ? error.message : '库存首页权限范围读取失败。'
     platformStockStoreLocations.value = []
@@ -2025,6 +2070,7 @@ function onPlatformLocationChanged() {
 
 function onPlatformStockSubjectChanged() {
   if (platformStockSubject.value === 'HQ') platformStoreId.value = 0
+  platformStockOrganizationId.value = null
   stockPage.value = 1
   stockExecutedQuery.value = {}
   stockUnifiedQuery.reset()
@@ -2242,15 +2288,19 @@ onBeforeUnmount(() => {
         <InventoryBusinessModal v-else-if="editor" :page-key="active" :modal-kind="editor" :detail="selectedDetail" :scope-name="scopeName" :default-location-name="defaultLocationName" :warehouse-options="platformLocations" :warehouse-selection="platformListWarehouseSelection" :hq-location-id="platformHqLocationId" :usage-store-id="platformUsageStoreId" :default-business-date="todayDate()" :mode="mode" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" @edit-count-draft="editor = 'count-edit'" />
         <template v-else-if="active === 'overview'">
           <div class="page-heading page-heading--dashboard">
-            <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? '总部仓' : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
-            <div v-if="mode !== 'platform' || (platformDashboardScopeReady && platformCanViewHqDashboard)" class="heading-actions"><label v-if="mode === 'platform'" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformDashboardHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry' })">查看库存分析</button></div>
+            <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? (dashboardStoreSubject ? '授权门店仓' : '总部仓') : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
+            <div v-if="mode !== 'platform' || (platformDashboardScopeReady && !dashboardScopeDenied)" class="heading-actions">
+              <div v-if="mode === 'platform' && platformCanViewStoreDashboard" class="dashboard-organization-filter"><span>组织 / 门店</span><InventoryOrganizationStorePicker :model-value="dashboardSelection" :tree="platformDashboardStoreTree" :show-scope-default="true" :show-hq-default="platformCanViewHqDashboard" @update:model-value="onDashboardSelectionChanged" /></div>
+              <label v-if="mode === 'platform' && !dashboardStoreSubject" class="dashboard-warehouse-picker"><Warehouse :size="16" aria-hidden="true" /><span>仓库</span><select aria-label="库存首页仓库" v-model.number="dashboardWarehouseId" @change="loadDashboard"><option :value="0">全部授权总部仓</option><option v-for="location in platformDashboardHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label>
+              <button class="secondary-button" @click="selectPage('statistics', { tab: 'expiry', dashboardScope: dashboardSelection })">查看库存分析</button>
+            </div>
           </div>
 
           <section v-if="mode === 'platform' && !platformDashboardScopeReady" class="content-card dashboard-scope-state" role="status">正在读取库存首页权限…</section>
           <section v-else-if="mode === 'platform' && platformDashboardScopeError" class="content-card dashboard-scope-state" role="status">库存首页权限范围读取失败：{{ platformDashboardScopeError }}</section>
           <section v-else-if="dashboardScopeDenied" class="content-card dashboard-scope-state" role="status">
-            <h2>当前权限范围无可查看的总部仓</h2>
-            <p>请由管理员为账号开通库存首页，并将员工数据范围设置为集团全部门店。</p>
+            <h2>当前权限范围无可查看的库存仓</h2>
+            <p>请由管理员为账号开通库存首页及可用门店仓的数据范围。</p>
           </section>
           <template v-else>
           <div class="dashboard-cards">
@@ -2262,7 +2312,7 @@ onBeforeUnmount(() => {
 
           <div class="dashboard-grid">
             <section class="content-card risk-card">
-              <header class="card-heading"><div><h2>批次临期风险</h2><p>按剩余保质期分档，临期不等于残次品</p></div><button class="text-button" @click="selectPage('statistics', { tab: 'expiry' })">查看批次</button></header>
+              <header class="card-heading"><div><h2>批次临期风险</h2><p>按剩余保质期分档，临期不等于残次品</p></div><button class="text-button" @click="selectPage('statistics', { tab: 'expiry', dashboardScope: dashboardSelection })">查看批次</button></header>
               <div v-if="dashboardLoading" class="risk-bars risk-bars--pending"><span>正在读取批次临期风险...</span></div>
               <div v-else-if="dashboardExpiryBuckets.length" class="risk-bars">
                 <button v-for="bucket in dashboardExpiryBuckets" :key="bucket.code" @click="openExpiryRisk(bucket)">
@@ -2387,6 +2437,7 @@ onBeforeUnmount(() => {
                   <label v-if="platformStockSubject === 'HQ'">总部仓<select v-model.number="platformHqLocationId" @change="onPlatformLocationChanged"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><label v-if="platformStockSubject === 'STORE'">库存仓
                     <InventoryStoreSelector v-model="platformStoreSelection" :options="platformStoreSelectorOptions" placeholder="选择门店" />
                   </label>
+                  <span v-if="platformStockSubject === 'STORE' && platformStockOrganizationId !== null" role="status">当前按首页所选组织查询</span>
                 </div>
               </template>
             </UnifiedQueryToolbar>

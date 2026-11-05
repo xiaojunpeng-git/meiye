@@ -5,7 +5,9 @@ import { ChevronDown, ChevronRight, Network } from '@lucide/vue'
 const props = defineProps({
   modelValue: { type: String, default: 'HQ:0' },
   tree: { type: Array, default: () => [] },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  showScopeDefault: { type: Boolean, default: false },
+  showHqDefault: { type: Boolean, default: true }
 })
 const emit = defineEmits(['update:modelValue'])
 const root = ref(null)
@@ -14,7 +16,7 @@ const expanded = ref({})
 const selectedOrganization = ref(null)
 watch(() => props.tree, () => { selectedOrganization.value = null; expanded.value = {} })
 
-// Typed keys keep an organization (including legacy ID 0) distinct from HQ and stores.
+// Typed keys keep the current authorized scope, an organization (including legacy ID 0), HQ and stores distinct.
 function storesUnder(node) {
   const stores = []
   const visit = item => {
@@ -38,6 +40,7 @@ const rows = computed(() => {
 })
 const visibleStores = computed(() => storesUnder(selectedOrganization.value))
 const selectedName = computed(() => {
+  if (props.modelValue === 'SCOPE:0') return '当前权限范围'
   if (props.modelValue === 'HQ:0') return '平台端'
   const find = nodes => {
     for (const node of nodes || []) {
@@ -62,8 +65,8 @@ function chooseStore(node) {
   emit('update:modelValue', `STORE:${node.id}`)
   open.value = false
 }
-function clear() {
-  emit('update:modelValue', 'HQ:0')
+function clear(value = 'HQ:0') {
+  emit('update:modelValue', value)
   open.value = false
 }
 function closeOutside(event) {
@@ -94,7 +97,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
           <button v-for="store in visibleStores" :key="store.id" type="button" :class="{ active: modelValue === `STORE:${store.id}` }" @click="chooseStore(store)">{{ store.title || store.name }}</button>
         </div>
       </div>
-      <footer><button type="button" @click="clear">平台端</button></footer>
+      <footer><button v-if="showScopeDefault" type="button" @click="clear('SCOPE:0')">当前权限范围</button><button v-if="showHqDefault" type="button" @click="clear('HQ:0')">平台端</button></footer>
     </section>
   </div>
 </template>

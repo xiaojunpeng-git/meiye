@@ -218,6 +218,8 @@ final class InventoryPlatformAccessPolicy
             'inventory_outbound' => 'outbound', 'inventory_count' => 'count',
             'inventory_request' => 'request', 'inventory_transfer' => 'transfer',
             'inventory_salon_usage' => 'usage',
+            'inventory_statistics_inbound' => 'overview', 'inventory_statistics_outbound' => 'overview',
+            'inventory_statistics_expiry' => 'overview', 'inventory_statistics_age' => 'overview',
         ][$pageCode] ?? '';
     }
 
@@ -326,12 +328,26 @@ final class InventoryPlatformAccessPolicy
         return $access;
     }
 
-    /** 单据页的门店范围取集团看板数据权限与有效默认门店仓的交集；写能力仍独立校验。 */
+    /** 首页门店视图只使用集团看板员工范围与有效默认仓的交集；库存菜单不授予集团总部仓总量。 */
+    public function forDashboardStoreRead(array $access): array
+    {
+        if (empty($access['is_super_admin']) && !$this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'overview')) {
+            throw $this->denied('当前岗位无权查看库存首页。');
+        }
+        $storeIds = $this->defaultLocationDashboardStoreIds($access);
+        $access['store_ids'] = $storeIds;
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|dashboard-store|' . implode(',', $storeIds));
+        return $access;
+    }
+
+    /** 单据与库存统计的门店范围取集团看板权限与有效默认仓交集；写能力仍独立校验。 */
     public function forOperationalRead(array $access, string $pageCode): array
     {
         $allowedPages = [
-            'inventory_inbound', 'inventory_outbound', 'inventory_request',
+            'inventory_inbound', 'inventory_outbound', 'inventory_count', 'inventory_request',
             'inventory_transfer', 'inventory_salon_usage',
+            'inventory_statistics_inbound', 'inventory_statistics_outbound',
+            'inventory_statistics_expiry', 'inventory_statistics_age',
         ];
         if (!in_array($pageCode, $allowedPages, true)) {
             throw $this->denied('当前库存页面不支持跨店查询。');
