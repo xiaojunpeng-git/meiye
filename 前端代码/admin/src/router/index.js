@@ -162,17 +162,18 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     meta.isAgentRoute ? agent_access : access
   );
 
-  // 岗位权限可在当前登录会话存续期间变更。只在本地快照拒绝页面时向服务端
-  // 复核一次当前岗位投影，避免旧 unique_auth 把新授权的深链接误导向 403。
-  if (!isPermission && !meta.isAgentRoute) {
+  // 会员入口每次进入都复核当前岗位，撤权后旧菜单不得继续放行。
+  // 其他页面保留原有仅在本地拒绝时刷新的行为。
+  if ((!isPermission || meta.refreshMemberAccess) && !meta.isAgentRoute) {
     try {
       const refreshed = await store.dispatch('admin/menus/getMenusNavList');
       const freshAccess = refreshed && refreshed.data && Array.isArray(refreshed.data.unique)
         ? refreshed.data.unique
         : [];
-      isPermission = includeArray(meta.auth, freshAccess);
+      isPermission = isPlatformRootAdmin(userInfo) || includeArray(meta.auth, freshAccess);
     } catch (ignored) {
       // 菜单接口失败时保持拒绝，不回退到历史权限或放行。
+      isPermission = false;
     }
   }
 
