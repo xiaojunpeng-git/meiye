@@ -45,14 +45,14 @@ adjustmentCheck(
     && str_contains($orderView, '<PersonnelPerformanceOverlay')
     && str_contains($orderView, 'history-adjustment')
     && str_contains($orderView, ':data-service-fact-id="record.serviceFactId || record.id"')
-    && str_contains($orderView, '>修改手艺人</button>')
+    && str_contains($orderView, 'title="修改该服务记录的手艺人分配"')
     && str_contains($orderView, '@click="openServiceCraftsmanAdjustment(record)"')
     && str_contains($personnelOverlay, "historyAdjustment: { type: Boolean, default: false }")
 );
 adjustmentCheck(
     'history adjustment retains local selections and supports organisation support craftsmen',
     str_contains($personnelOverlay, "mergeWithLocalSelections(candidates, selected, craftsmen.value, 'craftsmen')")
-    && str_contains($personnelOverlay, '<div class="personnel-performance-mode" aria-label="分配模式">')
+    && str_contains($personnelOverlay, '<div v-if="!simpleOnly" class="personnel-performance-mode" aria-label="分配模式">')
     && !str_contains($personnelOverlay, 'v-if="!historyAdjustment" class="personnel-performance-mode"')
     && str_contains($orderView, 'allow-other-craftsmen')
     && str_contains($orderView, ':other-craftsman-candidates="serviceCraftsmanEntry.otherCraftsmanCandidates || []"')
@@ -80,10 +80,10 @@ adjustmentCheck(
     && str_contains($orderView, 'maxlength="255"')
 );
 adjustmentCheck(
-    'history ratio supports decimals without legacy integer validation',
-    str_contains($personnelOverlay, ":step=\"historyAdjustment ? '0.01' : '1'\"")
-    && str_contains($personnelOverlay, "!props.historyAdjustment && !allocationIsValid(selectedCraftsmen, 'craftsmen')")
-    && str_contains($personnelOverlay, '!props.historyAdjustment && ![\'guides\', \'salesManagers\'].includes(role)')
+    'history ratio uses current integer validation and shared cashier amount allocator',
+    str_contains($personnelOverlay, '!allocationIsValid(selectedCraftsmen) || !historyAllocationIsValid(selectedCraftsmen)')
+    && str_contains($personnelOverlay, 'automaticCraftsmanAmounts(historyTotalCents.value, rows)')
+    && str_contains($adjustment, 'ServiceCraftsmanCurrentAllocation::calculate($rows, $totalCents)')
 );
 adjustmentCheck(
     'amount and ratio are linked while final manual allocations are retained',
@@ -93,14 +93,14 @@ adjustmentCheck(
     && !str_contains($personnelOverlay, 'historyAmountIsAutoBalanced(item)')
     && str_contains($personnelOverlay, 'step="1" inputmode="numeric" aria-label="分配消耗业绩"')
     && str_contains($adjustment, 'service_adjust_amount_not_whole_yuan')
-    && str_contains($adjustment, "'allocationInputMode' => 'manual'")
+    && str_contains($adjustment, "'allocationInputMode' => 'current_position_auto_or_manual'")
     && str_contains($personnelOverlay, '保存时以最终输入金额为准')
 );
 adjustmentCheck(
-    'labor-only history adjustment skips consumption allocation and explains it in the UI',
-    str_contains($personnelOverlay, 'const historyOnlyLaborFee = computed')
-    && str_contains($personnelOverlay, '仅手工费，不记录消耗业绩')
-    && str_contains($adjustment, "if (\$type === 'labor' && \$amount !== 0)")
+    'historical labor-only staff can receive both new consumption and labor allocations',
+    !str_contains($personnelOverlay, 'const historyOnlyLaborFee = computed')
+    && str_contains($personnelOverlay, '已录入消耗业绩')
+    && !str_contains($adjustment, "if (\$type === 'labor' && \$amount !== 0)")
     && !str_contains($adjustment, 'service_adjust_amount_total_mismatch')
 );
 adjustmentCheck(
@@ -110,12 +110,12 @@ adjustmentCheck(
     && str_contains($adjustment, '兼容已存在的历史服务记录')
 );
 adjustmentCheck(
-    'project count uses signed half-unit facts and one-decimal UI',
+    'project count retains signed legacy facts and supports six-decimal current input',
     str_contains($migration, '`project_count_half_units` bigint(20) NOT NULL DEFAULT 0')
     && !str_contains($migration, '`project_count_half_units` bigint(20) unsigned')
-    && str_contains($personnelOverlay, 'step="0.5"')
-    && str_contains($adjustment, "'projectCountStep' => '0.5'")
-    && str_contains($adjustment, "'projectCountDecimals' => 1")
+    && str_contains($personnelOverlay, 'projectCountMicroUnitsForText')
+    && str_contains($adjustment, "'projectCountStep' => '0.000001'")
+    && str_contains($adjustment, "'projectCountDecimals' => 6")
 );
 adjustmentCheck(
     'zero is an explicit adjusted project count instead of falling back to service quantity',
@@ -165,10 +165,10 @@ adjustmentCheck(
     && str_contains($adjustment, '退款状态均不是本动作的写域')
 );
 adjustmentCheck(
-    'salary report reads active labor facts and exact half-unit project counts',
+    'salary report reads active labor facts and preserves six-decimal project counts',
     str_contains($report, "->where('pf.performance_type','labor_performance_allocated')")
-    && str_contains($report, "\$sum+=(int)round((float)\$v*2)")
-    && str_contains($report, "number_format(\$sum/2,1,'.','')")
+    && str_contains($report, '$sum+=$this->projectCountMicros((string)$v)')
+    && str_contains($report, '$this->projectCountText($sum)')
     && str_contains($report, "(string)\$row['fact_direction']!=='forward'")
 );
 
@@ -178,7 +178,7 @@ adjustmentCheck(
     'manual final allocation does not use a fixed project-total gate',
     !str_contains($adjustment, 'allocationTotalMatches(')
     && !str_contains($adjustment, 'service_adjust_amount_total_mismatch')
-    && str_contains($adjustment, "'allocationInputMode' => 'manual'")
+    && str_contains($adjustment, "'allocationInputMode' => 'current_position_auto_or_manual'")
 );
 $reportService = new \app\services\report\StoreUnifiedReportPhaseSixServices();
 $resultMethod = new ReflectionMethod($reportService, 'result');

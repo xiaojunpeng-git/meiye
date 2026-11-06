@@ -1,0 +1,1 @@
+PASS current groups, independent amounts, integer tail, manual override, stale auto amount ignored, fractional ratio rejected

@@ -1,0 +1,525 @@
+--- a/前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue
++++ b/前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue
+@@ -135,12 +135,12 @@
+ }
+ 
+ function craftsmanType(item = {}, configuredType = configuredCraftsmanType(item)) {
+-  // 仅本次收银按任职类型锁定手工费；历史服务调整沿用原有可编辑金额。
+-  return !props.historyAdjustment && configuredType === 'commission' ? 'commission' : 'commission_labor'
++  // 收银和改单均按当前人员类型锁定手工费。
++  return configuredType === 'commission' ? 'commission' : 'commission_labor'
+ }
+ 
+ function servicePositionExcluded(item) {
+-  return !props.historyAdjustment && item?.serviceCountsExcluded === true
++  return item?.serviceCountsExcluded === true
+ }
+ 
+ function laborFeeLocked(item) {
+@@ -505,13 +505,15 @@
+       partnerDefaultRatio: Number(candidate.partnerDefaultRatio ?? saved?.partnerDefaultRatio ?? 0),
+       laborFeeCents,
+       laborFeeYuan: laborFeeCents / 100,
++      allocationAmountManual: saved?.allocationAmountManual === true,
+       allocationAmountCents: allocationAmountCentsFor(saved || {}),
+       allocationAmountYuan: allocationAmountYuanText(saved || {}),
+       performanceAmountCents: performanceAmountCentsFor(saved || {}),
+       performanceAmountYuan: performanceAmountYuanText(saved || {}),
+       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
+       performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
+-      projectCountText: projectCountTextFor(saved || {}),
++      // 当前岗位免计时展示与提交同时归零，不能只禁用仍显示旧项目数。
++      projectCountText: serviceCountsExcluded ? '0' : projectCountTextFor(saved || {}),
+       projectCountManuallyEdited: false,
+       projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount')
+         || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits'),
+@@ -540,13 +542,14 @@
+       partnerDefaultRatio: Number(saved.partnerDefaultRatio ?? 0),
+       laborFeeCents: laborFeeCentsFor(saved),
+       laborFeeYuan: laborFeeCentsFor(saved) / 100,
++      allocationAmountManual: saved.allocationAmountManual === true,
+       allocationAmountCents: allocationAmountCentsFor(saved),
+       allocationAmountYuan: allocationAmountYuanText(saved),
+       performanceAmountCents: performanceAmountCentsFor(saved),
+       performanceAmountYuan: performanceAmountYuanText(saved),
+       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
+       performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
+-      projectCountText: projectCountTextFor(saved),
++      projectCountText: servicePositionExcluded(saved) ? '0' : projectCountTextFor(saved),
+       projectCountManuallyEdited: false,
+       projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount')
+         || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits'),
+@@ -744,68 +747,28 @@
+   return craftsmen.value.filter((item) => item.selected)
+ }
+ 
+-function historyGroupAmountCents(item) {
+-  // 历史消耗业绩的金额已入事实，独立结算岗位只在自己的组内换算比例；
+-  // 当前组原有金额是编辑基数，新增岗位组才使用本次项目的原始基数。
+-  const groupKey = allocationGroupKey(item)
+-  const saved = (Array.isArray(props.selectedCraftsmen) ? props.selectedCraftsmen : [])
+-    .filter((record) => allocationGroupKey(record) === groupKey)
+-  return saved.length
+-    ? saved.reduce((total, record) => total + allocationAmountCentsFor(record), 0)
+-    : historyTotalCents.value
+-}
+-
+ function syncHistoryAmountFromRatio(item) {
+   if (!props.historyAdjustment) return
+-  const ratio = Math.max(0, Math.min(100, Number(item.performance || 0)))
+-  item.allocationAmountCents = Math.floor(historyGroupAmountCents(item) * ratio / 10000) * 100
+-  item.allocationAmountYuan = allocationAmountYuanText(item)
+-  balanceHistoryTail(item)
++  item.allocationAmountManual = false
++  distributeHistoryAmountsByRatio()
+ }
+ 
+ function syncHistoryRatioFromAmount(item) {
+   const yuan = String(item.allocationAmountYuan ?? '').trim()
+-  const cents = /^\d+$/.test(yuan) ? Number(yuan) * 100 : 0
+-  item.allocationAmountCents = Math.max(0, Math.trunc(cents))
+-  item.allocationAmountYuan = allocationAmountYuanText(item)
+-  const groupTotal = historyGroupAmountCents(item)
+-  item.performance = groupTotal > 0
+-    ? Number((item.allocationAmountCents * 100 / groupTotal).toFixed(2))
+-    : 0
+-  validationMessage.value = ''
+-}
+-
+-function balanceHistoryTail(changedItem) {
+-  const rows = historyPerformanceRows().filter((row) => allocationGroupKey(row) === allocationGroupKey(changedItem))
+-  if (!rows.length) return
+-  const tail = rows[rows.length - 1]
+-  const otherTotal = rows.reduce((total, row) => row === tail ? total : total + allocationAmountCentsFor(row), 0)
+-  // 尾差固定归最后一人：前面人员都是整元后，剩余金额全部落到最后一位。
+-  // 若前面已超出项目核销金额，保留 0 并由提交校验提示用户调整。
+-  const groupTotal = historyGroupAmountCents(tail)
+-  tail.allocationAmountCents = Math.max(0, groupTotal - otherTotal)
+-  tail.allocationAmountYuan = allocationAmountYuanText(tail)
+-  tail.performance = groupTotal > 0
+-    ? Number((tail.allocationAmountCents * 100 / groupTotal).toFixed(2))
+-    : 0
++  item.allocationAmountCents = /^\d+$/.test(yuan) ? Number(yuan) * 100 : 0
++  item.allocationAmountManual = true
++  // 手填是本次明确覆盖，不反向制造小数比例，也不改变其他人的金额。
++  validationMessage.value = ''
+ }
+ 
+ function distributeHistoryAmountsByRatio() {
+-  const groups = new Map()
+-  historyPerformanceRows().forEach((record) => {
+-    const key = allocationGroupKey(record)
+-    if (!groups.has(key)) groups.set(key, [])
+-    groups.get(key).push(record)
+-  })
+-  groups.forEach((rows) => {
+-    const tail = rows[rows.length - 1]
+-    rows.forEach((record) => {
+-      if (record === tail) return
+-      const ratio = Math.max(0, Math.min(100, Number(record.performance || 0)))
+-      record.allocationAmountCents = Math.floor(historyGroupAmountCents(record) * ratio / 10000) * 100
+-      record.allocationAmountYuan = allocationAmountYuanText(record)
+-    })
+-    balanceHistoryTail(tail)
++  const rows = historyPerformanceRows().map((item) => ({
++    ...item, performanceAmountManual: item.allocationAmountManual === true, performanceAmountLocked: false,
++    original: item
++  }))
++  automaticCraftsmanAmounts(historyTotalCents.value, rows).forEach((amount, row) => {
++    row.original.allocationAmountCents = amount
++    row.original.allocationAmountYuan = String(amount / 100)
+   })
+ }
+ 
+@@ -928,6 +891,7 @@
+   }
+   equalWeights(craftsmen.value)
+   distributeProjectCounts(craftsmen.value, true)
++  if (props.historyAdjustment) distributeHistoryAmountsByRatio()
+   otherCraftsmanSearchOpen.value = false
+   validationMessage.value = ''
+ }
+@@ -978,7 +942,10 @@
+   if (selected.some((record) => {
+     return projectCountMicroUnitsForText(record.projectCountText) === null
+   })) return false
+-  if (selected.some((record) => allocationAmountCentsFor(record) % 100 !== 0)) return false
++  // 非法输入不能先转换成 0 再通过校验；保留原输入直到用户改为整元。
++  if (selected.some((record) => !/^\d+$/.test(String(record.allocationAmountYuan ?? '').trim())
++    || !Number.isSafeInteger(Number(record.allocationAmountYuan) * 100)
++    || allocationAmountCentsFor(record) % 100 !== 0)) return false
+   return true
+ }
+ 
+@@ -1134,8 +1101,8 @@
+     activateInvalidTab('craftsmen', '当前项目至少需要选择一名手艺人。')
+     return
+   }
+-  if (props.historyAdjustment && !historyAllocationIsValid(selectedCraftsmen)) {
+-    activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数必须为非负数字，最多保留六位小数。')
++  if (props.historyAdjustment && (!allocationIsValid(selectedCraftsmen) || !historyAllocationIsValid(selectedCraftsmen))) {
++    activateInvalidTab('craftsmen', '业绩比例需为0至100的整数，消耗业绩需为整元；项目数必须为非负数字，最多保留六位小数。')
+     return
+   }
+   const selectedGuideRoundNo = props.hideGuideRounds || guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
+@@ -1180,6 +1147,7 @@
+       performanceIndependent: performanceIndependent(item),
+       allocationGroupKey: allocationGroupKey(item),
+       ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
++      allocationAmountManual: item.allocationAmountManual === true,
+       allocationAmountCents: allocationAmountCentsFor(item),
+       projectCountText: servicePositionExcluded(item) ? '0' : item.projectCountText,
+       projectCount: servicePositionExcluded(item) ? '0' : projectCountTextFor(item),
+@@ -1308,7 +1276,7 @@
+             <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
+               <strong>{{ item.name }}</strong><span>{{ item.position }}</span>
+               <label v-if="!activeIsNonPerformance && (activeTab === 'craftsmen' || showPreSale)" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
+-              <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" @input="markPerformanceTouched(item)"><b>%</b></label>
++              <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" step="1" inputmode="decimal" aria-label="业绩分配比例" @input="markPerformanceTouched(item)"><b>%</b></label>
+               <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
+               <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint()" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
+               <label v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="laborFeeLocked(item) ? 0 : item.laborFeeYuan" :disabled="laborFeeLocked(item)" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
+--- a/后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php
++++ b/后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php
+@@ -36,6 +36,37 @@
+         $facts = $this->activeLaborFacts($source, false);
+         $totalCents = $this->writeoffAmountCents($source, $scope->tenantId());
+         $allocations = $this->presentAllocations($facts, $source, $operator);
++        // 原事实只用于审计；编辑草稿按当前岗位重建，不能把历史平分金额当分母。
++        $latest = Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
++            ->where('service_fact_id', (int)$source['id'])->where('status', 'succeeded')->order('id desc')->find();
++        $currentCandidates = [];
++        foreach ($this->candidates($operator->storeId()) as $candidate) $currentCandidates[(int)$candidate['staffId']] = $candidate;
++        foreach ($this->organizationCraftsmenByEmployee(array_column($allocations, 'employeeId'), $operator, false) as $candidate) $currentCandidates[(int)$candidate['staffId']] = $candidate;
++        $saved = [];
++        foreach ((array)json_decode((string)($latest['after_snapshot_json'] ?? '[]'), true) as $row) $saved[(int)$row['employeeId']] = $row;
++        $currentExcluded = CashierV3ServicePositionExclusion::matches(array_column($allocations, 'staffId'), $operator->storeId());
++        foreach ($allocations as &$row) {
++            $row['serviceCountsExcluded'] = isset($currentExcluded[(int)$row['staffId']]);
++            $candidate = $currentCandidates[(int)$row['staffId']] ?? [];
++            foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey', 'craftsmanPerformanceType', 'serviceCountsExcluded'] as $field) {
++                if (array_key_exists($field, $candidate)) $row[$field] = $candidate[$field];
++            }
++            if (($row['craftsmanPerformanceType'] ?? '') === 'commission' || !empty($row['serviceCountsExcluded'])) $row['laborFeeCents'] = 0;
++            if (!empty($row['serviceCountsExcluded'])) $row['projectCount'] = '0';
++            $prior = $saved[(int)$row['employeeId']] ?? [];
++            // 仅本规则保存且岗位组未变化时恢复明确的手填/比例；旧快照不能充当当前默认分配。
++            $sameGroup = ($prior['allocationGroupKey'] ?? null) === ($row['allocationGroupKey'] ?? 'normal');
++            $row['laborWeight'] = $sameGroup && isset($prior['currentRuleAllocation']) ? ($prior['laborWeight'] ?? null) : null;
++            $row['allocationAmountManual'] = $sameGroup && !empty($prior['currentRuleAllocation']) && !empty($prior['allocationAmountManual']);
++        }
++        unset($row);
++        $allocations = ServiceCraftsmanCurrentAllocation::calculate($allocations, $totalCents);
++        foreach ($allocations as &$row) {
++            $row['allocationAmount'] = $this->money((int)$row['allocationAmountCents']);
++            $row['laborFeeAmount'] = $this->money((int)$row['laborFeeCents']);
++        }
++        unset($row);
++
+         return [
+             'contractVersion' => self::CONTRACT_VERSION,
+             'serviceFactId' => (int)$source['id'],
+@@ -49,8 +80,9 @@
+             'recordVersion' => $this->recordVersion($source, $scope->tenantId()),
+             'allocations' => $allocations,
+             'craftsmenCandidates' => $this->candidates($operator->storeId()),
+-            'projectCountStep' => '0.5',
+-            'projectCountDecimals' => 1,
++            // 与共用收银控件一致：仅项目数量允许最多六位小数。
++            'projectCountStep' => '0.000001',
++            'projectCountDecimals' => 6,
+         ];
+     }
+ 
+@@ -93,27 +125,7 @@
+         $before = $this->presentAllocations($currentFacts, $source, $operator);
+         $totalCents = $this->writeoffAmountCents($source, $dataScope->tenantId());
+         $after = $this->normalizeAllocations($payload['allocations'] ?? null, $operator, $totalCents);
+-        // 调整只能沿用原单已冻结的免计结果，不能用今天的岗位配置倒改历史。
+-        $excluded = CashierV3ServicePositionExclusion::frozenEmployeeIds(
+-            (string)($source['craftsmen_snapshot_json'] ?? ''), (int)$source['store_id']
+-        );
+-        // Historical manager backfill has no checkout snapshot marker. Carry
+-        // only its own immutable salary-only fact marker through a later edit;
+-        // today's manager position must not rewrite an older service.
+-        $backfilled = [];
+-        foreach ($currentFacts as $fact) {
+-            if ((string)($fact['rule_code_snapshot'] ?? '') === 'STORE-MANAGER-INDEPENDENT-BACKFILL-V1') {
+-                $backfilled[(int)$fact['employee_id']] = true;
+-            }
+-        }
+-        foreach ($after as &$allocation) {
+-            if (isset($excluded[$allocation['employeeId']]) || isset($backfilled[$allocation['employeeId']])) {
+-                $allocation['laborFeeCents'] = 0;
+-                $allocation['projectCount'] = '0';
+-            }
+-            if (isset($backfilled[$allocation['employeeId']])) $allocation['salaryOnlyManager'] = true;
+-        }
+-        unset($allocation);
++        // 本次改单生成新事实，按当前岗位免计规则处理；原事实由下方冲销保留。
+         $now = time();
+         $operationId = 'SRA-' . strtoupper(substr(hash_hmac(
+             'sha256', $dataScope->tenantId() . '|' . $source['id'] . '|' . $commandKey, $this->secret()
+@@ -135,7 +147,7 @@
+                 'contractVersion' => self::CONTRACT_VERSION, 'operationId' => $operationId,
+                 'operationNo' => $operationNo, 'serviceFactId' => (int)$source['id'],
+                 'reason' => $reason, 'allocationTotalAmountCents' => $totalCents,
+-                'allocationInputMode' => 'manual',
++                'allocationInputMode' => 'current_position_auto_or_manual',
+             ],
+         ]);
+ 
+@@ -221,6 +233,13 @@
+             ->field('amount_cents')->select()->toArray();
+         foreach ($rows as $row) $amount += (int)($row['amount_cents'] ?? 0);
+         if ($amount > 0) return $amount;
++
++        // 缺少项目消耗事实的旧记录，复用首次调整冻结的项目基数。独立岗位可各分一份，
++        // 新劳动事实合计不再等于项目金额，不能在再次编辑时将其相加作为新的基数。
++        $frozenBase = Db::name(self::OPERATION_TABLE)->where('tenant_id', $tenantId)
++            ->where('service_fact_id', (int)$source['id'])->where('status', 'succeeded')
++            ->order('id asc')->value('allocation_total_amount_cents');
++        if ($frozenBase !== null) return max(0, (int)$frozenBase);
+ 
+         // 兼容已存在的历史服务记录：旧事实表没有保存项目级核销金额时，
+         // 以该服务有效劳动业绩的净额作为本次必须重分配的固定金额。后续
+@@ -478,7 +497,8 @@
+             ->where('ss.cashier_craftsman_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+             ->field('ss.id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.craftsman_performance_type,e.name employee_name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name position_name,p.performance_independent')
+             ->order('ss.id', 'asc')->select()->toArray();
+-        return array_map(static function (array $row): array {
++        $excluded = CashierV3ServicePositionExclusion::matches(array_column($rows, 'id'), $storeId);
++        return array_map(static function (array $row) use ($excluded): array {
+             $positionId = (int)($row['position_id'] ?? 0);
+             $independent = (int)($row['performance_independent'] ?? 0) === 1;
+             return [
+@@ -490,7 +510,8 @@
+                 'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
+                 'employeeTypeCode' => (string)$row['employment_type_code'],
+                 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
+-                'craftsmanPerformanceType' => 'commission_labor',
++                'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['craftsman_performance_type'] ?? null),
++                'serviceCountsExcluded' => isset($excluded[(int)$row['id']]),
+                 'craftsmanEligible' => true, 'selectable' => true,
+             ];
+         }, $rows);
+@@ -533,8 +554,8 @@
+             ->whereIn('oe.employee_id', $employeeIds)
+             ->where('oe.status', 1)->where('oe.is_del', 0)
+             ->where('e.status', 1)->where('e.is_del', 0)
+-            ->field('e.id employee_id,e.name employee_name,e.employment_type_code,e.employment_type_version,MAX(o.name) organization_name')
+-            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version');
++            ->field('e.id employee_id,e.name employee_name,e.employment_type_code,e.employment_type_version,e.default_craftsman_performance_type,MAX(o.name) organization_name')
++            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version,e.default_craftsman_performance_type');
+         if ($lock) $query->lock(true);
+         $profiles = [];
+         foreach ($query->select()->toArray() as $row) {
+@@ -548,7 +569,8 @@
+                 'employeeType' => (string)($row['employment_type_code'] ?? 'internal'),
+                 'employeeTypeVersion' => max(1, (int)($row['employment_type_version'] ?? 0)),
+                 'personnelSource' => 'other',
+-                'craftsmanPerformanceType' => 'commission_labor',
++                'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['default_craftsman_performance_type'] ?? null),
++                'allocationGroupKey' => 'normal', 'positionId' => 0, 'performanceIndependent' => false,
+                 'organizationName' => trim((string)($row['organization_name'] ?? '')),
+             ];
+         }
+@@ -596,7 +618,7 @@
+                     'employeeName' => trim((string)$row['name']) ?: (string)$row['staff_name'],
+                     'employeeType' => (string)$row['employment_type_code'],
+                     'employeeTypeVersion' => max(1, (int)$row['employment_type_version']),
+-                    'craftsmanPerformanceType' => 'commission_labor',
++                    'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['craftsman_performance_type'] ?? null),
+                     'personnelSource' => 'store',
+                     'positionId' => $positionId,
+                     'staffJobPositionId' => (int)($row['staff_job_position_id'] ?? 0),
+@@ -618,26 +640,35 @@
+                 throw CashierV3CommandException::invalidContext('所选支援手艺人已停用或不在当前组织范围内。');
+             }
+         }
++        $currentExclusions = CashierV3ServicePositionExclusion::matches(array_keys($byId), $operator->storeId(), true);
+         $rows = [];
+         $seenEmployeeIds = [];
+         foreach ($input as $raw) {
+             $staffId = (int)($raw['staffId'] ?? $raw['id']); $staff = $byId[$staffId] ?? null;
+             if (!is_array($staff)) throw CashierV3CommandException::invalidContext('所选手艺人已失效，请重新选择。');
++            // 页面打开后岗位改变时要求刷新，不能将旧组比例套到新的独立岗位。
++            if (isset($raw['allocationGroupKey']) && (string)$raw['allocationGroupKey'] !== (string)$staff['allocationGroupKey']) {
++                throw CashierV3CommandException::invalidContext('人员岗位规则已变化，请刷新后重新分配。');
++            }
+             $employeeId = (int)$staff['employeeId'];
+             if ($employeeId <= 0 || isset($seenEmployeeIds[$employeeId])) {
+                 throw CashierV3CommandException::invalidContext('同一员工不能重复分配，请重新选择。');
+             }
+             $seenEmployeeIds[$employeeId] = true;
+             $amount = $this->nonnegativeInteger($raw['allocationAmountCents'] ?? null, '消耗业绩');
+-            if ($amount % 100 !== 0) {
++            if (($raw['allocationAmountManual'] ?? false) === true && $amount % 100 !== 0) {
+                 throw CashierV3CommandException::invalidContext('消耗业绩必须按整元分配。', [
+                     'reason' => 'service_adjust_amount_not_whole_yuan', 'staffId' => $staffId, 'amountCents' => $amount,
+                 ]);
+             }
+             $fee = $this->nonnegativeInteger($raw['laborFeeCents'] ?? 0, '手工费');
+             $projectCount = $this->projectCount($raw);
+-            // 调整写入的是新事实，沿用旧服务快照做来源追溯，但不继承已取消的限制。
+-            $type = 'commission_labor';
++            // 与收银候选/结账共用当前手艺人类型和岗位免计；客户端不能绕过禁填字段。
++            $type = \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($staff['craftsmanPerformanceType'] ?? null);
++            $excluded = isset($currentExclusions[$staffId]);
++            if ($type === 'commission' || $excluded) $fee = 0;
++            if ($excluded) $projectCount = '0';
++            if ($fee % 100 !== 0) throw CashierV3CommandException::invalidContext('手工费必须为整元。');
+             $rows[] = [
+                 'staffId' => $staffId, 'employeeId' => $employeeId,
+                 'employeeName' => (string)$staff['employeeName'],
+@@ -653,10 +684,15 @@
+                 'allocationGroupKey' => (string)($staff['allocationGroupKey'] ?? 'normal'),
+                 'isPointCustomer' => !empty($raw['isPointCustomer']) || !empty($raw['marked']),
+                 'allocationAmountCents' => $amount, 'laborFeeCents' => $fee,
++                'laborWeight' => $raw['laborWeight'] ?? null,
++                'allocationAmountManual' => ($raw['allocationAmountManual'] ?? false) === true,
++                'currentRuleAllocation' => true,
++                'serviceCountsExcluded' => $excluded,
+                 'projectCount' => $projectCount,
+             ];
+         }
+-        return $rows;
++        // 锁定后的岗位是最终权威；忽略客户端自动金额，防止旧页面继续写入平分结果。
++        return ServiceCraftsmanCurrentAllocation::calculate($rows, $totalCents);
+     }
+ 
+     /** Preserve exact entered decimals while accepting old half-unit snapshots. */
+@@ -745,11 +781,9 @@
+         $row['labor_fee_amount_cents'] = (int)$allocation['laborFeeCents'];
+         $row['project_count_half_units'] = 0;
+         $row['project_count_decimal'] = (string)$allocation['projectCount'];
+-        $row['rule_code_snapshot'] = !empty($allocation['salaryOnlyManager'])
+-            ? 'STORE-MANAGER-INDEPENDENT-BACKFILL-V1' : 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
+-        $row['rule_name_snapshot'] = !empty($allocation['salaryOnlyManager'])
+-            ? '店长独立业绩（不计服务人次）' : '服务记录手艺人调整';
+-        $row['rule_version_snapshot'] = 'v1';
++        // Current rules apply to replacement facts; historical manager markers stay on reversed originals.
++        $row['rule_code_snapshot'] = 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
++        $row['rule_name_snapshot'] = '服务记录手艺人调整'; $row['rule_version_snapshot'] = 'v1';
+         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));
+         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('service_adjust_allocation_insert_failed', ['index' => $index]);
+         return (string)$row['fact_id'];
+--- a/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php
++++ b/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php
+@@ -1714,36 +1714,8 @@
+                 throw self::failure('craftsman_not_active_eligible_in_store', ['staffId' => $staffId]);
+             }
+         }
+-        $amountByStaffId = [];
+-        $automaticGroups = [];
+-        foreach ($authorityIds as $staffId) {
+-            $row = $byId[$staffId];
+-            if (!empty($row['performanceAmountManual'])) {
+-                $amountByStaffId[$staffId] = max(0, (int)($row['performanceAmountCents'] ?? 0));
+-                continue;
+-            }
+-            $groupKey = !empty($row['performanceIndependent'])
+-                ? (string)($row['allocationGroupKey'] ?? 'normal') : 'normal';
+-            $automaticGroups[$groupKey][] = $row;
+-        }
+-        // 先锁定每组应分整元，再把向下取整的尾差给末人；不能把 19.5 元
+-        // 直接写入只接受整元的劳动事实。手填金额保持原值，不参与补差。
+-        $baseYuan = intdiv($amountCents, 100);
+-        foreach ($automaticGroups as $group) {
+-            $weightTotal = array_sum(array_map(static function (array $row): int {
+-                return max(0, (int)($row['laborWeight'] ?? 0));
+-            }, $group));
+-            $targetYuan = intdiv($baseYuan * $weightTotal + 50, 100);
+-            $allocatedYuan = 0;
+-            $lastIndex = count($group) - 1;
+-            foreach ($group as $index => $row) {
+-                $yuan = $index === $lastIndex
+-                    ? $targetYuan - $allocatedYuan
+-                    : intdiv($baseYuan * max(0, (int)($row['laborWeight'] ?? 0)), 100);
+-                $amountByStaffId[(int)$row['staffId']] = $yuan * 100;
+-                $allocatedYuan += $yuan;
+-            }
+-        }
++        // 与服务记录改单共用同一自动分组及整元尾差算法，避免两入口各自计算。
++        $amountByStaffId = \app\services\cashier\v3\CashierV3CraftsmanAmountAllocation::amounts($amountCents, $authorityRows);
+         $allocations = [];
+         foreach ($authorityRows as $index => $row) {
+             $staffId = (int)$row['staffId'];
+--- /dev/null
++++ b/后端代码/app/services/cashier/v3/CashierV3CraftsmanAmountAllocation.php
+@@ -0,0 +1,31 @@
++<?php
++namespace app\services\cashier\v3;
++
++/** 收银核销和改单共用的金额分配；输入必须是各入口已校验的当前岗位与整数比例。 */
++final class CashierV3CraftsmanAmountAllocation
++{
++    /** 返回 staffId => 整元分值；各独立岗位有完整基数，手填金额不参与自动尾差。 */
++    public static function amounts(int $baseCents, array $rows): array
++    {
++        $amounts = []; $groups = [];
++        foreach ($rows as $row) {
++            $id = (int)$row['staffId'];
++            if (!empty($row['performanceAmountManual'])) {
++                $amounts[$id] = max(0, (int)($row['performanceAmountCents'] ?? 0));
++                continue;
++            }
++            $key = !empty($row['performanceIndependent']) ? (string)($row['allocationGroupKey'] ?? 'normal') : 'normal';
++            $groups[$key][] = $row;
++        }
++        $baseYuan = intdiv(max(0, $baseCents), 100);
++        foreach ($groups as $group) {
++            $total = array_sum(array_map(static fn(array $row): int => max(0, (int)($row['laborWeight'] ?? 0)), $group));
++            $target = intdiv($baseYuan * $total + 50, 100); $allocated = 0;
++            foreach ($group as $index => $row) {
++                $yuan = $index === count($group) - 1 ? $target - $allocated : intdiv($baseYuan * max(0, (int)($row['laborWeight'] ?? 0)), 100);
++                $amounts[(int)$row['staffId']] = $yuan * 100; $allocated += $yuan;
++            }
++        }
++        return $amounts;
++    }
++}
+--- /dev/null
++++ b/后端代码/app/services/cashier/v3/order/ServiceCraftsmanCurrentAllocation.php
+@@ -0,0 +1,41 @@
++<?php
++declare(strict_types=1);
++namespace app\services\cashier\v3\order;
++
++use app\services\cashier\v3\CashierV3CommandException;
++
++/** 当前岗位分组的调整草稿与最终写入共用计算；rows 的岗位必须来自服务端任职查询。 */
++final class ServiceCraftsmanCurrentAllocation
++{
++    public static function calculate(array $rows, int $baseCents): array
++    {
++        $groups = [];
++        foreach ($rows as $i => $row) {
++            $key = !empty($row['performanceIndependent']) && (int)($row['positionId'] ?? 0) > 0
++                ? 'independent:' . (int)$row['positionId'] : 'normal';
++            $rows[$i]['allocationGroupKey'] = $key;
++            $groups[$key][] = $i;
++        }
++        foreach ($groups as $indices) {
++            foreach ($indices as $offset => $i) {
++                $raw = $rows[$i]['laborWeight'] ?? null;
++                if ($raw === null) $raw = intdiv(100, count($indices)) + ($offset < 100 % count($indices) ? 1 : 0);
++                if (!preg_match('/^(?:0|[1-9][0-9]*)$/D', (string)$raw) || (int)$raw > 100) {
++                    throw CashierV3CommandException::invalidContext('手艺人业绩比例必须为0至100的整数，请刷新后重试。');
++                }
++                $rows[$i]['laborWeight'] = (int)$raw;
++            }
++        }
++        // 适配改单字段后直接调用收银权威分配器，不维护第二套金额计算。
++        $inputs = [];
++        foreach ($rows as $i => $row) {
++            $inputs[] = array_merge($row, ['staffId' => $i + 1,
++                'performanceAmountManual' => !empty($row['allocationAmountManual']),
++                'performanceAmountCents' => (int)($row['allocationAmountCents'] ?? 0)]);
++        }
++        $amounts = \app\services\cashier\v3\CashierV3CraftsmanAmountAllocation::amounts($baseCents, $inputs);
++        foreach ($rows as $i => &$row) $row['allocationAmountCents'] = $amounts[$i + 1];
++        unset($row);
++        return $rows;
++    }
++}

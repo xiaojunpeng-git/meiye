@@ -1,0 +1,9 @@
+{
+  "head": "185447d01ff47a19eacfd1308e33494a2a5a8d41",
+  "files": {
+    "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "cad1d76d8d22786999a157d01c0c157509724d304cd3b41f6928d5e33f8c054e",
+    "后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php": "0da0516fa9efbe139faac7cc837eee450f8e34d826f1d29491f5dd67b9986de6",
+    "后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php": "de82061be5909ff153bddd08787c7dd99b01cdbaf0b2044b8d7bcdf2aa347624"
+  },
+  "remote": "not applicable; local development only"
+}

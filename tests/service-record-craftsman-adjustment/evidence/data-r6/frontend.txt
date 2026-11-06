@@ -1,0 +1,2 @@
+PASS current independent groups 77/77; same group 38/39; manual amount; ratio returns to automatic; support selection recalculates
+PASS checkout and adjustment share current hand-fee type and service-count exclusion rules

@@ -1,0 +1,23 @@
+{
+  "status": "local development and focused validation complete; awaiting PM acceptance; no commit/deployment/push",
+  "head": "185447d01ff47a19eacfd1308e33494a2a5a8d41",
+  "files": {
+    "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "128c84b54b19ad06ac136acee3b133489c059ac019709044a1fedf1b2c6634fd",
+    "后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php": "443e0f69e4d5b124ef5dca2d6f0884e75c5a136d2ab87bf5776bcc93f1915cb6",
+    "后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php": "6e38df8855dc60912b323ecbc3bba6df8cea1c7701d9602a66e14b74e0bf98eb",
+    "后端代码/app/services/cashier/v3/CashierV3CraftsmanAmountAllocation.php": "1e2fd34cf5403dd0b0aee9e6a05731747579f2c33924b10f5414aa803e4448b1",
+    "后端代码/app/services/cashier/v3/order/ServiceCraftsmanCurrentAllocation.php": "3e8c65a5a45209368411a29f2a63d4eecdcf7e13f7db02bba2936b850b21c599",
+    "tests/service-record-craftsman-adjustment/php/current-position.php": "8f7474e7d4e5a0a633bfc98ddaaf162a839e927719fd164990a596aeb7d6500f",
+    "tests/service-record-craftsman-adjustment/php/current-position-local.php": "800761bcf96667e9968da535ab0e4102493f493420ad1aaf0ac84f081356d2c4",
+    "tests/service-record-craftsman-adjustment/js/current-position.mjs": "0022ca053837400880a78065966a7c2a8e99e5b0faa12b7acda9441d05837ca6",
+    "tests/service-record-craftsman-adjustment/php/contract.php": "41869d16ef9f5badb220357e818a4e9236abbc2cdcaaf76ca3eec0cc4c3a0cc8",
+    "tests/cashier-v3/php/c2-entitlement-completion-contract.php": "e42cb95b0d55a16402e0dcdc90a3d9422d2287cf1c4454a329c4e211ef28e5a6",
+    "tests/cashier-v3/js/r14-labor-fee-integer-input.mjs": "2f2c543b3f4eff1438bfce2ccbc67ce9453b49498545f5003dc861fea9db1d53",
+    "tests/service-record-craftsman-adjustment/browser/index.html": "b365b75527617f757e819dc87e551eb5b4e4e260c4171e65d0c11796c5e8ce4e",
+    "tests/service-record-craftsman-adjustment/browser/server.mjs": "4eeaec8b945c112b9cc46cfdb771ac9bfddddcefeba8de2f537312e4f88d91b0"
+  },
+  "business_patch_sha256": "8a2b19cc990a028f07fafcea1c6f9d91f69f0725b3ce05b6e16e6cbd7f91108a",
+  "candidate_fingerprint": "64e217c91c1cf517ab3ffc21cbed664f1afe4297f1782e98ad82ddc7c6e016df",
+  "build_main_js": "index-698a1800.js",
+  "build_css": "index-4e8ff241.css"
+}
