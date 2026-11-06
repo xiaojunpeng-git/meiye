@@ -1042,7 +1042,12 @@ final class CashierV3EntitlementCompletionKernel
                 'performance_rule',
                 (string)$line['projectId'],
                 $line['performance']['ruleVersion'],
-                $line['performance']
+                [
+                    // The project rule owns consumption; labor defaults are
+                    // resolved per card detail and may differ for one project.
+                    'consumptionMode' => $line['performance']['consumptionMode'],
+                    'consumptionConfiguredUnitAmountCents' => $line['performance']['consumptionConfiguredUnitAmountCents'],
+                ]
             );
             if ($line['inventory']['inventoryManaged'] === false) {
                 continue;

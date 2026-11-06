@@ -51,6 +51,44 @@ final class ServiceCustomerMetricReadServices
     }
 
     /**
+     * Count distinct craftsmen actually attached to the caller's eligible
+     * completed services. Effective replacement labour facts supersede old
+     * allocations; zero-value services retain their frozen craftsmen snapshot.
+     * This is a denominator only: store visits remain owned by the separate
+     * non-experience member-day reader and are never summed across employees.
+     */
+    public function participatingCraftsmanCount(string $tenantId, array $stores, array $range, array $serviceFactIds): int
+    {
+        $wanted = array_fill_keys(array_map('strval', array_filter($serviceFactIds, static fn($id): bool => trim((string)$id) !== '')), true);
+        if ($wanted === []) return 0;
+        $employees = []; $serviceRows = []; $serviceKey = null;
+        $flush = function () use (&$serviceRows, &$employees, $stores): void {
+            if ($serviceRows === []) return;
+            foreach ($this->serviceLines($serviceRows, $stores, false, true) as $line) {
+                $employees[(int)$line['employee_id']] = true;
+            }
+            $serviceRows = [];
+        };
+        // The dashboard already selected eligible fact IDs. Resolve their
+        // craftsmen in bounded indexed batches instead of sorting every
+        // service in a multi-store/year scope a second time.
+        foreach (array_chunk(array_keys($wanted), 300) as $chunk) {
+            foreach ($this->aggregateRows($tenantId, $stores, $range, true, $chunk) as $row) {
+                $factId = (string)($row['service_fact_id'] ?? '');
+                if (!isset($wanted[$factId])) continue;
+                $nextKey = (int)$row['service_store_id'] . '|' . $factId;
+                if ($serviceKey !== null && $serviceKey !== $nextKey) $flush();
+                $serviceRows[] = $row;
+                if (count($serviceRows) > 10000) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+                $serviceKey = $nextKey;
+            }
+            $flush();
+            $serviceKey = null;
+        }
+        return count($employees);
+    }
+
+    /**
      * Summary/ranking projection: stream complete service facts, then retain
      * only one store/customer's employee sets until its last service. Never
      * prefilter employees: all co-workers must remain in the allocation divisor.
@@ -103,7 +141,7 @@ final class ServiceCustomerMetricReadServices
     }
 
     /** Resolve immutable service participants before any display projection. */
-    private function serviceLines(array $rows, array $stores, bool $details): array
+    private function serviceLines(array $rows, array $stores, bool $details, bool $includeAllServices = false): array
     {
         // Adjustment reversals remain immutable facts.  Removing an original
         // allocation therefore means ignoring the forward fact named by its
@@ -126,6 +164,7 @@ final class ServiceCustomerMetricReadServices
             $serviceFactId = $this->token($row['service_fact_id'] ?? null, 'METRIC_SERVICE_SOURCE_INVALID');
             if (!in_array($storeId, $stores, true)) $this->fail('METRIC_SERVICE_SOURCE_INVALID');
             $subject = $this->subjectKey($row, $serviceFactId);
+            if ($subject === null && $includeAllServices) $subject = 'service:' . $serviceFactId;
             $serviceLineKey = $storeId . '|' . $requestId . '|' . $sourceLineId;
             if (!isset($services[$serviceLineKey])) {
                 $services[$serviceLineKey] = [
@@ -170,6 +209,7 @@ final class ServiceCustomerMetricReadServices
                 $this->fail('METRIC_SERVICE_SOURCE_INVALID');
             }
             $subject = $this->subjectKey($row, $serviceFactId);
+            if ($subject === null && $includeAllServices) $subject = 'service:' . $serviceFactId;
             if ($subject === null) continue; // 本人或朋友标记不计数时，只排除客数，不排除真实服务及业绩。
 
             $lineKey = $storeId . '|' . $employeeId . '|' . $requestId . '|' . $sourceLineId;
@@ -352,12 +392,14 @@ final class ServiceCustomerMetricReadServices
      * only for this statement and close it before restoring the shared connection.
      * No other query is issued while this iterator is active.
      */
-    private function aggregateRows(string $tenantId, array $stores, array $range): \Generator
+    private function aggregateRows(string $tenantId, array $stores, array $range, bool $denominatorOnly = false, array $serviceFactIds = []): \Generator
     {
-        $query = $this->serviceQuery($tenantId, $stores, $range)
-            ->order('sv.store_id', 'asc')
-            ->orderRaw("CASE WHEN COALESCE(sv.friend_counts_as_customer,1)=1 AND LOWER(TRIM(sv.service_object))='self' AND sv.member_id>0 THEN CONCAT('member:',sv.member_id) ELSE CONCAT('record:',sv.service_fact_id) END ASC")
-            ->order('sv.service_fact_id', 'asc')->order('p.id', 'asc');
+        $query = $this->serviceQuery($tenantId, $stores, $range, $denominatorOnly, $serviceFactIds)->order('sv.store_id', 'asc');
+        // Staff visit allocation needs customer-contiguous rows; the dashboard
+        // denominator only needs service-contiguous rows and skips costly
+        // origin-payment checks, without changing its effective participants.
+        if (!$denominatorOnly) $query->orderRaw("CASE WHEN COALESCE(sv.friend_counts_as_customer,1)=1 AND LOWER(TRIM(sv.service_object))='self' AND sv.member_id>0 THEN CONCAT('member:',sv.member_id) ELSE CONCAT('record:',sv.service_fact_id) END ASC");
+        $query->order('sv.service_fact_id', 'asc')->order('p.id', 'asc');
         if (!$query instanceof \think\db\Query) {
             // Injectable sources obey the same ordered streaming contract.
             yield from $query->cursor();
@@ -381,7 +423,7 @@ final class ServiceCustomerMetricReadServices
     }
 
     /** Same fact joins, normal-service scope and source fields for both projections. */
-    private function serviceQuery(string $tenantId, array $stores, array $range)
+    private function serviceQuery(string $tenantId, array $stores, array $range, bool $denominatorOnly = false, array $serviceFactIds = [])
     {
         $query = call_user_func($this->queryFactory, 'cashier_v3_entitlement_service_fact')->alias('sv')
             ->leftJoin('cashier_v3_performance_fact p', "p.tenant_id=sv.tenant_id AND p.checkout_request_id=sv.checkout_request_id AND p.source_line_id=sv.source_line_id AND p.status='effective' AND p.performance_type='labor_performance_allocated'")
@@ -389,8 +431,9 @@ final class ServiceCustomerMetricReadServices
             ->where('sv.tenant_id', $tenantId)->whereIn('sv.store_id', $stores)
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
+        if ($serviceFactIds !== []) $query->whereIn('sv.service_fact_id', $serviceFactIds);
         call_user_func($this->normalServices, $query, 'sv');
-        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type,' . $this->originOtherCollectionSql() . ' origin_other_collection');
+        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type,' . ($denominatorOnly ? '0' : $this->originOtherCollectionSql()) . ' origin_other_collection');
     }
 
     /**

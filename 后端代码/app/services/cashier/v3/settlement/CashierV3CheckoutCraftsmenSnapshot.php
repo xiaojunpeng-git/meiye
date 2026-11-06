@@ -95,7 +95,7 @@ final class CashierV3CheckoutCraftsmenSnapshot
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_performance_type_invalid');
             }
-            $laborFeeCents = $hasPerformanceFields ? self::nonNegativeInt($row['laborFeeCents']) : 0;
+            $laborFeeCents = $hasPerformanceFields ? self::wholeYuanMoney($row['laborFeeCents']) : 0;
             if ($performanceType === 'commission' && $laborFeeCents !== 0) {
                 throw new \InvalidArgumentException('craftsmen_snapshot_labor_fee_invalid');
             }
@@ -120,7 +120,7 @@ final class CashierV3CheckoutCraftsmenSnapshot
                     || !is_bool($row['performanceAmountManual'])) {
                     throw new \InvalidArgumentException('craftsmen_snapshot_performance_amount_invalid');
                 }
-                $performanceAmountCents = self::nonNegativeInt($row['performanceAmountCents']);
+                $performanceAmountCents = self::wholeYuanMoney($row['performanceAmountCents']);
                 $performanceAmountManual = $row['performanceAmountManual'];
                 if ($performanceType === 'labor' && ($performanceAmountCents !== 0 || $performanceAmountManual)) {
                     throw new \InvalidArgumentException('craftsmen_snapshot_labor_performance_amount_invalid');
@@ -205,6 +205,16 @@ final class CashierV3CheckoutCraftsmenSnapshot
             throw new \InvalidArgumentException('craftsmen_snapshot_non_negative_integer_invalid');
         }
         return $value;
+    }
+
+    /** Personnel money is persisted in cents but every new value is whole yuan. */
+    private static function wholeYuanMoney($value): int
+    {
+        $amount = self::nonNegativeInt($value);
+        if ($amount % 100 !== 0) {
+            throw new \InvalidArgumentException('cashier personnel money must be whole yuan');
+        }
+        return $amount;
     }
 
     private static function projectCount($value): string

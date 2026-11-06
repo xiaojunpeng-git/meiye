@@ -1146,18 +1146,21 @@ $inconsistentSources['performance_rule']['lines'][1]['performance']['laborConfig
 $inconsistentSources['formula'] = $sameSourceSnapshot;
 $inconsistentSources['formula']['lines'][1]['inventory']['recipeFormulaHash'] = 'different-recipe-formula';
 $allSourceInconsistenciesRejected = true;
+$sourceInconsistencyReasons = [];
 foreach ($inconsistentSources as $inconsistencyName => $inconsistentSource) {
-    $expectedReason = $inconsistencyName === 'allowed_store'
+    $expectedReason = in_array($inconsistencyName, ['allowed_store', 'performance_rule'], true)
         ? 'entitlement_source_snapshot_inconsistent'
         : 'shared_resource_snapshot_inconsistent';
-    $allSourceInconsistenciesRejected = $allSourceInconsistenciesRejected
-        && b1Reason(static function () use ($inconsistentSource): void {
+    $actualReason = b1Reason(static function () use ($inconsistentSource): void {
             b1Plan(null, $inconsistentSource);
-        }) === $expectedReason;
+        });
+    $sourceInconsistencyReasons[$inconsistencyName] = $actualReason;
+    $allSourceInconsistenciesRejected = $allSourceInconsistenciesRejected && $actualReason === $expectedReason;
 }
 b1Assert(
     'same source cannot diverge on store scope performance policy or formula',
-    $allSourceInconsistenciesRejected
+    $allSourceInconsistenciesRejected,
+    json_encode($sourceInconsistencyReasons)
 );
 
 $sharedResourceInconsistencies = [];
@@ -1166,7 +1169,7 @@ $sharedResourceInconsistencies['performance']['lines'][1]['projectId']
     = $sharedResourceInconsistencies['performance']['lines'][0]['projectId'];
 $sharedResourceInconsistencies['performance']['lines'][1]['performance']['ruleVersion']
     = $sharedResourceInconsistencies['performance']['lines'][0]['performance']['ruleVersion'];
-$sharedResourceInconsistencies['performance']['lines'][1]['performance']['laborConfiguredUnitAmount'] = '11.00';
+$sharedResourceInconsistencies['performance']['lines'][1]['performance']['consumptionConfiguredUnitAmount'] = '11.00';
 $sharedResourceInconsistencies['policy'] = b1Snapshot();
 $sharedResourceInconsistencies['policy']['lines'][1]['projectId']
     = $sharedResourceInconsistencies['policy']['lines'][0]['projectId'];
@@ -1193,6 +1196,29 @@ b1Assert(
     'different entitlement sources cannot attach conflicting snapshots to one locked rule policy or recipe',
     $allSharedResourceInconsistenciesRejected,
     json_encode($sharedResourceReasons)
+);
+
+// Two cards can use the same project rule but different current card-project
+// labor defaults; those line-specific amounts must not invalidate checkout.
+$differentCardLaborDefaults = b1Snapshot();
+$differentCardLaborDefaults['lines'][1]['projectId'] = $differentCardLaborDefaults['lines'][0]['projectId'];
+$differentCardLaborDefaults['lines'][1]['performance']['ruleVersion']
+    = $differentCardLaborDefaults['lines'][0]['performance']['ruleVersion'];
+$differentCardLaborDefaults['lines'][1]['performance']['laborConfiguredUnitAmount'] = '11.00';
+$sharedInventoryPolicyFields = [
+    'merchantDefaultPolicy', 'merchantDefaultPolicyVersion', 'productPolicyOverride',
+    'productPolicyVersion', 'policy', 'policyVersion',
+];
+foreach ($sharedInventoryPolicyFields as $field) {
+    $differentCardLaborDefaults['lines'][0]['inventory'][$field]
+        = $differentCardLaborDefaults['lines'][1]['inventory'][$field];
+}
+$differentCardLaborPlan = b1Plan(null, $differentCardLaborDefaults);
+b1Assert(
+    'same project accepts distinct card labor defaults without changing the shared consumption rule',
+    count($differentCardLaborPlan['linePlans']) === 2
+        && $differentCardLaborPlan['linePlans'][0]['laborPerformance']['amountCents'] === 1000
+        && $differentCardLaborPlan['linePlans'][1]['laborPerformance']['amountCents'] === 2200
 );
 
 $allocationInvariant = true;

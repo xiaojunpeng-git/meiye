@@ -450,12 +450,12 @@ final class CashierV3EntitlementCompletionPlanV1
         }
         $lineId = self::token($line['lineId'], 64, 'line_id_invalid');
         $quantity = self::positiveInt($line['quantity'], 'line_quantity_invalid');
-        $actual = self::nonNegativeInt($line['actualEntitlementAmountCents'], 'line_actual_amount_invalid');
-        $consumption = self::nonNegativeInt(
+        $actual = self::money($line['actualEntitlementAmountCents'], 'line_actual_amount_invalid');
+        $consumption = self::money(
             $line['consumptionPerformance']['amountCents'] ?? null,
             'consumption_amount_invalid'
         );
-        $labor = self::nonNegativeInt($line['laborPerformance']['amountCents'] ?? null, 'labor_amount_invalid');
+        $labor = self::money($line['laborPerformance']['amountCents'] ?? null, 'labor_amount_invalid');
         $allocations = self::normalizeAllocations(
             $line['laborPerformance']['allocations'] ?? null,
             $labor,
@@ -514,7 +514,7 @@ final class CashierV3EntitlementCompletionPlanV1
             'project_category_name_snapshot' => self::text($source['projectCategoryNameSnapshot'], 128, 'line_category_name_invalid'),
             'source_version' => self::positiveInt($source['sourceVersion'], 'line_source_version_invalid'),
             'detail_version' => self::positiveInt($source['detailVersion'], 'line_detail_version_invalid'),
-            'purchase_amount_cents' => self::nonNegativeInt($source['purchaseAmountCents'], 'line_purchase_amount_invalid'),
+            'purchase_amount_cents' => self::money($source['purchaseAmountCents'], 'line_purchase_amount_invalid'),
             'total_purchase_times' => self::positiveInt($source['totalPurchaseTimes'], 'line_total_times_invalid'),
             'consumed_times_at_lock' => self::nonNegativeInt($source['consumedTimesAtLock'], 'line_consumed_times_invalid'),
             'amount_calculation_version' => self::token($source['amountCalculationVersion'], 128, 'line_amount_version_invalid'),
@@ -580,7 +580,7 @@ final class CashierV3EntitlementCompletionPlanV1
                 || (string)$craftsman['staffName'] !== $authority['staff_name']) {
                 throw self::failure('labor_staff_snapshot_mismatch', ['lineId' => $lineId, 'staffId' => $staffId]);
             }
-            $amount = self::nonNegativeInt($row['amountCents'], 'labor_allocation_amount_invalid');
+            $amount = self::money($row['amountCents'], 'labor_allocation_amount_invalid');
             $performanceType = (string)($row['craftsmanPerformanceType']
                 ?? $craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
@@ -613,7 +613,7 @@ final class CashierV3EntitlementCompletionPlanV1
                 'is_point_customer' => !empty($row['isPointCustomer'] ?? $craftsman['isPointCustomer'] ?? false),
                 'labor_weight' => $laborWeight,
                 'craftsman_performance_type' => $performanceType,
-                'labor_fee_cents' => self::nonNegativeInt(
+                'labor_fee_cents' => self::money(
                     $row['laborFeeCents'] ?? $craftsman['laborFeeCents'] ?? 0,
                     'labor_fee_invalid'
                 ),
@@ -986,6 +986,14 @@ final class CashierV3EntitlementCompletionPlanV1
             throw self::failure($reason);
         }
         return $value;
+    }
+
+    /** Final entitlement facts store cents but may only write whole-yuan money. */
+    private static function money($value, string $reason): int
+    {
+        $amount = self::nonNegativeInt($value, $reason);
+        if ($amount % 100 !== 0) throw self::failure($reason);
+        return $amount;
     }
 
     private static function booleanInt($value, string $reason): int
