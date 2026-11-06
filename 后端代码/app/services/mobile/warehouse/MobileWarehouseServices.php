@@ -41,6 +41,12 @@ final class MobileWarehouseServices
     {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
         $entry = $this->entryScopes->resolve($merchant);
+        $visibility=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'warehouse');
+        if(!$visibility['page']) {
+            $personal=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'employee');
+            if($personal['page']) return ['warehouse'=>['entry'=>['destination'=>'employee-performance','employeeId'=>(int)$merchant['employeeId']]]];
+            throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING','当前岗位没有可查看的数据页面。');
+        }
         if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL) {
             return ['warehouse' => ['entry' => $this->entryProjection($entry)]];
         }
@@ -74,7 +80,10 @@ final class MobileWarehouseServices
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? [])));
         $showOrganizationRanking = (bool)$entry['showOrganizationRanking'];
         $showStoreRanking = (bool)($entry['showStoreRanking'] ?? false);
-        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking, $showStoreRanking);
+        $availableCatalog=$this->rankingCatalog($showOrganizationRanking,$showStoreRanking);
+        $allowedTabs=array_values(array_intersect(array_column($visibility['tabs'],'code'),array_column($availableCatalog,'code')));
+        $requestedCode=(string)($input['rankingCode']??'');
+        $rankingCode=MerchantDataPermissionServices::selectedTab($allowedTabs,$requestedCode,'management_board');
         $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
         // 服务项目的默认排序是现金业绩；数量排序只改变同一组结果的顺序。
         $projectSortMetric = $this->projectSortMetric((string)($input['projectSortMetric'] ?? 'cash'));
@@ -86,6 +95,15 @@ final class MobileWarehouseServices
         // 指定门店的初始工作台仍是单店，但六类排行读取全部授权门店；
         // 点进组织或门店后，所有排行只在该节点与授权门店的交集内读取。
         $rankingScopeStoreIds = $defaultStoreEntry ? $validStoreIds : $scopeStoreIds;
+        // 管理看板严格跟随顶部当前节点，不沿用排行“全部指定门店”的特殊范围。
+        // 明细仍由同一入口重解权限，个人权限在前面的个人跳转分支返回，不能取得全店人员。
+        $managementBoard = null;
+        if ($rankingCode === 'management_board') {
+            if ($rankingPage !== 1) throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '看板不使用排行续页，请重新查询。', 'rankingPage');
+            $managementBoard = (new MobileManagementBoardServices())->read($scopeStoreIds,
+                ['start'=>$period['startDate'], 'end'=>$period['endDate']], $input);
+            if (($input['boardAction'] ?? '') === 'detail') return ['warehouse'=>['managementBoard'=>$managementBoard]];
+        }
         if ($rankingPage > 1) {
             // 续页只读当前已授权排行，避免重复计算概览与趋势；组织排行仍是当前层级概览。
             if ((string)($input['rankingCode'] ?? '') !== $rankingCode || $rankingCode === 'organization') {
@@ -146,6 +164,8 @@ final class MobileWarehouseServices
             $rankingRange = $storePage['rankingRange'];
             $rankingTotal = $storePage['rankingTotal'];
             $rankingHasMore = $storePage['rankingHasMore'];
+        } elseif (in_array($rankingCode,['management_board','none'],true)) {
+            $rankingRows = [];
         } else {
             $factPage = $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, 1, $projectSortMetric);
             $rankingRows = $factPage['rankingRows'];
@@ -153,7 +173,12 @@ final class MobileWarehouseServices
             $rankingTotal = $factPage['rankingTotal'];
             $rankingHasMore = $factPage['rankingHasMore'];
         }
-        $rankingCatalog = $this->rankingCatalog($showOrganizationRanking, $showStoreRanking);
+        $rankingCatalog = array_values(array_filter($this->rankingCatalog($showOrganizationRanking, $showStoreRanking),static fn($row)=>in_array($row['code'],$allowedTabs,true)));
+        $metrics=array_values(array_filter($metrics,static fn($row)=>in_array($row['code'],array_column($visibility['metrics'],'code'),true)));
+        foreach($metrics as &$metric)foreach($visibility['metrics'] as $definition)if($metric['code']===$definition['code'])$metric['name']=$definition['name'];unset($metric);
+        foreach($rankingCatalog as &$tab)foreach($visibility['tabs'] as $definition)if($tab['code']===$definition['code'])$tab['name']=$definition['name'];unset($tab);
+        $tabOrder=array_flip(array_column($visibility['tabs'],'code'));usort($rankingCatalog,static fn($a,$b)=>$tabOrder[$a['code']]<=>$tabOrder[$b['code']]);
+        $metricOrder=array_flip(array_column($visibility['metrics'],'code'));usort($metrics,static fn($a,$b)=>$metricOrder[$a['code']]<=>$metricOrder[$b['code']]);
         $selectedRankingAvailable = true;
         foreach ($rankingCatalog as $rankingDefinition) {
             if ((string)$rankingDefinition['code'] === $rankingCode) {
@@ -176,8 +201,10 @@ final class MobileWarehouseServices
                 'hierarchyRows' => $hierarchy['rows'],
                 'organizationTree' => $hierarchy['organizationTree'],
                 'summaryMetrics' => $metrics,
+                'visibility' => $visibility,
                 'trend' => $trend,
                 'rankingRows' => $rankingRows,
+                'managementBoard' => $managementBoard,
                 'rankingCatalog' => $rankingCatalog,
                 'selectedRankingCode' => $rankingCode,
                 'selectedRankingOrder' => $rankingOrder,
@@ -304,11 +331,14 @@ final class MobileWarehouseServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
 
-        $detailMode = trim((string)($input['detailMode'] ?? 'cash')) === 'labor' ? 'labor' : 'cash';
+        $visibility=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'employee');
+        if(!$visibility['page'])throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING','当前岗位没有员工业绩页面权限。');
+        $tabs=array_column($visibility['tabs'],'code');$requested=(string)($input['detailMode']??'');
+        $detailMode=MerchantDataPermissionServices::selectedTab($tabs,$requested,'board');
         $detailMetricCode = $detailMode === 'labor' ? 'staff_labor_yeji' : 'staff_sales_yeji';
         $page = max(1, (int)($input['page'] ?? 1));
         $pageSize = min(20, max(1, (int)($input['pageSize'] ?? 20)));
-        $detailPage = $metricReader->personnelDetailPage(
+        $detailPage = in_array($detailMode,['board','none'],true) ? ['total'=>0,'rows'=>[]] : $metricReader->personnelDetailPage(
             $detailMetricCode, '0', $storeIds, $metricRange, $employeeId, $page, $pageSize
         );
         $total = (int)$detailPage['total'];
@@ -374,7 +404,7 @@ final class MobileWarehouseServices
             ];
         }
 
-        return [
+        $result = [
             'employeePerformance' => [
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
                 'laborAlgorithm'=>\app\services\payroll\PayrollAlgorithmPolicy::projection(),
@@ -399,6 +429,12 @@ final class MobileWarehouseServices
                 'aggregation_caught_up' => true,
             ],
         ];
+        $result['employeePerformance']['metrics']=array_values(array_filter($result['employeePerformance']['metrics'],static fn($row)=>in_array($row['code'],array_column($visibility['metrics'],'code'),true)));
+        foreach($result['employeePerformance']['metrics'] as &$metric)foreach($visibility['metrics'] as $definition)if($metric['code']===$definition['code'])$metric['name']=$definition['name'];unset($metric);
+        $metricOrder=array_flip(array_column($visibility['metrics'],'code'));usort($result['employeePerformance']['metrics'],static fn($a,$b)=>$metricOrder[$a['code']]<=>$metricOrder[$b['code']]);
+        $result['employeePerformance']['tabs']=$visibility['tabs'];
+        $result['employeePerformance']['board']=$detailMode==='board'?(new EmployeeManagementBoardServices())->read($storeIds,$metricRange,$employeeId):null;
+        return $result;
     }
 
     /** Sum every authorized fact across the selected dates, not the visible page; unresolved facts stay explicit. */
@@ -1057,6 +1093,12 @@ final class MobileWarehouseServices
                 'scopeRule' => 'AUTHORIZED_ORGANIZATION_OR_SELECTED_STORES',
             ],
             [
+                'code' => 'management_board',
+                'name' => '看板',
+                'available' => true,
+                'scopeRule' => 'CURRENT_AUTHORIZED_NODE',
+            ],
+            [
                 'code' => 'staff_cash_performance',
                 'name' => '员工销售',
                 'available' => true,
@@ -1091,13 +1133,6 @@ final class MobileWarehouseServices
             return ((string)$item['code'] !== 'organization' || $showOrganizationRanking)
                 && ((string)$item['code'] !== 'store' || $showStoreRanking);
         }));
-    }
-
-    private function rankingCode(string $code, bool $showOrganizationRanking, bool $showStoreRanking): string
-    {
-        $allowed = array_column($this->rankingCatalog($showOrganizationRanking, $showStoreRanking), 'code');
-        $default = $showOrganizationRanking ? 'organization' : ($showStoreRanking ? 'store' : 'staff_cash_performance');
-        return in_array($code, $allowed, true) ? $code : $default;
     }
 
     /** @return array<string,mixed> */

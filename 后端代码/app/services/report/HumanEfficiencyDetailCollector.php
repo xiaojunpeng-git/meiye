@@ -16,6 +16,8 @@ final class HumanEfficiencyDetailCollector
     /** 角色、工龄和稳定行键均由后端实体确定，不接受姓名或分类文案拼条件。 */
     public function matches(array $row):bool
     {
+        // 内部管理看板只传入已由范围与单元格核实的稳定人员键，多人合计复用同一去重集合。
+        if (($this->input['entity_id'] ?? '') === 'summary:board') return in_array($row['id'], $this->input['entity_ids'] ?? [], true);
         $key=(string)$this->input['entity_id'];
         if($key===$row['id'])return true;
         if($key==='summary:'.($row['role_code']??''))return true;
@@ -50,15 +52,17 @@ final class HumanEfficiencyDetailCollector
     /** 人员/门店小型目录同样经过流式分页，不暴露私有事实集合。 */
     public function push(array $row):void
     {
-        $this->count++;$page=(int)ceil($this->count/10);
-        if(($this->count-1)%10===0)$this->lastRows=[];
+        $size=$this->input['entity_id']==='summary:board'?20:10;
+        $this->count++;$page=(int)ceil($this->count/$size);
+        if(($this->count-1)%$size===0)$this->lastRows=[];
         $this->lastRows[]=$row;
         if($page===max(1,(int)$this->input['page']))$this->pageRows[]=$row;
         foreach($this->totals as $key=>$_)$this->totals[$key]+=$row[$key]??0;
     }
     public function result(string $name):array
     {
-        $pages=max(1,(int)ceil($this->count/10));$requested=max(1,(int)$this->input['page']);
+        $size=$this->input['entity_id']==='summary:board'?20:10;
+        $pages=max(1,(int)ceil($this->count/$size));$requested=max(1,(int)$this->input['page']);
         return ['title'=>$name,'rows'=>$requested>$pages?$this->lastRows:$this->pageRows,'total'=>$this->count,
             'page'=>min($pages,$requested),'pages'=>$pages]+$this->totals;
     }

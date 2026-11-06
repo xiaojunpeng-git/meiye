@@ -236,6 +236,8 @@ class JobPositionPolicyServices extends BaseServices
         $platformRules = (string)($channelRules[self::CHANNEL_PLATFORM]['rules'] ?? '');
         $storeV3Rules = (string)($channelRules[self::CHANNEL_STORE_V3]['rules'] ?? '');
         $mobileRules = (string)($channelRules[self::CHANNEL_MOBILE]['rules'] ?? '');
+        // 旧岗位展示时补齐既有数据节点，保存标记后按新勾选逐项生效。
+        $mobileRules = implode(',', \app\services\mobile\warehouse\MerchantDataPermissionServices::legacyRules($this->rulesToIds($mobileRules)));
         return [
             'position' => [
                 'id' => (int)$row['id'],

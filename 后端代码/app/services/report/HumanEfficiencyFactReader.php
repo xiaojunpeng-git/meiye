@@ -64,6 +64,47 @@ final class HumanEfficiencyFactReader
         } while (count($rows) === 1000);
     }
 
+    /** 管理看板预约口径：按预约服务日取有效预约，排班与实际服务人员严格分开。只读，不修写历史预约。 */
+    public function managementAppointments(array $stores, array $range): array
+    {
+        $this->assertScope($stores, $range);
+        $base = Db::name('cashier_v3_reservation')->alias('r')
+            ->where('r.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('r.store_id', $stores)
+            ->whereBetween('r.business_date', [$range['start'], $range['end']])
+            ->where('r.lifecycle_generation', \app\services\cashier\v3\reservation\CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('r.status', ['UNSTARTED','IN_SERVICE','COMPLETED'])->where('r.member_id', '>', 0);
+        $booked = (clone $base)->join('cashier_v3_reservation_staff_schedule ss', 'ss.tenant_id=r.tenant_id AND ss.reservation_id=r.id')
+            ->join('system_store_staff st', 'st.id=ss.staff_id AND st.store_id=r.store_id')
+            ->field('r.store_id,r.member_id,r.member_name_snapshot member_name,r.reservation_no document_no,r.business_date,st.employee_id')->select()->toArray();
+        // 预约完成状态本身不证明服务有效：必须关联仍有效的服务事实，并读取其实际人员快照。
+        $actual = [];
+        foreach (['direct','checkout'] as $source) {
+            $query = clone $base;
+            if ($source === 'checkout') {
+                $query->join('cashier_v3_reservation_checkout_service_link l', 'l.tenant_id=r.tenant_id AND l.reservation_id=r.id')
+                    ->join('cashier_v3_entitlement_service_fact sv', 'sv.tenant_id=l.tenant_id AND sv.service_fact_id=l.service_fact_id AND sv.store_id=r.store_id AND sv.member_id=r.member_id');
+            } else {
+                $query->join('cashier_v3_entitlement_service_fact sv', "sv.tenant_id=r.tenant_id AND sv.source_document_type='reservation' AND sv.source_document_id=r.id AND sv.store_id=r.store_id AND sv.member_id=r.member_id");
+            }
+            $query->where('sv.service_status', 'completed');
+            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
+            foreach ($query->field('r.store_id,r.member_id,r.member_name_snapshot member_name,r.reservation_no document_no,r.business_date,sv.craftsmen_snapshot_json')->select()->toArray() as $row) {
+                foreach ((array)json_decode((string)$row['craftsmen_snapshot_json'], true) as $craftsman) {
+                    $employee = (int)($craftsman['employeeId'] ?? $craftsman['employee_id'] ?? 0);
+                    if ($employee <= 0) continue;
+                    $row['employee_id'] = $employee; unset($row['craftsmen_snapshot_json']); $actual[] = $row;
+                }
+            }
+        }
+        $sets = [];
+        foreach (['booked'=>$booked, 'arrived'=>$actual] as $kind=>$rows) foreach ($rows as $row) {
+            if ((int)$row['employee_id'] <= 0) continue;
+            $key = $row['store_id'].':'.$row['employee_id'];
+            $sets[$key][$kind][(int)$row['member_id']] = $row;
+        }
+        return $sets;
+    }
+
     /** 任职事实包含已离职人员；人数由期末区间裁剪，不能预先过滤当前status。 */
     public function staff(array $stores): array
     {

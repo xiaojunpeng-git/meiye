@@ -69,6 +69,14 @@ final class HumanEfficiencyDashboardServices
             elseif ($entity['role_code'] === 'leader') $leaders[] = $entity;
         }
         unset($entity);
+        // 管理看板复用完整人员实体后再转置，不读取分页榜单，不将经理门店金额重复分配给店长/顾问。
+        if (($input['action'] ?? '') === 'management_board') {
+            $appointments = $reader->managementAppointments($stores, $range);
+            // 期间只有有效预约、尚未完成服务的离职人员也有贡献，不能因现金/劳动事实为空漏掉预约顾客。
+            foreach ($entities as $key => &$person) if (!empty($appointments[$key])) $person['_has_facts'] = true;
+            unset($person);
+            return ManagementBoardProjection::project($entities, $this->categories, $appointments, $input);
+        }
         // 全部门店保留可见行；未配置店长时明确显示空岗位，不伪造人员或个人业绩。
         $leaderStores=array_fill_keys(array_column($leaders,'store_id'),true);
         foreach($storeNames as $storeId=>$name)if(!$selfEmployee&&!isset($leaderStores[$storeId])){

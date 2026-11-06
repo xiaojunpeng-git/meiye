@@ -48,7 +48,7 @@ final class MobileMerchantCapabilityCatalog
     {
         return [
             ['id' => self::RULE_HOME, 'title' => '经营', 'feature_code' => 'mobile.merchant.home', 'actions' => ['MERCHANT_HOME_VIEW']],
-            ['id' => self::RULE_WAREHOUSE, 'title' => '数据', 'feature_code' => 'mobile.merchant.warehouse', 'actions' => ['MERCHANT_WAREHOUSE_VIEW']],
+            ['id' => self::RULE_WAREHOUSE, 'title' => '数据', 'feature_code' => 'mobile.merchant.warehouse', 'actions' => ['MERCHANT_WAREHOUSE_VIEW'], 'children' => (new \app\services\mobile\warehouse\MerchantDataPermissionServices())->tree()],
             ['id' => self::RULE_CUSTOMERS, 'title' => '客户', 'feature_code' => 'mobile.merchant.customers', 'actions' => ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_AUDIENCE_VIEW', 'CUSTOMER_AUDIENCE_MANAGE']],
             ['id' => self::RULE_WORKBENCH, 'title' => '工作台', 'feature_code' => 'mobile.merchant.workbench', 'actions' => ['mobile.merchant.workbench'], 'children' => [
                 ['id' => self::RULE_GROWTH, 'title' => '成长管理', 'feature_code' => 'mobile.merchant.growth', 'actions' => ['mobile.merchant.growth'], 'legacy_autogrant' => false],
@@ -85,7 +85,7 @@ final class MobileMerchantCapabilityCatalog
         $featureIds = array_map(static function (array $feature): int {
             return (int)$feature['id'];
         }, array_merge($this->features(), $this->legacyFeatures()));
-        return array_values(array_unique(array_merge([
+        return array_values(array_unique(array_merge([\app\services\mobile\warehouse\MerchantDataPermissionServices::MARKER,
             self::GROUP_STORE_OPERATIONS,
             self::GROUP_CUSTOMER_OPERATIONS,
             self::GROUP_PERSONAL_OPERATIONS,
@@ -110,12 +110,20 @@ final class MobileMerchantCapabilityCatalog
             }
             $normalized[$id] = $id;
         }
-        return array_values($normalized);
+        // 只读授权解析不得写入新策略标记；只有岗位保存的strict路径切换到显式逐项授权。
+        if (!$strict) return array_values($normalized);
+        $expanded=\app\services\mobile\warehouse\MerchantDataPermissionServices::legacyRules(array_values($normalized));
+        $normalized=[];foreach($expanded as $id)$normalized[$id]=$id;
+        if (isset($normalized[self::RULE_WAREHOUSE])) $normalized[\app\services\mobile\warehouse\MerchantDataPermissionServices::MARKER] = \app\services\mobile\warehouse\MerchantDataPermissionServices::MARKER;
+        return \app\services\mobile\warehouse\MerchantDataPermissionServices::ancestors(array_values($normalized));
     }
 
     /** @param array<int, mixed> $ruleIds @return string[] */
     public function availableActions(array $ruleIds, string $scopeMode): array
     {
+        // 解析旧岗位前不自动加显式标记，避免登录时把旧指标误判为全未授权。
+        $dataPolicy=new \app\services\mobile\warehouse\MerchantDataPermissionServices();
+        $dataRules=$dataPolicy->snapshot()['rules'];
         $selected = array_flip($this->normalizeRuleIds($ruleIds, false));
         $actions = [
             'merchant.context.bootstrap',
@@ -130,6 +138,7 @@ final class MobileMerchantCapabilityCatalog
         // to all children so existing岗位 continue to work until re-saved.
         foreach ($this->features() as $feature) {
             if (!isset($selected[(int)$feature['id']])) continue;
+            if ((int)$feature['id'] === self::RULE_WAREHOUSE && !$dataPolicy->resolve($ruleIds,'warehouse',$dataRules)['page'] && !$dataPolicy->resolve($ruleIds,'employee',$dataRules)['page']) continue;
             $actions = array_merge($actions, (array)($feature['actions'] ?? []));
             $children = (array)($feature['children'] ?? []);
             if (!$children) continue;

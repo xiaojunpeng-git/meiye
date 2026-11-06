@@ -1,0 +1,84 @@
+<template>
+	<view class="management-board">
+		<view class="management-board__toolbar"><text class="management-board__title">门店管理看板</text></view>
+		<view v-for="tableKey in ['roleTable', 'beautyTable']" :key="tableKey" class="management-board__section">
+			<view class="management-board__section-head"><text>{{ props.board[tableKey].title }}</text></view>
+			<text v-if="tableKey === 'beautyTable' && props.board[tableKey].columns.length === 1" class="management-board__empty">当前范围没有符合条件的美容师。</text>
+			<scroll-view scroll-x="true" class="management-board__scroll">
+				<view class="management-board__table" :style="tableStyle(tableKey)" role="table" :aria-label="props.board[tableKey].title">
+					<view class="management-board__row management-board__row--head" role="row"><text :style="identityStyle()" class="management-board__cell management-board__cell--identity" role="columnheader">分类／指标</text><view v-for="column in props.board[tableKey].columns" :key="column.key" :style="valueStyle()" class="management-board__cell" :class="{ 'management-board__cell--total': column.key === 'total' }" role="columnheader"><text>{{ column.label }}</text><text v-if="column.store" class="management-board__store">{{ column.store }}</text></view></view>
+					<view v-for="row in props.board[tableKey].rows" :key="row.key" class="management-board__row" :class="{ 'management-board__row--emphasis': row.emphasis === true }" role="row"><text :style="identityStyle()" class="management-board__cell management-board__cell--identity" role="rowheader">{{ row.label }}</text><button role="button" v-for="cell in row.cells" :key="cell.key" :style="valueStyle()" class="management-board__cell management-board__value" :class="{ 'management-board__value--money': row.format === 'money', 'management-board__cell--total': cell.key === 'total' }" :disabled="!cell.drillable" :aria-label="row.label + ' ' + cell.display + ' 查看明细'" @tap="openDetail(tableKey, row.key, cell.key)">{{ cell.display }}</button></view>
+				</view>
+			</scroll-view>
+		</view>
+		<view v-if="showDetail" class="management-board__mask" @tap="closeDetail"><view class="management-board__dialog" @tap.stop role="dialog" aria-modal="true" aria-label="看板明细"><view class="management-board__section-head"><text>{{ detail.title || '看板明细' }}{{ detail.display != null ? ' · ' + detail.display + (detail.format === 'money' ? '元' : '') : '' }}</text><button role="button" class="management-board__button" @tap="closeDetail">关闭</button></view><text v-if="detailLoading" class="management-board__empty" role="status">正在读取明细…</text><text v-else-if="detailError.length > 0" class="management-board__empty" role="alert">{{ detailError }}</text><scroll-view v-else scroll-y="true" class="management-board__detail-scroll"><view v-for="(record, index) in detail.rows" :key="index" class="management-board__record"><text>{{ record.business_date }}　{{ record.document_no }}</text><text>{{ record.member_name || '未建档顾客' }}　{{ record.employee_name || '' }}　{{ record.item_name || '' }}</text><text v-if="record.cash_cents != null">现金业绩 {{ money(record.cash_cents) }}　消耗业绩 {{ money(record.consume_cents) }}　项目 {{ record.items || 0 }}　人次 {{ record.visits || 0 }}</text></view><text v-if="(detail.rows || []).length === 0" class="management-board__empty">当前条件没有明细。</text></scroll-view><view class="management-board__pagination"><text>共 {{ detail.total || 0 }} 条 · 每页 20 条 · 第 {{ detail.page || 1 }} / {{ detail.pages || 1 }} 页</text><button role="button" class="management-board__button" :disabled="detailLoading || Number(detail.page || 1) <= 1" @tap="loadDetail(Number(detail.page) - 1)">上一页</button><button role="button" class="management-board__button" :disabled="detailLoading || Number(detail.page || 1) >= Number(detail.pages || 1)" @tap="loadDetail(Number(detail.page) + 1)">下一页</button></view></view></view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { queryMobileWarehouse } from '../api/mobile-warehouse-client.uts'
+	import { formatDashboardMoney } from '../platform/merchant-dashboard-presentation.uts'
+	const props = defineProps<{ board : any, query : any }>()
+	const showDetail = ref(false)
+	const detailLoading = ref(false)
+	const detailError = ref('')
+	const detail = ref<any>({ rows: [], page: 1, pages: 1, total: 0 })
+	let detailSelection : any = null
+	let detailRequest = 0
+	// 查询条件变更关闭旧明细，晚到响应不能显示成另一门店/日期下的结果。
+	watch(() => props.board, () => { closeDetail() })
+	// 固定识别列和列宽由后端布局契约声明，页面只执行布局，不按指标名称猜测。
+	function identityStyle() : string { let width = Number(props.board.table_layout.fixed_identity_width); return 'width:' + width + 'px;min-width:' + width + 'px;flex:0 0 ' + width + 'px;position:' + (props.board.table_layout.fixed ? 'sticky' : 'static') }
+	function valueStyle() : string { let width = Number(props.board.table_layout.value_width); return 'width:' + width + 'px;min-width:' + width + 'px' }
+	function tableStyle(key : string) : string { return 'width:' + (Number(props.board.table_layout.fixed_identity_width) + props.board[key].columns.length * Number(props.board.table_layout.value_width)).toString() + 'px;min-width:100%' }
+	function money(cents : any) : string { return formatDashboardMoney(cents) }
+	function openDetail(table : string, row : string, column : string) : void { detailSelection = { boardTable: table, boardRow: row, boardColumn: column }; detail.value = { rows: [], page: 1, pages: 1, total: 0 }; showDetail.value = true; loadDetail(1) }
+	function closeDetail() : void { showDetail.value = false; detailRequest++; detailLoading.value = false }
+	function loadDetail(page : number) : void {
+		if (detailSelection == null) return
+		let request = ++detailRequest
+		detailLoading.value = true; detailError.value = ''
+		let payload = { ...props.query, ...detailSelection, boardAction: 'detail', boardDetailPage: page }
+		queryMobileWarehouse(payload, (response : any) => {
+			if (request !== detailRequest || !showDetail.value) return
+			detailLoading.value = false
+			let result = response != null && response.body != null ? response.body.warehouse : null
+			if (!response.ok || result == null || result.managementBoard == null || result.managementBoard.detail == null) { detailError.value = String(response.message || '明细读取失败，请关闭后重试。'); return }
+			detail.value = result.managementBoard.detail
+		})
+	}
+</script>
+
+<style>
+.management-board { display:flex; flex-direction:column; gap:16px; padding-top:14px; }
+.management-board__toolbar,.management-board__section-head { display:flex; flex-direction:row; align-items:center; gap:8px; }
+.management-board__title { flex:1; font-size:17px; font-weight:600; color:#20394d; }
+.management-board__button { margin:0; padding:0 12px; height:34px; line-height:34px; font-size:13px; border:1px solid #dce5ef; background:#fff; color:#1f5f8b; border-radius:7px; }
+.management-board__section { border:1px solid #dce5ef; border-radius:12px; background:#fff; overflow:hidden; }
+.management-board__section-head { justify-content:space-between; padding:12px; background:#f6f9fc; font-size:15px; font-weight:600; color:#263f52; }
+.management-board__scroll { width:100%; }
+.management-board__table { display:flex; flex-direction:column; overflow:visible; }
+.management-board__row { display:flex; flex-direction:row; overflow:visible; border-bottom:1px solid #e5ebf1; min-height:46px; }
+/* #ifdef WEB */
+/* 表格完整展开，只允许表内横向滚动；页面统一承担纵向滚动，分类/指标列始终固定在左侧。 */
+.management-board__scroll :deep(.uni-scroll-view > .uni-scroll-view) { overflow-x:auto !important; overflow-y:hidden !important; touch-action:pan-x pan-y; }
+/* #endif */
+.management-board__row--head { z-index:3; background:#eef5fb; font-weight:600; }
+.management-board__cell { display:flex; flex-direction:column; justify-content:center; align-items:center; flex:1; width:120px; min-width:120px; min-height:46px; box-sizing:border-box; padding:8px; border-right:1px solid #e5ebf1; font-size:14px; color:#2b4358; background:#fff; }
+.management-board__cell--identity { flex:0 0 160px; width:160px; min-width:160px; position:sticky; left:0; z-index:2; align-items:flex-start; line-height:20px; background:#f8fafc; }
+.management-board__row--head .management-board__cell { background:#eef5fb; }
+.management-board__row--head .management-board__cell--identity { z-index:4; }
+.management-board__cell--total { background:#f1f8f7; font-weight:600; }
+.management-board__value { margin:0; border-radius:0; border-top:0; border-left:0; border-bottom:0; line-height:20px; color:#357a72; font-weight:600; }
+.management-board__value::after { border:0; }
+.management-board__value--money { color:#1f5f8b; }
+.management-board__value[disabled] { background:#fafbfc; color:#718396; }
+.management-board__row--emphasis .management-board__cell { background:#edf5fc; }
+.management-board__store { font-size:11px; font-weight:400; color:#73869a; padding-top:3px; }
+.management-board__empty { display:block; padding:20px 12px; color:#72849a; font-size:14px; }
+.management-board__mask { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(23,40,57,.4); }
+.management-board__dialog { display:flex; flex-direction:column; width:900px; max-width:100%; max-height:85vh; background:#fff; border-radius:12px; overflow:hidden; }
+.management-board__detail-scroll { min-height:0; height:55vh; }
+.management-board__record { display:flex; flex-direction:column; gap:7px; padding:14px; border-bottom:1px solid #e5ebf1; font-size:13px; line-height:21px; color:#2b4358; }
+.management-board__pagination { display:flex; flex-direction:row; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:8px; padding:10px; border-top:1px solid #e5ebf1; font-size:12px; color:#506981; }
+</style>

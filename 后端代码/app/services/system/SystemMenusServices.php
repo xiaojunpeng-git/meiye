@@ -217,8 +217,9 @@ class SystemMenusServices extends BaseServices
         }
         // 独立目录沿用“权限规则”维护资格，只补导航，不修改任何平台/商家端岗位授权记录。
         if ($type === 1 && in_array('setting-system-menus', $unique, true)) {
-            $extraId = (int)\think\facade\Db::name('system_menus')->where('unique_auth','setting-store-permissions')->where('is_del',0)->value('id');
-            $extra = $extraId > 0 ? $this->dao->getMenusRoule(['auth_type'=>1,'is_show'=>1,'is_del'=>0,'type'=>1,'route'=>[$extraId]]) : [];
+            // 两个独立规则页均复用既有维护资格补原生导航；这里只补可见入口，不给 unique_auth 或岗位增加授权。
+            $extraIds = \think\facade\Db::name('system_menus')->whereIn('unique_auth',['setting-store-permissions','setting-merchant-permissions'])->where('is_del',0)->column('id');
+            $extra = $extraIds ? $this->dao->getMenusRoule(['auth_type'=>1,'is_show'=>1,'is_del'=>0,'type'=>1,'route'=>$extraIds]) : [];
             $known = $menusList->column('id');
             foreach ($extra as $row) if (!in_array($row['id'],$known)) $menusList[]=$row;
         }
