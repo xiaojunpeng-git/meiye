@@ -209,7 +209,9 @@
 	import pageFooter from '@/components/pageFooter/index.vue';
 	import merchantSwitch from '@/components/merchantSwitch/index.vue';
 	import Loading from '@/components/Loading/index.vue';
+	// #ifndef MP-WEIXIN
 	import { silenceBindingSpread } from '@/utils/index.js';
+	// #endif
 	export default {
 		computed: {
 			// #ifdef MP
@@ -443,7 +445,10 @@
 			if (spid) {
 				this.$Cache.set('spid', spid);
 				app.globalData.spid = spid;
+				// 微信端由 App.onShow 在会员会话恢复后绑定，访客首页只保留来源。
+				// #ifndef MP-WEIXIN
 				silenceBindingSpread(app);
+				// #endif
 			}
 			uni.removeStorageSync('form_type_cart');
 			// 优惠券弹窗

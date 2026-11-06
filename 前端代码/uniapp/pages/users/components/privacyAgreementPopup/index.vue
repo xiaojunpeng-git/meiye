@@ -18,7 +18,8 @@
 					当您点击同意并继续使用产品服务时，即表示您已理解并同意该条款内容，该条款将对您产生法律约束力。如您拒绝，将无法继续下一步操作。
 				</view>
 			</view>
-			<view class="main-color" @click.stop="privacy('privacy')">点击阅读{{agreementName}}</view>
+			<view class="main-color" @tap.stop="privacy('user')">《用户服务协议》</view>
+			<view class="main-color" @tap.stop="privacy('privacy')">《隐私政策》</view>
 			<view class="bottom">
 				<button class="save open" type="default" id="agree-btn" open-type="agreePrivacyAuthorization"
 					@agreeprivacyauthorization="handleAgree">同意并继续</button>
@@ -33,10 +34,12 @@
 	import colors from "@/mixins/color";
 	export default {
 		mixins: [colors],
+		props: {
+			returnHomeOnReject: { type: Boolean, default: true }
+		},
 		data() {
 			return {
 				isShow: false,
-				agreementName: '',
 				configData: this.$Cache.get('BASIC_CONFIG'),
 			};
 		},
@@ -46,7 +49,6 @@
 					if (res.needAuthorization) {
 						// 需要弹出隐私协议
 						this.isShow = true
-						this.agreementName = res.privacyContractName
 					} else {
 						this.$emit('onAgree');
 						// 用户已经同意过隐私协议，所以不需要再弹出隐私协议，也能调用已声明过的隐私接口
@@ -69,9 +71,8 @@
 			// 拒绝
 			rejectAgreement() {
 				this.isShow = false
-				uni.switchTab({
-					url: '/pages/index/index'
-				})
+				// 微信登录页持有活动返回地址，由它决定回活动还是首页。
+				if (this.returnHomeOnReject) uni.switchTab({ url: '/pages/index/index' });
 				this.$emit('onReject');
 			},
 			// 跳转协议

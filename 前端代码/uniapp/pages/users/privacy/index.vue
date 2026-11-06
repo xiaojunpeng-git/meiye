@@ -1,15 +1,27 @@
 <template>
-	<view>
-		<view class="content">
-			<jyf-parser :html="content" ref="article" :tag-style="tagStyle"></jyf-parser>
+	<view class="content">
+		<view v-if="loading" class="agreement-state">正在加载{{title}}…</view>
+		<jyf-parser v-else-if="content" :html="content" :tag-style="tagStyle"></jyf-parser>
+		<view v-else class="agreement-state">
+			<view>{{loadFailed ? title + '加载失败，请重试' : title + '暂未提供，请联系商家'}}</view>
+			<button size="mini" @tap="loadAgreement">重新加载</button>
 		</view>
 	</view>
 </template>
 
 <script>
-let sysHeight = uni.getSystemInfoSync().statusBarHeight;
 import parser from '@/components/jyf-parser/jyf-parser';
 import { getUserAgreement } from '@/api/user.js';
+
+const agreementTitles = {
+	privacy: '隐私政策',
+	user: '用户服务协议',
+	cancel: '注销协议',
+	supplier: '供应商入驻协议',
+	apply_store: '加盟门店入驻协议',
+	member: '会员服务协议'
+};
+
 export default {
 	components: {
 		'jyf-parser': parser
@@ -21,55 +33,38 @@ export default {
 				table: 'width:100%',
 				video: 'width:100%'
 			},
-			content: ``,
-			sysHeight: sysHeight || 0,
-			type: ''
+			content: '',
+			type: 'privacy',
+			loading: true,
+			loadFailed: false
 		};
 	},
 	computed: {
-		pageName() {
-			let list = {
-				privacy: '隐私协议',
-				cancel: '注销协议',
-				user: '用户协议',
-				supplier: '供应商入驻协议'
-			};
-			uni.setNavigationBarTitle({
-				title: list[this.type]
-			});
-			return list[this.type];
+		title() {
+			return agreementTitles[this.type];
 		}
 	},
-	onLoad(e) {
-		this.type = e.type;
-		if (e) {
-			getUserAgreement(e.type)
-				.then((res) => {
-					this.content = res.data.content;
-				})
-				.catch((err) => {
-					that.$util.Tips({
-						title: err.msg
-					});
-				});
-		} else {
-			getUserAgreement('privacy')
-				.then((res) => {
-					this.content = res.data.content;
-				})
-				.catch((err) => {
-					that.$util.Tips({
-						title: err.msg
-					});
-				});
-		}
+	onLoad({ type } = {}) {
+		this.type = Object.prototype.hasOwnProperty.call(agreementTitles, type) ? type : 'privacy';
+		uni.setNavigationBarTitle({ title: this.title });
+		return this.loadAgreement();
 	},
-	mounted() {},
 	methods: {
-		goBack() {
-			uni.navigateBack({
-				delta: 1
-			});
+		async loadAgreement() {
+			this.loading = true;
+			this.loadFailed = false;
+			try {
+				const { data } = await getUserAgreement(this.type);
+				const html = data && typeof data.content === 'string' ? data.content : '';
+				// 富文本编辑器的空段落不算协议正文。协议内容由当前站点提供。
+				const hasText = html.replace(/<[^>]*>|&nbsp;|&#160;|&#xA0;/gi, '').trim();
+				this.content = hasText ? html : '';
+			} catch {
+				this.content = '';
+				this.loadFailed = true;
+			} finally {
+				this.loading = false;
+			}
 		}
 	}
 };
@@ -82,22 +77,12 @@ page {
 .content {
 	padding: 0 30rpx 40rpx 30rpx;
 }
-.sys-head {
-	position: fixed;
-	width: 100%;
-	background-color: #fff;
-	top: 0;
-	left: 0;
-	z-index: 9;
-	.sys-title {
-		height: 43px;
-		line-height: 43px;
-		text-align: center;
-		position: relative;
-		.iconfont {
-			position: absolute;
-			left: 20rpx;
-		}
+.agreement-state {
+	padding: 60rpx 0;
+	text-align: center;
+	color: #666;
+	button {
+		margin-top: 24rpx;
 	}
 }
 </style>

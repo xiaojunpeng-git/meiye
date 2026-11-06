@@ -7,6 +7,8 @@ const PHONE_GATE_ALLOWLIST = [
 	'pages/users/wechat_login/index',
 	'pages/users/privacy/index',
 	'pages/users/survey/index',
+	// 小程序默认先打开公开启动页，再切换到首页。
+	'pages/guide/index',
 	'pages/index/index',
 	'pages/goods_cate/goods_cate',
 	'pages/store_list/index',
