@@ -1,0 +1,26 @@
+{
+  "task": "DATA-R5",
+  "baselineHead": "14874f1e7f53fa0ca36b72d5b845825897d80477",
+  "files": {
+    "后端代码/app/services/system/config/SystemConfigServices.php": "6cc9b5c99d9989aca8b1e6a73a78c3da08e88dc9f4c30b415d833010f2cdf2ac",
+    "后端代码/app/controller/admin/v1/system/config/SystemConfig.php": "7ef3ced9b1c69bbc6165f1d314860a2fcfebe209b443bb054c3a20714f5a00c6",
+    "后端代码/app/services/order/PlatformOrderCenterActionServices.php": "839f4938d1af00704aa4be32c844843558d792412ae41fddef537fbb3dcc90e8",
+    "后端代码/app/services/order/PlatformOrderCenterReadServices.php": "76e37bee4e103ba9ce398ee683345ee0b0dfef1e790df1ef33bf700274593d85",
+    "后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php": "20bf619751524dbe059acf9ceebde502e46bb7f62952cde6a6bf5ae8a37595ff",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue": "7ab208dbb00194b1865731f3d94e931e53cdd573c39519bc99ec262177463d8d",
+    "前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue": "6dae82390a963d5c14544b2d9ae9af71fda3ce266470964d876288af41926770",
+    "后端代码/app/services/order/PlatformDocumentEditPolicy.php": "e61a1ad93dd71f4563b2913ac191935fab4f8a4418715a8f9b9a7ce5831c5fc6",
+    "后端代码/database/upgrades/20261106_platform_document_edit_switch.sql": "2ba15ca2c609b8ed2a6de5743cf030f37e31f18797ef6210201711120207dd54",
+    "前端代码/cashier-v3/src/services/platformDocumentEditPolicy.js": "92bca1318cd969a5269476c4daf956dca38180a2dc4c2562db91255ac55876ec",
+    "tests/platform-document-edit-switch/php/local.php": "99cfbb927df4246c7d3b9cecd4fbc627f66c23804c882971d88b2771121b8549",
+    "tests/platform-document-edit-switch/php/boundaries.php": "cab54284333eddcb2f0581da3c226f199a201cc911808effcfd94c1b35b99784",
+    "tests/platform-document-edit-switch/js/policy.mjs": "c601cd949665839775f9d3429e08fa4b99ef51bfd088e7524f7b3a99e0b4a8b2"
+  },
+  "fingerprint": "e18f46c1f0d11c95595209c1240cfc64c2ee11b1c6778d0e14a182f747c839f4",
+  "trackedDiffSHA256": "53f894438843969d08458e5651f7409a0e19b22177a88f7d41ac736cff7b146d",
+  "status": "development and self-test complete; pending product manager acceptance",
+  "release": "not authorized this round; no remote connections",
+  "existingUncommittedBaseline": "MM 前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue\nMM 前端代码/cashier-v3/src/views/OrderCenterView.vue\nMM 后端代码/app/controller/admin/v1/system/config/SystemConfig.php\nMM 后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php\nD  后端代码/app/services/order/PlatformOrderCenterActionServices.php\nMM 后端代码/app/services/order/PlatformOrderCenterReadServices.php\nMM 后端代码/app/services/system/config/SystemConfigServices.php\n?? 后端代码/app/services/order/PlatformOrderCenterActionServices.php\n",
+  "buildJS": "index-15fa2c29.js",
+  "buildCSS": "index-a0561cf6.css"
+}

@@ -1,4 +1,5 @@
 <script setup>
+import { platformDocumentActionAllowed } from '@/services/platformDocumentEditPolicy'
 import { computed, nextTick, ref, watch } from 'vue'
 import { canUseCashierV3Operation, formatMoney } from '@/services/cashierV3Bridge'
 import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPrintButton.vue'
@@ -38,6 +39,8 @@ import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPr
  * 所有动作均为语义动作，由外层决定跳转、权限、版本校验和最终业务处理。
  */
 const props = defineProps({
+  // 平台关闭改单时仍展示原单、关联记录和打印；门店及其他已有调用默认保持原行为。
+  documentEditable: { type: Boolean, default: true },
   order: {
     type: Object,
     default: () => ({})
@@ -353,6 +356,7 @@ function cardBatchNo(entry) {
 }
 
 function hasAction(action) {
+  if (!platformDocumentActionAllowed(action, props.documentEditable)) return false
   const availability = sourceOrder.value.availableActions || sourceOrder.value.actionAvailability || sourceOrder.value.actions
   if (Array.isArray(availability)) return availability.includes(action)
   if (availability && typeof availability === 'object') return availability[action] === true
@@ -644,7 +648,7 @@ async function runAction(action, payload = {}) {
       </div>
       <div class="sales-order-detail-overlay__header-actions">
         <!-- 纯权益作废交回服务组入口，不复用销售退款表单。 -->
-        <button v-if="sourceOrder.entitlementOnly && sourceOrder.orderStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')" type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="isLoading" @click="emit('void-entitlement-order', sourceOrder)">作废订单</button>
+        <button v-if="documentEditable && sourceOrder.entitlementOnly && sourceOrder.orderStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')" type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="isLoading" @click="emit('void-entitlement-order', sourceOrder)">作废订单</button>
         <button
           v-if="!actionOnly"
           v-for="item in quickActions"
@@ -902,7 +906,7 @@ async function runAction(action, payload = {}) {
         <div ref="actionPanelRef">
           <p v-if="actionError" class="sales-order-detail-error" role="alert">{{ actionError }}</p>
 
-          <section v-if="activeLifecycleForm === 'refund'" class="sales-order-detail-section sales-order-detail-section--actions">
+          <section v-if="documentEditable && activeLifecycleForm === 'refund'" class="sales-order-detail-section sales-order-detail-section--actions">
           <header class="sales-order-detail-section__header"><div><h3>退款</h3><span>只冲销本次勾选明细的成交与收款事实；已完成服务、已出库产品和已签发权益不会自动回退。</span></div></header>
           <div class="sales-order-detail-lifecycle-form">
             <fieldset class="sales-order-detail-refund-lines">
@@ -926,7 +930,7 @@ async function runAction(action, payload = {}) {
           </div>
           </section>
 
-          <section v-if="activeLifecycleForm === 'void'" class="sales-order-detail-section sales-order-detail-section--actions">
+          <section v-if="documentEditable && activeLifecycleForm === 'void'" class="sales-order-detail-section sales-order-detail-section--actions">
           <header class="sales-order-detail-section__header"><div><h3>作废订单</h3><span>作废会保留原单和操作记录，在同一事务内冲销本单已发生的余额、优惠券、欠款、出库、服务及人员业绩；未发生的业务自动跳过。</span></div></header>
           <div class="sales-order-detail-lifecycle-form">
             <label>作废原因<textarea v-model.trim="voidReason" maxlength="255" rows="3" placeholder="填写作废原因" /></label>

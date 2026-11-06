@@ -2284,6 +2284,9 @@ WSS;
         foreach (['site_name', 'site_url', 'site_phone', 'cache_config','recharge_per'] as $key) {
             $system[] = Build::input($key, $data[$key]['info'], $data[$key]['value'])->maxlength($key === 'site_name' ? 20 : null)->info($data[$key]['desc'])->type($data[$key]['type']);
         }
+        // 平台改单独立于门店业务开关，固定紧随充值最大赠送比例，未安装时默认开启。
+        $system[] = Build::switch(\app\services\order\PlatformDocumentEditPolicy::CONFIG_KEY, '平台端允许修改单据', \app\services\order\PlatformDocumentEditPolicy::enabled() ? 1 : 0)
+            ->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后平台端仅可查询、查看详情、打印和导出，不能修改人员、业绩、日期、来源、备注或办理退款、作废、补交；门店端不受影响');
         $setting = [];
         foreach (['site_logo', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path'] as $key) {
             if ($key == 'ico_path') {

@@ -1,0 +1,10 @@
+PASS actual save and readback 0
+PASS actual save and readback 1
+PASS actual save and readback 0
+PASS actual save and readback 1
+PASS actual save and readback 0
+PASS invalid option rejected without change
+PASS existing authorized store identity
+PASS store detail same order remains readable
+PASS store real write unaffected while platform disabled
+PASS direct shared gateway cannot bypass transaction configuration guard

@@ -20,7 +20,7 @@ import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh, normalizeU
 import {
   createCashierV3CommandId,
   canUseCashierV3Feature,
-  canUseCashierV3Operation,
+  canUseCashierV3Operation as originalCanUseCashierV3Operation,
   formatMoney,
   mergeCashierV3PublicVersions,
   requestCashierV3Action,
@@ -45,6 +45,7 @@ import {
   refreshedBusinessReceiptRecord
 } from '@/services/orderCenterBusinessReceipt'
 import { orderCenterExportDownloadRequest } from '@/services/cashierV3HttpAdapter'
+import { platformDocumentActionAllowed, PLATFORM_DOCUMENT_READ_ONLY_MESSAGE } from '@/services/platformDocumentEditPolicy'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { guideRoundText, personnelEmptyText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
@@ -487,6 +488,14 @@ if (reconciliationToken) {
 const reconciliationSelection = reconciliationNavigation?.selection || null
 // 平台只增加组织/门店范围上下文；页面、字段、页签和动作仍走同一份权限投影。
 const isPlatformContext = computed(() => route.meta.platformOrderContext === true)
+// 平台在当前配置读回前先关闭修改入口；门店端沿用既有能力，不消费平台开关。
+const platformDocumentEditEnabled = ref(false)
+const documentEditable = computed(() => !isPlatformContext.value || platformDocumentEditEnabled.value)
+function canUseCashierV3Operation(permission) {
+  if (!documentEditable.value && ['cashier.v3.order.staff_adjust', 'cashier.v3.order.void', 'cashier.v3.order.service_void', 'cashier.v3.order.refund', 'cashier.v3.order.reopen'].includes(permission)) return false
+  return originalCanUseCashierV3Operation(permission)
+}
+
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
 // Reuse the root projection of the existing instance switch; missing initial
 // projection is not an instruction to erase a saved route or historical facts.
@@ -828,6 +837,10 @@ watch(
 )
 
 function requestAction(action, payload = {}) {
+  // 旧弹窗也不能继续提交；服务端再次读取配置，不能依赖这份页面状态保护数据。
+  if (!platformDocumentActionAllowed(action, documentEditable.value)) {
+    return Promise.resolve({ result: { status: 'failed', code: 'PLATFORM_DOCUMENT_EDIT_DISABLED', message: PLATFORM_DOCUMENT_READ_ONLY_MESSAGE } })
+  }
   // 导出只冻结已执行的查询并创建文件任务；其回包重建的收银根状态不含当前
   // 订单分页，不能覆盖仍在展示的列表。保留回包版本和任务结果供后续下载。
   return requestCashierV3Action(action, action === 'create-unified-query-export'
@@ -1783,6 +1796,7 @@ function openSalesItemCraftsmanEditor(record, item) {
 }
 
 function salesOrderActionAvailable(record, action, permission) {
+  if (!documentEditable.value && action !== 'print-sales-order-receipt') return false
   const actions = record?.availableActions
   const available = Array.isArray(actions) ? actions.includes(action) : actions?.[action] === true
   return available && (!permission || canUseCashierV3Operation(permission))
@@ -1806,6 +1820,7 @@ const editableRefundPersonnelSourceTypes = new Set([...editableRefundSourceTypes
 
 // 列表能力仅决定是否展示蓝色入口；后端仍以当前会话门店、权限及旧值独立判定。
 function canCorrectAttribution(record, field) {
+  if (!documentEditable.value) return false
   if (field === 'source' && !businessSourceEnabled.value) return false
   // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
   // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
@@ -2812,6 +2827,7 @@ function orderPaymentDetails(record) {
 }
 
 function canCorrectSalesPaymentMethod(record, payment) {
+  if (!documentEditable.value) return false
   // Recharge and repayments use the same editor and command; only the server
   // can expose a stable collection identity and confirm its business state.
   const type = recordType(record)
@@ -3096,6 +3112,7 @@ async function loadPlatformOrderScope() {
   platformScopePicker.value = { ...platformScopePicker.value, loading: true }
   try {
     const response = await queryPlatformOrderCenterScope()
+    platformDocumentEditEnabled.value = response?.document_edit_enabled === true
     const allowedStoreIds = Array.isArray(response?.allowed_store_ids)
       ? response.allowed_store_ids.map(Number).filter(Boolean)
       : []
@@ -3106,6 +3123,7 @@ async function loadPlatformOrderScope() {
       allowedStoreIds
     }
   } catch (_) {
+    platformDocumentEditEnabled.value = false
     // 订单查询仍由服务端数据权限保护。范围树异常时保留“当前权限范围”，
     // 避免把前端失败误解为没有订单数据。
     platformScopePicker.value = { ...platformScopePicker.value, loading: false, tree: [], allowedStoreIds: [] }
@@ -3535,6 +3553,7 @@ async function printBusinessRecord(record = {}) {
 }
 
 function serviceCraftsmanAdjustable(record = {}) {
+  if (!documentEditable.value) return false
   const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
   return /^[1-9][0-9]*$/.test(String(serviceFactId))
     && !record.voidedAt
@@ -3848,6 +3867,7 @@ async function restoreDebt(record) {
 }
 
 const rechargeLifecycleActions = computed(() => {
+  if (!documentEditable.value) return []
   const type = recordType(genericDetailRecord.value)
   // 退款作废只开放给仍生效的 V3 退款；旧退款缺少权益与余额快照，不能推测恢复。
   if (type === 'refund' && genericDetailRecord.value) {
@@ -4582,7 +4602,7 @@ onBeforeUnmount(() => {
                 class="button button--text button--danger" @click="openProjectReplacementVoid(record)">作废</button>
               <!-- 服务只保留详情入口；打印与作废统一按消费订单处理，避免拆单操作。 -->
               <button
-                v-if="activeTabKey === 'debt' && record.canRepay"
+                v-if="documentEditable && activeTabKey === 'debt' && record.canRepay"
                 type="button"
                 class="button button--text"
                 @click="openDebtRepayment(record)"
@@ -4618,6 +4638,7 @@ onBeforeUnmount(() => {
       @void-entitlement-order="(record) => { closeSalesDetail(); openServiceVoid(record) }"
       v-if="isSalesDetailOpen"
       :order="salesDetailOrder"
+      :document-editable="documentEditable"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
       :attribution-changes="visibleAttributionChanges"

@@ -387,6 +387,11 @@ class CashierV3CommandGatewayServices extends BaseServices
             }
             $txnDataScope = $permPack['data_scope'];
             $operatorProfile = $permPack['operator_profile'];
+            // 只信任事务内重建的平台身份；配置共享锁和单据写入在同一事务中，门店会话不受影响。
+            if (!empty($operatorProfile['_trusted_platform_order_center_admin'])) {
+                \app\services\order\PlatformDocumentEditPolicy::assertAllowed($canonicalAction, true);
+            }
+
 
             if ($existing) {
                 $replayContextsHash = $contextsHash;
