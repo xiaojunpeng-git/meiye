@@ -12,10 +12,8 @@ final class StoreSummary007ReadServices
     private $storeReader;
     private $certifiedCashReader;
     private $partnerFactQuery;
-    private $atomicReader;
     private $originalPaymentReader;
     private $originalLegacyReader;
-    private $consumptionReader;
     private $newCustomerReader;
     private $serviceOrderReader;
     private $soldProjectReader;
@@ -24,9 +22,9 @@ final class StoreSummary007ReadServices
 
     /** 门店范围由 Host 重认证；注入门店维度只用于隔离合同测试。 */
     public function __construct(?callable $storeReader = null, ?callable $certifiedCashReader = null,
-        ?callable $partnerFactQuery = null, ?callable $atomicReader = null,
+        ?callable $partnerFactQuery = null,
         ?callable $originalPaymentReader = null, ?callable $originalLegacyReader = null,
-        ?callable $consumptionReader = null,?callable $newCustomerReader = null,
+        ?callable $newCustomerReader = null,
         ?callable $serviceOrderReader = null,?callable $soldProjectReader = null,
         ?callable $designatedReader = null,?callable $partnerServiceReader = null)
     {
@@ -36,10 +34,8 @@ final class StoreSummary007ReadServices
         };
         $this->certifiedCashReader = $certifiedCashReader;
         $this->partnerFactQuery = $partnerFactQuery;
-        $this->atomicReader = $atomicReader;
         $this->originalPaymentReader = $originalPaymentReader;
         $this->originalLegacyReader = $originalLegacyReader;
-        $this->consumptionReader = $consumptionReader;
         $this->newCustomerReader = $newCustomerReader;
         $this->serviceOrderReader = $serviceOrderReader;
         $this->soldProjectReader = $soldProjectReader;
@@ -64,20 +60,15 @@ final class StoreSummary007ReadServices
         }
         $cash = [];
         $partner = null;
-        $atoms = null;
         $original = null;
-        $consumption = null;
         $newCustomers = null;
         $serviceOrders = null;
         $soldProjects = null;
         $designated = null;
         $insideConsumption = null;
         if ($stores !== [] && $dimensions !== []) {
-            // 注册 Reader 是 V3 原子数的唯一来源；它们与 007 原单筛选
-            // 尚未证明同义，故作为可核对数据返回，不直接填表格单元格。
-            $atoms = (new Sidebar007V3AtomicReadServices($this->atomicReader))->read($stores,$range);
-        }
-        if ($stores !== [] && $dimensions !== []) {
+            // 仅查询可见列所依赖的来源。员工诊断指标及核销执行店金额不属于
+            // 本表口径，不能让其额外扫描或异常阻断门店统计；诊断仍由独立 Reader 提供。
             // 生产默认读取独立 V3 原单收款并逐店核旧订单覆盖；先前
             // 后端认证输入仅供已有合同调用，不能由客户端提交经营数字。
             $original=(new Sidebar007OriginalCashReadServices(
@@ -88,12 +79,6 @@ final class StoreSummary007ReadServices
                 $cash=$this->certifiedCash(($this->certifiedCashReader)($stores,$range),$stores);
             }
             $partner = (new Sidebar007PartnerAllocationReadServices())->read($stores,$range,$this->partnerFactQuery);
-            $consumption=$this->consumptionReader
-                ?($this->consumptionReader)($stores,$range)
-                :(new Sidebar007ConsumptionAmountReadServices())->read($stores,$range);
-            if(!is_array($consumption)||!is_array($consumption['by_store']??null)
-                ||!is_bool($consumption['complete']??null))
-                throw new \LogicException('门店统计消耗金额结果无效');
             // 本表新客数与销售分析共用 007 同一个 sourceOrder 来源集合；
             // 映射与原单资格由同一 Reader 完成，不能另算一个近似人数。
             $newCustomers=$this->newCustomerReader
@@ -116,9 +101,11 @@ final class StoreSummary007ReadServices
             if(!is_array($soldProjects)||!is_array($soldProjects['by_store']??null)
                 ||!is_bool($soldProjects['complete']??null))
                 throw new \LogicException('门店统计销售项目来源无效');
+            // 指定客与消耗共用本次已认证的服务集合，避免再次扫描全部服务。
             $designated=$this->designatedReader
                 ?($this->designatedReader)($stores,$range)
-                :(new Sidebar007DesignatedCustomerReadServices())->read($stores,$range);
+                :(new Sidebar007DesignatedCustomerReadServices(
+                    static fn():array=>$serviceOrders))->read($stores,$range);
             if(!is_array($designated)||!is_array($designated['by_store']??null)
                 ||!is_bool($designated['complete']??null))
                 throw new \LogicException('门店统计指定客来源无效');
@@ -131,14 +118,14 @@ final class StoreSummary007ReadServices
                 ||!is_bool($insideConsumption['complete']??null))
                 throw new \LogicException('门店统计店内消耗来源无效');
         }
-        return $this->project($dimensions, $stores, $range, $cash, $partner, $atoms,
-            $original,$consumption,$newCustomers,$serviceOrders,$soldProjects,
+        return $this->project($dimensions, $stores, $range, $cash, $partner,
+            $original,$newCustomers,$serviceOrders,$soldProjects,
             $designated,$insideConsumption);
     }
 
     /** 投影只负责字段与来源缺口，不从余额、员工份额或当前分类推算 007 口径。 */
     private function project(array $dimensions, array $stores, array $range, array $cash,
-        ?array $partner, ?array $atoms, ?array $original,?array $consumption,
+        ?array $partner, ?array $original,
         ?array $newCustomers,?array $serviceOrders,?array $soldProjects,
         ?array $designated,?array $insideConsumption): array
     {
@@ -222,6 +209,12 @@ final class StoreSummary007ReadServices
                 // 007 本表公式最终强制转 int：非负比例向下截取整百分点。
                 $row['new_customer_conversion_rate']=$total>0?intdiv($new*100,$total):0;
             }
+            // 共用报表 money 字段以元传递，来源及诊断保留整数分；在后端一次转换，
+            // 让筛选、合计、页面和导出使用同一精确数值，禁止前端再各自除以100。
+            foreach (self::definitions() as $field) {
+                if ($field['money'] && $row[$field['key']] !== null)
+                    $row[$field['key']] = bcdiv((string)$row[$field['key']], '100', 2);
+            }
             $rows[] = $row;
         }
         usort($rows, static fn(array $a,array $b):int=>$a['store_id']<=>$b['store_id']);
@@ -256,16 +249,14 @@ final class StoreSummary007ReadServices
                 'new_customer_count',
                 'sold_project_count','consumed_project_count'],
                 static fn(string $key):bool=>!in_array($key,$unverified,true))),
-            'metric_version'=>'store-summary-007-v3-candidate-2',
+            'metric_version'=>'store-summary-007-v3-3',
             'coverage_start'=>StoreUnifiedReportServices::COVERAGE_START,'data_as_of'=>date('c'),
             'scope'=>['store_ids'=>$stores,'date_range'=>$range],
             'fact_completeness'=>$unverified===[]
                 ?'本次授权门店、日期和指标的来源已通过逐项覆盖校验。'
                 :'未通过来源或迁入覆盖校验的指标保持空白，详情见缺口代码。',
             'partner_allocation'=>$partner,
-            'v3_atoms'=>$atoms,
             'original_cash'=>$original,
-            'consumption_source'=>$consumption,
             'service_order_source'=>$serviceOrders,
             'sold_project_source'=>$soldProjects,
             'designated_source'=>$designated,

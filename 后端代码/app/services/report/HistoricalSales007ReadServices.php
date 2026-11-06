@@ -14,7 +14,7 @@ final class HistoricalSales007ReadServices
     /** Read one store at a time so the same authorized population remains bounded. */
     public function read(string $kind,array $stores,array $range,int $employee=0):array
     {
-        if(!in_array($kind,['store_items','products'],true))throw new \InvalidArgumentException('旧销售报表类型错误');
+        if(!in_array($kind,['store_items','products','store_quantities'],true))throw new \InvalidArgumentException('旧销售报表类型错误');
         foreach($stores as$id)if(!is_int($id)||$id<1)throw new \InvalidArgumentException('旧销售授权门店错误');
         foreach(['start','end']as$k)if(!isset($range[$k])||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$range[$k])||date('Y-m-d',strtotime($range[$k]))!==$range[$k])throw new \InvalidArgumentException('旧销售业务日期错误');
         if($range['start']>$range['end']||$employee<0)throw new \InvalidArgumentException('旧销售筛选错误');
@@ -31,10 +31,22 @@ final class HistoricalSales007ReadServices
         return ['rows'=>$rows,'gaps'=>$gaps,'complete'=>!$gaps];
     }
 
-    /** Original 007 expressions are preserved verbatim below; only identity, date and server scope are adapted. */
+    /** 复用原单身份、业务日期和授权范围；数量指标另遵循007有效现金原单资格。 */
     private function sql(string $kind,int $store,array $range,int $employee):string
     {
-        $sql=$kind==='store_items'?self::STORE_SQL:self::PRODUCT_SQL;
+        $sql=$kind==='products'?self::PRODUCT_SQL:($kind==='store_quantities'
+            ? 'SELECT o.store_id, SUM(IFNULL(c.cart_num,0)) AS `销售数量` '.self::STORE_POPULATION_SQL.' GROUP BY o.store_id'
+            : self::STORE_SQL);
+        if ($kind === 'store_quantities') {
+            // 007门店统计的销售项目数排除纯欠款与旧卡录入；混合支付至少有一笔
+            // 非欠款、非旧卡的有效支付才计入。仅限定数量指标，不改其他报表金额公式。
+            $sql = str_replace(
+                ['IFNULL(o.cash_choose, 0) <> 9', 'co2.cash_choose <> 9 AND co2.active_pay <> 3'],
+                ['IFNULL(o.cash_choose, 0) NOT IN (9, 10)',
+                    "co2.cash_choose NOT IN (9, 10) AND (co2.pay_sub_type IS NULL OR co2.pay_sub_type <> 'debt') AND co2.active_pay <> 3"],
+                $sql
+            );
+        }
         $table=static function($name){$value=Db::name($name)->getTable();if(!preg_match('/^[A-Za-z0-9_]+$/D',$value))throw new \LogicException('旧销售表名错误');return$value;};
         $h=$table('cashier_v3_sales_order');$receipt=$table('cashier_v3_card_purchase_receipt');$op=$table('cashier_v3_order_lifecycle_operation');
         $proof=ReportLegacyArchiveProofServices::visibilitySql('o','h',$op,$receipt);
@@ -96,6 +108,17 @@ FROM (
             WHEN o.uid = 0 OR IFNULL(o.service_object, '') = '朋友' THEN CONCAT('g_', o.id, '_', c.id)
             ELSE CONCAT(DATE(FROM_UNIXTIME(o.add_time)), '_', o.uid)
         END AS `客户标识`
+SQL
+        . self::STORE_POPULATION_SQL . <<<'SQL'
+) sales_detail
+GROUP BY store_id, `门店`, `分类`, `名称`
+ORDER BY `门店`, `分类`, `名称`;
+SQL;
+    /** 数量与品项表共用基础原单范围；数量另排纯欠款，不改变日期、归属及作废规则。
+     * 混合支付资格用不相关的 IN 集合，使数据库一次读取可用原单；不得逐销售行全扫支付明细，
+     * 也不能直接 JOIN 放大同单多种支付方式的销售数量。
+     */
+    private const STORE_POPULATION_SQL = <<<'SQL'
     FROM eb_store_order o
     INNER JOIN eb_store_order_cart_info c ON c.oid = o.id AND IFNULL(c.cart_type, 0) = 0
     INNER JOIN eb_store_product cp ON cp.id = c.product_id
@@ -113,9 +136,9 @@ FROM (
           (o.pay_type <> 'combination' AND IFNULL(o.cash_choose, 0) <> 9)
           OR (
               o.pay_type = 'combination'
-              AND EXISTS (
-                  SELECT 1 FROM eb_combination_order co2
-                  WHERE co2.order_id = o.id AND co2.cash_choose <> 9 AND co2.active_pay <> 3
+              AND o.id IN (
+                  SELECT co2.order_id FROM eb_combination_order co2
+                  WHERE co2.cash_choose <> 9 AND co2.active_pay <> 3
               )
           )
       )
@@ -132,9 +155,6 @@ FROM (
       )
       AND IFNULL(NULLIF(parent.store_name, ''), cp.store_name) LIKE CONCAT('%', '{{name}}', '%')
       AND IFNULL(NULLIF(parent.store_name, ''), cp.store_name) <> ''
-) sales_detail
-GROUP BY store_id, `门店`, `分类`, `名称`
-ORDER BY `门店`, `分类`, `名称`;
 SQL;
     private const PRODUCT_SQL = <<<'SQL'
 SELECT

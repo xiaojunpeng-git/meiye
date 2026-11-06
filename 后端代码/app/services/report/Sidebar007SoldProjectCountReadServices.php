@@ -20,7 +20,7 @@ final class Sidebar007SoldProjectCountReadServices
     public function __construct(?callable $saleReader=null,?callable $coverageReader=null,?callable $historicalReader=null)
     {
         $this->historicalEnabled=$saleReader===null||$historicalReader!==null;
-        $this->historicalReader=$historicalReader ?: static function(array$stores,array$range):array{return(new HistoricalSales007ReadServices())->read('store_items',$stores,$range);};
+        $this->historicalReader=$historicalReader ?: static function(array$stores,array$range):array{return(new HistoricalSales007ReadServices())->read('store_quantities',$stores,$range);};
         $this->saleReader=$saleReader ?: [$this,'sales'];
         $this->coverageReader=$coverageReader ?: [new StoreItemSales007SourceCoverageServices(),'read'];
     }
@@ -51,7 +51,7 @@ final class Sidebar007SoldProjectCountReadServices
         }
         $history=['rows'=>[],'complete'=>true,'gaps'=>[]];
         if($this->historicalEnabled){
-            // The same old SQL and approved payment business day serve the visible sales report and this count.
+            // 按007有效现金原单资格排除纯欠款，沿用已认证业务日；直接聚合数量，避免执行整张品项报表。
             // Never waive a missing-V3-fact gate without actually reading its original quantity.
             $history=($this->historicalReader)($stores,$range);
             if(!is_array($history)||!is_array($history['rows']??null)||count($history['rows'])>10000||!is_bool($history['complete']??null))throw new \LogicException('历史销售数量来源无效');
@@ -93,12 +93,16 @@ final class Sidebar007SoldProjectCountReadServices
             ->where('s.tenant_id','0')->whereIn('s.store_id',$stores)
             ->whereBetween('s.business_date',[$range['start'],$range['end']])
             ->where('s.status','effective')->where('s.fact_direction','forward')
-            ->whereNotExists(function($reversal):void{
+            // 租户已固定为当前独立实例。一次读取有效冲销目标，避免每个正向行
+            // 重新扫描整张事实表；过滤 NULL 保持与原 NOT EXISTS 相同的语义。
+            ->whereNotIn('s.fact_id',function($reversal):void{
                 $reversal->name('cashier_v3_sale_fact')->alias('rv')
-                    ->whereRaw('rv.tenant_id=s.tenant_id')
-                    ->whereRaw('rv.reversal_of=s.fact_id')
-                    ->where('rv.fact_direction','reversal')->where('rv.status','effective');
+                    ->where('rv.tenant_id','0')->whereNotNull('rv.reversal_of')
+                    ->where('rv.fact_direction','reversal')->where('rv.status','effective')
+                    ->field('rv.reversal_of');
             });
+        // 历史原单由同一只读桥完整读取；在数据库收敛原生集合，不重复拉取再丢弃迁入行。
+        if($this->historicalEnabled)$query->where('s.source_document_type','<>','legacy_store_order');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts(
             $query,'s.tenant_id','s.order_id');
         return $query->field('s.fact_id,s.store_id,s.order_id,s.source_document_type,'

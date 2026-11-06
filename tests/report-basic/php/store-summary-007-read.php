@@ -7,17 +7,9 @@ require (getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3).'/后端代码').'/vendor
 
 use app\services\report\StoreSummary007ReadServices;
 
-/** 测试只替换注册 Reader 的返回，验证按授权门店接线及口径隔离。 */
-$atomic=static function(string $code,array $stores,array $range):array {
-    return array_map(static fn(int $id):array=>['store_id'=>$id,'metric_value'=>$id*100],$stores);
-};
 $payments=static fn():array=>[];
 $legacy=static fn():array=>[['store_id'=>9,'source_order_id'=>'900','expected_cents'=>100],
     ['store_id'=>10,'source_order_id'=>'1000','expected_cents'=>100]];
-$consumptionGap=static fn():array=>['complete'=>false,'gaps'=>[['code'=>'LEGACY_WRITEOFF_SOURCE_UNVERIFIED']],
-    'by_store'=>[9=>null,10=>null]];
-$consumptionFull=static fn():array=>['complete'=>true,'gaps'=>[],
-    'by_store'=>[9=>1500,10=>0]];
 $newCustomerGap=static fn():array=>['complete'=>false,'gaps'=>[['code'=>'SOURCE_007_MAPPING_UNAVAILABLE']],
     'by_store'=>[]];
 $newCustomerFull=static fn():array=>['complete'=>true,'gaps'=>[],
@@ -41,7 +33,7 @@ $insideFull=static fn():array=>['complete'=>true,'by_store'=>[9=>130000,10=>0],
 
 $reader=new StoreSummary007ReadServices(static fn(array $stores):array=>[
     ['id'=>9,'name'=>'甲店'],['id'=>10,'name'=>'乙店']],null,static fn():array=>[],
-    $atomic,$payments,$legacy,$consumptionGap,$newCustomerGap,$serviceOrderGap,
+    $payments,$legacy,$newCustomerGap,$serviceOrderGap,
     $soldGap,$designatedGap,$insideGap);
 $result=$reader->read([9,10],['start'=>'2026-10-20','end'=>'2026-10-20']);
 $labels=array_slice(array_column($result['fields'],'label'),0,14);
@@ -55,10 +47,8 @@ foreach($result['rows'] as $row)foreach(array_slice(array_column($result['fields
     if($row[$key]!==null)throw new RuntimeException('unverified metric exposed value');
 if(count($result['field_sources'])!==count($result['fields']))
     throw new RuntimeException('field sources incomplete');
-if($result['v3_atoms']['by_store'][9]['consume_amount']!==900
-    ||$result['v3_atoms']['by_store'][10]['completed_service_item_count']!==1000
-    ||$result['rows'][0]['consumption_performance']!==null)
-    throw new RuntimeException('V3 实数应接入审计结果，未证明 007 同义前不得填充表格');
+if(isset($result['v3_atoms'])||isset($result['consumption_source']))
+    throw new RuntimeException('页面不得再依赖无关诊断扫描');
 if(strpos($result['field_sources']['actual_performance'],'合作方人员实际分配')===false
     ||strpos($result['field_sources']['cash_performance'],'原销售与原充值')===false
     ||strpos($result['field_sources']['inside_cash_performance'],'合作方人员实际分配')===false)
@@ -71,20 +61,19 @@ $certified=new StoreSummary007ReadServices(static fn(array $stores):array=>[
     static fn(array $stores,array $range):array=>[
         ['store_id'=>9,'partner_amount_cents'=>10000,'outsourced_amount_cents'=>5000,
         'refund_deduction_cents'=>-3000,'unclassified_rows'=>0,'unsigned_reversal_rows'=>0]],
-    $atomic,$payments,$legacy,$consumptionFull,$newCustomerFull,$serviceOrderFull,
+    $payments,$legacy,$newCustomerFull,$serviceOrderFull,
     $soldFull,$designatedFull,$insideFull);
 $verified=$certified->read([9,10],['start'=>'2026-10-20','end'=>'2026-10-20']);
-if($verified['rows'][0]['cash_performance']!==110000||$verified['rows'][0]['actual_performance']!==100000
-    ||$verified['rows'][0]['inside_cash_performance']!==100000
-    ||$verified['rows'][1]['actual_performance']!==20000
-    ||$verified['rows'][0]['consumption_performance']!==150000
-    ||$verified['rows'][0]['inside_consumption_performance']!==130000
+if($verified['rows'][0]['cash_performance']!=='1100.00'||$verified['rows'][0]['actual_performance']!=='1000.00'
+    ||$verified['rows'][0]['inside_cash_performance']!=='1000.00'
+    ||$verified['rows'][1]['actual_performance']!=='200.00'
+    ||$verified['rows'][0]['consumption_performance']!=='1500.00'
+    ||$verified['rows'][0]['inside_consumption_performance']!=='1300.00'
     ||$verified['rows'][0]['customer_count']!==10
     ||$verified['rows'][0]['consumed_project_count']!==14
     ||$verified['rows'][0]['sold_project_count']!==17
     ||$verified['rows'][0]['designated_customer_count']!==6
     ||$verified['rows'][0]['consumption_cash_ratio']!==136
-    ||$verified['consumption_source']['by_store'][9]!==1500
     ||$verified['rows'][0]['new_customer_count']!==3
     ||$verified['rows'][0]['new_customer_total_count']!==10
     ||$verified['rows'][0]['new_customer_conversion_rate']!==30
@@ -97,17 +86,22 @@ if($verified['rows'][0]['cash_performance']!==110000||$verified['rows'][0]['actu
 if($verified['partner_allocation']['separate_facts'][9]['outsourced_amount_cents']!==5000
     ||$verified['partner_allocation']['separate_facts'][9]['refund_deduction_cents']!==-3000)
     throw new RuntimeException('outsourced and refund must stay separate from partner allocation');
+$serviceCalls=0;
 $auto=new StoreSummary007ReadServices(static fn():array=>[['id'=>9,'name'=>'甲店']],null,
     static fn():array=>[['store_id'=>9,'partner_amount_cents'=>10000,'outsourced_amount_cents'=>0,
         'refund_deduction_cents'=>0,'unclassified_rows'=>0,'unsigned_reversal_rows'=>0]],
-    $atomic,static fn():array=>[['fact_id'=>'r9','store_id'=>9,'order_id'=>'RCH:9','source_line_id'=>'pay-r9',
-        'source_document_type'=>'recharge','amount_cents'=>110000,'eligible'=>true]],
-    static fn():array=>[],$consumptionGap,$newCustomerGap,$serviceOrderGap,
-    $soldGap,$designatedGap,$insideGap);
+    static fn():array=>[['fact_id'=>'r9','store_id'=>9,'order_id'=>'RCH:9','source_line_id'=>'pay-r9',
+        'source_document_type'=>'recharge','amount_cents'=>110025,'eligible'=>true]],
+    static fn():array=>[],$newCustomerGap,
+    static function()use(&$serviceCalls,$serviceOrderGap):array{++$serviceCalls;return $serviceOrderGap();},
+    $soldGap,null,$insideGap);
 $autoResult=$auto->read([9],['start'=>'2026-10-20','end'=>'2026-10-20']);
-if($autoResult['rows'][0]['cash_performance']!==110000
-    ||$autoResult['rows'][0]['actual_performance']!==100000)
+if($autoResult['rows'][0]['cash_performance']!=='1100.25'
+    ||$autoResult['rows'][0]['actual_performance']!=='1000.25')
     throw new RuntimeException('V3 原充值现金须自动接入门店统计并减 partner 实配');
+// 历史分值在报表内部保留精度，显示层才归整；指定客必须复用同次已核服务结果。
+if($serviceCalls!==1||$autoResult['designated_source']['complete']!==false)
+    throw new RuntimeException('指定客重复读取服务或绕过同次来源缺口');
 try{$reader->read([8],['start'=>'2026-10-20','end'=>'2026-10-20']);
     throw new RuntimeException('store scope failed');}
 catch(LogicException $expected){}
