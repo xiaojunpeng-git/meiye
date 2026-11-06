@@ -59,9 +59,8 @@ final class InventoryPlatformHqOutboundServices
         if ($sourceId === '' || strlen($sourceId) > 96) throw new \InvalidArgumentException('inventory_hq_outbound_detail_invalid');
         $facts = $this->facts($location, 'manual_outbound')->where('f.source_id', $sourceId)
             ->join('inventory_stock s', 's.id=f.stock_id')
-            ->leftJoin('store_product p', 'p.id=s.consumable_product_id')
             // Return the fact ID for line-note targeting while settled stock facts remain write-protected.
-            ->fieldRaw("f.id, s.consumable_product_id AS product_id, s.sku_id, s.product_unique AS sku_unique, COALESCE(p.no_expiry_management, 0) AS no_expiry_management, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            ->fieldRaw("f.id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')->select()->toArray();
         if (!$facts) throw new \InvalidArgumentException('inventory_hq_outbound_detail_missing');
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
