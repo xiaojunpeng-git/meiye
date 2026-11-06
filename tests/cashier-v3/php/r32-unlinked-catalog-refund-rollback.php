@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/** Local-only transaction probe: a catalog refund cannot modify a source sale, stock or card rights. */
+/** Local-only rollback probe: a catalog refund may credit bonus balance without inventing a sale, stock or card-rights change. */
 require '/var/www/html/vendor/autoload.php';
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
@@ -11,25 +11,43 @@ use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\order\CashierV3RefundSalespersonServices;
 use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices;
 use app\services\cashier\v3\order\CashierV3UnifiedRefundServices;
+use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use think\facade\Db;
 
 $app = new think\App('/var/www/html/');
 $app->initialize();
+// ThinkPHP CLI may render an uncaught exception with exit code zero; this probe must fail loudly.
+set_exception_handler(static function (Throwable $error): void {
+    fwrite(STDERR, get_class($error) . ': ' . $error->getMessage() . PHP_EOL);
+    exit(1);
+});
 if ((string)config('database.connections.mysql.hostname') !== 'mysql'
     || (string)config('database.connections.mysql.database') !== 'ruihao') {
     throw new RuntimeException('Local ruihao DB only.');
 }
-$staff = (array)Db::name('system_store_staff')->alias('s')
+$memberId = 978855;
+$staff = [];
+$resolver = new CashierV3FeatureResolver();
+// Gateway permissions come from the operator's live position, not the feature list supplied by a test scope.
+foreach (Db::name('system_store_staff')->alias('s')
     ->join('organization_store os', 'os.store_id=s.store_id')
-    ->where('s.status', 1)->where('s.is_del', 0)->where('s.level', 0)
-    ->field('s.*,os.org_id')->find();
+    ->join('store_user su', 'su.store_id=s.store_id AND su.uid=' . $memberId)
+    ->where('s.status', 1)->where('s.is_del', 0)->where('s.employee_id', '>', 0)
+    ->where('su.status', 1)->field('s.*,os.org_id')->select()->toArray() as $candidate) {
+    $features = $resolver->resolveGrantedFeatures($candidate);
+    if (in_array('cashier.v3.order.refund', $features, true)
+        && in_array('cashier.v3.order.staff_adjust', $features, true)) {
+        $staff = $candidate;
+        break;
+    }
+}
+if (!$staff) throw new RuntimeException('Local authorized catalog-refund operator fixture unavailable.');
 $storeId = (int)$staff['store_id'];
 $operator = new CashierV3OperatorScope($storeId, (int)$staff['id'], (string)$staff['org_id'], '0');
 $scope = new CashierV3DataScopeContext((int)$staff['id'], (int)$staff['id'], $storeId, '0',
     (string)$staff['org_id'], [$storeId], CashierV3DataScopeContext::MODE_STORES, [], false,
     '', 'r32-catalog-refund', ['cashier.v3.order_center', 'cashier.v3.order.refund', 'cashier.v3.order.staff_adjust'], $staff);
-$memberId = 978855;
 $service = new CashierV3UnifiedRefundServices();
 $items = $service->candidates(['mode' => 'catalog', 'memberId' => $memberId], $operator, $scope)['items'];
 $kinds = array_values(array_unique(array_map(static fn(array $row): string => (string)$row['kind'], $items)));
@@ -55,18 +73,16 @@ Db::startTrans();
 try {
     $payload = ['mode' => 'catalog', 'memberId' => $memberId, 'catalogItemId' => (int)$item['skuId'],
         'holderId' => 0, 'componentId' => 0, 'lineId' => '', 'refundAmount' => '33',
-        'balanceAmount' => '0', 'balanceKind' => 'bonus', 'voidTarget' => false,
+        'balanceAmount' => '7', 'balanceKind' => 'bonus', 'voidTarget' => false,
         'validThrough' => 0, 'businessDate' => $date, 'reason' => 'R32本地回滚验证',
         'salespeople' => [['staffId' => (int)$person['staffId'], 'allocationWeight' => 100]]];
-    // No source order exists to cap a balance grant or receive a void; reject both at the service boundary.
-    foreach ([['balanceAmount' => '1'], ['voidTarget' => true]] as $tamper) {
-        try {
-            $service->executeInTx(['operator_scope' => $operator, 'data_scope' => $scope,
-                'payload' => array_replace($payload, $tamper)]);
-            throw new RuntimeException('Forged balance/void request was accepted.');
-        } catch (\app\services\cashier\v3\CashierV3CommandException $expected) {
-            // Rejection must happen before any business event or fact is written.
-        }
+    // A catalog selection cannot be voided because it has no original sale, stock or entitlement to reverse.
+    try {
+        $service->executeInTx(['operator_scope' => $operator, 'data_scope' => $scope,
+            'payload' => array_replace($payload, ['voidTarget' => true])]);
+        throw new RuntimeException('Forged catalog void request was accepted.');
+    } catch (\app\services\cashier\v3\CashierV3CommandException $expected) {
+        // Rejection must happen before any business event or fact is written.
     }
     $invoke = static fn() => $dispatcher->gateway()->execute('refund-card-or-line',
         ['idempotencyKey' => $key, 'contexts' => []], $payload, $operator,
@@ -79,7 +95,7 @@ try {
     $row = (array)Db::name('cashier_v3_refund_adjustment')->where('operation_id', $operationId)->find();
     if ((string)$row['target_type'] !== 'catalog' || (int)$row['catalog_item_id'] !== (int)$item['skuId']
         || (string)$row['catalog_kind'] !== (string)$item['kind'] || (string)$row['source_order_id'] !== ''
-        || (string)$row['source_line_id'] !== '' || (int)$row['balance_credit_cents'] !== 0) {
+        || (string)$row['source_line_id'] !== '' || (int)$row['balance_credit_cents'] !== 700) {
         throw new RuntimeException('Unlinked refund persisted a false source or wrong catalog snapshot.');
     }
     $facts = Db::name('cashier_v3_performance_fact')->where('order_id', $operationId)
@@ -89,8 +105,11 @@ try {
         ->where('fact_type', 'manual_refund_adjustment')->sum('amount_cents') !== -3300) {
         throw new RuntimeException('Cash refund fact mismatch.');
     }
-    if ((int)Db::name('cashier_v3_balance_fact')->where('order_id', $operationId)->count() !== 0) {
-        throw new RuntimeException('Unlinked refund credited member balance.');
+    $balanceFact = (array)Db::name('cashier_v3_balance_fact')->where('order_id', $operationId)->find();
+    if ((int)($balanceFact['principal_delta_cents'] ?? 0) !== 0
+        || (int)($balanceFact['bonus_delta_cents'] ?? 0) !== 700
+        || (string)($balanceFact['balance_change_type'] ?? '') !== 'manual_refund_credit') {
+        throw new RuntimeException('Unlinked refund balance credit fact mismatch.');
     }
     $salary = (new StoreUnifiedReportPhaseSixServices())->query('phase_six_salary_detail', [$storeId],
         ['start' => $date, 'end' => $date], ['document_no' => (string)$result['data']['unifiedRefund']['operationNo'], '_internal_all' => true]);

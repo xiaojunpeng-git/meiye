@@ -4877,7 +4877,8 @@ onBeforeUnmount(() => {
             <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
             <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" :pattern="effectiveRefundMode === 'card' ? '(?:0|[1-9][0-9]*)' : '[1-9][0-9]*'" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
           </div>
-          <div v-if="effectiveRefundMode !== 'catalog'" class="unified-refund-dialog__field">
+          <!-- 无原单商品只确定退款展示身份；现金退款与转入余额仍是独立手工事实。 -->
+          <div class="unified-refund-dialog__field">
             <label class="service-void-modal__label" for="unified-refund-balance">{{ effectiveRefundMode === 'balance' ? '扣减余额' : '转入余额' }}</label>
             <input id="unified-refund-balance" :value="unifiedRefundBalanceAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'balance')" />
           </div>
