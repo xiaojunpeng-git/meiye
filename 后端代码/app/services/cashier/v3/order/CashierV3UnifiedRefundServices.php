@@ -166,9 +166,11 @@ final class CashierV3UnifiedRefundServices
         }
         $lineId = trim((string)($payload['lineId'] ?? ''));
         $catalogItemId = (int)($payload['catalogItemId'] ?? 0);
+        // 无原单商品只锁定退款展示与分类身份，不创建销售、不恢复库存或权益。
+        // 现金退款和转入赠金分别留事实，因此 catalog 模式允许非零转入余额。
         if (($mode === 'card' && $holderId <= 0)
             || ($mode === 'document' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId))
-            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void || $balanceCents !== 0))
+            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void))
             || ($mode === 'balance' && ($void || $holderId !== 0 || $componentId !== 0
                 || $lineId !== '' || $catalogItemId !== 0 || $balanceCents <= 0
                 || (int)($payload['balanceVersion'] ?? 0) <= 0))) {
