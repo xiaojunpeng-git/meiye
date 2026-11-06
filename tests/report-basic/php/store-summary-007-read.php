@@ -6,6 +6,10 @@ declare(strict_types=1);
 require (getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3).'/后端代码').'/vendor/autoload.php';
 
 use app\services\report\StoreSummary007ReadServices;
+use app\services\report\HistoricalStoreSummaryReadServices;
+
+// 本合同验证未启用历史封存范围的现行路径；历史分段另由明细与数据库合同覆盖。
+$noHistorical=new HistoricalStoreSummaryReadServices(static fn():array=>[]);
 
 $payments=static fn():array=>[];
 $legacy=static fn():array=>[['store_id'=>9,'source_order_id'=>'900','expected_cents'=>100],
@@ -34,7 +38,7 @@ $insideFull=static fn():array=>['complete'=>true,'by_store'=>[9=>130000,10=>0],
 $reader=new StoreSummary007ReadServices(static fn(array $stores):array=>[
     ['id'=>9,'name'=>'甲店'],['id'=>10,'name'=>'乙店']],null,static fn():array=>[],
     $payments,$legacy,$newCustomerGap,$serviceOrderGap,
-    $soldGap,$designatedGap,$insideGap);
+    $soldGap,$designatedGap,$insideGap,$noHistorical);
 $result=$reader->read([9,10],['start'=>'2026-10-20','end'=>'2026-10-20']);
 $labels=array_slice(array_column($result['fields'],'label'),0,14);
 if($labels!==['门店','现金业绩','实际业绩','店内现金业绩','消耗业绩','店内消耗业绩',
@@ -62,7 +66,7 @@ $certified=new StoreSummary007ReadServices(static fn(array $stores):array=>[
         ['store_id'=>9,'partner_amount_cents'=>10000,'outsourced_amount_cents'=>5000,
         'refund_deduction_cents'=>-3000,'unclassified_rows'=>0,'unsigned_reversal_rows'=>0]],
     $payments,$legacy,$newCustomerFull,$serviceOrderFull,
-    $soldFull,$designatedFull,$insideFull);
+    $soldFull,$designatedFull,$insideFull,$noHistorical);
 $verified=$certified->read([9,10],['start'=>'2026-10-20','end'=>'2026-10-20']);
 if($verified['rows'][0]['cash_performance']!=='1100.00'||$verified['rows'][0]['actual_performance']!=='1000.00'
     ||$verified['rows'][0]['inside_cash_performance']!=='1000.00'
@@ -94,7 +98,7 @@ $auto=new StoreSummary007ReadServices(static fn():array=>[['id'=>9,'name'=>'甲�
         'source_document_type'=>'recharge','amount_cents'=>110025,'eligible'=>true]],
     static fn():array=>[],$newCustomerGap,
     static function()use(&$serviceCalls,$serviceOrderGap):array{++$serviceCalls;return $serviceOrderGap();},
-    $soldGap,null,$insideGap);
+    $soldGap,null,$insideGap,$noHistorical);
 $autoResult=$auto->read([9],['start'=>'2026-10-20','end'=>'2026-10-20']);
 if($autoResult['rows'][0]['cash_performance']!=='1100.25'
     ||$autoResult['rows'][0]['actual_performance']!=='1000.25')

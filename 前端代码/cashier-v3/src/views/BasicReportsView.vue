@@ -54,6 +54,13 @@ let controller
 let returnFocus
 let asyncPollTimer
 const active = computed(() => catalog.value.find(report => report.code === route.params.report))
+/** 日期控件是待查询草稿；明确标出已执行周期，避免把旧结果误当成刚选的月份。 */
+const resultPeriod = computed(() => {
+  if (loading.value || !executedQuery.value || ['current', 'registration_date', 'month', 'realtime_month'].includes(active.value?.time_mode)) return null
+  const { start_date: start, end_date: end } = executedQuery.value
+  if (!start || !end) return null
+  return { start, end, pending: start !== dates.value.start_date || end !== dates.value.end_date }
+})
 const visibleFields = computed(() => {
   return fields.value.filter(field => field.defaultVisible)
 })
@@ -285,8 +292,14 @@ function formatReportCount(value, field) {
   const text = String(value)
   return /^-?\d+\.\d+$/.test(text) ? text.replace(/0+$/, '').replace(/\.$/, '') : text
 }
+/** 汇总卡与表格共用数量精度；只格式化显示，不改接口、事实值或导出。 */
+function displaySummaryCard(card) {
+  if (card.value == null) return '-'
+  if (card.money) return formatReportMoney(card.value)
+  return formatReportCount(card.value, fields.value.find(field => field.key === card.key))
+}
 function summary(field, index) {
-  if (!executedQuery.value) return index === 0 ? '合计' : '-'
+  if (loading.value || !executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_brush_registration' && field.key === 'amount') return formatReportMoney(amount, 2)
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && !['settlement_total', 'total_amount'].includes(field.key)) return Number(amount).toFixed(2)
@@ -384,15 +397,16 @@ onBeforeUnmount(() => { requestId++; clearTimeout(asyncPollTimer); controller?.a
           <button type="button" class="basic-reports__icon" title="导出" aria-label="导出" :disabled="!executedQuery || exporting || loading" @click="exportRows"><Download :size="17" /></button>
         </template>
       </UnifiedReportQueryToolbar>
+      <p v-if="resultPeriod" class="basic-reports__snapshot" role="status" aria-live="polite">当前结果周期：{{ resultPeriod.start }} 至 {{ resultPeriod.end }}<strong v-if="resultPeriod.pending">；日期已修改，请点击查询更新结果。</strong></p>
       <p v-if="salaryReport" class="basic-reports__salary-summary"><span>应发工资：{{ formatReportMoney(data.summaries['yingfagongzi:sum']) }}</span><span>实发工资：{{ formatReportMoney(data.summaries['shifagongzi:sum']) }}</span><span v-if="!data.salary_readonly && data.salary_state?.frozen">{{ data.salary_state.month }} 已冻结门店人工项编辑，实时计算继续更新。</span></p>
-      <div v-if="data.summary_cards?.length" class="basic-reports__metric-summary" aria-label="当前查询汇总"><span v-for="card in data.summary_cards" :key="card.key">{{ card.label }}：<strong>{{ card.value == null ? '-' : card.money ? formatReportMoney(card.value) : card.value }}</strong></span></div>
+      <div v-if="!loading && data.summary_cards?.length" class="basic-reports__metric-summary" aria-label="当前查询汇总"><span v-for="card in data.summary_cards" :key="card.key">{{ card.label }}：<strong>{{ displaySummaryCard(card) }}</strong></span></div>
       <section class="basic-reports__results" :aria-busy="loading || !!asyncTask">
         <div ref="resultsScroll" class="basic-reports__scroll">
           <table><thead><tr><th v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ field.label }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">操作</th></tr>
             <tr v-if="!asyncTask && data.table_layout?.summary_position !== 'none'" class="basic-reports__total"><th v-for="(field, index) in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left' }">{{ summary(field, index) }}</th><th v-if="data.can_edit || (salaryEditing && data.salary_can_edit)" :class="{ 'basic-reports__row-actions': salaryReport }">-</th></tr></thead>
-            <tbody><tr v-for="row in data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button><button type="button" class="basic-reports__edit" :aria-label="'删除登记 ' + row.registration_id" @click="requestDelete(row)">删除</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
+            <tbody><tr v-for="row in loading ? [] : data.rows" :key="row.row_id || row.registration_id"><td v-for="field in visibleFields" :key="field.key" :style="columnStyle(field)" :class="{ 'is-fixed': field.fixed === 'left', 'is-money': field.money }"><input v-if="salaryDraft?.row_key === row.row_id && field.editable" v-model="salaryDraft.values[field.key]" :aria-label="row.employee_name + field.label" :disabled="salarySaving" :maxlength="field.key === 'beizhu' ? 500 : 10" class="basic-reports__salary-input"><button v-else-if="['work_get','labor_commission'].includes(field.key) && row.commission_details?.length" type="button" class="basic-reports__edit" :aria-label="row.employee_name + '劳动提成计算依据'" @click="commissionProof = row">{{ display(row, field) }}</button><template v-else>{{ display(row, field) }}</template></td><td v-if="data.can_edit"><button type="button" class="basic-reports__edit" @click="edit(row)">编辑</button><button type="button" class="basic-reports__edit" :aria-label="'删除登记 ' + row.registration_id" @click="requestDelete(row)">删除</button></td><td v-if="salaryEditing && data.salary_can_edit" class="basic-reports__row-actions"><template v-if="salaryDraft?.row_key === row.row_id"><button type="button" :disabled="salarySaving || loading" @click="saveSalary">保存</button><button type="button" :disabled="salarySaving" @click="salaryDraft = null">取消</button></template><button v-else type="button" :disabled="salarySaving || !!salaryDraft" @click="editSalary(row)">编辑</button></td></tr></tbody>
           </table>
-          <p v-if="!data.rows.length" class="basic-reports__empty">{{ asyncTask ? '正在后台生成完整报表…' : loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
+          <p v-if="loading || !data.rows.length" class="basic-reports__empty">{{ asyncTask ? '正在后台生成完整报表…' : loading ? '正在查询…' : error ? '查询未完成' : '暂无符合条件的记录' }}</p>
         </div>
         <TablePagination v-if="!asyncTask" :total="data.pagination.total" :page="data.pagination.page" :page-size="20" :page-size-options="[20]" show-page-count @change="run({ ...query, page: $event.page })" />
       </section>

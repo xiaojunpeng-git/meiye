@@ -19,6 +19,7 @@ final class StoreSummary007ReadServices
     private $soldProjectReader;
     private $designatedReader;
     private $partnerServiceReader;
+    private $historicalReader;
 
     /** 门店范围由 Host 重认证；注入门店维度只用于隔离合同测试。 */
     public function __construct(?callable $storeReader = null, ?callable $certifiedCashReader = null,
@@ -26,7 +27,8 @@ final class StoreSummary007ReadServices
         ?callable $originalPaymentReader = null, ?callable $originalLegacyReader = null,
         ?callable $newCustomerReader = null,
         ?callable $serviceOrderReader = null,?callable $soldProjectReader = null,
-        ?callable $designatedReader = null,?callable $partnerServiceReader = null)
+        ?callable $designatedReader = null,?callable $partnerServiceReader = null,
+        ?HistoricalStoreSummaryReadServices $historicalReader = null)
     {
         $this->storeReader = $storeReader ?: static function (array $stores): array {
             return Db::name('system_store')->whereIn('id', $stores)->where('salary_status', 1)
@@ -41,6 +43,7 @@ final class StoreSummary007ReadServices
         $this->soldProjectReader = $soldProjectReader;
         $this->designatedReader = $designatedReader;
         $this->partnerServiceReader = $partnerServiceReader;
+        $this->historicalReader = $historicalReader ?: new HistoricalStoreSummaryReadServices();
     }
 
     /** 007 逐门店列出当前开启工资统计的门店；业务指标没有同义事实时保持 null。 */
@@ -58,6 +61,15 @@ final class StoreSummary007ReadServices
                 throw new \LogicException('门店统计维度超出授权或重复');
             $seen[$id]=true;
         }
+        // 历史适配按本实例已批准的封存期间启用；所有入口与导出均经过此唯一出口。
+        // 不修改现行人员分配口径，不把已被导入归整的业务事实伪装成历史原件。
+        return $this->historicalReader->read($stores,$range,$dimensions,
+            fn(array $segment):array=>$this->readCurrent($stores,$segment,$dimensions));
+    }
+
+    /** 未被核准历史批次覆盖的日期沿用现行事实与覆盖校验。 */
+    private function readCurrent(array $stores,array $range,array $dimensions): array
+    {
         $cash = [];
         $partner = null;
         $original = null;
