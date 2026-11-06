@@ -12,10 +12,13 @@ final class HumanEfficiencyDashboardServices
     private $categoryRoots = [];
     private $retainFacts = false;
     private $detailCollector;
+    // 仅在当前read调用内复用门店聚合，不能跨日期、权限或后续请求缓存。
+    private $storeCohortMetrics = [];
 
     /** 调用方必须先按后台身份裁剪门店；这里不接受前端的金额、排名或组织路径。 */
     public function read(array $stores, array $range, array $input = []): array
     {
+        $this->storeCohortMetrics = [];
         // 行明细只能缩小已经授权的门店范围；前端行键绝不能扩大范围。
         if(($input['action']??'')==='detail' && preg_match('/^(\d+):\d+$/',(string)($input['entity_id']??''),$match)){
             $store=(int)$match[1];if(!in_array($store,$stores,true))throw new \InvalidArgumentException('该人员不在当前查询范围');
@@ -105,12 +108,17 @@ final class HumanEfficiencyDashboardServices
             'manager' => HumanEfficiencyRules::page($managerResult['rows'], 'manager', max(1, (int)($input['manager_page'] ?? 1))),
         ];
         $warnings = $managerResult['warnings'];
+        // 院店分级独立读取整店事实；个人权限和原单下钻不能顺带获得整店汇总。
+        $storeCohorts = ['available'=>false, 'reason'=>'当前为个人数据权限，不展示整店分级汇总。'];
+        if (!$selfEmployee && !$this->retainFacts) {
+            $storeCohorts = (new HumanEfficiencyStoreCohortServices())->read($stores, $range, $staff, $this->categories, $this->categoryRoots, $this->storeCohortMetrics);
+        }
         // 表头从完整榜单生成，分页和导出复用同一分类显隐规则。
         $rankingRows = ['advisor'=>array_merge($advisors,$leaders),'leader'=>$leaders,'manager'=>$managerResult['rows']];
         $result = ['ranking_layouts'=>(new HumanEfficiencyMetadataServices())->layouts($this->categories,$rankingRows),'categories'=>$this->categories,'beauty'=>$beautySummary,'cohorts'=>$cohorts,
             'leader_summary'=>$this->summary($leaders),'advisor_summary'=>$this->summary($advisors),
             'manager_summary'=>$this->summary($managerResult['rows']),
-            'personal_summary'=>$this->summary(array_merge($leaders,$advisors)), 'tables'=>$tables,
+            'personal_summary'=>$this->summary(array_merge($leaders,$advisors)), 'tables'=>$tables, 'store_cohorts'=>$storeCohorts,
             'warnings'=>$warnings,'scope'=>['store_ids'=>$stores,'range'=>$range],
             'source_explanations'=>$metadata['source_explanations'], 'data_as_of'=>date('Y-m-d H:i:s')];
         if ($this->detailCollector) {
@@ -130,7 +138,7 @@ final class HumanEfficiencyDashboardServices
             }
             return $this->detailCollector->result($all[$key]['name']??'当前范围');
         }
-        if (($input['action'] ?? '') === 'export') return $this->exportRows($entities, $managerResult['rows']);
+        if (($input['action'] ?? '') === 'export') return $this->exportRows($entities, $managerResult['rows']) + ['store_cohorts'=>$storeCohorts];
         return $this->publicResult($result);
     }
 
@@ -281,9 +289,15 @@ final class HumanEfficiencyDashboardServices
         foreach($history['days'] as $store=>$dates)foreach(array_unique($dates) as $id)$rows[$id]['_stores'][$store]='';
         $registered=\app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
         foreach($stores as $scopeStore){
+        // 在读取原有经理事实时顺带按店聚合，新增院店表不再重复读取同一批宽事实。
+        $cohort=['cash_cents'=>0,'consume_cents'=>0,'category_cents'=>[]];$monthlyActive=[];$storeVisits=[];
         foreach($registered->categoryRows('cash_performance','0',[$scopeStore],$range) as $f){
             $id=$ensure($resolve($f));$rows[$id]['_stores'][(int)$f['store_id']]=(string)($f['store_name']??'');
             $category=(int)($f['category_id']??0);
+            if(!$this->retainFacts){
+                $root=$this->categoryRoots[$category]??0;$cents=(int)$f['amount_cents'];
+                $cohort['cash_cents']+=$cents;$cohort['category_cents'][$root]=($cohort['category_cents'][$root]??0)+$cents;
+            }
             $this->append($rows[$id],array_merge($f,['cash_cents'=>(int)$f['amount_cents'],'sales_category_cents'=>[$category=>(int)$f['amount_cents']],'project_count'=>0,'consumption_cents'=>0,'service_visit_tenths'=>0,'service_fact_id'=>'']));
         }
         foreach($reader->services([$scopeStore],$range) as $f){
@@ -292,6 +306,10 @@ final class HumanEfficiencyDashboardServices
             if($member>0 && \app\services\query\metric\StoreCustomerVisitEligibility::allows($f))$rows[$id]['_active'][$member]=true;
             // 经理复用门店注册售后人次资格及会员日键，原单只在第一次出现时承载一人次。
             $visit=\app\services\query\metric\StoreCustomerVisitEligibility::dailyVisitKey($f);
+            if(!$this->retainFacts && $visit!==null){
+                $storeVisits[$visit]=true;
+                if($member>0)$monthlyActive[substr($f['business_date'],0,7).':'.$member]=true;
+            }
             $visitShare=$visit!==null && !isset($rows[$id]['_visits'][$visit]) ? 10 : 0;
             if($visit!==null)$rows[$id]['_visits'][$visit]=true;
             $rows[$id]['items']+=(float)$f['quantity'];
@@ -301,9 +319,11 @@ final class HumanEfficiencyDashboardServices
         }
         foreach($registered->categoryRows('consume_amount','0',[$scopeStore],$range) as $f){
             $id=$ensure($resolve($f));$rows[$id]['consume_cents']+=(int)$f['amount_cents'];
+            if(!$this->retainFacts)$cohort['consume_cents']+=(int)$f['amount_cents'];
             // 消耗明细保留独立事实，不拿人员劳动分配替代门店核销总额。
             if($this->detailCollector)$this->detailCollector->add($rows[$id],array_merge($f,['cash_cents'=>0,'project_count'=>0,'service_visit_tenths'=>0,'consumption_cents'=>(int)$f['amount_cents'],'active_eligible'=>false,'service_fact_id'=>'consumption:'.$f['fact_id']]));
         }
+        if(!$this->retainFacts)$this->storeCohortMetrics[$scopeStore]=$cohort+['active_month_count'=>count($monthlyActive),'visits'=>count($storeVisits)];
         }
         $names=Db::name('system_store')->whereIn('id',$stores)->column('name','id');
         $projection=(new HumanEfficiencyTargetProjector())->project($targets,$range,$history['days']);
