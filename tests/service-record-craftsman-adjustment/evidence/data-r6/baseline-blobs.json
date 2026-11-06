@@ -1,0 +1,5 @@
+{
+  "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "fe8d71d2bb1919e7c62baabffcc3a299aa29a8ce",
+  "后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php": "cb645656d25593c5d0a4eb1bcd724e59e9a72782",
+  "后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php": "ac7a253e0213b71ab5267fdbbe110399da00f48c"
+}

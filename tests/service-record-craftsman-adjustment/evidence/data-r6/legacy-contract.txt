@@ -1,0 +1,20 @@
+PASS entry and save share service detail permission snapshot
+PASS existing personnel overlay is reused in history mode
+PASS history adjustment retains local selections and supports organisation support craftsmen
+PASS checkout-selected support craftsmen remain visible when a zero-value labor fact is intentionally absent
+PASS reason is collected by a second dialog after assignment confirmation
+PASS history ratio uses current integer validation and shared cashier amount allocator
+PASS amount and ratio are linked while final manual allocations are retained
+PASS historical labor-only staff can receive both new consumption and labor allocations
+PASS legacy service records fall back to the effective labor-performance net amount
+PASS project count retains signed legacy facts and supports six-decimal current input
+PASS zero is an explicit adjusted project count instead of falling back to service quantity
+PASS adjustment is versioned idempotent and audited
+PASS old facts are reversed and replacement facts are appended
+PASS command is registered with a transaction policy
+PASS history adjustment uses the service record version instead of cashier workspace state
+PASS adjustment service does not write entitlement order refund or service source tables
+PASS salary report reads active labor facts and preserves six-decimal project counts
+PASS manual final allocation does not use a fixed project-total gate
+PASS 0.5 plus 1.0 remains 1.5 in report summary
+SERVICE_RECORD_CRAFTSMAN_ADJUSTMENT passed=19 failed=0

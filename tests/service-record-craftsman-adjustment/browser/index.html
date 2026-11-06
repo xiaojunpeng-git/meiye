@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>R6 当前岗位分配本地组件验证</title><div id="app"></div><script type="module">
+import {createApp,h,ref} from 'vue';
+import Overlay from '@/components/cashier/PersonnelPerformanceOverlay.vue';
+// Only synthetic personnel and the real shared component; no network business commands are sent.
+const staff=[{id:1,name:'测试美容师',position:'美容师',positionId:1,craftsmanPerformanceType:'commission',performanceIndependent:true,allocationGroupKey:'independent:1',laborWeight:100,allocationAmountCents:7700,projectCount:'1'}, {id:2,name:'测试店长',position:'店长',positionId:2,serviceCountsExcluded:true,performanceIndependent:true,allocationGroupKey:'independent:2',laborWeight:100,allocationAmountCents:7700,projectCount:'1'}];
+createApp({setup(){let result=ref('');return()=>h('main',[h('p','真实共享组件 / 合成77元项目 / 不写业务数据'),h(Overlay,{historyAdjustment:true,craftsmenCandidates:staff,selectedCraftsmen:staff,allocationTotalAmountCents:7700,showSalespeople:false,showGuides:false,showSalesManagers:false,onConfirm:v=>{result.value=JSON.stringify(v.craftsmen.map(x=>({amount:x.allocationAmountCents,ratio:x.laborWeight,manual:x.allocationAmountManual})))}}),h('output',{'aria-label':'确认结果',style:'position:fixed;bottom:0;z-index:9999;background:white'},result.value)])}}).mount('#app');
+</script></html>

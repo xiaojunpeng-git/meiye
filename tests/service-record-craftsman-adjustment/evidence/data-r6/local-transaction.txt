@@ -1,0 +1,15 @@
+PASS existing service fixture
+PASS two current job positions
+PASS local fixture has current excluded job
+PASS project consumption authority
+PASS current candidate
+PASS current candidate
+PASS real command {"status":"success","code":"","message":"\u670d\u52a1\u8bb0\u5f55\u624b\u827a\u4eba\u5df2\u4fee\u6539\u3002"}
+PASS saved 77/77 despite old 38.5/38.5 client amounts
+PASS current commission type ignores forbidden hand fee like checkout
+PASS current excluded job writes zero projects and hand fee
+PASS reopen matches saved amounts
+PASS current excluded job reopens with zero projects
+PASS missing consumption facts retain frozen project base, not 154 yuan labor sum
+PASS retry does not duplicate adjustment
+PASS local rehearsal rolled back all writes

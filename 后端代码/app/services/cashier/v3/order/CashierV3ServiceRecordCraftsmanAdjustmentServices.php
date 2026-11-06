@@ -36,6 +36,37 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $facts = $this->activeLaborFacts($source, false);
         $totalCents = $this->writeoffAmountCents($source, $scope->tenantId());
         $allocations = $this->presentAllocations($facts, $source, $operator);
+        // 原事实只用于审计；编辑草稿按当前岗位重建，不能把历史平分金额当分母。
+        $latest = Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
+            ->where('service_fact_id', (int)$source['id'])->where('status', 'succeeded')->order('id desc')->find();
+        $currentCandidates = [];
+        foreach ($this->candidates($operator->storeId()) as $candidate) $currentCandidates[(int)$candidate['staffId']] = $candidate;
+        foreach ($this->organizationCraftsmenByEmployee(array_column($allocations, 'employeeId'), $operator, false) as $candidate) $currentCandidates[(int)$candidate['staffId']] = $candidate;
+        $saved = [];
+        foreach ((array)json_decode((string)($latest['after_snapshot_json'] ?? '[]'), true) as $row) $saved[(int)$row['employeeId']] = $row;
+        $currentExcluded = CashierV3ServicePositionExclusion::matches(array_column($allocations, 'staffId'), $operator->storeId());
+        foreach ($allocations as &$row) {
+            $row['serviceCountsExcluded'] = isset($currentExcluded[(int)$row['staffId']]);
+            $candidate = $currentCandidates[(int)$row['staffId']] ?? [];
+            foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey', 'craftsmanPerformanceType', 'serviceCountsExcluded'] as $field) {
+                if (array_key_exists($field, $candidate)) $row[$field] = $candidate[$field];
+            }
+            if (($row['craftsmanPerformanceType'] ?? '') === 'commission' || !empty($row['serviceCountsExcluded'])) $row['laborFeeCents'] = 0;
+            if (!empty($row['serviceCountsExcluded'])) $row['projectCount'] = '0';
+            $prior = $saved[(int)$row['employeeId']] ?? [];
+            // 仅本规则保存且岗位组未变化时恢复明确的手填/比例；旧快照不能充当当前默认分配。
+            $sameGroup = ($prior['allocationGroupKey'] ?? null) === ($row['allocationGroupKey'] ?? 'normal');
+            $row['laborWeight'] = $sameGroup && isset($prior['currentRuleAllocation']) ? ($prior['laborWeight'] ?? null) : null;
+            $row['allocationAmountManual'] = $sameGroup && !empty($prior['currentRuleAllocation']) && !empty($prior['allocationAmountManual']);
+        }
+        unset($row);
+        $allocations = ServiceCraftsmanCurrentAllocation::calculate($allocations, $totalCents);
+        foreach ($allocations as &$row) {
+            $row['allocationAmount'] = $this->money((int)$row['allocationAmountCents']);
+            $row['laborFeeAmount'] = $this->money((int)$row['laborFeeCents']);
+        }
+        unset($row);
+
         return [
             'contractVersion' => self::CONTRACT_VERSION,
             'serviceFactId' => (int)$source['id'],
@@ -49,8 +80,9 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             'recordVersion' => $this->recordVersion($source, $scope->tenantId()),
             'allocations' => $allocations,
             'craftsmenCandidates' => $this->candidates($operator->storeId()),
-            'projectCountStep' => '0.5',
-            'projectCountDecimals' => 1,
+            // 与共用收银控件一致：仅项目数量允许最多六位小数。
+            'projectCountStep' => '0.000001',
+            'projectCountDecimals' => 6,
         ];
     }
 
@@ -93,17 +125,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $before = $this->presentAllocations($currentFacts, $source, $operator);
         $totalCents = $this->writeoffAmountCents($source, $dataScope->tenantId());
         $after = $this->normalizeAllocations($payload['allocations'] ?? null, $operator, $totalCents);
-        // 调整只能沿用原单已冻结的免计结果，不能用今天的岗位配置倒改历史。
-        $excluded = CashierV3ServicePositionExclusion::frozenEmployeeIds(
-            (string)($source['craftsmen_snapshot_json'] ?? ''), (int)$source['store_id']
-        );
-        foreach ($after as &$allocation) {
-            if (isset($excluded[$allocation['employeeId']])) {
-                $allocation['laborFeeCents'] = 0;
-                $allocation['projectCount'] = '0';
-            }
-        }
-        unset($allocation);
+        // 本次改单生成新事实，按当前岗位免计规则处理；原事实由下方冲销保留。
         $now = time();
         $operationId = 'SRA-' . strtoupper(substr(hash_hmac(
             'sha256', $dataScope->tenantId() . '|' . $source['id'] . '|' . $commandKey, $this->secret()
@@ -125,7 +147,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'contractVersion' => self::CONTRACT_VERSION, 'operationId' => $operationId,
                 'operationNo' => $operationNo, 'serviceFactId' => (int)$source['id'],
                 'reason' => $reason, 'allocationTotalAmountCents' => $totalCents,
-                'allocationInputMode' => 'manual',
+                'allocationInputMode' => 'current_position_auto_or_manual',
             ],
         ]);
 
@@ -212,6 +234,13 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         foreach ($rows as $row) $amount += (int)($row['amount_cents'] ?? 0);
         if ($amount > 0) return $amount;
 
+        // 缺少项目消耗事实的旧记录，复用首次调整冻结的项目基数。独立岗位可各分一份，
+        // 新劳动事实合计不再等于项目金额，不能在再次编辑时将其相加作为新的基数。
+        $frozenBase = Db::name(self::OPERATION_TABLE)->where('tenant_id', $tenantId)
+            ->where('service_fact_id', (int)$source['id'])->where('status', 'succeeded')
+            ->order('id asc')->value('allocation_total_amount_cents');
+        if ($frozenBase !== null) return max(0, (int)$frozenBase);
+
         // 兼容已存在的历史服务记录：旧事实表没有保存项目级核销金额时，
         // 以该服务有效劳动业绩的净额作为本次必须重分配的固定金额。后续
         // 调整写入的反向及新正向事实会相互抵消，净额仍保持原项目金额。
@@ -219,6 +248,9 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             ->where('checkout_request_id', (string)$source['checkout_request_id'])
             ->where('source_line_id', (string)$source['source_line_id'])
             ->where('performance_type', 'labor_performance_allocated')->where('status', 'effective')
+            // Independent manager salary is a second allocation group, never
+            // an authority for the service's underlying consumption amount.
+            ->whereRaw("(rule_code_snapshot IS NULL OR rule_code_snapshot<>'STORE-MANAGER-INDEPENDENT-BACKFILL-V1')")
             ->sum('amount_cents');
         return max(0, $laborAmount);
     }
@@ -465,7 +497,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             ->where('ss.cashier_craftsman_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.craftsman_performance_type,e.name employee_name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name position_name,p.performance_independent')
             ->order('ss.id', 'asc')->select()->toArray();
-        return array_map(static function (array $row): array {
+        $excluded = CashierV3ServicePositionExclusion::matches(array_column($rows, 'id'), $storeId);
+        return array_map(static function (array $row) use ($excluded): array {
             $positionId = (int)($row['position_id'] ?? 0);
             $independent = (int)($row['performance_independent'] ?? 0) === 1;
             return [
@@ -477,7 +510,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
                 'employeeTypeCode' => (string)$row['employment_type_code'],
                 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
-                'craftsmanPerformanceType' => 'commission_labor',
+                'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['craftsman_performance_type'] ?? null),
+                'serviceCountsExcluded' => isset($excluded[(int)$row['id']]),
                 'craftsmanEligible' => true, 'selectable' => true,
             ];
         }, $rows);
@@ -520,8 +554,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             ->whereIn('oe.employee_id', $employeeIds)
             ->where('oe.status', 1)->where('oe.is_del', 0)
             ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('e.id employee_id,e.name employee_name,e.employment_type_code,e.employment_type_version,MAX(o.name) organization_name')
-            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version');
+            ->field('e.id employee_id,e.name employee_name,e.employment_type_code,e.employment_type_version,e.default_craftsman_performance_type,MAX(o.name) organization_name')
+            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version,e.default_craftsman_performance_type');
         if ($lock) $query->lock(true);
         $profiles = [];
         foreach ($query->select()->toArray() as $row) {
@@ -535,7 +569,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'employeeType' => (string)($row['employment_type_code'] ?? 'internal'),
                 'employeeTypeVersion' => max(1, (int)($row['employment_type_version'] ?? 0)),
                 'personnelSource' => 'other',
-                'craftsmanPerformanceType' => 'commission_labor',
+                'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['default_craftsman_performance_type'] ?? null),
+                'allocationGroupKey' => 'normal', 'positionId' => 0, 'performanceIndependent' => false,
                 'organizationName' => trim((string)($row['organization_name'] ?? '')),
             ];
         }
@@ -583,7 +618,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                     'employeeName' => trim((string)$row['name']) ?: (string)$row['staff_name'],
                     'employeeType' => (string)$row['employment_type_code'],
                     'employeeTypeVersion' => max(1, (int)$row['employment_type_version']),
-                    'craftsmanPerformanceType' => 'commission_labor',
+                    'craftsmanPerformanceType' => \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['craftsman_performance_type'] ?? null),
                     'personnelSource' => 'store',
                     'positionId' => $positionId,
                     'staffJobPositionId' => (int)($row['staff_job_position_id'] ?? 0),
@@ -605,26 +640,35 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 throw CashierV3CommandException::invalidContext('所选支援手艺人已停用或不在当前组织范围内。');
             }
         }
+        $currentExclusions = CashierV3ServicePositionExclusion::matches(array_keys($byId), $operator->storeId(), true);
         $rows = [];
         $seenEmployeeIds = [];
         foreach ($input as $raw) {
             $staffId = (int)($raw['staffId'] ?? $raw['id']); $staff = $byId[$staffId] ?? null;
             if (!is_array($staff)) throw CashierV3CommandException::invalidContext('所选手艺人已失效，请重新选择。');
+            // 页面打开后岗位改变时要求刷新，不能将旧组比例套到新的独立岗位。
+            if (isset($raw['allocationGroupKey']) && (string)$raw['allocationGroupKey'] !== (string)$staff['allocationGroupKey']) {
+                throw CashierV3CommandException::invalidContext('人员岗位规则已变化，请刷新后重新分配。');
+            }
             $employeeId = (int)$staff['employeeId'];
             if ($employeeId <= 0 || isset($seenEmployeeIds[$employeeId])) {
                 throw CashierV3CommandException::invalidContext('同一员工不能重复分配，请重新选择。');
             }
             $seenEmployeeIds[$employeeId] = true;
             $amount = $this->nonnegativeInteger($raw['allocationAmountCents'] ?? null, '消耗业绩');
-            if ($amount % 100 !== 0) {
+            if (($raw['allocationAmountManual'] ?? false) === true && $amount % 100 !== 0) {
                 throw CashierV3CommandException::invalidContext('消耗业绩必须按整元分配。', [
                     'reason' => 'service_adjust_amount_not_whole_yuan', 'staffId' => $staffId, 'amountCents' => $amount,
                 ]);
             }
             $fee = $this->nonnegativeInteger($raw['laborFeeCents'] ?? 0, '手工费');
             $projectCount = $this->projectCount($raw);
-            // 调整写入的是新事实，沿用旧服务快照做来源追溯，但不继承已取消的限制。
-            $type = 'commission_labor';
+            // 与收银候选/结账共用当前手艺人类型和岗位免计；客户端不能绕过禁填字段。
+            $type = \app\services\employee\EmployeeCraftsmanPerformanceTypeServices::checkoutType($staff['craftsmanPerformanceType'] ?? null);
+            $excluded = isset($currentExclusions[$staffId]);
+            if ($type === 'commission' || $excluded) $fee = 0;
+            if ($excluded) $projectCount = '0';
+            if ($fee % 100 !== 0) throw CashierV3CommandException::invalidContext('手工费必须为整元。');
             $rows[] = [
                 'staffId' => $staffId, 'employeeId' => $employeeId,
                 'employeeName' => (string)$staff['employeeName'],
@@ -640,10 +684,15 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'allocationGroupKey' => (string)($staff['allocationGroupKey'] ?? 'normal'),
                 'isPointCustomer' => !empty($raw['isPointCustomer']) || !empty($raw['marked']),
                 'allocationAmountCents' => $amount, 'laborFeeCents' => $fee,
+                'laborWeight' => $raw['laborWeight'] ?? null,
+                'allocationAmountManual' => ($raw['allocationAmountManual'] ?? false) === true,
+                'currentRuleAllocation' => true,
+                'serviceCountsExcluded' => $excluded,
                 'projectCount' => $projectCount,
             ];
         }
-        return $rows;
+        // 锁定后的岗位是最终权威；忽略客户端自动金额，防止旧页面继续写入平分结果。
+        return ServiceCraftsmanCurrentAllocation::calculate($rows, $totalCents);
     }
 
     /** Preserve exact entered decimals while accepting old half-unit snapshots. */
@@ -732,6 +781,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $row['labor_fee_amount_cents'] = (int)$allocation['laborFeeCents'];
         $row['project_count_half_units'] = 0;
         $row['project_count_decimal'] = (string)$allocation['projectCount'];
+        // Current rules apply to replacement facts; historical manager markers stay on reversed originals.
         $row['rule_code_snapshot'] = 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
         $row['rule_name_snapshot'] = '服务记录手艺人调整'; $row['rule_version_snapshot'] = 'v1';
         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));

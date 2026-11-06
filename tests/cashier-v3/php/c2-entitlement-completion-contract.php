@@ -13,6 +13,7 @@ require_once $backendRoot . '/app/services/cashier/v3/CashierV3ResourceScope.php
 require_once $backendRoot . '/app/services/cashier/v3/CashierV3ResourceKindCatalog.php';
 require_once $backendRoot . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionContractException.php';
 require_once $backendRoot . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionLockPlanner.php';
+require_once $backendRoot . '/app/services/cashier/v3/CashierV3CraftsmanAmountAllocation.php';
 require_once $backendRoot . '/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php';
 
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionContractException;

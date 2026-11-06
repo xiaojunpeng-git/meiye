@@ -1,0 +1,12 @@
+{
+  "candidate_fingerprint": "64e217c91c1cf517ab3ffc21cbed664f1afe4297f1782e98ad82ddc7c6e016df",
+  "user_answer": "固定候选验收通过",
+  "date": "2026-11-06",
+  "scope": "DATA-R6 current-position craftsman adjustment; local commit only",
+  "commit_parent": "bf83c867581d4af20a8e673e548a4dbe823d05e9",
+  "branch": "fix/data-r6-current-position-allocation",
+  "deployment": false,
+  "push": false,
+  "parent_dependency_check": "Approved parent personnelDefaultAllocation.js passed the same current-position JS tests. Unrelated uncommitted helper changes excluded.",
+  "shared_workspace": "HEAD and shared index remain unchanged; dedicated Git index, no new source worktree."
+}

@@ -1,0 +1,41 @@
+--- a/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php
++++ b/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php
+@@ -1714,36 +1714,8 @@
+                 throw self::failure('craftsman_not_active_eligible_in_store', ['staffId' => $staffId]);
+             }
+         }
+-        $amountByStaffId = [];
+-        $automaticGroups = [];
+-        foreach ($authorityIds as $staffId) {
+-            $row = $byId[$staffId];
+-            if (!empty($row['performanceAmountManual'])) {
+-                $amountByStaffId[$staffId] = max(0, (int)($row['performanceAmountCents'] ?? 0));
+-                continue;
+-            }
+-            $groupKey = !empty($row['performanceIndependent'])
+-                ? (string)($row['allocationGroupKey'] ?? 'normal') : 'normal';
+-            $automaticGroups[$groupKey][] = $row;
+-        }
+-        // 先锁定每组应分整元，再把向下取整的尾差给末人；不能把 19.5 元
+-        // 直接写入只接受整元的劳动事实。手填金额保持原值，不参与补差。
+-        $baseYuan = intdiv($amountCents, 100);
+-        foreach ($automaticGroups as $group) {
+-            $weightTotal = array_sum(array_map(static function (array $row): int {
+-                return max(0, (int)($row['laborWeight'] ?? 0));
+-            }, $group));
+-            $targetYuan = intdiv($baseYuan * $weightTotal + 50, 100);
+-            $allocatedYuan = 0;
+-            $lastIndex = count($group) - 1;
+-            foreach ($group as $index => $row) {
+-                $yuan = $index === $lastIndex
+-                    ? $targetYuan - $allocatedYuan
+-                    : intdiv($baseYuan * max(0, (int)($row['laborWeight'] ?? 0)), 100);
+-                $amountByStaffId[(int)$row['staffId']] = $yuan * 100;
+-                $allocatedYuan += $yuan;
+-            }
+-        }
++        // 与服务记录改单共用同一自动分组及整元尾差算法，避免两入口各自计算。
++        $amountByStaffId = \app\services\cashier\v3\CashierV3CraftsmanAmountAllocation::amounts($amountCents, $authorityRows);
+         $allocations = [];
+         foreach ($authorityRows as $index => $row) {
+             $staffId = (int)$row['staffId'];
