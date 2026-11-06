@@ -695,40 +695,59 @@ function inventoryErrorMessage(error, fallback) {
   return message || fallback
 }
 
-async function acceptCatalogRows(rows) {
+async function acceptCatalogRows(rows, quantities = new Map()) {
   catalogError.value = ''
-  const selectedSkuIds = new Set(selectedRows.value.map((item) => Number(item.sku_id)))
+  const selectedBySku = new Map(selectedRows.value.map((item) => [Number(item.sku_id), item]))
   for (const row of rows) {
+    const skuId = Number(row.sku_id)
+    const quantity = quantities.get(skuId)
+    const existing = selectedBySku.get(skuId)
     if (props.pageKey === 'count' && Number(row.no_expiry_management) !== 1 && Array.isArray(row.count_batches) && row.count_batches.length) {
-      // 选品以仓库当前批次为粒度；相同 SKU 的每个批次只补一次，保留已经录入的实盘数。
-      if (selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
+      // 一个 SKU 数量只能对应唯一批次，避免把实盘数重复填到多个批次。
+      const countedQuantity = row.count_batches.length === 1 ? quantity : undefined
+      if (selectedRows.value.some((item) => Number(item.sku_id) === skuId && item.count_mode !== 'BATCH')) {
         catalogError.value = `「${row.product_name}」已有按总量盘点的行，请删除该行后再加载库存批次。`
         continue
       }
-      const existingBatches = new Set(selectedRows.value.filter((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode === 'BATCH').map((item) => String(item.surplus_batch_no)))
+      const existingBatches = new Map(selectedRows.value.filter((item) => Number(item.sku_id) === skuId && item.count_mode === 'BATCH').map((item) => [String(item.surplus_batch_no), item]))
       for (const batch of row.count_batches) {
-        if (existingBatches.has(String(batch.batch_no))) continue
-        selectedRows.value.push(countBatchRow(row, batch))
-        existingBatches.add(String(batch.batch_no))
+        const batchNo = String(batch.batch_no)
+        const existingBatch = existingBatches.get(batchNo)
+        if (existingBatch) {
+          if (countedQuantity !== undefined) existingBatch.counted_quantity = countedQuantity
+          continue
+        }
+        const selected = countBatchRow(row, batch)
+        if (countedQuantity !== undefined) selected.counted_quantity = countedQuantity
+        selectedRows.value.push(selected)
+        existingBatches.set(batchNo, selected)
       }
       continue
     }
-    if (selectedSkuIds.has(Number(row.sku_id)) && props.pageKey !== 'count') continue
-    if (props.pageKey === 'count' && selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
+    // 只有显式填写的数量才覆盖已有草稿行；条码与勾选仍走原有添加规则。
+    if (existing && props.pageKey !== 'count') {
+      if (quantity !== undefined) existing.quantity = quantity
+      continue
+    }
+    if (props.pageKey === 'count' && existing?.count_mode === 'SKU' && Number(row.no_expiry_management) === 1 && quantity !== undefined) {
+      existing.counted_quantity = quantity
+      continue
+    }
+    if (props.pageKey === 'count' && selectedRows.value.some((item) => Number(item.sku_id) === skuId && item.count_mode !== 'BATCH')) {
       catalogError.value = '该商品已有按总量盘点的明细，请删除该行后再按不同批次添加。'
       continue
     }
-    const selected = { ...row, batch_no: '', manufactured_date: '', manufactured_date_bad_input: false, expire_date: '', expire_date_bad_input: false, quantity: '1', unit_cost: '0.00', detail_remark: '', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
+    const selected = { ...row, batch_no: '', manufactured_date: '', manufactured_date_bad_input: false, expire_date: '', expire_date_bad_input: false, quantity: props.pageKey === 'count' ? '1' : (quantity ?? '1'), unit_cost: '0.00', detail_remark: '', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
     if (props.pageKey === 'count') {
       // 商品目录已经按当前库存主体返回权威可用数；避免对每个 SKU 再发一次库存查询。
       // 手工重复选择形成独立待填批次，不能复制商品总库存到每个批次。
       // 不管理有效期按规格总量盘点；内部成本层由服务端保留，不要求员工挑选系统批次。
       selected.count_mode = Number(row.no_expiry_management) === 1 ? 'SKU' : 'BATCH'
       selected.book_quantity = selected.count_mode === 'SKU' ? selected.available_quantity : '0'
-      selected.counted_quantity = ''
+      selected.counted_quantity = quantity ?? ''
     }
     selectedRows.value.push(selected)
-    selectedSkuIds.add(Number(row.sku_id))
+    selectedBySku.set(skuId, selected)
   }
   productSelectorVisible.value = false
 }
@@ -1586,7 +1605,7 @@ function submitPrimaryEditor() {
         </footer>
   </section>
   <!-- 盘点每次仅选择本次新增批次的商品，不把已有批次回填为全选后再次添加；其他业务维持原选择逻辑。 -->
-  <InventoryProductSelector :visible="productSelectorVisible" :selected-rows="pageKey === 'count' ? [] : selectedRows" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productSelectorVisible = false" @confirm="acceptCatalogRows" />
+  <InventoryProductSelector :visible="productSelectorVisible" :selected-rows="pageKey === 'count' ? [] : selectedRows" :catalog-api="catalogApi" :catalog-query="catalogQuery" :quantity-mode="pageKey === 'count' ? 'count' : 'document'" @close="productSelectorVisible = false" @confirm="acceptCatalogRows" />
 </template>
 
 <style scoped>

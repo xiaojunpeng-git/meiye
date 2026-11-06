@@ -104,16 +104,21 @@ export function createInventoryApi(options = {}) {
   const prefix = String(options.prefix || import.meta.env?.VITE_INVENTORY_API_PREFIX || DEFAULT_PREFIX).replace(/\/$/, '')
   const apiRootPrefix = String(options.apiRootPrefix || prefix.replace(/\/product\/inventory$/, '')).replace(/\/$/, '')
 
-  async function request(path, requestOptions = {}, requestPrefix = prefix) {
-    const token = tokenFromBrowser(browserWindow)
+  // Query and export serialize the exact same filter payload, including structured filters.
+  function withInventoryQuery(path, parameters = {}) {
     const [rawPath, pathQuery = ''] = String(path).split('?', 2)
     const queryParams = new URLSearchParams(pathQuery)
-    Object.entries(requestOptions.query || {}).forEach(([key, value]) => {
+    Object.entries(parameters).forEach(([key, value]) => {
       if (value === '' || value === null || value === undefined) return
       queryParams.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value))
     })
     const serializedQuery = queryParams.toString()
-    const query = serializedQuery ? `?${serializedQuery}` : ''
+    return serializedQuery ? `${rawPath}?${serializedQuery}` : rawPath
+  }
+
+  async function request(path, requestOptions = {}, requestPrefix = prefix) {
+    const token = tokenFromBrowser(browserWindow)
+    const url = withInventoryQuery(path, requestOptions.query)
     const method = requestOptions.method || 'GET'
     // Only the transfer list opts into gateway recovery; never replay a stock-changing command.
     const retryGatewayRead = method === 'GET' && requestOptions.retryTransientGateway === true
@@ -122,7 +127,7 @@ export function createInventoryApi(options = {}) {
       // 大盘点仍是一张原子单据；仅延长该命令的等待时间，不拆成会部分入账的小单。
       const timer = controller ? setTimeout(() => controller.abort(), requestOptions.timeoutMs || TIMEOUT_MS) : null
       try {
-        const response = await fetchImpl(`${requestPrefix}${rawPath}${query}`, {
+        const response = await fetchImpl(`${requestPrefix}${url}`, {
           method,
           credentials: 'include',
           cache: 'no-store',
@@ -162,7 +167,7 @@ export function createInventoryApi(options = {}) {
     }
   }
 
-  async function download(path) {
+  async function download(path, label = '模板') {
     const token = tokenFromBrowser(browserWindow)
     const response = await fetchImpl(`${prefix}${path}`, {
       method: 'GET', credentials: 'include', cache: 'no-store',
@@ -175,9 +180,9 @@ export function createInventoryApi(options = {}) {
       const raw = await response.text()
       let body = null
       try { body = raw ? JSON.parse(raw) : null } catch (_) {}
-      throw new Error(messageOf(body, response.status === 401 || response.status === 403 ? '登录已失效，请重新登录。' : '模板下载失败。'))
+      throw new Error(messageOf(body, response.status === 401 || response.status === 403 ? '登录已失效，请重新登录。' : `${label}下载失败。`))
     }
-    if (!contentType.includes('spreadsheetml.sheet')) throw new Error('模板服务未返回有效的 Excel 文件。')
+    if (!contentType.includes('spreadsheetml.sheet')) throw new Error(`${label}服务未返回有效的 Excel 文件。`)
     return response.blob()
   }
 
@@ -215,11 +220,27 @@ export function createInventoryApi(options = {}) {
     ...(options.listPaths || {})
   })
 
+  const listExportPaths = {
+    unified: '/v3/unified-query/operational',
+    'batch-stock': '/v3/unified-query/batch-stock',
+    'hq-inbound': '/v3/hq/inbound',
+    'hq-outbound': '/v3/hq/outbound',
+    'hq-transfer': '/v3/hq/cross-transfer',
+    'hq-stock': '/v3/hq/product-summary',
+    'store-stock': listPaths.productSummary,
+    usage: listPaths.usage,
+  }
+
   return Object.freeze({
     list(page, query = {}) {
       const path = listPaths[page]
       if (!path) throw new Error(`库存页面 ${page} 暂不支持列表查询。`)
       return request(path, { query })
+    },
+    // The submitted list route keeps its existing account and warehouse authorization.
+    downloadListExport({ kind, payload }) {
+      if (!Object.hasOwn(listExportPaths, kind)) throw new Error('当前库存页面暂不支持导出。')
+      return download(withInventoryQuery(listExportPaths[kind], { ...payload, list_export: 'xlsx' }), '库存导出')
     },
     usageStatistics(query = {}) { return request('/salon/usage/statistics', { query }) },
     movementStatistics(query = {}) { return request('/v3/movement-statistics', { query }) },

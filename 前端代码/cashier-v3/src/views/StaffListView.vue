@@ -80,7 +80,7 @@ function defaultEditorValues() {
     staffName: '', phone: '', avatar: '/static/images/staff/avatar_male.png', account: '', password: '',
     positionIds: [], scopeMode: 'personal', scopeVersion: 0, scopeTouched: false,
     workMemberId: 0, notify: false, status: true, statusVersion: 0,
-    salespersonEnabled: true, craftsmanEnabled: true, mobileEnabled: false, isCustomer: false, customerUrl: '',
+    salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission_labor', mobileEnabled: false, isCustomer: false, customerUrl: '',
     isReservable: true, employeeNumber: '', idCard: '', age: '', joinArea: '', joinDate: '',
     birthdayDate: '', birthdayType: 1, birthdayArea: '', nowArea: '', contractBegin: '',
     contractEnd: '', salaryStatus: true, department: '', employmentTypeCode: 'internal', employmentTypeVersion: 1
@@ -88,6 +88,8 @@ function defaultEditorValues() {
 }
 
 const editorValues = reactive(defaultEditorValues())
+// 恢复原有手艺人服务业绩类型单选控件；可修改模式显示，计算法沿用现有隐藏行为。
+const craftsmanTypeEditable = computed(() => state.storeDisplayOptions?.laborFeeVisible === true)
 const selectedPositionOptions = computed(() => {
   const selected = new Set((Array.isArray(editorValues.positionIds) ? editorValues.positionIds : []).slice(0, 1).map(Number))
   return positionOptions.value.filter((option) => selected.has(Number(option.value)))
@@ -262,6 +264,8 @@ function mapDetail(detail) {
     status: Number(detail?.status ?? 1) === 1, statusVersion: Number(detail?.status_version ?? 0),
     salespersonEnabled: Number(detail?.cashier_salesperson_enabled ?? 1) === 1,
     craftsmanEnabled: Number(detail?.cashier_craftsman_enabled ?? 1) === 1,
+    craftsmanPerformanceType: ['commission', 'labor', 'commission_labor'].includes(String(detail?.craftsman_performance_type || ''))
+      ? String(detail.craftsman_performance_type) : 'commission',
     isCustomer: Number(detail?.is_customer || 0) === 1,
     mobileEnabled: Number(detail?.mobile_enabled || 0) === 1,
     customerUrl: String(detail?.customer_url || ''), isReservable: Number(detail?.is_reservable ?? 1) === 1,
@@ -333,7 +337,7 @@ async function saveEditor() {
   editorSaving.value = true
   editorError.value = ''
   try {
-    await saveStoreStaff(editorStaffId.value, editorValues)
+    await saveStoreStaff(editorStaffId.value, editorValues, { craftsmanTypeEditable: craftsmanTypeEditable.value })
     editorOpen.value = false
     await queryStaff(lastSuccessfulQuery.value || initialQuery(queryCapability.value), false)
   } catch (error) {
@@ -431,6 +435,7 @@ async function onAvatarFileChange(event) {
               <label class="staff-editor__toggle"><input v-model="editorValues.salespersonEnabled" type="checkbox"><span>可作为销售人：</span></label>
               <label class="staff-editor__toggle"><input v-model="editorValues.craftsmanEnabled" type="checkbox"><span>可作为手艺人：</span></label>
               <fieldset v-if="editorValues.salespersonEnabled" class="staff-editor__choice-field"><legend>人员类型</legend><label><input v-model="editorValues.employmentTypeCode" type="radio" value="internal"><span>内部员工</span></label><label><input v-model="editorValues.employmentTypeCode" type="radio" value="partner"><span>合作方</span></label></fieldset>
+              <fieldset v-if="craftsmanTypeEditable && editorValues.craftsmanEnabled" class="staff-editor__choice-field"><legend>手艺人服务业绩类型</legend><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission"><span>消耗业绩</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="labor"><span>手工费</span></label><label><input v-model="editorValues.craftsmanPerformanceType" type="radio" value="commission_labor"><span>消耗业绩+手工费</span></label></fieldset>
               <label class="staff-editor__toggle"><input v-model="editorValues.status" type="checkbox"><span>在职状态：</span></label>
             </div>
             <div v-show="editorTab === 'scope'" class="staff-editor__section">

@@ -49,7 +49,6 @@ const scope = computed(() => dashboard.value.scope || {})
 const trend = computed(() => dashboard.value.trend || {})
 const ranking = computed(() => dashboard.value.ranking || {})
 const isPlatform = computed(() => dashboard.value.mode === 'platform')
-const dashboardTitle = computed(() => isPlatform.value ? '运营概况' : '运营概况')
 const rankingTitle = computed(() => ranking.value.title || '人员排行')
 const rankingRole = computed(() => ranking.value.role || 'sales')
 const rankingRoleOptions = computed(() => Array.isArray(ranking.value.roleOptions) ? ranking.value.roleOptions : [])
@@ -65,11 +64,7 @@ const localScope = ref({
   organization: null,
   store: null
 })
-// The shared picker changes dates only; organization and query timing stay put.
-const queryPeriod = computed({
-  get: () => ({ min: localScope.value.start, max: localScope.value.end }),
-  set: range => { localScope.value.start = range.min; localScope.value.end = range.max }
-})
+const queryPeriod = computed(() => ({ min: localScope.value.start, max: localScope.value.end }))
 
 watch(
   scope,
@@ -158,6 +153,12 @@ async function queryDashboard(action, values = {}) {
 
 async function applyScope() {
   return queryDashboard('query-business-dashboard-summary')
+}
+
+function applyPeriod({ min, max }) {
+  // 日期控件仅在确认或清空时提交，卡片、趋势和排行走同一次看板查询。
+  localScope.value = { ...localScope.value, start: min, end: max }
+  return applyScope()
 }
 
 async function selectScopeEntity(entityType) {
@@ -305,18 +306,8 @@ function aggregationLabel() {
 
 <template>
   <section class="business-dashboard-page" aria-label="运营概况">
-    <header class="business-dashboard-page__header">
-      <div>
-        <div class="business-dashboard-page__eyebrow">门店经营</div>
-        <h2>{{ dashboardTitle }}</h2>
-      </div>
-      <div class="business-dashboard-page__actions">
-        <button type="button" class="button button--primary" @click="applyScope">刷新数据</button>
-      </div>
-    </header>
-
     <section class="business-dashboard-filter" aria-label="运营概况筛选条件">
-      <div><UnifiedQueryDateRange v-model="queryPeriod" label="运营概况查询周期" /></div>
+      <div><UnifiedQueryDateRange :model-value="queryPeriod" label="运营概况查询周期" @change="applyPeriod" /></div>
       <template v-if="isPlatform">
         <label class="business-dashboard-select-field">
           <span>组织</span>
@@ -453,13 +444,8 @@ function aggregationLabel() {
 
 <style scoped>
 .business-dashboard-page { display: grid; align-content: start; gap: 14px; width: 100%; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; padding: 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; background: #f5f7fa; }
-.business-dashboard-page__header, .business-dashboard-filter, .business-dashboard-data-status, .business-dashboard-panel { border: 1px solid #dde4ed; border-radius: 12px; background: #fff; }
-.business-dashboard-page__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px; }
-.business-dashboard-page__eyebrow { margin-bottom: 4px; color: #2878c9; font-size: 12px; font-weight: 700; letter-spacing: .05em; }
-.business-dashboard-page__header h2, .business-dashboard-panel h3 { margin: 0; color: #1f2329; }
-.business-dashboard-page__header h2 { font-size: 21px; }
-.business-dashboard-page__header p { max-width: 720px; margin: 7px 0 0; color: #697586; font-size: 13px; line-height: 1.65; }
-.business-dashboard-page__actions { display: flex; flex: none; gap: 8px; }
+.business-dashboard-filter, .business-dashboard-data-status, .business-dashboard-panel { border: 1px solid #dde4ed; border-radius: 12px; background: #fff; }
+.business-dashboard-panel h3 { margin: 0; color: #1f2329; }
 .business-dashboard-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px 18px; }
 .business-dashboard-filter > label, .business-dashboard-filter__fixed-scope { display: grid; gap: 6px; min-width: 154px; color: #697586; font-size: 12px; }
 .business-dashboard-filter input, .business-dashboard-filter select, .business-dashboard-select-field > button:first-of-type { min-height: 34px; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d9e1eb; border-radius: 7px; background: #fff; color: #303133; font: inherit; }
@@ -518,5 +504,5 @@ function aggregationLabel() {
 .business-dashboard-loading, .business-dashboard-empty { display: grid; min-height: 150px; align-content: center; justify-content: center; color: #8a94a3; font-size: 13px; text-align: center; }
 .business-dashboard-metrics > .business-dashboard-empty { grid-column: 1 / -1; border: 1px dashed #cfd9e4; border-radius: 10px; background: #fff; }
 @media (max-width: 1220px) { .business-dashboard-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } .business-dashboard-panels { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .business-dashboard-page { padding: 12px; } .business-dashboard-page__header { display: grid; } .business-dashboard-page__actions { flex-wrap: wrap; } .business-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .business-dashboard-panel > header { display: grid; } .business-dashboard-ranking__controls { justify-content: start; } }
+@media (max-width: 760px) { .business-dashboard-page { padding: 12px; } .business-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .business-dashboard-panel > header { display: grid; } .business-dashboard-ranking__controls { justify-content: start; } }
 </style>

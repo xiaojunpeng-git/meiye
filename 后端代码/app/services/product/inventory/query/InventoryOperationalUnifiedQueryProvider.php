@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory\query;
 
+use app\services\product\inventory\InventoryDocumentCreatorScope;
+
 use app\services\query\UnifiedQueryCustomFieldKeyCollector;
 use app\services\query\UnifiedQueryCustomFieldServices;
 use app\services\query\UnifiedQueryExecutionServices;
@@ -128,21 +130,23 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         $locationIds = array_values(array_unique(array_map('intval', (array)(($context['scope_dimensions'] ?? [])['location_id'] ?? []))));
         if (!$locationIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存业务查询缺少服务端仓库范围。', []);
         $dateRange = $this->businessDateRange($payload);
+        $creator = $this->selectedCreator($context, $payload);
         $canViewCost = in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)$context['permissions'], true);
         switch ($this->pageCode()) {
-            case 'inventory_inbound': $rows = $this->documentRows($tenantId, $scopeStoreIds, $locationIds, 'manual_inbound', $canViewCost, $dateRange); break;
-            case 'inventory_outbound': $rows = $this->documentRows($tenantId, $scopeStoreIds, $locationIds, ['manual_outbound', 'presale_claim_outbound'], $canViewCost, $dateRange); break;
+            case 'inventory_inbound': $rows = $this->documentRows($tenantId, $scopeStoreIds, $locationIds, 'manual_inbound', $canViewCost, $dateRange, $creator); break;
+            case 'inventory_outbound': $rows = $this->documentRows($tenantId, $scopeStoreIds, $locationIds, ['manual_outbound', 'presale_claim_outbound'], $canViewCost, $dateRange, $creator); break;
             case 'inventory_movement': $rows = $this->movementRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_count': $rows = $this->countRows($tenantId, $storeId, $locationIds, $canViewCost, $context); break;
             case 'inventory_request': $rows = $this->requestRows($tenantId, $scopeStoreIds, $locationIds, $locationByStore, $canViewCost, $dateRange); break;
-            case 'inventory_transfer': $rows = $this->transferRows($tenantId, $scopeStoreIds, $locationIds, $canViewCost, $this->hasInTransitTransferFilter($payload), $dateRange); break;
-            case 'inventory_salon_usage': $rows = $this->usageRows($tenantId, $scopeStoreIds, $locationIds, $dateRange); break;
+            case 'inventory_transfer': $rows = $this->transferRows($tenantId, $scopeStoreIds, $locationIds, $canViewCost, $this->hasInTransitTransferFilter($payload), $dateRange, $creator); break;
+            case 'inventory_salon_usage': $rows = $this->usageRows($tenantId, $scopeStoreIds, $locationIds, $dateRange, $creator); break;
             case 'inventory_import': $rows = $this->importRows($tenantId, $storeId); break;
             default: throw new \LogicException('inventory_operational_page_code_invalid');
         }
         $normalized = [];
         foreach ($rows as $index => $row) {
             $row = is_array($row) ? $row : [];
+            if ($creator !== null) $row[InventoryDocumentCreatorScope::FIELD] = true;
             // Movement facts may split one business document by warehouse; include its trusted store/location identity.
             $row['record_id'] = $organizationRead && in_array($this->pageCode(), ['inventory_inbound', 'inventory_outbound'], true)
                 ? $this->pageCode() . ':' . (int)($row['store_id'] ?? $storeId) . ':' . (string)($row['source_type'] ?? '') . ':' . (string)($row['source_id'] ?? '') . ':' . (int)($row['location_id'] ?? 0)
@@ -177,6 +181,18 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         return $normalized;
     }
 
+    /** 只将已校验的顶层「本人」条件下推，冻结导出使用同一计划和认证身份。 */
+    private function selectedCreator(array $context, array $payload): ?array
+    {
+        foreach ((array)($payload['topFilterConditions'] ?? []) as $filter) {
+            if (($filter['field_key'] ?? '') === InventoryDocumentCreatorScope::FIELD
+                && ($filter['operator'] ?? '') === 'equal' && ($filter['value'] ?? null) === true) {
+                return $context['inventory_document_creator'] ?? ['id' => 0, 'type' => ''];
+            }
+        }
+        return null;
+    }
+
     /** Push down only a validated conjunctive date interval; OR filters still run wholly in the UQ executor. */
     private function businessDateRange(array $payload): ?array
     {
@@ -190,7 +206,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         return null;
     }
 
-    private function documentRows(string $tenantId, array $storeIds, array $locationIds, $types, bool $canViewCost, ?array $dateRange): array
+    private function documentRows(string $tenantId, array $storeIds, array $locationIds, $types, bool $canViewCost, ?array $dateRange, ?array $creator): array
     {
         $types = is_array($types) ? $types : [(string)$types];
         // Resolve the document's store, not the logged-in store or warehouse label.
@@ -203,6 +219,22 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')->where('f.tenant_id', $tenantId)->whereIn('f.store_id', $storeIds)
             ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED')->whereIn('f.source_type', $types);
         if ($dateRange !== null) $query->whereBetween('f.business_date', $dateRange);
+        if ($creator !== null) {
+            // 预售领用的原录入人在领用单，旧批次流水没有复制该身份；手工单继续取原流水。
+            if (in_array('presale_claim_outbound', $types, true)) {
+                $query->where(static function ($source) use ($creator): void {
+                    $source->where(static function ($manual) use ($creator): void {
+                        $manual->where('f.source_type', 'manual_outbound');
+                        InventoryDocumentCreatorScope::applyFacts($manual, $creator);
+                    })->whereOr(static function ($claim) use ($creator): void {
+                        $claim->where('f.source_type', 'presale_claim_outbound');
+                        InventoryDocumentCreatorScope::applyFacts($claim, $creator, 'pc');
+                    });
+                });
+            } else {
+                InventoryDocumentCreatorScope::applyFacts($query, $creator);
+            }
+        }
         $rows = $query
             // Query expressions cannot be used as PHP array keys. Use one raw
             // projection so ThinkORM receives the SQL aliases directly.
@@ -350,7 +382,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         return $this->bounded($rows);
     }
 
-    private function transferRows(string $tenantId, array $storeIds, array $locationIds, bool $canViewCost, bool $onlyInTransit, ?array $dateRange): array
+    private function transferRows(string $tenantId, array $storeIds, array $locationIds, bool $canViewCost, bool $onlyInTransit, ?array $dateRange, ?array $creator): array
     {
         $query = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id AND l.retired_at=0')->leftJoin('inventory_cross_transfer_batch_allocation a', 'a.line_id=l.id AND a.withdrawn_at=0')
             ->where('d.tenant_id', $tenantId)->where(function ($query) use ($storeIds, $locationIds): void {
@@ -361,6 +393,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         // 先限制在途状态再读取，避免大量其他状态占满统一查询的来源窗口。
         if ($onlyInTransit) $query->where('d.document_status', 'DISPATCHED');
         if ($dateRange !== null) $query->whereBetween('d.business_date', $dateRange);
+        if ($creator !== null) InventoryDocumentCreatorScope::applyTransfer($query, $creator);
         $rows = $query
             ->field('d.id,d.transfer_no order_sn,d.document_status,d.document_status status_name,d.withdrawal_count,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,d.from_party_type,d.from_party_id,d.from_location_id,d.to_party_type,d.to_party_id,d.to_location_id,d.initiator_store_id,d.from_party_name_snapshot from_party_name,d.to_party_name_snapshot to_party_name,COUNT(DISTINCT l.id) detail_count,SUM((a.quantity_units*a.unit_cost_cents)/POW(10,a.quantity_scale)) transfer_amount_cents')
             ->group('d.id')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
@@ -388,7 +421,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         unset($row); return $this->bounded($rows);
     }
 
-    private function usageRows(string $tenantId, array $storeIds, array $locationIds, ?array $dateRange): array
+    private function usageRows(string $tenantId, array $storeIds, array $locationIds, ?array $dateRange, ?array $creator): array
     {
         // 列表显示单据原仓，不从当前页面筛选器反推；查询范围仍以服务端授权 location_id 集合为准。
         $query = Db::name('inventory_salon_usage_document')->alias('d')->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
@@ -396,6 +429,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             ->leftJoin('system_store s', 's.id=d.store_id')
             ->where('d.tenant_id', $tenantId)->whereIn('d.store_id', $storeIds)->whereIn('d.location_id', $locationIds);
         if ($dateRange !== null) $query->whereBetween('d.business_date', $dateRange);
+        if ($creator !== null) InventoryDocumentCreatorScope::applyUsage($query, $creator);
         $rows = $query
             ->field('d.id,d.usage_no,d.operation_type,d.project_name_snapshot,d.store_id,d.location_id,loc.location_name,d.document_status,d.business_date,d.recorded_at operation_at,d.operator_name_snapshot operator_name,d.remark,COUNT(l.id) detail_count')
             ->fieldRaw("COALESCE(NULLIF(loc.store_name_snapshot, ''), s.name, '') AS store_name")

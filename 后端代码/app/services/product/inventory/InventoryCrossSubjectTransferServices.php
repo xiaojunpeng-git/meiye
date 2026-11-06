@@ -295,6 +295,9 @@ final class InventoryCrossSubjectTransferServices
             $sourceStoreId = (int)$command['sourceStoreId'];
             if ($sourceStoreId <= 0 || (!$hqScope['isSuperAdmin'] && !in_array($sourceStoreId, $hqScope['allowedStoreIds'], true))) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
             $sourceScope = $this->scope($sourceStoreId, (int)$hqScope['operatorId'], false);
+            // 调出门店决定库存归属，录入人仍是发起本次操作的平台管理员。
+            $sourceScope['operatorType'] = $hqScope['operatorType'];
+            $sourceScope['operatorName'] = $hqScope['operatorName'];
             $hqRoot = explode('/', trim((string)$hqScope['organizationPath'], '/'))[0] ?? '';
             $sourceRoot = explode('/', trim((string)$sourceScope['organizationPath'], '/'))[0] ?? '';
             if ($hqRoot === '' || $sourceRoot === '' || $hqRoot !== $sourceRoot) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
@@ -625,7 +628,7 @@ final class InventoryCrossSubjectTransferServices
         return ['list' => array_values(array_filter($documents, static fn (array $document): bool => (bool)$document['lines']))];
     }
 
-    public function listForHeadquarters(array $adminInfo, int $hqLocationId, string $keyword, int $page = 1, int $limit = 20, string $fromPartyType = '', int $fromPartyId = 0, string $toPartyType = '', int $toPartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = '', int $fromLocationId = 0, int $toLocationId = 0): array
+    public function listForHeadquarters(array $adminInfo, int $hqLocationId, string $keyword, int $page = 1, int $limit = 20, string $fromPartyType = '', int $fromPartyId = 0, string $toPartyType = '', int $toPartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = '', int $fromLocationId = 0, int $toLocationId = 0, bool $mineOnly = false): array
     {
         // 查询只解析可读范围；按钮能力仍取后端写授权，不能由单据状态独自决定。
         $scope = $this->headquartersScope($adminInfo, $hqLocationId, false);
@@ -659,6 +662,7 @@ final class InventoryCrossSubjectTransferServices
         if ($fromLocationId > 0) $query->where('d.from_location_id', $fromLocationId);
         if ($toLocationId > 0) $query->where('d.to_location_id', $toLocationId);
         if ($status !== '') $query->where('d.document_status', $status);
+        if ($mineOnly) InventoryDocumentCreatorScope::applyTransfer($query, InventoryDocumentCreatorScope::platform((int)$scope['operatorId']));
         $count = (int)(clone $query)->group('d.id')->count();
         $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.withdrawal_count,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(200, $limit)))->select()->toArray();
@@ -794,7 +798,8 @@ final class InventoryCrossSubjectTransferServices
             'to_party_type' => $target['partyType'], 'to_party_id' => (int)$target['partyId'], 'to_party_name_snapshot' => $target['partyName'], 'to_location_id' => (int)$targetLocation['id'],
             'request_document_id' => $request ? (int)$request['id'] : 0, 'initiator_store_id' => (int)($source['initiatorStoreId'] ?? ($source['partyType'] === 'STORE' ? $source['storeId'] : 0)),
             'transfer_staff_id' => (int)($command['transferStaff']['id'] ?? 0), 'transfer_employee_id' => (int)($command['transferStaff']['employee_id'] ?? 0), 'transfer_staff_name_snapshot' => (string)($command['transferStaff']['employee_name'] ?? $command['transferStaff']['staff_name'] ?? $command['transferStaff']['name'] ?? ''),
-            'created_by_operator_id' => (int)$source['operatorId'], 'created_by_operator_name_snapshot' => (string)($source['operatorName'] ?? ''),
+            'created_by_operator_id' => (int)$source['operatorId'], 'created_by_operator_type' => (string)($source['operatorType'] ?? ''),
+            'created_by_operator_name_snapshot' => (string)($source['operatorName'] ?? ''),
             'document_status' => 'DRAFT', 'remark' => $command['remark'], 'business_date' => $command['date'], 'recorded_at' => $command['now'],
         ]);
         $this->persistDraftLines($source, $target, $request, $command, $documentId);

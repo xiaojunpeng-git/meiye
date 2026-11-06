@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory\query;
 
+use app\services\product\inventory\InventoryDocumentCreatorScope;
 use app\services\product\inventory\InventoryStoreAccessPolicy;
 use app\services\product\inventory\InventoryStockCountActorServices;
 use app\services\query\UnifiedQueryContextFactory;
@@ -111,6 +112,9 @@ final class InventoryStoreUnifiedQueryContextFactory
             'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);
         // Host-only discriminator is appended after the neutral context factory's strict allowlist.
+        if (in_array($pageCode, InventoryDocumentCreatorScope::PAGES, true)) {
+            $context['inventory_document_creator'] = InventoryDocumentCreatorScope::store($operatorId, $organizationSession ? $sessionInfo : []);
+        }
         if ($pageCode === 'inventory_count') {
             $context['inventory_count_operator_type'] = $countActor['type'] ?? '';
             $context['inventory_count_creator_id'] = $countActor['id'] ?? 0;

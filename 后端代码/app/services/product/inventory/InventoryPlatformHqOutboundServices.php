@@ -8,7 +8,7 @@ use think\facade\Db;
 /** 平台总部出库写边界及共用详情入口；门店详情复用原事实投影并保持只读。 */
 final class InventoryPlatformHqOutboundServices
 {
-    public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = ''): array
+    public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = '', bool $mineOnly = false): array
     {
         $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
         $access = (array)$resolved['access'];
@@ -18,6 +18,7 @@ final class InventoryPlatformHqOutboundServices
         $limit = max(1, min($limit, 100));
 
         $query = $this->facts((array)$location, 'manual_outbound');
+        if ($mineOnly) InventoryDocumentCreatorScope::applyFacts($query, InventoryDocumentCreatorScope::platform((int)$access['admin_id']));
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('f.business_date', [$dateFrom, $dateTo]);
         if ($keyword !== '') {
             $like = '%' . $keyword . '%';
@@ -26,8 +27,9 @@ final class InventoryPlatformHqOutboundServices
             });
         }
         $count = count((clone $query)->field('f.source_id')->group('f.source_id')->select()->toArray());
+        // 同一秒录入的单据用源单 ID 决定顺序，翻页及全量导出均保持稳定。
         $list = $query->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, l.location_name, MAX(f.recorded_at) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
-            ->group('f.source_id,n.document_no,f.business_date,l.location_name')->order('operation_at desc')->page($page, $limit)->select()->toArray();
+            ->group('f.source_id,n.document_no,f.business_date,l.location_name')->order('operation_at desc,f.source_id desc')->page($page, $limit)->select()->toArray();
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
         foreach ($list as &$row) {
             $row['source_type'] = 'manual_outbound';
@@ -59,9 +61,8 @@ final class InventoryPlatformHqOutboundServices
         if ($sourceId === '' || strlen($sourceId) > 96) throw new \InvalidArgumentException('inventory_hq_outbound_detail_invalid');
         $facts = $this->facts($location, 'manual_outbound')->where('f.source_id', $sourceId)
             ->join('inventory_stock s', 's.id=f.stock_id')
-            ->leftJoin('store_product p', 'p.id=s.consumable_product_id')
             // Return the fact ID for line-note targeting while settled stock facts remain write-protected.
-            ->fieldRaw("f.id, s.consumable_product_id AS product_id, s.sku_id, s.product_unique AS sku_unique, COALESCE(p.no_expiry_management, 0) AS no_expiry_management, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            ->fieldRaw("f.id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')->select()->toArray();
         if (!$facts) throw new \InvalidArgumentException('inventory_hq_outbound_detail_missing');
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);

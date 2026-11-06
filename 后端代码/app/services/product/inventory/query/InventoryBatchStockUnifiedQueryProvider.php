@@ -43,6 +43,17 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
         return InventoryBatchStockQueryContract::PAGE_CODE;
     }
 
+    /** 两端共用当前仓库读权限，选品只返回商品身份和名称。 */
+    public function productOptions(array $context, array $payload): array
+    {
+        return $this->source->productOptions(
+            $this->dataScope($context),
+            trim((string)($payload['keyword'] ?? '')),
+            max(1, (int)($payload['page'] ?? 1)),
+            max(1, min(50, (int)($payload['limit'] ?? 12)))
+        );
+    }
+
     public function query(array $context, array $payload): array
     {
         // The first result row is a mandatory report total. Inject these fixed
@@ -136,11 +147,19 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
         // 显式数量筛选必须先读入零结存，再按商品/SKU 总量筛选；否则等于0/全部永远漏零库存。
         // 未使用数量筛选的既有查询保留仅正库存源窗口，权限仍由服务端仓库范围强制裁剪。
         $hasQuantityFilter = $this->hasQuantityRangeTopFilter($payload);
+        // 已验证的顶层多选与仓库取交集，提前缩小事实扫描；统一查询仍校验并冻结同一条件用于导出。
+        $productIds = [];
+        foreach ((array)($payload['topFilterConditions'] ?? []) as $filter) {
+            if (($filter['field_key'] ?? '') === 'catalog_product_id' && ($filter['operator'] ?? '') === 'in') {
+                $productIds = array_map('intval', $filter['value']);
+                break;
+            }
+        }
         $batches = $this->source->sourceBatches([
             'queryCutoffDate' => (string)$context['query_cutoff_date'],
             'locationIds' => $scope->locationIds(),
             'includeZero' => $hasQuantityFilter,
-        ], $scope);
+        ] + ($productIds ? ['catalogProductIds' => $productIds] : []), $scope);
         if ($hasQuantityFilter) {
             // The stock page displays one row per product/SKU. A quantity range
             // must therefore be applied to that total, never to individual

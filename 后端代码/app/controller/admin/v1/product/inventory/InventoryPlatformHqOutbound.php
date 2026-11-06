@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\admin\v1\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryPlatformHqOutboundServices;
 use app\services\query\UnifiedQueryException;
@@ -27,7 +28,12 @@ final class InventoryPlatformHqOutbound extends AuthController
     {
         try {
             [$locationId, $keyword, $page, $limit, $dateFrom, $dateTo] = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['business_date_from', ''], ['business_date_to', '']], true);
-            return $this->success($this->services->index((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$dateFrom, (string)$dateTo));
+            $mineOnly = $this->request->get('creator_scope', '') === 'mine';
+            $read = fn (int $readPage, int $readLimit): array => $this->services->index((array)$this->adminInfo, (int)$locationId, (string)$keyword, $readPage, $readLimit, (string)$dateFrom, (string)$dateTo, $mineOnly);
+            if ($this->request->get('list_export') === 'xlsx') {
+                return InventoryListExport::response('inventory_outbound', $read, 100, true);
+            }
+            return $this->success($read((int)$page, (int)$limit));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }

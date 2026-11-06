@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\admin\v1\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventorySalonUsageServices;
 use think\facade\App;
@@ -21,7 +22,12 @@ final class InventoryPlatformSalonUsage extends AuthController
         try {
             $input = $this->request->getMore([['store_id', 0], ['hq_location_id', 0], ['keyword', ''], ['from', date('Y-m-d')], ['to', date('Y-m-d')], ['page', 1], ['limit', 100]]);
             // 平台院装列表按授权仓库和完整筛选范围分页；详情仍由原单据身份独立校验。
-            return $this->success($this->services->listForPlatform((array)$this->adminInfo, (int)$input['store_id'], (string)$input['keyword'], (string)$input['from'], (string)$input['to'], (int)$input['hq_location_id'], (int)$input['page'], (int)$input['limit']));
+            $mineOnly = $this->request->get('creator_scope', '') === 'mine';
+            $read = fn (int $readPage, int $readLimit): array => $this->services->listForPlatform((array)$this->adminInfo, (int)$input['store_id'], (string)$input['keyword'], (string)$input['from'], (string)$input['to'], (int)$input['hq_location_id'], $readPage, $readLimit, $mineOnly);
+            if ($this->request->get('list_export') === 'xlsx') {
+                return InventoryListExport::response('inventory_salon_usage', $read, 100, true);
+            }
+            return $this->success($read((int)$input['page'], (int)$input['limit']));
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('院装查询条件不合法。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {

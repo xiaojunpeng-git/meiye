@@ -101,7 +101,7 @@ function normalizedDate(value) {
   return raw || null
 }
 
-export function saveStoreStaff(staffId, values) {
+export function saveStoreStaff(staffId, values, { craftsmanTypeEditable = false } = {}) {
   const requestToken = createRequestToken()
   return request(`/cashierapi/v3/management/staff/${encodeURIComponent(staffId)}`, {
     method: 'POST',
@@ -128,8 +128,12 @@ export function saveStoreStaff(staffId, values) {
       status_version: Number(values.statusVersion),
       cashier_salesperson_enabled: normalizedBoolean(values.salespersonEnabled),
       cashier_craftsman_enabled: normalizedBoolean(values.craftsmanEnabled),
-      // 新保存统一启用两项业绩；旧档案类型只保留作历史追溯，不再限制收银分配。
-      craftsman_performance_type: 'commission_labor',
+      // 原有单选控件显示时恢复其原值提交；隐藏时沿用现有双项默认口径，
+      // 不扩展保存规则或改变收银分配、计算及历史事实。
+      craftsman_performance_type: craftsmanTypeEditable && values.craftsmanEnabled
+        ? (['commission', 'labor', 'commission_labor'].includes(String(values.craftsmanPerformanceType || ''))
+            ? String(values.craftsmanPerformanceType) : 'commission')
+        : 'commission_labor',
       mobile_enabled: normalizedBoolean(values.mobileEnabled),
       is_customer: normalizedBoolean(values.isCustomer),
       customer_url: String(values.customerUrl || '').trim(),

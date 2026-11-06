@@ -8,7 +8,7 @@ use think\facade\Db;
 /** 平台总部仓写边界；单据读取可缩小到授权门店仓，绝不扩展总部写命令。 */
 final class InventoryPlatformHqInboundServices
 {
-    public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = ''): array
+    public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = '', bool $mineOnly = false): array
     {
         $hq = new InventoryHqLocationServices();
         $resolved = $hq->readableLocation($adminInfo, $locationId);
@@ -27,6 +27,7 @@ final class InventoryPlatformHqInboundServices
             ->where('f.location_id', (int)$location['id'])
             ->where('f.fact_status', 'SETTLED')
             ->where('f.source_type', 'manual_inbound');
+        if ($mineOnly) InventoryDocumentCreatorScope::applyFacts($query, InventoryDocumentCreatorScope::platform((int)$access['admin_id']));
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('f.business_date', [$dateFrom, $dateTo]);
         if ($keyword !== '') {
             $like = '%' . $keyword . '%';
@@ -35,10 +36,11 @@ final class InventoryPlatformHqInboundServices
             });
         }
         $grouped = (clone $query)->field('f.source_id')->group('f.source_id')->select()->toArray();
+        // 同一秒录入的单据用源单 ID 决定顺序，翻页及全量导出均保持稳定。
         $list = $query
             ->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, l.location_name, MAX(f.recorded_at) AS add_time, MAX(f.recorded_at) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
             ->group('f.source_id,n.document_no,f.business_date,l.location_name')
-            ->order('add_time desc')
+            ->order('add_time desc,f.source_id desc')
             ->page($page, $limit)
             ->select()
             ->toArray();
@@ -70,7 +72,6 @@ final class InventoryPlatformHqInboundServices
         $facts = Db::name('inventory_batch_movement_fact')->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')
             ->join('inventory_stock s', 's.id=f.stock_id')
-            ->leftJoin('store_product p', 'p.id=s.consumable_product_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', (string)$location['tenant_id'])
             ->where('f.location_id', (int)$location['id'])
@@ -79,8 +80,7 @@ final class InventoryPlatformHqInboundServices
             ->where('f.source_id', $sourceId)
             ->where('f.fact_status', 'SETTLED')
             // Stable fact ID is returned only as a note target, not as permission to mutate the stock fact.
-            // 仅向已授权详情补充当前规格身份，供新建复制表单使用。
-            ->fieldRaw("f.id, s.consumable_product_id AS product_id, s.sku_id, s.product_unique AS sku_unique, COALESCE(p.no_expiry_management, 0) AS no_expiry_management, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            ->fieldRaw("f.id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')
             ->select()->toArray();
         if (!$facts) throw new \InvalidArgumentException('inventory_hq_inbound_detail_missing');

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\admin\v1\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\product\inventory\InventoryPlatformWarehouseCommandServices;
@@ -98,7 +99,9 @@ final class InventoryPlatformWarehouse extends AuthController
         try {
             $pageCode = trim((string)$this->request->get('pageCode', ''));
             $policy = new InventoryPlatformAccessPolicy();
-            $access = $policy->forOperationalRead($this->access(), $pageCode);
+            $access = $pageCode === InventoryBatchStockQueryContract::PAGE_CODE
+                ? $policy->forStockRead($this->access())
+                : $policy->forOperationalRead($this->access(), $pageCode);
             $storeIds = array_values(array_map('intval', (array)$access['store_ids']));
             return $this->success([
                 'tree' => app()->make(OrganizationScopeService::class)->buildPickerTree($storeIds),
@@ -187,10 +190,17 @@ final class InventoryPlatformWarehouse extends AuthController
             $subject = $this->selectedSubject($payload);
             $hqLocationId = $this->selectedHqLocationId($payload);
             $organizationId = $this->selectedOrganizationId($payload);
-            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id'], $payload['organizationId']);
+            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id'], $payload['organizationId'], $payload['list_export']);
             $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, (string)($payload['queryCutoffDate'] ?? date('Y-m-d')), $selectedStoreId, $subject, InventoryBatchStockQueryContract::PAGE_CODE, $hqLocationId, $organizationId);
             $payload['pageCode'] = InventoryBatchStockQueryContract::PAGE_CODE;
-            return $this->success($runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE)->query($context, $payload));
+            $provider = $runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE);
+            // 选品只读当前库存查询授权的仓库，不借用单据新建目录的权限。
+            if ((string)($payload['productOptions'] ?? '') === '1') return $this->success($provider->productOptions($context, $payload));
+            if ($this->request->get('list_export') === 'xlsx') {
+                $read = static fn (int $page, int $limit): array => $provider->query($context, array_replace($payload, compact('page', 'limit')));
+                return InventoryListExport::response(InventoryBatchStockQueryContract::PAGE_CODE, $read, 100, true);
+            }
+            return $this->success($provider->query($context, $payload));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('平台库存查询条件不合法。'); }
     }
@@ -215,18 +225,25 @@ final class InventoryPlatformWarehouse extends AuthController
                 $payload[$key] = $decoded;
             }
             $runtime = UnifiedQueryRuntime::runtime();
+            $subject = $this->selectedSubject($payload);
             $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make(
                 (int)$this->adminId,
                 (array)$this->adminInfo,
                 (string)($payload['queryCutoffDate'] ?? date('Y-m-d')),
                 $this->selectedStoreId($payload),
-                $this->selectedSubject($payload),
+                $subject,
                 $pageCode,
                 $this->selectedHqLocationId($payload),
                 $this->selectedOrganizationId($payload)
             );
-            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id'], $payload['organizationId']);
-            return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
+            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id'], $payload['organizationId'], $payload['list_export']);
+            $provider = $runtime['providers']->resolve($pageCode);
+            if ($this->request->get('list_export') === 'xlsx') {
+                if (!InventoryListExport::supports($pageCode)) throw new \InvalidArgumentException('inventory_list_export_page_invalid');
+                $read = static fn (int $page, int $limit): array => $provider->query($context, array_replace($payload, compact('page', 'limit')));
+                return InventoryListExport::response($pageCode, $read, 100, true, $subject === 'STORE');
+            }
+            return $this->success($provider->query($context, $payload));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {

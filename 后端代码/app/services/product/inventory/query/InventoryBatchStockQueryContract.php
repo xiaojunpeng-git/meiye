@@ -26,6 +26,8 @@ final class InventoryBatchStockQueryContract
             self::field('location_name', '仓库', 'text', true),
             self::field('store_name', '门店', 'text', true),
             self::field('product_name', '商品名称', 'text', true, true),
+            // 选择整件商品时命中该商品的所有规格，包括各门店的关联商品。
+            self::field('catalog_product_id', '库存商品标识', 'integer', false, false, ['filter']),
             self::field('sku_name', '商品规格', 'text', true),
             self::field('product_code', '商品编码', 'text'),
             self::field('barcode', '商品条码', 'text'),

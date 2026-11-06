@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\admin\v1\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryCrossSubjectTransferServices;
 use app\services\query\UnifiedQueryException;
@@ -21,7 +22,12 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
     {
         try {
             $input = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['from_party_type', ''], ['from_party_id', 0], ['to_party_type', ''], ['to_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']]);
-            return $this->success($this->services->listForHeadquarters((array)$this->adminInfo, (int)$input['hq_location_id'], (string)$input['keyword'], (int)$input['page'], (int)$input['limit'], (string)$input['from_party_type'], (int)$input['from_party_id'], (string)$input['to_party_type'], (int)$input['to_party_id'], (string)$input['status'], (string)$input['business_date_from'], (string)$input['business_date_to'], (int)$this->request->get('from_location_id', 0), (int)$this->request->get('to_location_id', 0)));
+            $mineOnly = $this->request->get('creator_scope', '') === 'mine';
+            $read = fn (int $readPage, int $readLimit): array => $this->services->listForHeadquarters((array)$this->adminInfo, (int)$input['hq_location_id'], (string)$input['keyword'], $readPage, $readLimit, (string)$input['from_party_type'], (int)$input['from_party_id'], (string)$input['to_party_type'], (int)$input['to_party_id'], (string)$input['status'], (string)$input['business_date_from'], (string)$input['business_date_to'], (int)$this->request->get('from_location_id', 0), (int)$this->request->get('to_location_id', 0), $mineOnly);
+            if ($this->request->get('list_export') === 'xlsx') {
+                return InventoryListExport::response('inventory_transfer', $read, 100, true);
+            }
+            return $this->success($read((int)$input['page'], (int)$input['limit']));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\RuntimeException $exception) {

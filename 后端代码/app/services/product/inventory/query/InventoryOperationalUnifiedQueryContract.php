@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory\query;
 
+use app\services\product\inventory\InventoryDocumentCreatorScope;
 use app\services\query\UnifiedQueryPageRegistry;
 
 /**
@@ -27,6 +28,12 @@ final class InventoryOperationalUnifiedQueryContract
             UnifiedQueryPageRegistry::field('order_sn', '业务单号', 'text', true, true),
             UnifiedQueryPageRegistry::field('status_name', '状态', 'text', true, true),
         ];
+        if (in_array($pageCode, InventoryDocumentCreatorScope::PAGES, true)) {
+            // 只供业务筛选，录入人身份在服务端确定，不在列表或导出中暴露内部标识。
+            $common[] = UnifiedQueryPageRegistry::field(
+                InventoryDocumentCreatorScope::FIELD, '本人录入', 'boolean', false, false, ['filter']
+            );
+        }
         if ($pageCode === 'inventory_count') {
             $common[] = UnifiedQueryPageRegistry::field('count_date', '盘点日期', 'date', true, true);
             // 旧查询偏好和冻结计划仍可读取真实仓名；默认不展示，不将仓名改写为门店名。
