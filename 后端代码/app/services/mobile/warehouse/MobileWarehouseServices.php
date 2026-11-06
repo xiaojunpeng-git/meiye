@@ -83,7 +83,8 @@ final class MobileWarehouseServices
         $availableCatalog=$this->rankingCatalog($showOrganizationRanking,$showStoreRanking);
         $allowedTabs=array_values(array_intersect(array_column($visibility['tabs'],'code'),array_column($availableCatalog,'code')));
         $requestedCode=(string)($input['rankingCode']??'');
-        $rankingCode=MerchantDataPermissionServices::selectedTab($allowedTabs,$requestedCode,'management_board');
+        // 数据总览以同一可见目录顺序选择最左项；请求中的有效手动页签继续保留。
+        $rankingCode=MerchantDataPermissionServices::selectedTab($allowedTabs,$requestedCode);
         $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
         // 服务项目的默认排序是现金业绩；数量排序只改变同一组结果的顺序。
         $projectSortMetric = $this->projectSortMetric((string)($input['projectSortMetric'] ?? 'cash'));

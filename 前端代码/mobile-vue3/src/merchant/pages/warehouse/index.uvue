@@ -74,7 +74,7 @@
 	const rankingLoadError = ref(false)
 	const trend = ref<any>({ metricName: '现金业绩', granularity: 'day', points: [], periods: {} })
 	const selectedMetricCode = ref('cash_performance')
-	// 初次进入由后端在可见页签中优先选择看板；后续请求保留用户手动选择。
+	// 初次进入由后端选择可见页签的最左项；后续请求保留用户手动选择。
 	const selectedRankingCode = ref('')
 	const selectedRankingAvailable = ref(true)
 	const rankingLoading = ref(false)

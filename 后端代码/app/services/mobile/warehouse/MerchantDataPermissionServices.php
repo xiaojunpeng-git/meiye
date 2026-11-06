@@ -112,8 +112,8 @@ final class MerchantDataPermissionServices
         $text=(string)Db::name('employee_mobile_auth')->where('employee_id',$employee)->where('status',1)->where('is_del',0)->value('rules');
         return $this->resolve(array_map('intval',explode(',',$text)),$page,$this->snapshot()['rules']);
     }
-    /** 首次进入优先看板，否则按已授权目录顺序选择；显式点击仍尊重用户选择，全隐藏返回none。 */
-    public static function selectedTab(array $allowed,string $requested,string $board): string
+    /** 默认按已授权目录顺序选首项；仅显式指定优先项的调用方使用该优先项。保留有效手动选择，全隐藏返回none。 */
+    public static function selectedTab(array $allowed,string $requested,string $board=''): string
     {
         if(in_array($requested,$allowed,true))return $requested;
         return in_array($board,$allowed,true)?$board:($allowed[0]??'none');

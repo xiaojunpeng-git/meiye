@@ -19,7 +19,14 @@ expectDataRule(DataRules::selectedTab(['cash','board','labor'],'','board')==='bo
 expectDataRule(DataRules::selectedTab(['labor','cash'],'','board')==='labor','看板隐藏时默认第一个可见页签');
 expectDataRule(DataRules::selectedTab(['board','cash'],'cash','board')==='cash','用户显式切换页签后保留选择');
 expectDataRule(DataRules::selectedTab([],'board','board')==='none','全部页签隐藏时不伪造默认页签');
-expectDataRule(DataRules::selectedTab(['staff_cash_performance','management_board'],'','management_board')==='management_board','管理看板采用相同默认规则');
+// 数据总览按后端可见顺序默认；员工详情的显式看板优先口径保持独立。
+expectDataRule(DataRules::selectedTab(['organization','store','management_board'],'')==='organization','数据总览默认最左组织排行而非看板');
+expectDataRule(DataRules::selectedTab(['store','management_board'],'')==='store','组织排行隐藏时默认最左门店排行');
+expectDataRule(DataRules::selectedTab(['staff_cash_performance','management_board'],'')==='staff_cash_performance','目录调序后默认新的最左可见页签');
+expectDataRule(DataRules::selectedTab(['store','management_board'],'management_board')==='management_board','数据总览手动选择看板仍保留');
+expectDataRule(DataRules::selectedTab(['store','management_board'],'organization')==='store','原选择失去权限后回退最左可见页签');
+expectDataRule(DataRules::selectedTab(['management_board'],'')==='management_board','仅剩看板时正常选中看板');
+expectDataRule(DataRules::selectedTab([],'')==='none','无可见页签时不伪造页签');
 $expectedIds=[
     'warehouse'=>402001,'warehouse.metrics'=>402002,'warehouse.metrics.cash_performance'=>402003,
     'warehouse.metrics.refund_performance'=>402004,'warehouse.metrics.actual_performance'=>402005,
@@ -37,6 +44,13 @@ foreach($expectedIds as $code=>$id)expectDataRule(($byCode[$code]['id']??null)==
 expectDataRule(count(array_unique(array_column($rows,'id')))===count($rows),'目录 ID 无重复');
 $legacy=$service->resolve([401007],'warehouse',$rows);
 expectDataRule($legacy['page']&&count($legacy['metrics'])===4&&count($legacy['tabs'])===7,'旧数据授权保留总览原四指标及七页签');
+// 使用真实权限目录验证显隐与排序后，默认选择和页面目录始终同序。
+$reordered=$rows;foreach($reordered as &$row)if($row['feature_code']==='warehouse.tabs.project_count')$row['sort']=0;unset($row);
+$orderedPolicy=$service->resolve([401007],'warehouse',$reordered);
+expectDataRule(DataRules::selectedTab(array_column($orderedPolicy['tabs'],'code'),'')==='project_count','权限目录重新排序后选第一个可见项');
+$hidden=$rows;foreach($hidden as &$row)if(in_array($row['feature_code'],['warehouse.tabs.organization','warehouse.tabs.store'],true))$row['enabled']=0;unset($row);
+$hiddenPolicy=$service->resolve([401007],'warehouse',$hidden);
+expectDataRule(DataRules::selectedTab(array_column($hiddenPolicy['tabs'],'code'),'organization')==='management_board','原最左两项停用后回退剩余可见第一项');
 $legacyEmployee=$service->resolve([401007],'employee',$rows);
 expectDataRule($legacyEmployee['page']&&count($legacyEmployee['metrics'])===7&&array_column($legacyEmployee['tabs'],'code')===['cash','labor'],'旧岗位保留员工指标且不自动获得新看板');
 $explicit=$service->resolve([401007,DataRules::MARKER,402001,402015],'employee',$rows);
