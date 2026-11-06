@@ -3512,6 +3512,23 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return $this->serviceRows($stores, $range, []);
     }
 
+    /**
+     * Customer item analysis is limited to current platform 生美 categories.
+     * Reuse signed cash/card allocations and service facts; batch consumption
+     * sums and omit unused source-label joins instead of querying per service.
+     * An absent category must yield no facts, never broaden to all categories.
+     */
+    public function customerBeautyItemRows(array $stores, array $range, array $scope = []): array
+    {
+        $this->applyCustomerParticipantScope($scope);
+        $categoryIds = $this->categoryIds('生美', []);
+        if ($categoryIds === []) return ['cash' => [], 'services' => []];
+        return [
+            'cash' => $this->cashRows($stores, $range, $categoryIds, false, true),
+            'services' => $this->serviceRows($stores, $range, $categoryIds, false, false, true, true),
+        ];
+    }
+
     /** Apply the authenticated report scope when customer analytics calls the
      * read-only fact helpers directly instead of going through query(). */
     private function applyCustomerParticipantScope(array $scope): void
@@ -3828,7 +3845,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return $attributed;
     }
 
-    private function serviceRows(array $stores, array $range, array $categoryIds, bool $forHealth = false, bool $includeSourceLabel = true, bool $batchConsumption = false): array
+    private function serviceRows(array $stores, array $range, array $categoryIds, bool $forHealth = false, bool $includeSourceLabel = true, bool $batchConsumption = false, bool $compactItems = false): array
     {
         if ($batchConsumption && $forHealth) {
             // Health's reduced projection has no source-line identity for a batched performance lookup.
@@ -3845,6 +3862,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $fields = $forHealth
             ? 'sv.service_fact_id,sv.service_record_no,sv.checkout_request_id,sv.store_id,sv.member_id,sv.business_date,sv.project_id item_id,sv.is_experience,sv.quantity'
             : 'sv.service_fact_id,sv.service_record_no,sv.checkout_request_id,sv.document_no_snapshot,sv.store_id,sv.member_id,sv.member_name_snapshot,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_id item_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.source_line_id,sv.quantity';
+        // Item ranking needs no receipt/customer/organization display snapshots.
+        // Keep fact identity for audits and the product identity for category resolution.
+        if ($compactItems) $fields = 'sv.service_fact_id,sv.store_id,sv.member_id,sv.project_id,sv.project_id item_id,sv.project_name_snapshot,sv.source_line_id';
         // Use the order center's event-bound authority order (sale, checkout,
         // service). Within each record the full label retains the primary A-H
         // code; a secondary display name alone cannot drive source filtering.

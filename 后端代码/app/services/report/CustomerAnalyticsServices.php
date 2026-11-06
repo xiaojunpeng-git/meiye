@@ -379,10 +379,10 @@ final class CustomerAnalyticsServices
                 'refund_date' => '取退款成功操作完成日期。',
             ],
             'customer_item_analysis' => [
-                'item_id' => '取成交事实中的稳定品项编号，用于区分同名品项和精确下钻。',
-                'item_name' => '取销售或卡项内含项目在成交时保存的品项名称快照。',
+                'item_id' => '由品项名称生成的稳定分组标识，不是商品编号。',
+                'item_name' => '仅统计当前平台生美及下级分类；按业务发生时的品项名称快照去除首尾空格后分组，同名跨门店、跨编号合并。',
                 'cash_amount' => '按成功收款分摊事实和卡项内含项目分摊事实统计净现金业绩，退款和作废按反向事实冲减。',
-                'deal_people' => '按品项统计期间成交会员的去重人数。',
+                'deal_people' => '同名品项合并后按成交会员去重；合计跨全部生美品项去重，不累加各行人数。',
                 'average_amount' => '品项现金业绩除以成交人数，人数为零显示“-”。',
                 'people_share' => '品项成交人数除以全部品项成交人数。',
                 'amount_share' => '品项现金业绩除以全部品项现金业绩。',
@@ -659,10 +659,20 @@ final class CustomerAnalyticsServices
         return $result;
     }
 
-    /** Cash item ranking; the same signed allocation facts are used for totals. */
+    /** Read only 生美 facts from the shared allocator; display and export use this same projection. */
     private function itemAnalysis(array $stores, array $range, array $input): array
     {
-        $facts = (new StoreUnifiedReportPhaseFourServices())->customerCashRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        // Card allocations must retain every component until the signed amount
+        // is apportioned; a bounded report-only budget avoids truncating large scopes.
+        $limit = trim((string)ini_get('memory_limit'));
+        if (preg_match('/^(\d+)M$/i', $limit, $m) && (int)$m[1] < 512) ini_set('memory_limit', '512M');
+        $facts = (new StoreUnifiedReportPhaseFourServices())->customerBeautyItemRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        return $this->groupBeautyItems($facts['cash'], $facts['services'], $input);
+    }
+
+    /** Merge equal snapshot names across stores/IDs; deduplicate members after merging, never sum per-ID people. */
+    private function groupBeautyItems(array $facts, array $serviceFacts, array $input): array
+    {
         $items = [];
         $itemFilter = trim((string)($input['item_id'] ?? ''));
         $categoryFilter = trim((string)($input['category_path'] ?? ''));
@@ -672,12 +682,8 @@ final class CustomerAnalyticsServices
                 $path = trim((string)($fact['category_path'] ?? ''));
                 if ($path !== $categoryFilter && !str_starts_with($path, $categoryFilter . '/')) continue;
             }
-            // Group by the stable item id. Display names are snapshots and
-            // can collide or change, so using only the name would merge
-            // distinct items and break exact drill-downs.
-            $itemId = trim((string)($fact['item_id'] ?? ''));
-            if ($itemId === '') $itemId = 'snapshot:' . trim((string)($fact['item_name'] ?? '未命名品项'));
             $name = trim((string)($fact['item_name'] ?? '')) ?: '未命名品项';
+            $itemId = 'name:' . hash('sha256', $name);
             if (!isset($items[$itemId])) $items[$itemId] = ['item_id' => $itemId, 'item_name' => $name, 'cash_cents' => 0, 'members' => [], 'consumption_cents' => 0, 'consumption_members' => []];
             $items[$itemId]['cash_cents'] += (int)($fact['amount_cents'] ?? 0);
             if ((int)($fact['member_id'] ?? 0) > 0) $items[$itemId]['members'][(string)$fact['member_id']] = true;
@@ -686,16 +692,14 @@ final class CustomerAnalyticsServices
         // consumption facts, not the cash allocation facts above. Keep the
         // same item/category filters and union consumption-only items so the
         // two rankings remain independently truthful.
-        $serviceFacts = (new StoreUnifiedReportPhaseFourServices())->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []));
         foreach ($serviceFacts as $fact) {
             if ($itemFilter !== '' && (string)($fact['project_id'] ?? '') !== $itemFilter) continue;
             if ($categoryFilter !== '') {
                 $path = trim((string)($fact['category_path'] ?? ''));
                 if ($path !== $categoryFilter && !str_starts_with($path, $categoryFilter . '/')) continue;
             }
-            $itemId = trim((string)($fact['project_id'] ?? ''));
             $name = trim((string)($fact['project_name_snapshot'] ?? '')) ?: '未命名品项';
-            if ($itemId === '') $itemId = 'snapshot:' . $name;
+            $itemId = 'name:' . hash('sha256', $name);
             if (!isset($items[$itemId])) $items[$itemId] = ['item_id' => $itemId, 'item_name' => $name, 'cash_cents' => 0, 'members' => [], 'consumption_cents' => 0, 'consumption_members' => []];
             $items[$itemId]['consumption_cents'] += (int)($fact['consumption_cents'] ?? 0);
             if ((int)($fact['member_id'] ?? 0) > 0) $items[$itemId]['consumption_members'][(string)$fact['member_id']] = true;
@@ -734,19 +738,25 @@ final class CustomerAnalyticsServices
         foreach ($consumptionRecords as &$record) { unset($record['_cash_cents'], $record['_consumption_cents']); }
         unset($record);
         $result = $this->customerResult('客户品相分析', [
-            ['key' => 'item_id', 'label' => '品项编号', 'source_explanation' => '取成交事实中的稳定品项编号，用于区分同名品项和精确下钻。'],
-            ['key' => 'item_name', 'label' => '品项名称', 'source_explanation' => '取成交或卡项内含项目在业务事实发生时保存的品项名称。'],
+            ['key' => 'item_name', 'label' => '品项名称', 'source_explanation' => '仅统计当前平台生美分类及其下级分类；按业务名称快照去除首尾空格后精确分组，同名品项跨编号、跨门店合并。'],
             ['key' => 'cash_amount', 'label' => '品项现金业绩', 'source_explanation' => '成功收款分摊事实净额，退款和作废按反向事实冲减。', 'summable' => true, 'value_type' => 'money'],
-            ['key' => 'deal_people', 'label' => '成交人数', 'source_explanation' => '按品项统计期间成交会员去重人数。', 'summable' => true, 'value_type' => 'integer'],
+            ['key' => 'deal_people', 'label' => '成交人数', 'source_explanation' => '同名品项合并后按会员去重；合计按全部生美品项会员去重，不累加各行人数。', 'summable' => false, 'value_type' => 'integer'],
             ['key' => 'average_amount', 'label' => '成交单产', 'source_explanation' => '品项现金业绩除以成交人数，人数为零显示“-”。'],
             ['key' => 'people_share', 'label' => '人头占比', 'source_explanation' => '品项成交人数除以全部品项成交人数。'],
             ['key' => 'amount_share', 'label' => '业绩占比', 'source_explanation' => '品项现金业绩除以全部品项现金业绩。'],
             ['key' => 'consumption_amount', 'label' => '消耗业绩', 'source_explanation' => '完成服务后形成的有效消耗业绩事实净额；作废按反向事实冲减。', 'summable' => true, 'value_type' => 'money'],
-            ['key' => 'consumption_people', 'label' => '消耗人数', 'source_explanation' => '按品项统计期间完成有效服务的会员去重人数。', 'summable' => true, 'value_type' => 'integer'],
+            ['key' => 'consumption_people', 'label' => '消耗人数', 'source_explanation' => '同名品项合并后按有效服务会员去重；合计跨全部生美品项去重。', 'summable' => false, 'value_type' => 'integer'],
             ['key' => 'consumption_average_amount', 'label' => '消耗单价', 'source_explanation' => '消耗业绩除以消耗人数，人数为零显示“-”。'],
             ['key' => 'consumption_share', 'label' => '消耗占比', 'source_explanation' => '品项消耗业绩除以全部品项消耗业绩。'],
         ], $records, $input);
+        // A member may buy/use several names; report-wide people are a union, not the sum of rows.
+        $consumptionMembers = [];
+        foreach ($items as $item) $consumptionMembers += $item['consumption_members'];
+        $result['summary_row']['deal_people'] = (string)$totalPeople;
+        $result['summary_row']['consumption_people'] = (string)count($consumptionMembers);
         $result['consumption_records'] = $consumptionRecords;
+        $result['metric_version'] = 'beauty-item-name-v1';
+        $result['aggregation_status'] = '仅统计生美及其下级分类；按品项名称合并，同名品项的会员人数去重。';
         return $result;
     }
 
@@ -1227,7 +1237,7 @@ final class CustomerAnalyticsServices
                 ['key' => 'refund_rate', 'label' => '退款率', 'source_explanation' => '退货业绩分析：退款金额除以同期成功收款金额，分母为零显示“-”。'],
             ],
             'customer_item_analysis' => [
-                ['key' => 'item_name', 'label' => '品项', 'source_explanation' => '客户品相分析：取成交时保存的品项名称快照。'],
+                ['key' => 'item_name', 'label' => '品项', 'source_explanation' => '客户品相分析：仅统计当前平台生美及下级分类；按名称快照精确合并同名品项。'],
                 ['key' => 'cash_amount', 'label' => '品项现金业绩', 'source_explanation' => '客户品相分析：成功收款分摊事实和卡项内含项目分摊事实的净额。'],
                 ['key' => 'deal_people', 'label' => '成交人数', 'source_explanation' => '客户品相分析：按品项统计成交会员去重人数。'],
                 ['key' => 'average_amount', 'label' => '成交单产', 'source_explanation' => '客户品相分析：品项现金业绩除以成交人数，分母为零显示“-”。'],
