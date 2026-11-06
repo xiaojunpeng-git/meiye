@@ -147,17 +147,21 @@ class CombinationGroupListServices
             ->where(function ($q) use ($groupIds) {
                 $q->whereIn('p.id', $groupIds)->whereOr('p.k_id', 'in', $groupIds);
             })->where('p.is_virtual', 0)->where('p.uid', '>', 0)
-            ->field('p.id,p.k_id,refund_order.id as refund_order_id,refund_order.refund_status,refund_order.pay_price,refund_order.refund_price,receipt.state as receipt_state')
+            ->field('p.id,p.k_id,refund_order.id as refund_order_id,refund_order.refund_status,refund_order.pay_price,refund_order.refund_price,receipt.order_id as receipt_order_id,receipt.state as receipt_state,receipt.amount_cents as receipt_amount_cents')
             ->select()->toArray() : [];
         $refunds = [];
         foreach ($refundSeats as $seat) {
             $id = (int)$seat['k_id'] ?: (int)$seat['id'];
             if (!isset($refunds[$id])) $refunds[$id] = ['total' => 0, 'settled' => 0, 'processing' => 0];
             $refunds[$id]['total']++;
+            // 新退款的金额权威是成功回执，终态领域不会回写旧 refund_price 累计字段。
+            // 无回执的历史全退才沿用旧累计值；待处理、失败或金额不符均不能隐藏查询入口。
             $settled = (int)($seat['refund_order_id'] ?? 0) > 0
                 && (int)$seat['refund_status'] === 2
-                && bccomp((string)$seat['refund_price'], (string)$seat['pay_price'], 2) === 0
-                && in_array((string)($seat['receipt_state'] ?? ''), ['', 'success'], true);
+                && ((int)($seat['receipt_order_id'] ?? 0) > 0
+                    ? (string)$seat['receipt_state'] === 'success'
+                        && bccomp((string)$seat['receipt_amount_cents'], bcmul((string)$seat['pay_price'], '100', 0), 0) === 0
+                    : bccomp((string)$seat['refund_price'], (string)$seat['pay_price'], 2) === 0);
             if ($settled) $refunds[$id]['settled']++;
             elseif (in_array((string)($seat['receipt_state'] ?? ''), ['sending', 'pending', 'confirmed'], true)) $refunds[$id]['processing']++;
         }

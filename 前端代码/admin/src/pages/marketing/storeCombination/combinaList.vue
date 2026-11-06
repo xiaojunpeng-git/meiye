@@ -371,6 +371,8 @@
 .combination-results { flex: 0 1 auto; min-height: 0; }
 .combination-results >>> .ivu-card-body { display: flex; flex-direction: column; min-height: 0; }
 .combination-table-scroll { min-height: 0; overflow: hidden; }
+/* 仅本列表恢复固定列的滚动容器，覆盖全局 overflow:unset，沿用表格自带的纵向同步。 */
+.combination-table-scroll >>> .ivu-table-fixed-body { overflow: hidden !important; }
 .combination-table-scroll >>> .ivu-table-header th { height: 48px; background: #f8f8f9; }
 .combination-table-scroll >>> .ivu-table-cell { padding: 0 12px; }
 .combination-table-scroll >>> .ivu-table-row td { height: 48px; }

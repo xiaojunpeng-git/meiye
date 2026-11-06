@@ -94,11 +94,23 @@ try {
     $gateway->orders=[$leader['oid'],$member['oid']]; $gateway->failOrder=$member['oid'];
     $result=$service->refundGroup($leader['pinkId'],'本地整团退款验收',$admin);
     check($result['state']==='partial' && $result['success_count']===1 && $result['pending_count']===1,'mixed success and pending are never reported as whole success');
+    check($reader->page(['group_id'=>$leader['pinkId']],$admin)['list'][0]['refund_state']==='processing',
+        'list preserves the query entry while a real member refund is pending');
     check(count($result['results'])===2,'virtual seats are excluded from refund money');
     $applications=count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}));
     $gateway->failOrder=0;
     $result=$service->refundGroup($leader['pinkId'],'查询整团退款',$admin,'query');
     check($result['state']==='success' && $result['success_count']===2,'query closes the remaining original receipt');
+    // Reproduce the production terminal contract: receipts own the refund amount,
+    // while the legacy order aggregate may remain zero after successful settlement.
+    Db::name('store_order')->whereIn('id',[$leader['oid'],$member['oid']])->update(['refund_price'=>0]);
+    $settled=$reader->page(['group_id'=>$leader['pinkId']],$admin)['list'][0];
+    check($settled['refund_state']==='fully_refunded' && $settled['status_name']==='整团已退款',
+        'successful full receipts hide whole-refund action despite zero legacy refund aggregate');
+    Db::name('combination_order_refund')->where('order_id',$member['oid'])->update(['amount_cents'=>9900]);
+    check($reader->page(['group_id'=>$leader['pinkId']],$admin)['list'][0]['refund_state']!=='fully_refunded',
+        'receipt amount mismatch cannot be classified as a fully refunded group');
+    Db::name('combination_order_refund')->where('order_id',$member['oid'])->update(['amount_cents'=>10000]);
     check(count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}))===$applications,'query and replay never apply a second channel refund');
     $before=count($gateway->requests);$again=$service->refundGroup($leader['pinkId'],'重复整团退款',$admin);
     check($again['state']==='success' && count($gateway->requests)===$before,'whole success replay is idempotent');
@@ -106,6 +118,12 @@ try {
     $fresh=fixture(6,2,'yue'); (new CombinationGroupManagementServices())->complete($fresh['pinkId'],1);
     $query=$service->refundGroup($fresh['pinkId'],'只查询不发起',$admin,'query');
     check($query['results'][0]['state']==='not_started' && !Db::name('combination_order_refund')->where('order_id',$fresh['oid'])->count(),'query cannot start an unrequested refund');
+    Db::name('store_order')->where('id',$fresh['oid'])->update(['refund_status'=>2,'refund_price'=>100]);
+    check($reader->page(['group_id'=>$fresh['pinkId']],$admin)['list'][0]['refund_state']==='fully_refunded',
+        'legacy whole refunds without channel receipts retain their historical full amount');
+    Db::name('store_order')->where('id',$fresh['oid'])->update(['refund_price'=>50]);
+    check($reader->page(['group_id'=>$fresh['pinkId']],$admin)['list'][0]['refund_state']!=='fully_refunded',
+        'legacy partial refunds do not hide the whole-group entry');
     $retryLeader=fixture(6,2);$retryMember=fixture(6,2);joinFixture($retryLeader,$retryMember);
     (new CombinationGroupManagementServices())->complete($retryLeader['pinkId'],1);
     $retryGateway=WholeGroupGateway::groupLocal();$retryGateway->orders=[$retryLeader['oid'],$retryMember['oid']];
