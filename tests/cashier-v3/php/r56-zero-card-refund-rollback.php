@@ -137,24 +137,3 @@ if ((array)Db::name('user')->where('uid', (int)$member['uid'])
     ->field('ben_money,give_money,balance_version')->find() !== $balanceBefore) {
     throw new RuntimeException('R56 rollback left a member-balance change.');
 }
-foreach ([['card' => $zero, 'amount' => '1', 'bonus' => '0'],
-    ['card' => $positive, 'amount' => '0', 'bonus' => '121']] as $case) {
-    Db::startTrans();
-    try {
-        try {
-            $service->executeInTx(['operator_scope' => $operator, 'data_scope' => $scope,
-                'idempotency_key' => 'r56-negative-' . bin2hex(random_bytes(8)),
-                'payload' => ['mode' => 'card', 'memberId' => (int)$member['uid'],
-                    'holderId' => (int)$case['card']['holderId'],
-                    'componentId' => (int)$case['card']['components'][0]['id'],
-                    'refundAmount' => $case['amount'], 'balanceAmount' => $case['bonus'],
-                    'balanceKind' => 'bonus', 'voidTarget' => false,
-                    'reason' => 'R56超额边界测试']]);
-            throw new RuntimeException('Out-of-scope refund or bonus was accepted.');
-        } catch (\app\services\cashier\v3\CashierV3CommandException $error) {
-            if (!str_contains($error->getMessage(), '超过实际剩余金额')) throw $error;
-        }
-    } finally {
-        Db::rollback();
-    }
-}

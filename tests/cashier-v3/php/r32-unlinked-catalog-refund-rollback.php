@@ -111,6 +111,75 @@ try {
         || (string)($balanceFact['balance_change_type'] ?? '') !== 'manual_refund_credit') {
         throw new RuntimeException('Unlinked refund balance credit fact mismatch.');
     }
+    // Zero cash and a positive bonus transfer are independent manual facts. This is the
+    // exact no-original-order workflow used when the operator only transfers value to balance.
+    $zeroHex = bin2hex(random_bytes(16));
+    $zeroKey = 'CMD-' . substr($zeroHex, 0, 8) . '-' . substr($zeroHex, 8, 4) . '-4'
+        . substr($zeroHex, 13, 3) . '-8' . substr($zeroHex, 17, 3) . '-' . substr($zeroHex, 20, 12);
+    $zeroResult = $dispatcher->gateway()->execute('refund-card-or-line',
+        ['idempotencyKey' => $zeroKey, 'contexts' => []], array_replace($payload, [
+            'refundAmount' => '0', 'balanceAmount' => '500', 'salespeople' => [],
+            'reason' => 'R32零现金转余额回滚验证',
+        ]), $operator, ['client_session_id' => 'SESSION-' . substr($zeroKey, 4), 'operator_profile' => $staff],
+        $dispatcher->handlers()->requireCommand('refund-card-or-line'), $scope,
+        CashierV3ActionManifest::requireAction('refund-card-or-line'));
+    $zeroOperationId = (string)($zeroResult['data']['unifiedRefund']['operationId'] ?? '');
+    $zeroRow = (array)Db::name('cashier_v3_refund_adjustment')->where('operation_id', $zeroOperationId)->find();
+    $zeroBalanceFact = (array)Db::name('cashier_v3_balance_fact')->where('order_id', $zeroOperationId)->find();
+    if (($zeroResult['status'] ?? '') !== 'success' || (int)($zeroRow['refund_amount_cents'] ?? -1) !== 0
+        || (int)($zeroRow['balance_credit_cents'] ?? 0) !== 50000
+        || (int)($zeroBalanceFact['principal_delta_cents'] ?? 0) !== 0
+        || (int)($zeroBalanceFact['bonus_delta_cents'] ?? 0) !== 50000
+        || (int)Db::name('cashier_v3_payment_fact')->where('order_id', $zeroOperationId)
+            ->where('fact_type', 'manual_refund_adjustment')->sum('amount_cents') !== 0) {
+        throw new RuntimeException('Zero-cash 500-yuan balance transfer facts mismatch.');
+    }
+    // Clone a local sales line to prove that document cash/bonus inputs may exceed the
+    // original value while the source entitlement closes at zero instead of going negative.
+    $seedLine = (array)Db::name('cashier_v3_sales_order_line')->whereIn('item_type', ['project', 'product'])
+        ->where('line_status', 'settled')->where('line_direction', 'forward')->find();
+    $seedOrder = $seedLine
+        ? (array)Db::name('cashier_v3_sales_order')->where('order_id', $seedLine['order_id'])->find() : [];
+    if (!$seedLine || !$seedOrder) throw new RuntimeException('Document over-remaining schema fixture unavailable.');
+    $docSuffix = bin2hex(random_bytes(10));
+    unset($seedLine['id'], $seedOrder['id']);
+    $seedOrder = array_replace($seedOrder, [
+        'order_id' => 'R32-DOC-ORDER-' . $docSuffix, 'order_no' => 'R32-DOC-' . $docSuffix,
+        'checkout_request_id' => 'R32-DOC-REQUEST-' . $docSuffix,
+        'natural_key' => 'R32-DOC-ORDER-' . $docSuffix, 'tenant_id' => '0',
+        'member_id' => $memberId, 'store_id' => $storeId,
+        'order_status' => 'settled', 'order_direction' => 'forward',
+    ]);
+    $seedLine = array_replace($seedLine, [
+        'order_line_id' => 'R32-DOC-LINE-' . $docSuffix,
+        'natural_key' => 'R32-DOC-LINE-' . $docSuffix,
+        'checkout_request_id' => $seedOrder['checkout_request_id'],
+        'order_id' => $seedOrder['order_id'], 'tenant_id' => '0',
+        'member_id' => $memberId, 'store_id' => $storeId,
+        'sale_amount_cents' => 10000, 'coupon_payment_cents' => 0,
+    ]);
+    Db::name('cashier_v3_sales_order')->insert($seedOrder);
+    Db::name('cashier_v3_sales_order_line')->insert($seedLine);
+    $docHex = bin2hex(random_bytes(16));
+    $docKey = 'CMD-' . substr($docHex, 0, 8) . '-' . substr($docHex, 8, 4) . '-4'
+        . substr($docHex, 13, 3) . '-8' . substr($docHex, 17, 3) . '-' . substr($docHex, 20, 12);
+    $docResult = $dispatcher->gateway()->execute('refund-card-or-line',
+        ['idempotencyKey' => $docKey, 'contexts' => []], [
+            'mode' => 'document', 'memberId' => $memberId, 'holderId' => 0, 'componentId' => 0,
+            'lineId' => $seedLine['order_line_id'], 'catalogItemId' => 0,
+            'refundAmount' => '1000', 'balanceAmount' => '330', 'balanceKind' => 'bonus',
+            'voidTarget' => false, 'validThrough' => 0, 'businessDate' => $date,
+            'reason' => 'R32单据超余值回滚验证', 'salespeople' => [],
+        ], $operator, ['client_session_id' => 'SESSION-' . substr($docKey, 4), 'operator_profile' => $staff],
+        $dispatcher->handlers()->requireCommand('refund-card-or-line'), $scope,
+        CashierV3ActionManifest::requireAction('refund-card-or-line'));
+    $docOperationId = (string)($docResult['data']['unifiedRefund']['operationId'] ?? '');
+    $docRow = (array)Db::name('cashier_v3_refund_adjustment')->where('operation_id', $docOperationId)->find();
+    if (($docResult['status'] ?? '') !== 'success' || (int)($docRow['refund_amount_cents'] ?? 0) !== 100000
+        || (int)($docRow['balance_credit_cents'] ?? 0) !== 33000
+        || (int)($docRow['remaining_after_cents'] ?? -1) !== 0) {
+        throw new RuntimeException('Document over-remaining amounts or capped rights mismatch.');
+    }
     $salary = (new StoreUnifiedReportPhaseSixServices())->query('phase_six_salary_detail', [$storeId],
         ['start' => $date, 'end' => $date], ['document_no' => (string)$result['data']['unifiedRefund']['operationNo'], '_internal_all' => true]);
     $salaryCents = array_sum(array_map(static fn(array $record): int => (int)($record['cash_amount_cents'] ?? 0), $salary['records']));
@@ -172,7 +241,7 @@ try {
             ->value('source_sales_order_id') !== '') {
         throw new RuntimeException('Catalog refund correction changed cash/source identity or left stale fact dates.');
     }
-    echo "R32 catalog local rollback probe passed: snapshot, replay, salesperson reassignment, date correction.\n";
+    echo "R32 refund rollback probe passed: zero-cash balance credit, document over-remaining cap, replay, salesperson reassignment, date correction.\n";
 } finally {
     Db::rollback();
 }

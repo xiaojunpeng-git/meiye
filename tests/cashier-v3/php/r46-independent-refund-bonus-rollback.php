@@ -133,7 +133,8 @@ try {
     Db::rollback();
 }
 
-// Independent bonus entry still respects usable rights; real cash keeps its coupon/balance cap.
+// Manual refund and bonus amounts are independent operator-entered facts. Only malformed
+// non-integer values are rejected; rights reduction is capped separately in the transaction.
 $reject = static function (array $input, string $message) use ($operator, $scope, $newKey, $assert): void {
     try {
         (new CashierV3UnifiedRefundServices())->executeInTx(['operator_scope' => $operator,
@@ -146,8 +147,6 @@ $reject = static function (array $input, string $message) use ($operator, $scope
 };
 Db::startTrans();
 try {
-    $reject(array_replace($payload, ['refundAmount' => '9601', 'balanceAmount' => '0']), '超过实际剩余金额');
-    $reject(array_replace($payload, ['refundAmount' => '0', 'balanceAmount' => '9601']), '超过实际剩余金额');
     $reject(array_replace($payload, ['refundAmount' => '1.50']), '整数元');
     $reject(array_replace($payload, ['balanceAmount' => '1.50']), '整数元');
 
@@ -178,21 +177,23 @@ try {
         'lineId' => $seedLine['order_line_id'], 'refundAmount' => '200', 'balanceAmount' => '300']);
     $line = $snapshot('document', $seedLine['order_line_id'], (int)$holder['uid']);
     $assert((int)$line['remainingAmountCents'] === 80000 && (int)$line['cashRefundRemainingCents'] === 70000,
-        'Coupon/balance-funded value entered the cash ceiling.');
-    $reject(array_replace($doc, ['refundAmount' => '701', 'balanceAmount' => '0']), '原单实际支付');
+        'Document source snapshot changed before the refund.');
     $result = $execute('refund-card-or-line', $doc, $newKey());
     $operations[] = (string)$result['data']['unifiedRefund']['operationId'];
     $line = $snapshot('document', $seedLine['order_line_id'], (int)$holder['uid']);
     $assert((int)$line['remainingAmountCents'] === 60000 && (int)$line['cashRefundRemainingCents'] === 50000,
         'Sales-line reread deducted bonus as a second refund.');
-    $reject(array_replace($doc, ['refundAmount' => '501', 'balanceAmount' => '0']), '原单实际支付');
-    $reject(array_replace($doc, ['refundAmount' => '100', 'balanceAmount' => '601']), '超过实际剩余金额');
+    // The entered cash and bonus may exceed the remaining line value, but the line itself
+    // must close at zero rather than becoming a negative entitlement.
     $result = $execute('refund-card-or-line', array_replace($doc,
-        ['refundAmount' => '500', 'balanceAmount' => '600']), $newKey());
+        ['refundAmount' => '1000', 'balanceAmount' => '900']), $newKey());
     $operations[] = (string)$result['data']['unifiedRefund']['operationId'];
+    $assert((int)$result['data']['unifiedRefund']['refundAmountCents'] === 100000
+        && (int)$result['data']['unifiedRefund']['balanceCreditCents'] === 90000,
+        'Over-remaining manual amounts were not recorded independently.');
     $line = $snapshot('document', $seedLine['order_line_id'], (int)$holder['uid']);
-    $assert((int)$line['remainingAmountCents'] === 10000 && (int)$line['cashRefundRemainingCents'] === 0,
-        'Cash ceiling failed to exhaust while preserving non-cash value.');
+    $assert((int)$line['remainingAmountCents'] === 0 && (int)$line['cashRefundRemainingCents'] === 0,
+        'Over-remaining manual refund created a negative document entitlement.');
 } finally {
     Db::rollback();
 }
