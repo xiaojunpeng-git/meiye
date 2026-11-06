@@ -1248,22 +1248,19 @@ async function submitImportedCardRefund() {
   if (mode === 'balance' && !unifiedRefundWallet.value?.accountVersion) {
     importedCardRefundError.value = '请重新查询会员本金和赠金。'; return
   }
-  // Card refunds may record zero cash without changing rights; other modes still require positive cash.
-  if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount) || (mode !== 'card' && Number(amount) <= 0)
+  // 现金退款和转入余额是两个独立手填事实：任一项可以为 0，但都必须是非负整数元。
+  // 余额退款的“扣减余额”仍在下方单独要求大于 0 并受真实账户余额保护。
+  if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount)
     || !/^(?:0|[1-9][0-9]{0,7})$/.test(balanceAmount)) {
     importedCardRefundError.value = `本次退款金额和${mode === 'balance' ? '扣减余额' : '转入余额'}只能填写整数元。`; return
   }
   if (mode === 'balance' && Number(balanceAmount) <= 0) {
     importedCardRefundError.value = '扣减余额必须大于 0。'; return
   }
-  // 卡项的现金与转入余额都由用户手填，不以成交额／余值作上限；
-  // 单据和钱包模式仍保留原金额校验，权益扣减由后端锁定后单独计算。
-  const remaining = Number(line?.remainingAmountCents || 0) / 100
+  // 卡项、单据和无原单商品的现金退款与转入余额都由用户手填，不以原单／余值作上限；
+  // 后端只把权益扣减封顶在真实剩余值。余额退款仍按锁定账户余额保护，不能扣成负数。
   if (mode === 'balance' && Number(balanceAmount) > Number(unifiedRefundWallet.value.totalCents) / 100) {
     importedCardRefundError.value = '扣减余额超过当前剩余余额，请重新查询。'; return
-  }
-  if (mode === 'document' && (Number(amount) > remaining || Number(balanceAmount) > remaining)) {
-    importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
   }
   if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate) || businessDate > refundBusinessToday()) {
@@ -4875,9 +4872,10 @@ onBeforeUnmount(() => {
         <div class="unified-refund-dialog__field-row">
           <div class="unified-refund-dialog__field">
             <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
-            <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" :pattern="effectiveRefundMode === 'card' ? '(?:0|[1-9][0-9]*)' : '[1-9][0-9]*'" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
+            <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
           </div>
-          <div v-if="effectiveRefundMode !== 'catalog'" class="unified-refund-dialog__field">
+          <!-- 无原单商品只确定退款展示身份；现金退款与转入余额仍是独立手工事实。 -->
+          <div class="unified-refund-dialog__field">
             <label class="service-void-modal__label" for="unified-refund-balance">{{ effectiveRefundMode === 'balance' ? '扣减余额' : '转入余额' }}</label>
             <input id="unified-refund-balance" :value="unifiedRefundBalanceAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'balance')" />
           </div>

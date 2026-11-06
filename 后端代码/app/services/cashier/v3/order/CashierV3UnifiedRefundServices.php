@@ -140,9 +140,9 @@ final class CashierV3UnifiedRefundServices
         $memberId = (int)($payload['memberId'] ?? 0);
         $void = $payload['voidTarget'] ?? false;
         if (!is_bool($void) || $memberId <= 0) throw self::fail('退款对象无效，请重新选择。', 'refund_target_invalid');
-        // A zero-yuan card refund is an auditable manual record, not a cash reversal;
-        // document and unlinked refunds still require a positive payment amount.
-        $refundCents = self::enteredWholeYuanCents($payload['refundAmount'] ?? null, $mode === 'card');
+        // 现金退款和转入余额分别记录为独立手填事实；现金可为 0，但仍保留整数元与非负校验。
+        // balance 模式的扣减额在目标校验中仍必须大于 0，且不得超过锁定的真实余额。
+        $refundCents = self::enteredWholeYuanCents($payload['refundAmount'] ?? null, true);
         $balanceCents = self::enteredWholeYuanCents($payload['balanceAmount'] ?? null, true);
         $balanceKind = (string)($payload['balanceKind'] ?? 'bonus');
         // 钱包模式扣本金再扣赠金；其余模式只能增加赠金。两条方向不能由客户端混用。
@@ -166,9 +166,11 @@ final class CashierV3UnifiedRefundServices
         }
         $lineId = trim((string)($payload['lineId'] ?? ''));
         $catalogItemId = (int)($payload['catalogItemId'] ?? 0);
+        // 无原单商品只锁定退款展示与分类身份，不创建销售、不恢复库存或权益。
+        // 现金退款和转入赠金分别留事实，因此 catalog 模式允许非零转入余额。
         if (($mode === 'card' && $holderId <= 0)
             || ($mode === 'document' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId))
-            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void || $balanceCents !== 0))
+            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void))
             || ($mode === 'balance' && ($void || $holderId !== 0 || $componentId !== 0
                 || $lineId !== '' || $catalogItemId !== 0 || $balanceCents <= 0
                 || (int)($payload['balanceVersion'] ?? 0) <= 0))) {
@@ -205,22 +207,14 @@ final class CashierV3UnifiedRefundServices
                 : $this->selectedCardComponent($snapshot, $componentId)))
             : $snapshot;
         $remaining = (int)$target['usableRemainingAmountCents'];
-        // 卡项退款现金、转入赠金均按手填值登记，不以原成交或剩余权益作上限。
-        // 权益扣减只消耗当前目标的正向余值，现金、赠金和权益分别留事实，不能产生负权益。
+        // 卡项、单据及无原单退款的现金和转入赠金均按手填值独立登记，不以原成交或余值作上限。
+        // 只有实际权益扣减封顶在当前正向余值，避免人工登记金额反向制造负权益。
         $rightsRefundCents = $mode === 'card'
-            ? CashierV3CardRefundQuotaPolicy::rightsReductionCents($refundCents, (int)$target['remainingAmountCents']) : $refundCents;
+            ? CashierV3CardRefundQuotaPolicy::rightsReductionCents($refundCents, (int)$target['remainingAmountCents'])
+            : ($mode === 'document' ? min($refundCents, max(0, (int)$target['remainingAmountCents'])) : $refundCents);
         // 保留零价卡转赠金的既有审计标记，不再把它作为允许超额登记的特殊条件。
         $zeroPriceBonusGrant = $mode === 'card' && (int)$snapshot['purchaseAmountCents'] === 0
             && $refundCents === 0;
-        if ($mode === 'document' && ($refundCents > $remaining
-            || $balanceCents > (int)$snapshot['usableRemainingAmountCents'])) {
-            throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
-        }
-        // 单据退款继续排除原单券抵付和余额支付；卡项手填登记不复用这项原单金额上限。
-        if ($mode === 'document' && $refundCents
-            > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
-            throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
-        }
         $newEnd = (int)($payload['validThrough'] ?? 0);
         if ($mode === 'card' && $snapshot['isTimeCard']) {
             if ($entireCard) {
@@ -268,7 +262,7 @@ final class CashierV3UnifiedRefundServices
         $rightsBefore = $mode === 'card' ? $this->refundReversalRightsSnapshotInTx($scope->tenantId(), $holderId) : null;
         $after = $mode === 'card'
             ? $this->adjustCard($snapshot, $target, $rightsRefundCents, $void, $newEnd, $scope->tenantId(), $now, $entireCard)
-            : ($mode === 'document' ? $this->adjustLine($snapshot, $refundCents, $void)
+            : ($mode === 'document' ? $this->adjustLine($snapshot, $rightsRefundCents, $void)
                 : ['remainingAmountCents' => $mode === 'balance' ? $remaining - $balanceCents : 0,
                     'closedRemainingCents' => 0, 'remainingTimes' => 0,
                     'timesRemoved' => 0, 'timesClosed' => 0]);
