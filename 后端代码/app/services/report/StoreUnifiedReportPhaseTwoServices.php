@@ -1631,18 +1631,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'phone' => '显示该会员当前登记的手机号；业务事实没有保存历史号码，会员改号后此列会更新，游客或未登记号码时留空。',
             'classification' => '属于生美的显示“生美”；非生美且商品分类已开启合作方的显示“合作方”。同时符合两项时优先按生美计算，同一笔业绩不重复计入合作方。',
             'beauty_category' => '直接项目取售出项目、卡项取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员对每位会员按整月累计，生美、合作方各取累计业绩最高的一个分类；不同会员或分类不拼凑金额达标。',
-            'tier' => '生美：正向现金业绩满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：正向现金业绩满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。销售经理低于门槛时显示“未达标”，不计算分期。退款不降低档位，也不参与达标判断。',
+            'tier' => '生美卡项：正向现金业绩满30,000元、未满50,000元，分2个月且各计50%；生美直接项目同档仍分3个月；50,000元及以上分6个月。合作方：满50,000元、未满100,000元分3个月；100,000元及以上分6个月。卡项与直接项目混合时沿用原三期口径。销售经理低于门槛时显示“未达标”，不计算分期；退款不改变档位。',
             'award_amount' => '该人员对本会员在所示月份、入选商品分类中的正向现金业绩。达标行以此为分摊基数，按实际金额计算、不按档位金额封顶；销售经理未达标行只展示金额，不计算分期。销售收款、欠款补交计入各自业务月；退款不扣减本列。',
             'refund_amount' => '成功现金退款按退款业务月正数展示；达标组退款随达标行展示，未达标退款沿用独立行且只计一次。退款不扣减正向业绩，也不参与达标、档位或分期；作废不计。',
             'accrual_month' => '查询时选择的月份。达标行统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；销售经理未达标行只展示本月业绩，不产生应计。',
-            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。退款仅展示，不改变总期数或当前期次。',
+            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。生美卡项3万至未满5万分2个月，各50%；原三期规则为40%、30%、30%；六期规则首月40%，后五个月各12%。退款仅展示，不改变总期数或当前期次。',
             'monthly_due' => '本行所选销售角色、会员与分类在达标月的正向累计现金业绩×本月对应比例，退款不加、不减，也不改变期次。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
         ];
         foreach (range(1, 6) as $i) {
             $key = 'installment_' . $i;
             $columns[] = ['key' => $key, 'label' => '第' . $i . '个月应计'];
-            $periodRule = $i === 1 ? '三期、六期均按达标金额的40%计算。'
-                : ($i <= 3 ? '三期按达标金额的30%计算，六期按12%计算。' : '仅六期大单适用，按达标金额的12%计算；三期大单没有本期。');
+            $periodRule = $i === 1 ? '生美卡项两期按50%；三期、六期按40%。'
+                : ($i === 2 ? '生美卡项两期按50%并吸收尾差；三期按30%，六期按12%。'
+                    : ($i === 3 ? '三期按30%并吸收尾差，六期按12%；两期大单没有本期。'
+                        : '仅六期大单适用，按12%计算；两期、三期大单没有本期。'));
             $explanations[$key] = '仅在所选月份是从达标当月起算的第' . $i . '个月时显示。' . $periodRule
                 . '其他期次显示“-”；最后一期包含分摊尾差，显示金额不代表已发放。';
         }
@@ -2171,6 +2173,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if (!isset($bySaleCategory[$key])) {
                 $bySaleCategory[$key] = $component;
                 $bySaleCategory[$key]['beauty_category'] = $category;
+                // 卡项与直接项目使用不同分期资格；来源取权威事实投影，不从分类名称猜测。
+                $bySaleCategory[$key]['large_order_product_type'] = isset($component['direct_amount_cents']) ? 'project' : 'card';
                 $bySaleCategory[$key]['component_cash_amount_cents'] = 0;
             } elseif (isset($component['direct_amount_cents'])
                 || (int)$bySaleCategory[$key]['base_amount_cents'] !== (int)$component['base_amount_cents']
@@ -2294,7 +2298,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $monthly[$scope][$categoryKey] = [
                     'beauty_category' => $category, 'rule_type' => $rule,
                     'amount_cents' => 0, 'refund_amount_cents' => 0, 'last_positive_index' => null,
-                    'member_names' => [],
+                    'member_names' => [], 'positive_product_types' => [],
                 ];
             }
             $memberId = (int)($fact['member_id'] ?? 0);
@@ -2306,6 +2310,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if ($amount > 0) {
                 $monthly[$scope][$categoryKey]['amount_cents'] += $amount;
                 $monthly[$scope][$categoryKey]['last_positive_index'] = $index;
+                $productType = (string)($fact['large_order_product_type'] ?? '');
+                $monthly[$scope][$categoryKey]['positive_product_types'][$productType] = true;
             } elseif ($amount < 0) {
                 $monthly[$scope][$categoryKey]['refund_amount_cents'] += abs($amount);
             }
@@ -2329,6 +2335,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 'refund_amount_cents' => (int)$winner['refund_amount_cents'],
                 'threshold_cents' => (int)$winner['amount_cents'] >= $high ? $high : $minimum,
                 'member_names' => $winner['member_names'],
+                // 混合卡项与直接项目的原聚合口径保持不变；只有全部正向业绩来自卡项才改两期。
+                'large_order_product_type' => count($winner['positive_product_types']) === 1
+                    && isset($winner['positive_product_types']['card']) ? 'card' : 'mixed_or_project',
             ];
         }
         return $awards;
