@@ -325,7 +325,7 @@ class CashierV3CommandGatewayServices extends BaseServices
         $deadlockAttempts = 0;
         while (true) {
             try {
-                return Db::transaction(function () use (
+                $commandResult = Db::transaction(function () use (
                     $canonicalAction,
                     $idempotencyKey,
                     $contexts,
@@ -648,6 +648,23 @@ class CashierV3CommandGatewayServices extends BaseServices
                 }
             }
                 });
+                // Notifications are external effects: only a newly committed
+                // checkout may request them. A receipt replay never sends again,
+                // and delivery failures cannot turn a committed sale into a retry.
+                if ($canonicalAction === 'submit-checkout'
+                    && ($commandResult['status'] ?? '') === CashierV3ResultCode::STATUS_SUCCESS
+                    && empty($commandResult['replay'])) {
+                    try {
+                        (new \app\services\cashier\v3\settlement\CashierV3CheckoutMemberNotificationServices())
+                            ->sendAfterCommit($idempotencyKey, (array)($commandResult['data']['checkoutSubmission'] ?? []));
+                    } catch (\Throwable $notificationError) {
+                        Log::error('[cashier_v3_checkout_notification_failed] ' . json_encode([
+                            'command_key_hash' => hash('sha256', $idempotencyKey),
+                            'error' => get_class($notificationError),
+                        ]));
+                    }
+                }
+                return $commandResult;
             } catch (\Throwable $exception) {
                 if ($canonicalAction !== 'submit-checkout'
                     || $deadlockAttempts >= 1
