@@ -52,6 +52,20 @@ try {
     Db::name('store_pink')->where('id',$one['pinkId'])->update(['order_id'=>$originalOrderNo]);
     check($service->dashboard($filters,$admin)['metrics']['formed_amount']==='300.00',
         'restored participant identity restores the original group total');
+    // 卡项拼团发卡后原单会转成 type=11；仍须依赖同一参团身份，不能把普通卡项计入大屏。
+    Db::name('store_order')->where('id',$one['oid'])->update(['type'=>11]);
+    $cardDashboard=$service->dashboard($filters,$admin);
+    $cardDetails=$service->details($filters,$admin);
+    $cardPromoterDetails=$service->details($filters,$admin,null,false,true);
+    check($cardDashboard['metrics']['formed_amount']==='300.00'
+        && $cardDetails['count']===3 && $cardPromoterDetails['count']===3,
+        'type-eleven paid card group appears in dashboard and both detail reports');
+    Db::name('store_pink')->where('id',$one['pinkId'])->update(['order_id'=>'unrelated-card-order']);
+    check($service->dashboard($filters,$admin)['metrics']['formed_amount']==='200.00',
+        'type-eleven card order still requires matching participant identity');
+    Db::name('store_pink')->where('id',$one['pinkId'])->update(['order_id'=>$originalOrderNo]);
+    check($service->dashboard($filters,$admin)['metrics']['formed_amount']==='300.00',
+        'restored card-group participant identity restores the total');
     Db::name('store_order')->where('id',$one['oid'])->update(['type'=>3]);
     seed('store_order_terminal_operation',['store_order_id'=>$one['oid'],'business_type'=>1,'action_type'=>1,'state'=>2,'refund_amount'=>100,'operation_no'=>'R44-PENDING-'.$one['oid'],'request_token'=>'R44-pending-'.$one['oid']]);
     check($service->dashboard($filters,$admin)['metrics']['total_amount']==='300.00','pending refund does not prematurely reduce net sales');
