@@ -290,6 +290,7 @@ final class CashierV3SaleOnlyFactAssembler
 
             $craftsmenSnapshotJson = trim((string)($orderLine['craftsmen_snapshot_json'] ?? ''));
             if ((string)$orderLine['item_type'] === 'project'
+                && !\app\services\cashier\v3\settlement\CashierV3ProjectPurchasePolicy::deferred($order)
                 && $craftsmenSnapshotJson !== ''
                 && $craftsmenSnapshotJson !== '[]') {
                 try {
@@ -501,7 +502,11 @@ final class CashierV3SaleOnlyFactAssembler
             || !($aggregate['verifiedSources'] instanceof CashierV3CheckoutVerifiedSourceSet)) {
             throw self::failure('sale_only_fact_locked_aggregate_shape_invalid');
         }
-        self::assertExactKeys($aggregate['request'], self::REQUEST_KEYS, 'sale_only_fact_request_shape_invalid');
+        // Fulfillment is independently frozen on the locked request; it is not
+        // a second amount source and old requests retain default immediate mode.
+        $requestShape = $aggregate['request'];
+        unset($requestShape['project_auto_complete']);
+        self::assertExactKeys($requestShape, self::REQUEST_KEYS, 'sale_only_fact_request_shape_invalid');
         self::assertExactKeys($aggregate['currentRequest'], self::CURRENT_REQUEST_KEYS, 'sale_only_fact_current_request_shape_invalid');
         $request = $aggregate['request'];
         if ((string)$request['request_status'] !== 'ready_for_submit'

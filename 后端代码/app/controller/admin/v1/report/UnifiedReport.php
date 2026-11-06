@@ -272,6 +272,44 @@ class UnifiedReport extends AuthController
         }
     }
 
+    /** 人效查询、原单下钻和全量导出共用后台数据权限；查询参数只能缩小范围。 */
+    public function humanEfficiency(Request $request, \app\services\report\HumanEfficiencyDashboardServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-report-employee-dashboard') && !$this->hasMenuPermission('admin-staff')) {
+            return app('json')->fail('当前账号未配置人效看板权限');
+        }
+        try {
+            $input = $request->getMore([
+                ['start_date',''],['end_date',''],['store_ids',''],['org_id',0],['store_id',0],
+                ['advisor_page',1],['leader_page',1],['manager_page',1],['action','query'],
+                ['entity_id',''],['category_id',0],['metric','cash'],['page',1],
+            ]);
+            if (!in_array($input['action'], ['query','detail','export'], true)) throw new \InvalidArgumentException('人效查询操作不正确');
+            $range = $this->employeeDashboardRange($input);
+            $stores = $this->scopedStoreIds($input);
+            if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
+            // 个人数据权限不能因拥有参与门店而升级成全店员工和经理业绩。身份只来自认证投影。
+            $authorization=$this->reportAuthorization();
+            $input['_employee_id']=$authorization['mode']==='self_participant'?(int)$authorization['employee_id']:0;
+            $data = \think\facade\Db::transaction(function () use ($services, $stores, $range, $input) {
+                return $services->read($stores, $range, $input);
+            });
+            return app('json')->success($data);
+        } catch (\InvalidArgumentException $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** 人效列元数据沿用员工区域权限；目录返回只影响展示，不授予事实查询权限。 */
+    public function humanEfficiencyMetadata(\app\services\report\HumanEfficiencyMetadataServices $services)
+    {
+        if (!$this->hasMenuPermission('admin-report-employee-dashboard') && !$this->hasMenuPermission('admin-staff')) {
+            return app('json')->fail('当前账号未配置人效看板权限');
+        }
+        if (!$this->scopedStoreIds([])) return app('json')->fail('无权限或当前范围无门店');
+        return app('json')->success($services->metadata());
+    }
+
     /** 员工看板统一聚合读取；客户端筛选只能缩小当前账号权限范围。 */
     public function employeeDashboard(Request $request, EmployeeDashboardServices $services)
     {

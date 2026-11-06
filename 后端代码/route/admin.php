@@ -1804,6 +1804,9 @@ Route::group('adminapi', function () {
         Route::get('product-dashboard', 'v1.report.UnifiedReport/productDashboard')->option(['real_name' => '商品看板查询']);
         Route::get('customer-analytics', 'v1.report.UnifiedReport/customerAnalytics')->option(['real_name' => '客户分析查询']);
         Route::get('customer-analytics/export', 'v1.report.UnifiedReport/customerAnalyticsExport')->option(['real_name' => '客户分析导出']);
+        // 人效列契约沿用统一报表权限中间件，分类不在前端硬编码。
+        Route::get('human-efficiency', 'v1.report.UnifiedReport/humanEfficiency')->option(['real_name' => '人效看板']);
+        Route::get('human-efficiency/metadata', 'v1.report.UnifiedReport/humanEfficiencyMetadata')->option(['real_name' => '人效看板列元数据']);
         Route::get('employee-dashboard', 'v1.report.UnifiedReport/employeeDashboard')->option(['real_name' => '员工看板查询']);
         Route::get('staffing-quota', 'v1.report.UnifiedReport/staffingQuota')->option(['real_name' => '岗位编制列表']);
         Route::post('staffing-quota', 'v1.report.UnifiedReport/saveStaffingQuota')->option(['real_name' => '保存岗位编制']);
@@ -2763,6 +2766,8 @@ Route::group('adminapi', function () {
             'delete' => '删除系统配置'
         ]]);
         // 独立门店端目录；控制器显式复核平台权限，不能沿用未知路由默认放行。
+        Route::get('merchant-permissions', 'v1.system.MerchantPermissions/index')->option(['real_name'=>'商家端权限规则']);
+        Route::post('merchant-permissions', 'v1.system.MerchantPermissions/save')->option(['real_name'=>'保存商家端权限规则']);
         Route::get('store-permissions', 'v1.system.StorePermissions/index')->option(['real_name'=>'门店端权限规则']);
         Route::post('store-permissions', 'v1.system.StorePermissions/save')->option(['real_name'=>'保存门店端权限规则']);
         //权限菜单资源路由

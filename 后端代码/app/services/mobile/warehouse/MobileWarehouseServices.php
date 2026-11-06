@@ -41,6 +41,12 @@ final class MobileWarehouseServices
     {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
         $entry = $this->entryScopes->resolve($merchant);
+        $visibility=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'warehouse');
+        if(!$visibility['page']) {
+            $personal=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'employee');
+            if($personal['page']) return ['warehouse'=>['entry'=>['destination'=>'employee-performance','employeeId'=>(int)$merchant['employeeId']]]];
+            throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING','当前岗位没有可查看的数据页面。');
+        }
         if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL) {
             return ['warehouse' => ['entry' => $this->entryProjection($entry)]];
         }
@@ -74,7 +80,10 @@ final class MobileWarehouseServices
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? [])));
         $showOrganizationRanking = (bool)$entry['showOrganizationRanking'];
         $showStoreRanking = (bool)($entry['showStoreRanking'] ?? false);
-        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking, $showStoreRanking);
+        $availableCatalog=$this->rankingCatalog($showOrganizationRanking,$showStoreRanking);
+        $allowedTabs=array_values(array_intersect(array_column($visibility['tabs'],'code'),array_column($availableCatalog,'code')));
+        $requestedCode=(string)($input['rankingCode']??'');
+        $rankingCode=MerchantDataPermissionServices::selectedTab($allowedTabs,$requestedCode,'management_board');
         $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
         // 服务项目的默认排序是现金业绩；数量排序只改变同一组结果的顺序。
         $projectSortMetric = $this->projectSortMetric((string)($input['projectSortMetric'] ?? 'cash'));
@@ -86,6 +95,15 @@ final class MobileWarehouseServices
         // 指定门店的初始工作台仍是单店，但六类排行读取全部授权门店；
         // 点进组织或门店后，所有排行只在该节点与授权门店的交集内读取。
         $rankingScopeStoreIds = $defaultStoreEntry ? $validStoreIds : $scopeStoreIds;
+        // 管理看板严格跟随顶部当前节点，不沿用排行“全部指定门店”的特殊范围。
+        // 明细仍由同一入口重解权限，个人权限在前面的个人跳转分支返回，不能取得全店人员。
+        $managementBoard = null;
+        if ($rankingCode === 'management_board') {
+            if ($rankingPage !== 1) throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '看板不使用排行续页，请重新查询。', 'rankingPage');
+            $managementBoard = (new MobileManagementBoardServices())->read($scopeStoreIds,
+                ['start'=>$period['startDate'], 'end'=>$period['endDate']], $input);
+            if (($input['boardAction'] ?? '') === 'detail') return ['warehouse'=>['managementBoard'=>$managementBoard]];
+        }
         if ($rankingPage > 1) {
             // 续页只读当前已授权排行，避免重复计算概览与趋势；组织排行仍是当前层级概览。
             if ((string)($input['rankingCode'] ?? '') !== $rankingCode || $rankingCode === 'organization') {
@@ -146,6 +164,8 @@ final class MobileWarehouseServices
             $rankingRange = $storePage['rankingRange'];
             $rankingTotal = $storePage['rankingTotal'];
             $rankingHasMore = $storePage['rankingHasMore'];
+        } elseif (in_array($rankingCode,['management_board','none'],true)) {
+            $rankingRows = [];
         } else {
             $factPage = $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, 1, $projectSortMetric);
             $rankingRows = $factPage['rankingRows'];
@@ -153,7 +173,12 @@ final class MobileWarehouseServices
             $rankingTotal = $factPage['rankingTotal'];
             $rankingHasMore = $factPage['rankingHasMore'];
         }
-        $rankingCatalog = $this->rankingCatalog($showOrganizationRanking, $showStoreRanking);
+        $rankingCatalog = array_values(array_filter($this->rankingCatalog($showOrganizationRanking, $showStoreRanking),static fn($row)=>in_array($row['code'],$allowedTabs,true)));
+        $metrics=array_values(array_filter($metrics,static fn($row)=>in_array($row['code'],array_column($visibility['metrics'],'code'),true)));
+        foreach($metrics as &$metric)foreach($visibility['metrics'] as $definition)if($metric['code']===$definition['code'])$metric['name']=$definition['name'];unset($metric);
+        foreach($rankingCatalog as &$tab)foreach($visibility['tabs'] as $definition)if($tab['code']===$definition['code'])$tab['name']=$definition['name'];unset($tab);
+        $tabOrder=array_flip(array_column($visibility['tabs'],'code'));usort($rankingCatalog,static fn($a,$b)=>$tabOrder[$a['code']]<=>$tabOrder[$b['code']]);
+        $metricOrder=array_flip(array_column($visibility['metrics'],'code'));usort($metrics,static fn($a,$b)=>$metricOrder[$a['code']]<=>$metricOrder[$b['code']]);
         $selectedRankingAvailable = true;
         foreach ($rankingCatalog as $rankingDefinition) {
             if ((string)$rankingDefinition['code'] === $rankingCode) {
@@ -176,8 +201,10 @@ final class MobileWarehouseServices
                 'hierarchyRows' => $hierarchy['rows'],
                 'organizationTree' => $hierarchy['organizationTree'],
                 'summaryMetrics' => $metrics,
+                'visibility' => $visibility,
                 'trend' => $trend,
                 'rankingRows' => $rankingRows,
+                'managementBoard' => $managementBoard,
                 'rankingCatalog' => $rankingCatalog,
                 'selectedRankingCode' => $rankingCode,
                 'selectedRankingOrder' => $rankingOrder,
@@ -304,11 +331,14 @@ final class MobileWarehouseServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
 
-        $detailMode = trim((string)($input['detailMode'] ?? 'cash')) === 'labor' ? 'labor' : 'cash';
+        $visibility=(new MerchantDataPermissionServices())->policy((int)$merchant['employeeId'],'employee');
+        if(!$visibility['page'])throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING','当前岗位没有员工业绩页面权限。');
+        $tabs=array_column($visibility['tabs'],'code');$requested=(string)($input['detailMode']??'');
+        $detailMode=MerchantDataPermissionServices::selectedTab($tabs,$requested,'board');
         $detailMetricCode = $detailMode === 'labor' ? 'staff_labor_yeji' : 'staff_sales_yeji';
         $page = max(1, (int)($input['page'] ?? 1));
         $pageSize = min(20, max(1, (int)($input['pageSize'] ?? 20)));
-        $detailPage = $metricReader->personnelDetailPage(
+        $detailPage = in_array($detailMode,['board','none'],true) ? ['total'=>0,'rows'=>[]] : $metricReader->personnelDetailPage(
             $detailMetricCode, '0', $storeIds, $metricRange, $employeeId, $page, $pageSize
         );
         $total = (int)$detailPage['total'];
@@ -318,12 +348,7 @@ final class MobileWarehouseServices
         $rechargeAmounts = $this->detailRechargeAmounts($detailRows);
         $calculated=\app\services\payroll\PayrollAlgorithmPolicy::calculated();
         $commission=$calculated ? (new \app\services\payroll\ProjectLaborCommissionReadServices($metricReader))->read($storeIds,$metricRange,[$employeeId]) : null;
-        $commissionAmount=0;$commissionComplete=true;
-        // 提成分组与明细分页总数独立命名，不能覆盖后面的分页契约。
-        if ($commission!==null) foreach ($commission['totals'] as $commissionTotal) {
-            $commissionComplete=$commissionComplete && $commissionTotal['complete'];
-            if ($commissionTotal['amount_cents']!==null) $commissionAmount+=$commissionTotal['amount_cents'];
-        }
+        $commissionSummary=self::employeeCommissionSummary($commission);
         $details = [];
         foreach ($detailRows as $row) {
             $amount = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['metric_value'] ?? 0));
@@ -362,6 +387,8 @@ final class MobileWarehouseServices
                 'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
+                // 仅无会员身份的历史销售事实显示游客；有会员 ID 但姓名缺失不能误判为游客。
+                'isGuest' => (int)($row['member_id'] ?? 0) <= 0,
                 'memberPhone' => (string)($contactPhones[$factId] ?? ''),
                 'serviceObject' => $hasService ? self::detailServiceObject((string)($context['service_object'] ?? ''), $context['friend_counts_as_customer'] ?? null) : '',
                 'serviceQuantity' => $hasService ? (string)($context['service_quantity'] ?? '') : '',
@@ -377,11 +404,11 @@ final class MobileWarehouseServices
             ];
         }
 
-        return [
+        $result = [
             'employeePerformance' => [
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
                 'laborAlgorithm'=>\app\services\payroll\PayrollAlgorithmPolicy::projection(),
-                'commission'=>['visible'=>$calculated,'complete'=>$commissionComplete,'displayValue'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对'],
+                'commission'=>['visible'=>$calculated,'complete'=>$commissionSummary['complete'],'displayValue'=>$commissionSummary['displayValue'],'pendingCount'=>$commissionSummary['pendingCount']],
                 'period' => $period,
                 'metrics' => [
                     // 人员现金业绩是销售人分配事实，不是整店收款；页面按产品用语展示。
@@ -392,8 +419,7 @@ final class MobileWarehouseServices
                     ['code' => 'staff_project_num', 'name' => '项目数', 'value' => self::displayScaledCount($metricAmounts['staff_project_num'], 6), 'unit' => 'count'],
                     ['code' => 'staff_labor_fee', 'name' => '手工费', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_fee']), 'unit' => 'amount'],
                 ] + ($calculated ? [
-                    6=>['code'=>'staff_net_sales','name'=>'净销售业绩','value'=>\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)(new \app\services\report\StoreSalespersonNetReadServices())->matrix($storeIds,$metricRange,[$employeeId])['summary']['total_metric_value']),'unit'=>'amount'],
-                    7=>['code'=>'project_labor_commission','name'=>'劳动提成（预计）','value'=>$commissionComplete ? \app\services\query\metric\MetricMoneyFormatter::integerYuan($commissionAmount) : '待核对','unit'=>'amount'],
+                    6=>['code'=>'project_labor_commission','name'=>'劳动提成（预计）','value'=>$commissionSummary['displayValue'],'unit'=>'amount'],
                 ] : []),
                 'detailMode' => $detailMode,
                 'details' => $details,
@@ -403,6 +429,25 @@ final class MobileWarehouseServices
                 'aggregation_caught_up' => true,
             ],
         ];
+        $result['employeePerformance']['metrics']=array_values(array_filter($result['employeePerformance']['metrics'],static fn($row)=>in_array($row['code'],array_column($visibility['metrics'],'code'),true)));
+        foreach($result['employeePerformance']['metrics'] as &$metric)foreach($visibility['metrics'] as $definition)if($metric['code']===$definition['code'])$metric['name']=$definition['name'];unset($metric);
+        $metricOrder=array_flip(array_column($visibility['metrics'],'code'));usort($result['employeePerformance']['metrics'],static fn($a,$b)=>$metricOrder[$a['code']]<=>$metricOrder[$b['code']]);
+        $result['employeePerformance']['tabs']=$visibility['tabs'];
+        $result['employeePerformance']['board']=$detailMode==='board'?(new EmployeeManagementBoardServices())->read($storeIds,$metricRange,$employeeId):null;
+        return $result;
+    }
+
+    /** Sum every authorized fact across the selected dates, not the visible page; unresolved facts stay explicit. */
+    private static function employeeCommissionSummary(?array $commission): array
+    {
+        $amount=0;$pending=0;
+        foreach ($commission['details'] ?? [] as $detail) {
+            if (($detail['amount_cents'] ?? null) === null) $pending++;
+            else $amount+=(int)$detail['amount_cents'];
+        }
+        $display=\app\services\query\metric\MetricMoneyFormatter::integerYuan($amount);
+        if ($pending>0) $display='已计算 '.$display.'（'.$pending.'笔待核对）';
+        return ['complete'=>$pending===0,'pendingCount'=>$pending,'displayValue'=>$display];
     }
 
     /**
@@ -1048,6 +1093,12 @@ final class MobileWarehouseServices
                 'scopeRule' => 'AUTHORIZED_ORGANIZATION_OR_SELECTED_STORES',
             ],
             [
+                'code' => 'management_board',
+                'name' => '看板',
+                'available' => true,
+                'scopeRule' => 'CURRENT_AUTHORIZED_NODE',
+            ],
+            [
                 'code' => 'staff_cash_performance',
                 'name' => '员工销售',
                 'available' => true,
@@ -1082,13 +1133,6 @@ final class MobileWarehouseServices
             return ((string)$item['code'] !== 'organization' || $showOrganizationRanking)
                 && ((string)$item['code'] !== 'store' || $showStoreRanking);
         }));
-    }
-
-    private function rankingCode(string $code, bool $showOrganizationRanking, bool $showStoreRanking): string
-    {
-        $allowed = array_column($this->rankingCatalog($showOrganizationRanking, $showStoreRanking), 'code');
-        $default = $showOrganizationRanking ? 'organization' : ($showStoreRanking ? 'store' : 'staff_cash_performance');
-        return in_array($code, $allowed, true) ? $code : $default;
     }
 
     /** @return array<string,mixed> */
@@ -1212,7 +1256,7 @@ final class MobileWarehouseServices
         $base = ['selectedRankingCode' => $rankingCode, 'rankingRange' => $range, 'data_as_of' => time()];
         if ($storeIds === []) return self::paginateRankingRows([], $page) + $base;
         if ($rankingCode === 'staff_designated_customer') {
-            return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder, 0), $page) + $base;
+            return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder), $page) + $base;
         }
         if ($rankingCode === 'project_count') {
             return $this->serviceProjectRankingPage($storeIds, $period, $rankingOrder, $projectSortMetric, $page) + $base;
@@ -1312,145 +1356,22 @@ final class MobileWarehouseServices
         return $rows;
     }
 
-    /**
-     * "员工点客" has the same customer-counting rule as the legacy service
-     * report, but reads only the V3 immutable service fact and its frozen
-     * craftsman snapshot.  A member is counted once per day; a friend/guest
-     * service line is counted separately.  All point-customer craftsmen in a
-     * group split one customer in hundredths, with the final remainder given
-     * to the largest staff id for deterministic results.
-     */
-    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder, int $limit = 10): array
+    /** 与员工详情共用点客指标和十分位展示，原始服务记录由指标服务统一识别和去重。 */
+    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder): array
     {
-        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('service')
-            ->where('service.tenant_id', '0')->whereIn('service.store_id', $storeIds)
-            ->whereBetween('service.business_date', [$period['startDate'], $period['endDate']])
-            ->where('service.service_status', 'completed');
-        // Point-customer rankings share normal service visibility with report
-        // lists, so a successful service or sales void removes its original day.
-        (new \app\services\report\StoreReportNormalDataScopeServices())
-            ->excludeVoidedSalesOrderServices($query, 'service');
-        $facts = $query->field('service.service_fact_id,service.business_date,service.member_id,service.service_object,service.craftsmen_snapshot_json')
-            ->select()->toArray();
-
-        // groupKey => [staff id => immutable employee identity]
-        $groups = [];
-        foreach ($facts as $fact) {
-            $pointCraftsmen = $this->pointCraftsmenFromSnapshot($fact['craftsmen_snapshot_json'] ?? null);
-            if ($pointCraftsmen === []) {
-                continue;
-            }
-
-            $day = (string)($fact['business_date'] ?? '');
-            $memberId = (int)($fact['member_id'] ?? 0);
-            $serviceObject = trim((string)($fact['service_object'] ?? ''));
-            $isFriendOrGuest = $memberId <= 0 || $serviceObject === 'friend' || $serviceObject === '朋友';
-            $groupKey = $isFriendOrGuest
-                ? 'g_' . $day . '_' . (string)($fact['service_fact_id'] ?? '')
-                : 'm_' . $day . '_' . $memberId;
-            if (!isset($groups[$groupKey])) {
-                $groups[$groupKey] = [];
-            }
-            foreach ($pointCraftsmen as $staffId => $identity) {
-                $groups[$groupKey][$staffId] = $identity;
-            }
-        }
-
-        // employee id => immutable display identity plus scaled customer count
-        $employees = [];
-        foreach ($groups as $group) {
-            ksort($group, SORT_NUMERIC);
-            $staffIds = array_keys($group);
-            $count = count($staffIds);
-            if ($count === 0) {
-                continue;
-            }
-            $base = intdiv(100, $count);
-            $remainder = 100 - $base * $count;
-            foreach ($staffIds as $index => $staffId) {
-                $identity = $group[$staffId];
-                $employeeId = (int)$identity['employeeId'];
-                if (!isset($employees[$employeeId])) {
-                    $employees[$employeeId] = ['name' => (string)$identity['name'], 'hundredths' => 0];
-                }
-                $employees[$employeeId]['hundredths'] += $base + ($index === $count - 1 ? $remainder : 0);
-            }
-        }
-
-        $rows = [];
-        foreach ($employees as $employeeId => $employee) {
-            $rows[] = [
-                'entity_id' => (int)$employeeId,
-                'entity_name' => (string)$employee['name'],
-                'ranking_value' => (int)$employee['hundredths'],
-            ];
-        }
-        usort($rows, static function (array $left, array $right) use ($rankingOrder): int {
-            $leftValue = (int)$left['ranking_value'];
-            $rightValue = (int)$right['ranking_value'];
-            if ($leftValue === $rightValue) {
-                return (int)$left['entity_id'] <=> (int)$right['entity_id'];
-            }
-            return $rankingOrder === 'asc' ? $leftValue <=> $rightValue : $rightValue <=> $leftValue;
-        });
-        return $this->fractionalCustomerRankingRows($limit > 0 ? array_slice($rows, 0, $limit) : $rows);
-    }
-
-    /**
-     * Reads only frozen V3 service-row snapshots.  The entitlement completion
-     * stream has a historical snake_case snapshot shape while the sales stream
-     * uses the canonical camelCase shape; both explicitly carry the point
-     * flag.  A pre-fix snapshot without that flag is intentionally ignored.
-     *
-     * @return array<int,array{employeeId:int,name:string}>
-     */
-    private function pointCraftsmenFromSnapshot($json): array
-    {
-        if (!is_string($json) || trim($json) === '') {
-            return [];
-        }
-        $rows = json_decode($json, true);
-        if (!is_array($rows)) {
-            return [];
-        }
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $rows = $reader->pointVisitRanking('0', $storeIds, [
+            'start' => $period['startDate'], 'end' => $period['endDate'],
+        ], $rankingOrder);
         $result = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $hasPointFlag = array_key_exists('isPointCustomer', $row) || array_key_exists('is_point_customer', $row);
-            $isPointCustomer = !empty($row['isPointCustomer']) || !empty($row['is_point_customer']);
-            if (!$hasPointFlag || !$isPointCustomer) {
-                continue;
-            }
-            $staffId = (int)($row['staffId'] ?? $row['staff_id'] ?? 0);
-            $employeeId = (int)($row['employeeId'] ?? $row['employee_id'] ?? 0);
-            if ($staffId <= 0 || $employeeId <= 0) {
-                continue;
-            }
-            $result[$staffId] = [
-                'employeeId' => $employeeId,
-                'name' => trim((string)($row['name'] ?? $row['staff_name_snapshot'] ?? '')),
-            ];
-        }
-        return $result;
-    }
-
-    /** @param array<int,array<string,mixed>> $rows */
-    private function fractionalCustomerRankingRows(array $rows): array
-    {
-        $result = [];
-        foreach ($rows as $row) {
-            $hundredths = (int)($row['ranking_value'] ?? 0);
-            $value = $hundredths / 100;
-            $display = number_format($value, 2, '.', '');
-            $display = rtrim(rtrim($display, '0'), '.');
+            $count = (int)$row['metric_value'];
             $result[] = [
                 'entityType' => 'employee',
-                'entityId' => (int)($row['entity_id'] ?? 0),
-                'name' => trim((string)($row['entity_name'] ?? '')) ?: '未命名员工',
-                'rankingValue' => $value,
-                'displayValue' => $display === '' ? '0' : $display,
+                'entityId' => (int)$row['entity_id'],
+                'name' => trim((string)$row['entity_name']) ?: '未命名员工',
+                'rankingValue' => $count / 10,
+                'displayValue' => self::displayScaledCount($count, 1),
                 'unit' => 'count',
                 'hasChildren' => false,
             ];

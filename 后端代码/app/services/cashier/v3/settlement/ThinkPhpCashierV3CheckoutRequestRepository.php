@@ -59,6 +59,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'supplementOperatorId' => 'supplement_operator_id',
         'supplementOperatorNameSnapshot' => 'supplement_operator_name_snapshot',
         'supplementOperatedAt' => 'supplement_operated_at',
+        'projectAutoComplete' => 'project_auto_complete',
         'sourceDocumentType' => 'source_document_type',
         'sourceDocumentId' => 'source_document_id',
         'sourceDocumentNo' => 'source_document_no',
@@ -942,6 +943,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
     ): array {
         $request = $plan['request'];
         $now = time();
+        $request['projectAutoComplete'] = $request['projectAutoComplete'] ?? 1;
         $requestRow = $this->mapRow($request, self::REQUEST_MAP, 'request');
         $requestRow['add_time'] = $now;
         $requestRow['update_time'] = $now;
@@ -1056,6 +1058,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $sourceBefore = $this->lockedChildCount(self::SOURCE_TABLE, $requestId);
 
         $now = time();
+        $request['projectAutoComplete'] = $request['projectAutoComplete'] ?? 1;
         $requestUpdate = $this->mapRow($request, self::REQUEST_MAP, 'request');
         unset($requestUpdate['request_id'], $requestUpdate['tenant_id'], $requestUpdate['store_id']);
         $requestUpdate['update_time'] = $now;
@@ -1157,7 +1160,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             || !is_array($plan['cas'])) {
             throw self::failure('checkout_persistence_plan_invalid');
         }
-        $this->assertExactKeys($plan['request'], array_keys(self::REQUEST_MAP), 'request_row');
+        $this->assertExactKeys($plan['request'] + ['projectAutoComplete' => 1], array_keys(self::REQUEST_MAP), 'request_row');
         $this->assertExactKeys($plan['cas'], ['requestId', 'expectedVersion', 'nextVersion'], 'request_cas');
         foreach ($plan['lineDrafts'] as $row) {
             if (!is_array($row)) {

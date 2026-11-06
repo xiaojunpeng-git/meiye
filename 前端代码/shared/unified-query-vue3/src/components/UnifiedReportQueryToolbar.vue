@@ -84,10 +84,12 @@ defineExpose({ submitQuery })
           <span>{{ field.label }}：</span><UnifiedQueryDateRange v-model="draft[field.key]" :label="`${field.label}周期`" />
         </div>
       </div>
+      <slot name="before-filter-toggle" />
       <button v-if="secondaryFields.length || keepFilterToggle" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary unified-report-query-toolbar__query" :disabled="isQueryLoading" :aria-busy="isQueryLoading" @click="submitQuery">{{ isQueryLoading ? '查询中' : '查询' }}</button>
       <div v-if="$slots['primary-actions']" class="unified-report-query-toolbar__actions" aria-label="报表操作"><slot name="primary-actions" /></div>
     </div>
+    <slot name="supplementary-filters" />
     <p v-if="expanded && !secondaryFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
     <div v-if="expanded && secondaryFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
       <div class="unified-report-query-toolbar__fields" @keydown.enter.prevent="submitQuery">

@@ -56,6 +56,19 @@ final class StoreSalespersonNetReadServices
         return $query;
     }
 
+    /** 人效、分类及原单下钻复用净业绩事实谓词；按主键分批读取完整集合，不截断大范围。 */
+    public function factRows(array $stores, array $range): \Generator
+    {
+        if (!$stores) return;
+        $query = $this->facts($stores, $range);
+        $last = 0;
+        do {
+            $rows = (clone $query)->where('p.id', '>', $last)->field('p.*')
+                ->order('p.id')->limit(1000)->select()->toArray();
+            foreach ($rows as $row) { $last = (int)$row['id']; yield $row; }
+        } while (count($rows) === 1000);
+    }
+
     /** 全量授权事实先按人/业务日聚合，页面与合计共用同一分精度结果。 */
     public function matrix(array $stores, array $range, array $employeeIds = []): array
     {

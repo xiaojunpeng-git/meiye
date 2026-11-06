@@ -583,7 +583,7 @@ final class CashierV3CheckoutSettlementKernel
                 'balanceDeduction',
                 'debt',
             ],
-            ['supplement'],
+            ['supplement', 'projectAutoComplete'],
             'authoritySnapshot'
         );
         if ($snapshot['contractVersion'] !== self::AUTHORITY_CONTRACT_VERSION) {
@@ -634,6 +634,13 @@ final class CashierV3CheckoutSettlementKernel
         }
         if (count($entitlementLines) > 0 && $memberId <= 0) {
             throw self::failure('entitlement_member_required');
+        }
+        $projectAutoComplete = $snapshot['projectAutoComplete'] ?? true;
+        if (!is_bool($projectAutoComplete)) throw self::failure('project_auto_complete_invalid');
+        if (!$projectAutoComplete) {
+            foreach ($saleLines as $saleLine) {
+                if ($saleLine['sourceType'] === 'project') CashierV3ProjectPurchasePolicy::assertMember($memberId);
+            }
         }
         $balance = self::normalizeBalance($snapshot['balanceDeduction'], $memberId);
         $debt = self::normalizeDebt($snapshot['debt'], $memberId);
@@ -715,6 +722,7 @@ final class CashierV3CheckoutSettlementKernel
                 'authoritySnapshot.permissionSnapshotFingerprint'
             ),
             'memberId' => $memberId,
+            'projectAutoComplete' => $projectAutoComplete,
             'memberName' => $memberName,
             'operatorId' => self::positiveInt($snapshot['operatorId'], 'authoritySnapshot.operatorId'),
             'operatorName' => self::text(
@@ -1848,6 +1856,7 @@ final class CashierV3CheckoutSettlementKernel
             'supplementOperatorId' => $snapshot['supplement']['operatorId'],
             'supplementOperatorNameSnapshot' => $snapshot['supplement']['operatorNameSnapshot'],
             'supplementOperatedAt' => $snapshot['supplement']['operatedAt'],
+            'projectAutoComplete' => $snapshot['projectAutoComplete'] ? 1 : 0,
             'sourceDocumentType' => $snapshot['sourceDocument']['type'],
             'sourceDocumentId' => $snapshot['sourceDocument']['id'],
             'sourceDocumentNo' => $snapshot['sourceDocument']['no'],

@@ -76,6 +76,7 @@ const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0,
 const toolbarBusinessSourceButtonRef = ref(null)
 const toolbarBusinessSourceGuidanceMessage = ref('')
 const isMemberSelectorOpen = ref(false)
+const memberRequiredSelectionMessage = ref('')
 const memberSelectorContext = ref('cashier')
 // 只在收银选客入口启用本机最近会员；账号或门店身份缺失时不共用缓存。
 const recentMemberHistoryKey = computed(() => memberSelectorContext.value === 'cashier'
@@ -946,6 +947,7 @@ function openMemberSelector(payload = {}) {
   memberSelectorContext.value = context
   memberSelectorInitialView.value = detail.initialView === 'creator' ? 'creator' : 'selector'
   memberSelectorRequiresMember.value = detail.requireMember === true
+  memberRequiredSelectionMessage.value = String(detail.requiredSelectionMessage || '')
   isMemberSelectorOpen.value = true
   return true
 }
@@ -3083,6 +3085,7 @@ onBeforeUnmount(() => {
 
   <MemberSelectorOverlay
     v-if="isMemberSelectorOpen"
+    :required-selection-message="memberRequiredSelectionMessage"
     :records="memberSelector.records || []"
     :total="memberSelector.total || 0"
     :page="memberSelector.page || 1"

@@ -100,7 +100,8 @@ if (!$target) throw new RuntimeException('Local multi-project ordinary card fixt
 $purchase = $target['cardPurchaseSnapshot'];
 $base = $purchase['ordinarySaleBaseline']['definition']['purchase'];
 $originalTimes = $purchase['components'][0]['writeTimes'];
-$originalAmount = $purchase['components'][0]['configuredPriceCents'] * $originalTimes;
+$originalAmount = $purchase['ordinarySaleBaseline']['definition']['componentSaleAmountsCents'][0]
+    ?? $purchase['components'][0]['configuredPriceCents'] * $originalTimes;
 $increaseCents = (int)(getenv('R49_INCREASE_CENTS') ?: 20000);
 if ($increaseCents <= 0 || $increaseCents % 100 !== 0) throw new RuntimeException('Fixture increase must be whole yuan');
 $purchase['components'][0]['writeTimes'] += 2;

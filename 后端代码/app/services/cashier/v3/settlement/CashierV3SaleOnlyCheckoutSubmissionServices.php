@@ -489,25 +489,17 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 'source_id' => $requestId,
                 'command_idempotency_key' => $commandKey,
             ]);
-            // Product decision: a cash-purchased project (member or guest)
-            // completes service at successful settlement.  The service fact
-            // references the transaction's committed checkout event; a later
-            // failure rolls both facts back together.
-            // Member purchases issue unused project rights. Service and labor
-            // facts belong to the later store redemption, never this payment.
-            $memberPurchase = (string)$order['source_document_type'] === 'member_checkout';
-            if ($memberPurchase) {
-                (new \app\services\member\MemberProjectEntitlementServices())
-                    ->issueInTx($salesPlan, $now);
+            // Purchased project rights and immediate services are mutually exclusive.
+            // Use the frozen request decision, never reread a switch after payment.
+            $deferredProjects = CashierV3ProjectPurchasePolicy::deferred($order);
+            $projectUpgrade = ($entitlementCredit['operationType'] ?? '') === 'project_upgrade';
+            if ($deferredProjects && !$projectUpgrade) {
+                (new CashierV3PurchasedProjectEntitlementServices())->issueInTx($salesPlan, $now);
             }
-            $saleProjectServiceResult = ($memberPurchase || ($entitlementCredit['operationType'] ?? '') === 'project_upgrade')
+            $saleProjectServiceResult = ($deferredProjects || $projectUpgrade)
                 ? ['services' => [], 'completedServiceCount' => 0]
-                : $this->saleProjectServices->completeInTx(
-                    $salesPlan,
-                    $salesResult,
-                    $now,
-                    (string)$eventAuthority['event_no']
-                );
+                : $this->saleProjectServices->completeInTx($salesPlan, $salesResult, $now,
+                    (string)$eventAuthority['event_no']);
             foreach ((array)$saleProjectServiceResult['services'] as $service) {
                 $eventRecorder->recordInTx($eventExecution, $eventContract, [
                     'event_type' => 'service.completed',

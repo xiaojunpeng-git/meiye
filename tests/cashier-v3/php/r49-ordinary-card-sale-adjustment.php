@@ -27,7 +27,17 @@ $base = ['sourceKind' => 'card_package', 'ruleType' => 'normal', 'productId' => 
         ['relationId' => 1, 'productId' => 31, 'skuUnique' => 'a', 'writeTimes' => 3, 'configuredPriceCents' => 10000],
         ['relationId' => 2, 'productId' => 32, 'skuUnique' => 'b', 'writeTimes' => 2, 'configuredPriceCents' => 20000]
     ]];
-$sealed = Rule::seal($base, 1, 12, 60000);
+// Keep the R49 independent-floor fixtures as previously signed hangs. R47
+// covers newly signed per-card sale allocations separately; both must work.
+function legacySeal49(array $base): array {
+    $sealed = Rule::seal($base, 1, 12, 60000);
+    unset($sealed['ordinarySaleBaseline']['definition']['componentSaleAmountsCents']);
+    $sign = new ReflectionMethod(Rule::class, 'signature');
+    if (PHP_VERSION_ID < 80100) $sign->setAccessible(true);
+    $sealed['ordinarySaleBaseline']['signature'] = $sign->invoke(null, $sealed['ordinarySaleBaseline']['definition']);
+    return $sealed;
+}
+$sealed = legacySeal49($base);
 // The JS regression sends this signed business snapshot through the REAL final builder.
 if (getenv('R49_EXPORT_FIXTURE') === '1') {
     $fixture = $sealed;
@@ -44,7 +54,7 @@ if (getenv('R49_VALIDATE_TRANSPORT') === '1') {
 }
 $large = $base; $large['definitionVersion'] = 1152921504606846975;
 $large['components'][0]['productVersion'] = 1152921504606846974;
-$largeSealed = Rule::seal($large, 1, 12, 60000);
+$largeSealed = legacySeal49($large);
 check49('unique sale snapshot contains no catalogue or envelope versions',
     !isset($largeSealed['definitionVersion']) && !isset($largeSealed['components'][0]['productVersion'])
     && !isset($largeSealed['ordinarySaleBaseline']['definition']['version']));

@@ -874,6 +874,8 @@ class UnifiedQueryExportTaskServices
         $validationContext = $context;
         // 冻结任务必须重建同一个对账来源范围，不能丢失后退化为全部订单导出。
         if (array_key_exists('reconciliation_drilldown', $domainScope)) $query['reconciliationDrilldown'] = $domainScope['reconciliation_drilldown'];
+        // 会员分析同样属于冻结查询身份；恢复后再重建校验，不能在worker中丢失或扩大名单。
+        if (array_key_exists('member_analysis', $domainScope)) $query['memberAnalysis'] = $domainScope['member_analysis'];
         $validationContext['query_cutoff_date'] = (string)($plan['query_cutoff_date'] ?? '');
         $rebuilt = $this->execution->validatedPlan(
             $pageCode,
@@ -1338,9 +1340,10 @@ class UnifiedQueryExportTaskServices
 
     public function exportCapability(array $permissions, string $pageCode = ''): array
     {
-        // 仅订单中心已接入有界行集；其余页面继续原内存工作簿预算，不能声称全系统已支持大导出。
+        // 订单中心及双端会员列表已接入有界行集；其他页面仍保留原内存工作簿预算。
         $streaming = in_array($pageCode, ['order_center_all','order_center_sales','order_center_recharge','order_center_refund',
-            'order_center_service','order_center_debt','order_center_gift','order_center_card_operation','order_center_supplement'], true);
+            'order_center_service','order_center_debt','order_center_gift','order_center_card_operation','order_center_supplement',
+            'member_list','platform_member_list'], true);
         return [
             'enabled' => !empty($permissions['export']),
             'allowCurrentQuery' => true,

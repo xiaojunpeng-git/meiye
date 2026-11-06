@@ -149,6 +149,50 @@ final class RegisteredMetricReadServices
     }
 
     /**
+     * Sum positive ordinary-card receipts and count their buyers in one cohort
+     * to the requested current product categories. One member may buy several
+     * cards or pay several times in the period, but contributes only one buyer.
+     * The registered cash projection owns category allocation and permissions;
+     * sale facts are reopened solely to identify the card shell and its type.
+     * @return array{amount_cents:int,buyer_count:int}
+     */
+    public function dashboardNormalCardBuyerSummary(string $tenantId, array $stores, array $range, array $categoryIds): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        if (!$this->currentReportProductCategory) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($categoryIds === []) return ['amount_cents' => 0, 'buyer_count' => 0];
+        $rows = $this->categoryRows('cash_performance', $tenantId, $stores, $range, $categoryIds);
+        $saleIds = [];
+        foreach ($rows as $row) {
+            if (($row['sale_source_type'] ?? '') === 'card' && (int)($row['member_id'] ?? 0) > 0
+                && (int)($row['amount_cents'] ?? 0) > 0 && !empty($row['sale_fact_id'])) {
+                $saleIds[(string)$row['sale_fact_id']] = true;
+            }
+        }
+        if ($saleIds === []) return ['amount_cents' => 0, 'buyer_count' => 0];
+        $cardIdsBySale = [];
+        foreach (array_chunk(array_keys($saleIds), 300) as $chunk) {
+            foreach (call_user_func($this->queryFactory, 'cashier_v3_sale_fact')->where('tenant_id', $tenantId)
+                ->whereIn('store_id', $stores)->whereIn('fact_id', $chunk)
+                ->field('fact_id,item_id')->select()->toArray() as $sale) {
+                $cardIdsBySale[(string)$sale['fact_id']] = (int)$sale['item_id'];
+            }
+        }
+        $types = $this->dashboardCardStatisticsTypes(array_values(array_unique(array_values($cardIdsBySale))));
+        $buyers = []; $amount = 0;
+        foreach ($rows as $row) {
+            if (($row['sale_source_type'] ?? '') !== 'card' || (int)($row['amount_cents'] ?? 0) <= 0) continue;
+            $memberId = (int)($row['member_id'] ?? 0);
+            $cardId = $cardIdsBySale[(string)($row['sale_fact_id'] ?? '')] ?? 0;
+            if ($memberId > 0 && ($types[$cardId] ?? null) === 0) {
+                $buyers[$memberId] = true;
+                $amount += (int)$row['amount_cents'];
+            }
+        }
+        return ['amount_cents' => $amount, 'buyer_count' => count($buyers)];
+    }
+
+    /**
      * Read-only custom-card projection. Receipt identity deduplicates repeated
      * projects within a root; different roots may each count the same card.
      * Cash remains payment-dated (including later collections), quantities
@@ -1084,6 +1128,35 @@ final class RegisteredMetricReadServices
         // contains no customer/model-authored SQL.
         [$query, $expression] = $this->memberMetricAggregateQuery($metricCode, $tenantId, $stores, $range);
         return $query->having($expression . ' ' . $operator . ' ' . $condition['amount_cents']);
+    }
+
+    /** 会员分析直接复用现金业绩的三类有效收款来源；金额按分，次数按来源业务单去重。
+     * 一单多个项目/支付方式只算一次；销售补欠以其收款来源单标识，不能与原销售重复。
+     */
+    public function memberAnalysisReceiptAggregate(string $tenantId, array $stores, array $range)
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        $sale=$this->saleCashQuery($tenantId,$stores,$range)
+            ->leftJoin('cashier_v3_payment_fact analysis_receipt','analysis_receipt.tenant_id=p.tenant_id AND analysis_receipt.fact_id=p.payment_fact_id');
+        $sources=[[$sale,'s.member_id',"CONCAT(COALESCE(analysis_receipt.source_document_type,'sale'),'|',COALESCE(analysis_receipt.order_id,p.order_id))"],
+            [$this->rechargeCashQuery($tenantId,$stores,$range),'p.member_id',"CONCAT(p.source_document_type,'|',p.order_id)"],
+            [$this->unallocatedSalesDebtRepaymentCashQuery($tenantId,$stores,$range),'p.member_id',"CONCAT(p.source_document_type,'|',p.order_id)"]];
+        $queries=[];
+        foreach ($sources as [$source,$memberId,$document]) {
+            $this->applyCashDirection($source,'positive','p.amount_cents');
+            $queries[]=$source->where($memberId,'>',0)->fieldRaw($memberId.' member_id,p.amount_cents amount_cents,'.$document.' document_key');
+        }
+        $union=array_shift($queries);
+        foreach ($queries as $source) $union->unionAll($source->buildSql(false));
+        return Db::table([$union->buildSql()=>'receipt_rows'])->group('member_id')
+            ->fieldRaw('member_id,SUM(amount_cents) cash_cents,COUNT(DISTINCT document_key) consume_count');
+    }
+
+    /** 到店存在/不存在与次数复用注册指标；一次会员同店同日有效服务算一次。 */
+    public function memberAnalysisVisitAggregate(string $tenantId, array $stores, array $range)
+    {
+        [$query,$expression]=$this->memberMetricAggregateQuery('member_service_visit_count',$tenantId,$stores,$range);
+        return $query->fieldRaw('s.member_id member_id,'.$expression.' visit_count');
     }
 
     /** @return array{0:mixed,1:string} */
@@ -2944,10 +3017,21 @@ final class RegisteredMetricReadServices
         $this->dimensionSourceFilters($query,$dimension);
         $idField = (string)$dimension['id'];
         $nameField = (string)$dimension['name'];
-        $rows = $query->where('p.' . $idField, '>', 0)
-            ->fieldRaw('p.' . $idField . ' entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
-            ->group('p.' . $idField)->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
-            ->limit($offset, $limit)->select()->toArray();
+        // Registry-owned exact name grouping is evaluated before TOP N.
+        // BINARY keeps distinct historical names distinct under MySQL's
+        // otherwise case/accent-insensitive default collation. Trim only outer
+        // spaces, matching the shared presentation boundary; never fuzzy-match names.
+        if (($dimension['group_by_name'] ?? false) === true) {
+            $rows = $query->where('p.' . $idField, '>', 0)
+                ->fieldRaw('MIN(p.' . $idField . ') entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
+                ->group('BINARY TRIM(p.' . $nameField . ')')->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
+                ->limit($offset, $limit)->select()->toArray();
+        } else {
+            $rows = $query->where('p.' . $idField, '>', 0)
+                ->fieldRaw('p.' . $idField . ' entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
+                ->group('p.' . $idField)->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
+                ->limit($offset, $limit)->select()->toArray();
+        }
         $out = [];
         foreach ($rows as $row) {
             $id = $this->integer($row['entity_id'] ?? null);
@@ -2965,9 +3049,19 @@ final class RegisteredMetricReadServices
         $this->dimensionSourceFilters($query,$dimension);
         $idField=(string)($dimension['id']??'');
         if (!preg_match('/^[a-z][a-z0-9_]{0,127}$/D',$idField)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        $rows=$query->whereIn('p.'.$idField,$entityIds)
-            ->fieldRaw('p.'.$idField.' entity_id,COALESCE(SUM('.$source['amount'].'),0) metric_value')
-            ->group('p.'.$idField)->select()->toArray();
+        if (($dimension['group_by_name'] ?? false) === true) {
+            $nameField = (string)$dimension['name'];
+            // The IDs were validated by dimensionValues; HAVING preserves
+            // all contributions to each previously selected name group.
+            $rows=$query->where('p.'.$idField,'>',0)
+                ->fieldRaw('MIN(p.'.$idField.') entity_id,COALESCE(SUM('.$source['amount'].'),0) metric_value')
+                ->group('BINARY TRIM(p.'.$nameField.')')
+                ->having('MIN(p.'.$idField.') IN ('.implode(',', $entityIds).')')->select()->toArray();
+        } else {
+            $rows=$query->whereIn('p.'.$idField,$entityIds)
+                ->fieldRaw('p.'.$idField.' entity_id,COALESCE(SUM('.$source['amount'].'),0) metric_value')
+                ->group('p.'.$idField)->select()->toArray();
+        }
         $out=[];
         foreach ($rows as $row) {
             $entityId=$this->integer($row['entity_id']??null);
@@ -3188,8 +3282,19 @@ final class RegisteredMetricReadServices
         return array_values($out);
     }
 
+    /** 点客榜按员工详情的点客数排序。完整正数名单供门店端分页，零点客不入榜。 */
+    public function pointVisitRanking(string $tenantId, array $stores, array $range, string $order): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        if (!in_array($order, ['asc', 'desc'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $rows = $this->serviceCustomerDimensionRanking('staff_point_visit_num', 'employee', $tenantId, $stores, $range, null, $order);
+        return array_values(array_filter($rows, static function (array $row): bool {
+            return $row['metric_value'] > 0;
+        }));
+    }
+
     /** @return array<int,array{entity_id:int,entity_name:string,metric_value:int}> */
-    private function serviceCustomerDimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit, string $order): array
+    private function serviceCustomerDimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, ?int $limit, string $order): array
     {
         if ($dimension !== 'employee') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $field = $this->serviceCustomerField($metricCode);
@@ -3207,7 +3312,7 @@ final class RegisteredMetricReadServices
             if ($order === 'desc') $compare = -$compare;
             return $compare ?: strcmp((string)$left['entity_name'], (string)$right['entity_name']) ?: ($left['entity_id'] <=> $right['entity_id']);
         });
-        return array_slice($rows, 0, $limit);
+        return $limit === null ? $rows : array_slice($rows, 0, $limit);
     }
 
     /** Batch-decorate only identities returned by an authorised ranking. */

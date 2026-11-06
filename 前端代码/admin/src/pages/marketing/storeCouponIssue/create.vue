@@ -216,6 +216,12 @@
               </RadioGroup>
               <div class="info">他人：原领取人不可使用，只能转赠给其他会员使用。</div>
             </FormItem>
+            <!-- Only reusable vouchers expose this future-gift capability; existing claim values stay frozen. -->
+            <FormItem v-if="formData.coupon_type === 3" label="允许：">
+              <i-switch v-model="formData.allow_gift_face_edit" :true-value="1" :false-value="0"
+                :disabled="giftFaceSettingSaving" @on-change="saveGiftFaceSetting" aria-label="赠送时面值可修改" />
+              <span class="ml10">赠送时面值可修改</span>
+            </FormItem>
             <FormItem label="新用户：">
               <i-switch v-model="formData.new_user_only" :true-value="1" :false-value="0" :disabled="type === 1 || formData.coupon_type === 3" />
               <div class="info">仅限系统内从未消费的实际用券人使用；充值不计消费，多次抵用券暂不支持。</div>
@@ -533,6 +539,7 @@ export default {
       ],
       disabled: false,
       transferSettingSaving: false,
+      giftFaceSettingSaving: false,
       storesList: [],
       formData: {
         coupon_title: '',
@@ -563,6 +570,7 @@ export default {
         allow_transfer: 0,
         usage_target: 0,
         new_user_only: 0,
+        allow_gift_face_edit: 0,
         use_mode: 0,
         order_tiers: [],
       },
@@ -636,6 +644,7 @@ export default {
       }
       this.formData.coupon_price = 0;
       this.formData.coupon_type = item.id;
+      this.formData.allow_gift_face_edit = 0;
       // Reusable allowance cannot inherit a hidden order tier or transfer switch.
       if (item.id === 3) {
         this.formData.use_mode = 0;
@@ -682,6 +691,7 @@ export default {
           this.formData.allow_transfer = Number(data.allow_transfer || 0);
           this.formData.usage_target = Number(data.usage_target || 0);
           this.formData.new_user_only = Number(data.new_user_only || 0);
+          this.formData.allow_gift_face_edit = Number(data.allow_gift_face_edit || 0);
           this.formData.use_mode = Number(data.use_mode || 0);
           try {
             const tiers = JSON.parse(data.order_tiers_json || '[]');
@@ -803,6 +813,18 @@ export default {
         .catch((err) => {
           this.$Message.error(err.msg);
         });
+    },
+    // On detail pages the switch saves only itself; new/copy forms save with their template.
+    saveGiftFaceSetting(value) {
+      if (this.type !== 1 || !this.id || this.giftFaceSettingSaving) return;
+      this.giftFaceSettingSaving = true;
+      couponSaveApi(this.id, { gift_face_edit_only: 1, allow_gift_face_edit: Number(value) })
+        .then((res) => this.$Message.success(res.msg))
+        .catch((err) => {
+          this.formData.allow_gift_face_edit = Number(value) === 1 ? 0 : 1;
+          this.$Message.error(err.msg || '赠送面值设置保存失败');
+        })
+        .finally(() => { this.giftFaceSettingSaving = false; });
     },
     // 已发布优惠券只保存会员转赠开关，不改动其他券规则。
     saveTransferSetting() {

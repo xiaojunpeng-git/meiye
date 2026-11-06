@@ -60,7 +60,11 @@ final class CashierV3DirectGiftIssuanceServices
         if ($handlingStoreId !== $operatorScope->storeId()) {
             throw self::failure('direct_gift_handling_store_invalid', '赠送必须在当前办理门店提交，请刷新后重试。');
         }
-        $now = time();
+        $existing = Db::name(self::AUTHORITY_TABLE)->where('tenant_id', $operatorScope->tenantId())
+            ->where('command_idempotency_key', $commandIdempotencyKey)->lock(true)->find();
+        // Replay uses the original issuance instant, so a later retry does not manufacture
+        // a different validityStart/fingerprint for the same amount and contents.
+        $now = $existing ? (int)$existing['occurred_at'] : time();
         $reason = trim((string)($payload['reason'] ?? ''));
         if ($reason === '' || mb_strlen($reason) > 120) {
             throw self::failure('direct_gift_reason_invalid', '请填写不超过 120 个字符的赠送原因。');
@@ -85,8 +89,6 @@ final class CashierV3DirectGiftIssuanceServices
             'tenantId' => $operatorScope->tenantId(), 'storeId' => $operatorScope->storeId(),
             'memberId' => $memberId, 'reason' => $reason, 'validityEnd' => $authorityValidityEnd, 'items' => $items,
         ]));
-        $existing = Db::name(self::AUTHORITY_TABLE)->where('tenant_id', $operatorScope->tenantId())
-            ->where('command_idempotency_key', $commandIdempotencyKey)->lock(true)->find();
         if ($existing) return $this->replay($existing, $giftId, $fingerprint, $items);
 
         $giftNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
@@ -138,11 +140,14 @@ final class CashierV3DirectGiftIssuanceServices
                 $coupon = (array)Db::name('store_coupon_issue')->where('id', $couponId)->where('status', 1)->where('is_del', 0)
                     ->whereIn('relation_id', [0, $scope->storeId()])->lock(true)->find();
                 if (!$coupon || isset($seen['coupon:' . $couponId])) throw self::failure('direct_gift_coupon_unavailable', '所选优惠券已停用、删除或重复。');
+                // Freeze only an explicitly editable face; older gifts retain their original snapshot shape.
+                $face = \app\services\activity\coupon\StoreCouponGiftFaceRule::override($coupon, $raw['couponFaceValue'] ?? null);
                 $items[] = ['itemNo' => count($items) + 1, 'kind' => 'coupon', 'productId' => 0, 'productType' => 0,
                     'couponIssueId' => $couponId, 'quantity' => $quantity, 'name' => trim((string)($coupon['title'] ?? '')) ?: '赠送优惠券',
                     'skuUnique' => '', 'skuWriteTimes' => 0, 'validityStart' => $now, 'validityEnd' => $itemValidityEnd,
                     'couponIssueStoreId' => (int)($coupon['relation_id'] ?? 0),
                     'couponApplicableStoreIds' => $this->storeIds($coupon['applicable_store_id'] ?? '')];
+                if ($face !== null) $items[count($items) - 1]['couponFaceValue'] = $face;
                 $seen['coupon:' . $couponId] = true;
                 continue;
             }
@@ -251,6 +256,10 @@ final class CashierV3DirectGiftIssuanceServices
             }
         }
         $snapshot = json_decode((string)($row['content_snapshot_json'] ?? ''), true);
+        // A replay must retain the originally issued face as well as quantity and expiry.
+        if (($snapshot['couponFaceValue'] ?? null) !== ($expected['couponFaceValue'] ?? null)) {
+            throw self::failure('direct_gift_item_replay_conflict', '赠送面值与原始记录不一致，不能重复发放。');
+        }
         $rowValidityEnd = is_array($snapshot) ? (int)($snapshot['validityEnd'] ?? $snapshot['validity_end'] ?? 0) : 0;
         $expectedValidityEnd = (int)($expected['validityEnd'] ?? $expected['validity_end'] ?? 0);
         if ($rowValidityEnd !== $expectedValidityEnd) {

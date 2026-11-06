@@ -211,7 +211,13 @@
         "projectSortMetric",
         "rankingPage",
         "storeRankingPage",
-        "trendMetricCode"
+        "trendMetricCode",
+        "boardEmployeeIds",
+        "boardAction",
+        "boardTable",
+        "boardRow",
+        "boardColumn",
+        "boardDetailPage"
       ],
       "response": "warehouseHierarchyProjection",
       "legacyAgentMetricApisForbidden": true

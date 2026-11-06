@@ -28,8 +28,10 @@ const groups = {
     '后端代码/app/dao/order/StoreOrderDao.php',
     '后端代码/app/services/order/StoreOrderServices.php',
     ...['MemberCommerceServices','MemberCommerceSettingsServices','MemberCommerceScope',
-      'MemberProjectEntitlementServices','MemberCommerceRechargeSettlement','MemberCommercePaymentServices']
+      'MemberCommerceRechargeSettlement','MemberCommercePaymentServices']
       .map(name => `后端代码/app/services/member/${name}.php`),
+    // Purchased projects share one issuer across member checkout and deferred store sales.
+    '后端代码/app/services/cashier/v3/settlement/CashierV3PurchasedProjectEntitlementServices.php',
     '后端代码/app/services/cashier/v3/CashierV3BusinessDocumentNumberServices.php',
     '后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php',
     '后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php',

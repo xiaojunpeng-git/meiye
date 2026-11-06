@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+// 独立契约不启动应用容器，显式加载目录依赖；生产仍由 Composer 自动加载。
+require_once dirname(__DIR__, 3) . '/后端代码/app/services/mobile/warehouse/MerchantDataPermissionServices.php';
 require_once dirname(__DIR__, 3) . '/后端代码/app/services/mobile/merchant/MobileMerchantCapabilityCatalog.php';
 
 use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
@@ -15,16 +17,17 @@ $assert = static function (string $id, bool $ok) use (&$failed): void {
 
 $features = $catalog->features();
 $codes = array_column($features, 'feature_code');
-$assert('MOBILE-CATALOG-01', $catalog->allRuleIds() === [
+$assert('MOBILE-CATALOG-01', array_diff([
     401100, 401200, 401300, 401009, 401007, 401004, 401001, 401002, 401003, 401010, 401005, 401006, 401008,
-]);
+], $catalog->allRuleIds()) === [] && count($catalog->allRuleIds()) === count(array_unique($catalog->allRuleIds())));
 $assert('MOBILE-CATALOG-02', $codes === [
     'mobile.merchant.home', 'mobile.merchant.warehouse', 'mobile.merchant.customers', 'mobile.merchant.workbench',
 ]);
 $workbench = $catalog->menuTree()[3] ?? [];
 $assert('MOBILE-CATALOG-03', count($catalog->menuTree()) === 4
     && count($catalog->menuTree()[0]['actions']) === 1
-    && array_column((array)($workbench['children'] ?? []), 'title') === ['预约管理', '客情管理', '工程管理']);
+    // 已有预约/客情/工程入口须保留，目录允许合法追加已单独授权的新功能。
+    && array_diff(['预约管理', '客情管理', '工程管理'], array_column((array)($workbench['children'] ?? []), 'title')) === []);
 $assert('MOBILE-CATALOG-04', $catalog->normalizeRuleIds([401004, 401200, 401003, 401004]) === [401004, 401200, 401003]);
 try {
     $catalog->normalizeRuleIds([999999]);

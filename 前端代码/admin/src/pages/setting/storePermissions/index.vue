@@ -1,9 +1,9 @@
 <template>
   <section class="store-permission-page">
     <Card dis-hover>
-      <p slot="title">门店端权限规则</p>
-      <p>维护门店端功能名称、显示层级、排序和启停；岗位仍在“岗位策略 → 门店端”勾选授权。</p>
-      <div class="rule-toolbar">
+      <p slot="title">{{ merchant ? '商家端权限规则' : '门店端权限规则' }}</p>
+      <p v-if="!merchant">维护门店端功能名称、显示层级、排序和启停；岗位仍在“岗位策略 → 门店端”勾选授权。</p>
+      <p v-if="merchant">当前仅管理商家端「数据」页面、顶部单个指标和各个页签；在岗位策略 → 商家端勾选授权。名称、排序和启停在此维护，页面层级固定。</p><div class="rule-toolbar">
         <Input v-model.trim="keyword" placeholder="搜索功能名称或权限代码" style="width:280px" clearable />
         <Button :disabled="loading || saving" @click="load">刷新</Button>
         <Button :disabled="loading || saving" @click="collapsedIds = []">展开全部</Button>
@@ -11,7 +11,8 @@
         <Button type="primary" :loading="saving" :disabled="loading || !!error" @click="save">保存规则</Button>
       </div>
       <Alert v-if="error" type="error" show-icon>{{ error }}</Alert>
-      <p class="rule-hint">停用功能会关闭已有岗位的对应入口和操作，保留原勾选；重新启用后恢复。显示层级不会改变功能本身的业务权限关系。菜单入口的启停控制导航展示，岗位仍按原业务功能授权。</p>
+      <p v-if="merchant" class="rule-hint">关闭页面会同时隐藏其指标与页签；顶部指标和同名页签独立控制。已有岗位勾选保留，重新开启后恢复；组织与门店数据范围保持原有规则。</p>
+      <p v-else class="rule-hint">停用功能会关闭已有岗位的对应入口和操作，保留原勾选；重新启用后恢复。显示层级不会改变功能本身的业务权限关系。菜单入口的启停控制导航展示，岗位仍按原业务功能授权。</p>
     </Card>
     <div class="rule-scroll">
       <table class="rule-table">
@@ -26,8 +27,8 @@
                 <Input v-model.trim="entry.rule.title" :maxlength="30" :disabled="saving" />
               </div>
             </td>
-            <td>{{ entry.rule.navigation_key ? '菜单入口：' + entry.rule.navigation_key : entry.rule.grantable === false ? '菜单大类' : entry.rule.feature_code }}</td>
-            <td><Select v-model="entry.rule.parent_id" :disabled="saving || (entry.rule.grantable === false && !entry.rule.navigation_key)" filterable><Option v-if="entry.rule.grantable === false && !entry.rule.navigation_key" :value="0">顶级</Option><Option v-for="parent in parentOptions(entry.rule.id)" :key="parent.id" :value="parent.id">{{ parent.title }}</Option></Select></td>
+            <td>{{ entry.rule.navigation_key ? '菜单入口：' + entry.rule.navigation_key : entry.rule.grantable === false ? (merchant ? '规则分组' : '菜单大类') : entry.rule.feature_code }}</td>
+            <td><span v-if="merchant">{{ parentLabel(entry.rule.parent_id) }}</span><Select v-else v-model="entry.rule.parent_id" :disabled="saving || (entry.rule.grantable === false && !entry.rule.navigation_key)" filterable><Option v-if="entry.rule.grantable === false && !entry.rule.navigation_key" :value="0">顶级</Option><Option v-for="parent in parentOptions(entry.rule.id)" :key="parent.id" :value="parent.id">{{ parent.title }}</Option></Select></td>
             <td><InputNumber v-model="entry.rule.sort" :min="0" :max="99999" :precision="0" :disabled="saving" /></td>
             <td><i-switch v-model="entry.rule.enabled" :true-value="1" :false-value="0" :disabled="saving"><span slot="open">开</span><span slot="close">关</span></i-switch></td>
           </tr>
@@ -40,12 +41,14 @@
 </template>
 <script>
 import request from '@/plugins/request';
+import { getHeaderName, getHeaderSider, getMenuSider } from '@/libs/system';
 
 // 功能身份及接口由源码登记；这里只提交完整元数据，不能通过编辑名称创建任意业务接口。
 export default {
   name: 'StorePermissions',
-  data() { return { rules: [], revision: 0, keyword: '', collapsedIds: [], loading: false, saving: false, error: '' }; },
+  data() { return { rules: [], revision: 0, keyword: '', collapsedIds: [], loading: false, saving: false, error: '', loadSequence: 0 }; },
   computed: {
+    merchant() { return this.$route.meta.merchantPermissionRules === true; },
     visibleRows() {
       // 展示投影引用完整文档中的原节点；折叠、搜索和排序都不能改变保存内容。
       const word = this.keyword.toLowerCase();
@@ -70,8 +73,29 @@ export default {
       return result;
     }
   },
+  // 两个路由复用同一组件；切换终端必须重读各自目录，不能把旧终端的晚到响应装进新页。
+  watch: { merchant() { this.keyword = ''; this.load(); } },
   created() { this.load(); },
   methods: {
+    /** 新原生菜单可能尚未进入本次登录缓存；只刷新后端授权菜单，不在浏览器补造入口或扩大授权。 */
+    async refreshMerchantNavigation() {
+      if (!this.merchant || !this.$store) return;
+      try {
+        await this.$store.dispatch('admin/menus/getMenusNavList');
+        if (!this.merchant) return;
+        const menus = this.$store.state.admin.menus.menusName || [];
+        const header = getHeaderName(this.$route, menus);
+        if (!header) return;
+        const selected = getMenuSider(menus, header)[0];
+        this.$store.commit('admin/menu/setHeaderName', header);
+        this.$store.commit('admin/menu/setHeader', getHeaderSider(menus));
+        this.$store.commit('admin/menu/setSider', selected && selected.children ? selected.children : []);
+      } catch (ignored) {
+        // 菜单刷新失败不覆盖本页已成功读取的规则，也不伪造设置菜单。
+        console.warn('商家端权限规则的原生菜单刷新失败，请重新登录后重试。');
+      }
+    },
+    parentLabel(id) { const parent = this.rules.find(rule => rule.id === id); return parent ? parent.title : '顶级'; },
     isExpanded(id) { return !!this.keyword || !this.collapsedIds.includes(id); },
     toggle(id) {
       if (this.keyword) return;
@@ -89,17 +113,21 @@ export default {
       return this.rules.filter(row => !excluded.has(row.id) && !row.navigation_key);
     },
     async load() {
+      const sequence = ++this.loadSequence;
       this.loading = true; this.error = '';
-      try { const response = await request({ url: '/setting/store-permissions', method: 'get' }); this.rules = response.data.rules; this.revision = response.data.revision; this.collapseAll(); }
-      catch (error) { this.error = error.msg || error.message || '权限规则加载失败'; }
-      finally { this.loading = false; }
+      this.rules = [];
+      try { const response = await request({ url: this.merchant ? '/setting/merchant-permissions' : '/setting/store-permissions', method: 'get' }); if (sequence !== this.loadSequence) return; this.rules = response.data.rules; this.revision = response.data.revision; this.collapseAll(); await this.refreshMerchantNavigation(); }
+      catch (error) { if (sequence === this.loadSequence) this.error = error.msg || error.message || '权限规则加载失败'; }
+      finally { if (sequence === this.loadSequence) this.loading = false; }
     },
     async save() {
       if (this.saving) return;
+      const merchant = this.merchant;
       this.saving = true;
       try {
-        const response = await request({ url: '/setting/store-permissions', method: 'post', data: { revision: this.revision, rules: this.rules } });
-        this.rules = response.data.rules; this.revision = response.data.revision; this.$Message.success('保存成功');
+        const response = await request({ url: this.merchant ? '/setting/merchant-permissions' : '/setting/store-permissions', method: 'post', data: { revision: this.revision, rules: this.rules } });
+        if (merchant === this.merchant) { this.rules = response.data.rules; this.revision = response.data.revision; }
+        this.$Message.success('保存成功');
       } catch (error) { this.$Message.error(error.msg || error.message || '保存失败，请刷新后重试'); }
       finally { this.saving = false; }
     }

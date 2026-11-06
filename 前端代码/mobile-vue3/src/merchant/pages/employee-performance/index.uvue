@@ -17,9 +17,11 @@
 				<view v-else-if="message.length > 0" class="employee-performance__state"><text>{{ message }}</text><view class="employee-performance__retry" @tap="reload"><text>重新加载</text></view></view>
 				<template v-else>
 					<view class="employee-performance__identity-card"><view class="employee-performance__avatar"><text>{{ employeeInitial() }}</text></view><view class="employee-performance__identity-copy"><text class="employee-performance__name">{{ employeeName }}</text><text class="employee-performance__period">{{ periodLabel }}</text></view></view>
-					<view class="employee-performance__metrics"><view v-for="metric in metrics" :key="metric.code" class="employee-performance__metric"><text class="employee-performance__metric-name">{{ metric.name }}</text><text class="employee-performance__metric-value">{{ metric.value }}</text></view></view>
-					<view class="employee-performance__details-card"><view class="employee-performance__detail-tabs"><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'cash' }" @tap="selectDetailMode('cash')"><text>现金业绩</text></view><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'labor' }" @tap="selectDetailMode('labor')"><text>劳动业绩</text></view></view>
-						<view v-if="details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
+					<view v-if="metrics.length > 0" class="employee-performance__metrics"><view v-for="metric in metrics" :key="metric.code" class="employee-performance__metric"><text class="employee-performance__metric-name">{{ metric.name }}</text><text class="employee-performance__metric-value">{{ metric.value }}</text></view></view>
+					<view v-if="visibleTabs.length > 0" class="employee-performance__details-card"><view class="employee-performance__detail-tabs"><view v-for="tab in visibleTabs" :key="tab.code" class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === tab.code }" @tap="selectDetailMode(tab.code)"><text>{{ tab.name }}</text></view></view>
+                        <view v-if="detailMode === 'board' && personalBoard != null" class="employee-personal-board"><view v-for="section in personalBoard.sections" :key="section.name" class="employee-personal-board__section"><text class="employee-personal-board__title">{{ section.name }}</text><view class="employee-personal-board__grid"><view v-for="card in section.cards" :key="card.code" class="employee-personal-board__card"><text>{{ card.name }}</text><text class="employee-personal-board__value" :class="'employee-personal-board__value--' + card.tone">{{ card.display }}</text></view></view></view></view>
+
+						<view v-if="detailMode !== 'board' && details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
 						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
 							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
 							<!-- Older guest facts may omit isGuest; an empty saved member name still reads as 游客, never as a member placeholder. -->
@@ -68,7 +70,10 @@
 	const customStartDate = ref(month.value + '-01')
 	const customEndDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-' + twoDigits(now.getDate()))
 	const periodLabel = ref('本月')
-	const detailMode = ref('cash')
+	// 首次进入由后端按可见权限优先选看板；收到结果或手动切换后保留当前选择。
+	const detailMode = ref('')
+	const visibleTabs = ref<Array<any>>([])
+	const personalBoard = ref<any>(null)
 	const metrics = ref<Array<any>>([])
 	const details = ref<Array<any>>([])
     const calculated = ref(false)
@@ -79,6 +84,7 @@
 	const loadingMore = ref(false)
 	const message = ref('')
 	const showCustomRange = ref(false)
+	let latestPerformanceRequest = 0
 
 	onLoad((options : any) => {
 		employeeId.value = Number(options != null ? options.employeeId || 0 : 0)
@@ -89,7 +95,8 @@
 		month.value = String(options != null ? options.month || month.value : month.value)
 		customStartDate.value = String(options != null ? options.startDate || customStartDate.value : customStartDate.value)
 		customEndDate.value = String(options != null ? options.endDate || customEndDate.value : customEndDate.value)
-		detailMode.value = String(options != null ? options.detailMode || 'cash' : 'cash') === 'labor' ? 'labor' : 'cash'
+		// 来源排行可能仍传 cash/labor，不能覆盖本页首次进入的授权默认页签。
+		detailMode.value = ''
 		if (employeeId.value <= 0) { message.value = '未识别到有效员工。'; return }
 		reload()
 	})
@@ -117,8 +124,11 @@
 	}
 	function reload() : void {
 		if (merchantRequestSession(currentMerchantRoot()) == null) { clearMerchantRoot(); openMerchantBootstrap(); return }
+		// 日期/页签快速切换只接受最后一次响应，旧查询不能覆盖当前看板或可见权限。
+		let requestId = ++latestPerformanceRequest
 		loading.value = true; loadingMore.value = false; message.value = ''; page.value = 1; details.value = []; hasMore.value = false
 		queryMobileWarehouseEmployeePerformance(requestPayload(1), (response : any) => {
+			if (requestId !== latestPerformanceRequest) return
 			loading.value = false
 			if (!response.ok || response.body == null || response.body.employeePerformance == null) {
 				if (mobileHttpResultRequiresMerchantLogin(response)) { clearMerchantRoot(); openMerchantBootstrap(); return }
@@ -130,13 +140,18 @@
 	function loadMore() : void {
 		if (!hasMore.value || loading.value || loadingMore.value) return
 		loadingMore.value = true
+		let requestId = latestPerformanceRequest
 		queryMobileWarehouseEmployeePerformance(requestPayload(page.value + 1), (response : any) => {
+			if (requestId !== latestPerformanceRequest) return
 			loadingMore.value = false
 			if (!response.ok || response.body == null || response.body.employeePerformance == null) { message.value = String(response.message || '更多业绩明细暂时不可用。'); return }
 			installProjection(response.body.employeePerformance, true)
 		})
 	}
 	function installProjection(payload : any, append : boolean) : void {
+		visibleTabs.value = Array.isArray(payload.tabs) ? payload.tabs : []
+        detailMode.value = String(payload.detailMode || 'none')
+        personalBoard.value = payload.board || null
 		employeeName.value = String(payload.employee != null ? payload.employee.name || '员工' : '员工')
 		periodLabel.value = String(payload.period != null ? payload.period.label || '当前范围' : '当前范围')
         // 净销售基数仅在计算依据中展示；计算法另隐藏手工费，项目数与后端计算保持不变。
@@ -152,6 +167,15 @@
 </script>
 
 <style>
+    .employee-personal-board { display:flex; flex-direction:column; gap:14px; padding:14px; }
+    .employee-personal-board__section { display:flex; flex-direction:column; gap:10px; }
+    .employee-personal-board__title { font-size:16px; font-weight:600; color:#2b4358; border-left:3px solid #398fbd; padding-left:8px; }
+    .employee-personal-board__grid { display:flex; flex-direction:row; flex-wrap:wrap; }
+    .employee-personal-board__card { display:flex; flex-direction:column; width:50%; min-width:0; box-sizing:border-box; padding:14px; gap:8px; border-bottom:1px solid #e4ebf2; color:#60758a; font-size:14px; }
+    .employee-personal-board__value { color:#1f5f8b; font-size:20px; font-weight:600; }
+    .employee-personal-board__value--people { color:#2b4358; }
+    .employee-personal-board__value--service { color:#357a72; }
+
 	.employee-performance { display: flex; min-height: 100%; flex: 1; flex-direction: column; background-color: #f6f9fc; }
 	.employee-performance__header { display: flex; min-height: 56px; flex-direction: row; align-items: center; padding: 18px 18px 8px 18px; }
 	.employee-performance__back, .employee-performance__header-space { display: flex; width: 36px; height: 36px; flex-shrink: 0; align-items: center; justify-content: center; }
@@ -175,9 +199,11 @@
 	.employee-performance__name { overflow: hidden; font-size: 17px; font-weight: 800; line-height: 23px; color: #173451; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__period { margin-top: 3px; font-size: 12px; line-height: 18px; color: #71839a; }
 	.employee-performance__metrics { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 10px; padding: 6px 0; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
-	.employee-performance__metric { display: flex; box-sizing: border-box; width: 33.33%; min-height: 64px; flex-direction: column; justify-content: center; padding: 8px 14px; }
+	/* 权限隐藏部分指标后平均分配剩余宽度，不保留原三列的空洞。 */
+	.employee-performance__metric { display: flex; box-sizing: border-box; flex:1 1 30%; min-width:100px; min-height: 64px; flex-direction: column; justify-content: center; padding: 8px 14px; }
 	.employee-performance__metric-name { font-size: 11px; line-height: 16px; color: #71839a; }
-	.employee-performance__metric-value { margin-top: 3px; overflow: hidden; font-size: 19px; font-weight: 800; line-height: 24px; color: #173451; text-overflow: ellipsis; white-space: nowrap; }
+	/* 待核对笔数属于经营结果，不可因手机列宽不足而省略。 */
+	.employee-performance__metric-value { margin-top: 3px; min-width:0; font-size: 19px; font-weight: 800; line-height: 24px; color: #173451; white-space:normal; overflow-wrap:anywhere; }
 	.employee-performance__details-card { margin-top: 12px; overflow: hidden; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
 	.employee-performance__detail-tabs { display: flex; min-height: 48px; flex-direction: row; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
 	.employee-performance__detail-tab { display: flex; flex: 1; align-items: center; justify-content: center; border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: transparent; }

@@ -5,6 +5,7 @@ namespace app\services\user;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\organization\EmployeeDataScopeServices;
 use think\facade\Db;
 use think\exception\ValidateException;
@@ -12,6 +13,30 @@ use think\exception\ValidateException;
 /** 平台会员管理对所有有效总后台账号开放；仍只接受真实平台登录态，不消费门店 token。 */
 class PlatformMemberScopeServices
 {
+    /**
+     * 复用已上线的历史归属兼容：主门店失效时选会员真实关联的有效门店作操作上下文。
+     * 不修改会员归属，也不代替 build() 的平台身份与组织范围校验。
+     * 写操作须按会员→门店/关联顺序使用锁定当前读，不能用旧MVCC快照判定调店后的归属。
+     */
+    public function activeMemberStoreId(int $memberId, bool $lock = false): int
+    {
+        if ($memberId <= 0) return 0;
+        if ($lock) CashierV3TransactionGuard::assertInTransaction('platformMemberStoreScope');
+        $memberQuery = Db::name('user')->where('uid', $memberId)->field('uid,belong_store_id');
+        if ($lock) $memberQuery->lock(true);
+        $member = $memberQuery->find();
+        $primary = (int)($member['belong_store_id'] ?? 0);
+        if ($primary > 0) {
+            $storeQuery = Db::name('system_store')->where('id', $primary)->where('is_del', 0);
+            if ($lock) $storeQuery->lock(true);
+            if ($storeQuery->value('id')) return $primary;
+        }
+        $relationQuery = Db::name('store_user')->alias('su')->join('system_store s', 's.id=su.store_id')
+            ->where('su.uid', $memberId)->where('su.status', 1)->where('s.is_del', 0)->order('su.store_id', 'asc');
+        if ($lock) $relationQuery->lock(true);
+        return (int)$relationQuery->value('su.store_id');
+    }
+
     public function build(int $adminId, string $operation = 'read', int $storeId = 0): array
     {
         $admin = Db::name('system_admin')->where('id', $adminId)->where('status', 1)->where('is_del', 0)->where('admin_type', 0)->find();

@@ -179,6 +179,12 @@ export default {
       component: () => import('@/pages/setting/systemAdmin/index')
     },
     {
+      path: 'merchant-permissions',
+      name: `${pre}merchantPermissions`,
+      meta: { auth: ['setting-system-menus', 'setting-merchant-permissions'], title: '商家端权限规则', merchantPermissionRules: true },
+      component: () => import('@/pages/setting/storePermissions/index.vue')
+    },
+    {
       path: 'store-permissions',
       name: `${pre}storePermissions`,
       meta: { auth: ['setting-system-menus', 'setting-store-permissions'], title: '门店端权限规则' },

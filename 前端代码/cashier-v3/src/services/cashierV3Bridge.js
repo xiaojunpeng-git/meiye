@@ -279,7 +279,7 @@ const EMPTY_BOOTSTRAP = {
   },
   navigationRules: [],
   // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
-  storeDisplayOptions: { preSaleEnabled: true, salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true, memberDefaultAll: false },
+  storeDisplayOptions: { projectAutoComplete: true, preSaleEnabled: true, salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true, memberDefaultAll: false },
   // Old, unmigrated servers retain their previous source behavior; current
   // servers explicitly provide false for fixed-source mode, never truthy-fallback.
   businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
@@ -1956,6 +1956,8 @@ function normalizeBootstrap(rawBootstrap = {}) {
     },
     navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
     storeDisplayOptions: {
+      // Missing settings keep the original immediate project fulfillment.
+      projectAutoComplete: raw.storeDisplayOptions?.projectAutoComplete !== false,
       // 旧实例缺少该键时继续显示售前；关闭只影响当前弹窗，不重写保存快照。
       preSaleEnabled: raw.storeDisplayOptions?.preSaleEnabled !== false,
       salesAttributionEnabled: raw.storeDisplayOptions?.salesAttributionEnabled !== false,

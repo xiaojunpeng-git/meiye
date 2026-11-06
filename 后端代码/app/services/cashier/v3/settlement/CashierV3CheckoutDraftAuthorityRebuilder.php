@@ -282,6 +282,8 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             'businessTimezone' => (string)($request['business_timezone'] ?? ''),
             'occurredAt' => $serverTime,
             'recordedAt' => $serverTime,
+            // Keep the saved business choice across payment edits and final materialization.
+            'projectAutoComplete' => (int)($request['project_auto_complete'] ?? 1) === 1,
             'orderNote' => (string)($request['order_note'] ?? ''),
             'supplement' => [
                 'enabled' => (int)($request['supplement_enabled'] ?? 0) === 1,

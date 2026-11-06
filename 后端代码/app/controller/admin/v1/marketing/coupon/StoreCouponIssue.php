@@ -90,6 +90,11 @@ class StoreCouponIssue extends AuthController
      */
     public function saveCoupon($id)
     {
+        // Existing-template switch saves are deliberately narrow: never rewrite issued amounts or stock.
+        if ((int)$id > 0 && (int)$this->request->post('gift_face_edit_only', 0) === 1) {
+            $this->services->setGiftFaceEditing((int)$id, (int)$this->request->post('allow_gift_face_edit', 0));
+            return $this->success('赠送面值设置已保存');
+        }
         $data = $this->request->postMore([
             ['coupon_title', ''],
             ['coupon_price', 0.00],
@@ -118,6 +123,7 @@ class StoreCouponIssue extends AuthController
             ['rule', ''],
             ['allow_transfer', 0],
             ['usage_target', 0],
+            ['allow_gift_face_edit', 0],//仅多次抵用券允许独立赠送时修改本张券面值
             ['new_user_only', 0],//仅限无历史消费的实际用券人
             ['use_mode', StoreCouponOrderRule::DETAIL],//明细券或整单门槛券
             ['order_tiers', []],//整单应收档位与全单张数

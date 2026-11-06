@@ -334,9 +334,11 @@ final class MobileMerchantSessionServices
         ])->find();
         if ($existing && (string)$existing['state'] === 'ACTIVE') return $existing;
         $contextId = $this->uuid();
+        // 任职记录不承载权威门店名；新上下文与管理账号一样从门店资料取名。
+        $storeName = trim((string)Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->value('name'));
         Db::name('mobile_merchant_business_context')->insert([
             'context_id' => $contextId, 'employee_id' => $employeeId, 'context_type' => 'STORE', 'staff_id' => (int)$staff['id'],
-            'store_id' => $storeId, 'organization_id' => $organizationId, 'label' => (string)($staff['store_name'] ?? ('门店 ' . $storeId)),
+            'store_id' => $storeId, 'organization_id' => $organizationId, 'label' => $storeName !== '' ? $storeName : ('门店 ' . $storeId),
             'state' => 'ACTIVE', 'created_at' => $now, 'closed_at' => 0, 'updated_at' => $now,
         ]);
         return Db::name('mobile_merchant_business_context')->where('context_id', $contextId)->find() ?: [];
@@ -461,15 +463,33 @@ final class MobileMerchantSessionServices
     {
         $employee = Db::name('employee')->where('id', (int)$session['employee_id'])->find() ?: [];
         $context = Db::name('mobile_merchant_business_context')->where('context_id', (string)$projection['business_context_id'])->find() ?: [];
+        $scopeRows = Db::name('employee_data_scope')->where('employee_id', (int)$session['employee_id'])
+            ->where('status', 1)->where('is_del', 0)->field('id,scope_mode,source_type,source_store_id')->select()->toArray();
+        $scopeEntryType = app()->make(MobileMerchantAnalyticsEntryPolicy::class)->entryType($scopeRows);
+        $managerStoreIds = $this->managerVisibleStoreIds((int)$session['employee_id']);
+        // root只在登录/bootstrap/切换的既有事务及账号租约锁内调用。
+        // 有任职的组织账号也要补齐授权门店选项；保留当前任职，不自动切换或制造任职。
+        if ($scopeEntryType === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION
+            && ($context['context_type'] ?? '') === 'STORE') {
+            $this->ensureOrganizationStoreChoices((int)$session['employee_id'], $context, $managerStoreIds);
+        }
         $contexts = Db::name('mobile_merchant_business_context')->where('employee_id', (int)$session['employee_id'])->where('state', 'ACTIVE')
             ->field('context_id,label,staff_id,store_id,context_type,organization_id')->order('created_at', 'asc')->select()->toArray();
         $auth = Db::name('employee_mobile_auth')->where('employee_id', (int)$session['employee_id'])->where('status', 1)->where('is_del', 0)->find() ?: [];
-        $managerStoreIds = $this->managerVisibleStoreIds((int)$session['employee_id']);
-        $contexts = array_values(array_filter($contexts, function (array $row) use ($managerStoreIds,$session,$auth): bool {
+        $contexts = array_values(array_filter($contexts, function (array $row) use ($managerStoreIds,$session,$auth,$scopeEntryType): bool {
             if((string)($row['context_type']??'')==='ORGANIZATION'){if(!in_array(MobileMerchantCapabilityCatalog::RULE_GROWTH,$this->positiveIds(explode(',',(string)($auth['rules']??''))),true))return false;$binding=Db::name('organization_employee')->where('employee_id',(int)$session['employee_id'])->where('org_id',(int)$row['organization_id'])->where('status',1)->where('is_del',0)->find();return (bool)$binding&&app()->make(OrganizationOpsStatusServices::class)->isOrganizationEffectivelyEnabled((int)$row['organization_id']);}
+            // 组织账号的历史任职选项同样不能超出当前授权或带出停用门店。
+            if ($scopeEntryType === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION) {
+                return in_array((int)($row['store_id'] ?? 0), $managerStoreIds, true);
+            }
             return (int)($row['staff_id'] ?? 0) > 0 || in_array((int)($row['store_id'] ?? 0), $managerStoreIds, true);
         }));
-        $contextSummary = array_map(static fn(array $row): array => ['contextId' => (string)$row['context_id'], 'label' => (string)$row['label']], $contexts);
+        if ($scopeEntryType === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION) {
+            $eligibleStaff = $this->defaultEligibleMobileStaff((int)$session['employee_id'], $auth);
+            $contexts = $this->uniqueOrganizationStoreChoices($contexts, (string)$context['context_id'], (int)($eligibleStaff['id'] ?? 0));
+        }
+        $contextSummary = $this->contextSummaries($contexts);
+        $storeContextIds = array_fill_keys(array_column(array_filter($contexts, static fn(array $row): bool => ($row['context_type'] ?? '') === 'STORE'), 'context_id'), true);
         $actions = $this->availableActions((int)$session['employee_id']);
         // 组织上下文只有成长入口；不得把已有门店岗位动作带到无店会话。
         if(($context['context_type']??'')==='ORGANIZATION')$actions=array_values(array_intersect($actions,['mobile.merchant.growth','mobile.merchant.workbench']));
@@ -479,9 +499,67 @@ final class MobileMerchantSessionServices
             'employee' => ['id' => (string)$session['employee_id'], 'name' => (string)($employee['name'] ?? $employee['real_name'] ?? '员工'), 'avatar' => (string)($employee['avatar'] ?? ''), 'status' => 'ACTIVE'],
             'authVersion' => (int)$session['auth_version'], 'activeContextId' => (string)$projection['active_context_id'],
             'activeContext' => ['contextId' => (string)$context['context_id'], 'storeId' => (string)($context['store_id'] ?? 0), 'organizationId' => (string)($context['organization_id'] ?? 0), 'staffId' => (string)($context['staff_id'] ?? 0)],
-            'contexts' => $contextSummary, 'capabilities' => $actions, 'dataScope' => ['authorized' => true, 'scopeEntryCount' => 1, 'scopeDigest' => $scopeDigest],
+            'contexts' => $contextSummary, 'capabilities' => $actions, 'dataScope' => ['entryType' => $scopeEntryType, 'authorized' => true, 'scopeEntryCount' => 1, 'scopeDigest' => $scopeDigest],
+            // 客户页只切换门店，不能把成长专用的组织上下文误当作客户门店。
+            'storeContexts' => array_values(array_filter($contextSummary, static fn(array $row): bool => isset($storeContextIds[$row['contextId']]))),
             'availableActions' => $actions, 'reasonCode' => $reason, 'stateContextId' => (string)$projection['state_context_id'], 'stateRevision' => (string)$projection['state_revision'],
         ];
+    }
+
+    /** 补齐后端授权门店的操作上下文；调用方必须持有会话事务/租约锁，不创建任职或改权限。 */
+    private function ensureOrganizationStoreChoices(int $employeeId, array $active, array $storeIds): void
+    {
+        if (!in_array((int)$active['store_id'], $storeIds, true)) {
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '当前门店已不在授权范围，请重新登录。');
+        }
+        // 批量识别已有选项，正常刷新不逐店反复查询/写入；只有新增授权门店需要补建。
+        $existingStoreIds = array_map('intval', Db::name('mobile_merchant_business_context')
+            ->where('employee_id', $employeeId)->where('context_type', 'STORE')->where('staff_id', 0)
+            ->where('state', 'ACTIVE')->whereIn('store_id', $storeIds)->column('store_id'));
+        foreach ($storeIds as $storeId) {
+            if ((int)$storeId !== (int)$active['store_id'] && !in_array((int)$storeId, $existingStoreIds, true)) {
+                $this->upsertManagerOperationContext($employeeId, (int)$storeId, time());
+            }
+        }
+    }
+
+    /** 同店只显示一个选项：当前上下文、原规则认定的有效任职、管理上下文依次优先；回本店不丢有效任职身份。 */
+    private function uniqueOrganizationStoreChoices(array $contexts, string $activeId, int $eligibleStaffId): array
+    {
+        $choices = [];
+        foreach ($contexts as $row) {
+            $store = ($row['context_type'] ?? '') === 'STORE';
+            if ($store && (int)$row['staff_id'] > 0 && (int)$row['staff_id'] !== $eligibleStaffId && (string)$row['context_id'] !== $activeId) continue;
+            $key = $store ? 'store:' . (int)$row['store_id'] : 'context:' . (string)$row['context_id'];
+            if (!isset($choices[$key]) || (string)$row['context_id'] === $activeId
+                || ((string)$choices[$key]['context_id'] !== $activeId && (int)$row['staff_id'] > 0)) $choices[$key] = $row;
+        }
+        return array_values($choices);
+    }
+
+    /**
+     * 输入仅为已经过原权限过滤的上下文，批量补齐当前门店展示名。
+     * 旧数字标签及改名前标签只在响应中纠正，不写历史上下文或改变身份、顺序、权限。
+     * 组织上下文不按门店解释；门店缺失/已删除/空名称时保留原标签以便追溯。
+     */
+    private function contextSummaries(array $contexts): array
+    {
+        $storeIds = [];
+        foreach ($contexts as $row) {
+            if (($row['context_type'] ?? '') === 'STORE' && (int)($row['store_id'] ?? 0) > 0) {
+                $storeIds[] = (int)$row['store_id'];
+            }
+        }
+        $names = $storeIds === [] ? [] : Db::name('system_store')->whereIn('id', array_values(array_unique($storeIds)))
+            ->where('is_del', 0)->column('name', 'id');
+        return array_map(static function (array $row) use ($names): array {
+            $label = (string)$row['label'];
+            if (($row['context_type'] ?? '') === 'STORE') {
+                $name = trim((string)($names[(int)($row['store_id'] ?? 0)] ?? ''));
+                if ($name !== '') $label = $name;
+            }
+            return ['contextId' => (string)$row['context_id'], 'label' => $label];
+        }, $contexts);
     }
 
     private function availableActions(int $employeeId): array

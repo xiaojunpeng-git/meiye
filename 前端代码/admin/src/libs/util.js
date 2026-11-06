@@ -83,7 +83,7 @@ function isExternalOrScreenMenu(item) {
  * @param {Array|Object} menus 顶层菜单数组，或单个带 children 的菜单节点
  * @returns {string}
  */
-util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
+util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus, canOpen = () => true) {
   // 空菜单不是首页授权；登录及刷新后的默认落地均保持业务内容为空。
   const emptyWorkspace = `${Setting.roterPre}/workspace`;
   if (!menus) return emptyWorkspace;
@@ -101,7 +101,7 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
       return '';
     }
     if (isExternalOrScreenMenu(node)) return '';
-    return node.path || '';
+    return node.path && canOpen(node.path) ? node.path : '';
   };
 
   if (Array.isArray(menus)) {
