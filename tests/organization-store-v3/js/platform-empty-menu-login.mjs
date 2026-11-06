@@ -20,6 +20,7 @@ vm.runInContext(system, context);
 const menuHelpers = read('libs/util.js');
 vm.runInContext(menuHelpers.slice(menuHelpers.indexOf('util.makeMenu ='), menuHelpers.indexOf('/**\n * 平台端免密')), context);
 vm.runInContext(read('libs/moheAiManagementMenu.js').replace(/^export /gm, ''), context);
+vm.runInContext(read('libs/platformRouteAccess.js').replace(/^import .*;$/gm, '').replace(/^export /gm, ''), context);
 vm.runInContext(read('libs/platformLogin.js').replace(/^import .*;$/gm, '').replace('export async function', 'async function'), context);
 const plain = data => JSON.parse(JSON.stringify(data));
 
@@ -29,6 +30,7 @@ async function login(menus, access, redirect = '/admin/home/') {
   const db = { set: () => ({ write() {} }) };
   const instance = {
     $store: {
+      state: { admin: { menus: { get menusName() { return state.get('admin/menus/getmenusNav'); } } } },
       commit: (key, data) => state.set(key, plain(data)),
       dispatch: async (key, data) => {
         if (key === 'admin/db/database') return db;
@@ -36,7 +38,22 @@ async function login(menus, access, redirect = '/admin/home/') {
       }
     },
     $route: { query: { redirect } },
-    $router: { replace: data => { destination = data.path; } }
+    $router: {
+      replace: data => { destination = data.path; },
+      resolve: value => {
+        const [pathname, search] = value.split('?');
+        const routes = {
+          '/admin/stock/transfer': { auth: ['transfer'] },
+          '/admin/stock/transfer/detail/7': { auth: ['transfer'] },
+          '/admin/first/action': { auth: ['first-action'] },
+          '/admin/home/': { auth: ['admin-index-index'] },
+          '/admin/setting/mohe-ai/feedback': { auth: ['setting-mohe-ai'], moheAiMaintainer: true },
+          '/admin/workspace': { auth: true }
+        };
+        return { route: { path: pathname, query: Object.fromEntries(new URLSearchParams(search)),
+          params: {}, matched: routes[pathname] ? [{ meta: routes[pathname] }] : [] } };
+      }
+    }
   };
   await context.finishPlatformLogin(instance, {
     menus, unique_auth: access, token: 'synthetic-local-session', expires_time: 9999999999,
@@ -64,7 +81,22 @@ const normal = await login(menu, ['transfer']);
 assert.equal(normal.destination, '/admin/stock/transfer');
 assert.equal(normal.state.get('admin/menu/setSider')[0].path, '/admin/stock/transfer');
 // 真实业务深链仍须保留。
-assert.equal((await login([{ path: '/stock', header: 'product' }], [], '/admin/stock/transfer')).destination, '/admin/stock/transfer');
+assert.equal((await login(plain(menu).map(item => ({ ...item, path: '/stock',
+  children: [{ path: '/stock/transfer' }] })), ['transfer'], '/admin/stock/transfer/detail/7?tab=items')).destination,
+'/admin/stock/transfer/detail/7?tab=items');
+const staleMenu = () => [{ path: '/stock', header: 'product', children: [
+  { path: '/first/action' }, { path: '/stock/transfer' }
+] }];
+for (const stale of ['/admin/first/action', '/admin/403', '/admin/no-longer-exists', 'https://example.com']) {
+  assert.equal((await login(staleMenu(), ['transfer'], stale)).destination, '/admin/stock/transfer');
+}
+assert.equal((await login(staleMenu(), [], '/admin/first/action')).destination, '/admin/workspace');
+assert.deepEqual(plain(context.filterPlatformMenuRoutes([
+  { path: '/admin/empty', children: [{ path: '/admin/first/action' }] },
+  { path: '/admin/stock', children: [{ path: '/admin/stock/transfer' }, { path: '/admin/403' }] }
+], path => path === '/admin/stock/transfer')), [
+  { path: '/admin/stock', children: [{ path: '/admin/stock/transfer' }] }
+]);
 const ordered = await login([
   {
     path: '/first', header: 'first', children: [

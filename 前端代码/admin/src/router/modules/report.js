@@ -103,18 +103,18 @@ export default {
       component: () => import('@/pages/report/data/product_dashboard')
     },
     {
-      // 人效看板继承员工入口权限，查询与导出均由统一后端裁剪数据范围。
+      // 与接口使用相同授权：正式员工看板权限与历史员工区域权限均可进入。
       path: 'human-efficiency',
       name: `${pre}human_efficiency`,
-      meta: { auth: ['admin-staff'], title: '人效看板' },
+      meta: { auth: ['admin-report-employee-dashboard', 'admin-staff'], title: '人效看板' },
       component: () => import('@/pages/report/data/human_efficiency')
     },
     {
-      // 原型阶段复用现有员工权限；真实报表权限在接口阶段配置。
+      // 正式菜单可单独授予员工看板权限，保持与查询接口的权限口径一致。
       path: 'employee-dashboard/:section?',
       name: `${pre}employee_dashboard`,
       meta: {
-        auth: ['admin-staff'],
+        auth: ['admin-report-employee-dashboard', 'admin-staff'],
         title: '员工看板',
         employeeDashboard: true
       },

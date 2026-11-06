@@ -18,6 +18,8 @@ import { filterMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 import Vue from 'vue';
+import router from '@/router';
+import { canOpenPlatformPath, filterPlatformMenuRoutes, isPlatformRootAdmin } from '@/libs/platformRouteAccess';
 
 // 客户分析九项统一挂在“会员 → 看板”下，避免旧登录态把它们平铺到
 // “客户”顶栏或生成第二套重复入口。
@@ -159,55 +161,35 @@ export default {
       const access = aiVerified ? [...(Array.isArray(userInfo.access) ? userInfo.access : []), 'setting-mohe-ai'] : userInfo.access;
       // 后端对 level=0 的平台超级管理员不做菜单权限裁剪；前端也必须保持同一口径，
       // 否则新增的独立报表入口会在菜单中消失并被路由守卫拦截。
-      const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
-      const isRootAdmin = (
-        Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3
-      ) || account === 'admin';
       let filtered;
-      if (isRootAdmin) {
+      if (isPlatformRootAdmin(userInfo)) {
         filtered = cloneDeep(state.sider);
       } else if (access && access.length) {
         filtered = filterMenu(state.sider, access, []);
       } else {
         filtered = filterMenu(state.sider, [], []);
       }
-      // 仓库设置是否可见由后端菜单与岗位规则决定；这里不再额外隐藏已授权入口。
-      return normalizeProductBusinessConfigMenu(
+      // 后端配置决定可见候选，站内入口还必须通过实际目标路由的权限校验。
+      const normalized = normalizeProductBusinessConfigMenu(
         normalizeOrganizationWorkspaceMenu(filterMoheAiManagementMenu(filtered, userInfo, aiVerified), Setting.roterPre),
         Setting.roterPre
       );
+      return filterPlatformMenuRoutes(normalized,
+        path => canOpenPlatformPath(router, path, userInfo, access || [], aiVerified));
     },
-    // 处理顶部路由递归
 
-    /**
-         * @description 根据 user 里登录用户权限，对顶栏菜单进行鉴权过滤
-         * */
+    /** 顶栏只保留有可用子功能的分组，路径沿过滤后的配置顺序计算。 */
     filterHeader(state, getters, rootState) {
-      //  调用递归函数
-      state.header.forEach(item => {
-        item.path = getChilden(item);
-      });
-
-      // @权限
       const userInfo = rootState.admin.user.info;
-      const access = userInfo.access;
-      if (access && access.length) {
-        return state.header.filter(item => {
-          let state = true;
-          if (item.auth && !includeArray(item.auth, access)) state = false;
-          return state;
-        });
-      } else {
-        return state.header.filter(item => {
-          let state = true;
-          if (item.auth && item.auth.length) state = false;
-          return state;
-        });
-      }
+      const access = userInfo.access || [];
+      const headers = isPlatformRootAdmin(userInfo) ? state.header : filterMenu(state.header, access, []);
+      const currentToken = Vue.prototype.__getToken && Vue.prototype.__getToken();
+      const aiVerified = !!currentToken && state.moheAiVerifiedToken === currentToken;
+      const visible = filterPlatformMenuRoutes(filterMoheAiManagementMenu(headers, userInfo, aiVerified),
+        path => canOpenPlatformPath(router, path, userInfo, access, aiVerified));
+      return visible.map(item => ({ ...item, path: getChilden(item) }));
     },
-    /**
-         * @description 当前 header 的全部信息
-         * */
+    /** 当前顶栏对应的布局配置。 */
     currentHeader(state) {
       return state.header.find(item => item.name === state.headerName);
     },

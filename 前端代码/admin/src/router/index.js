@@ -24,8 +24,7 @@ import { includeArray } from '@/libs/system';
 import { isAgentPath } from '@/utils/pathUtils';
 import moheAiRequest from '@/api/moheAi';
 import { managementRouteAccess } from '../../../shared/mohe-ai/management-route-access.mjs';
-import { STORE_OPERATION_REPORT_CODES } from '@/libs/storeOperationReports';
-import { PHASE_SIX_REPORT_CODES } from '@/libs/phaseSixReports';
+import { resolveRouteAccessMeta, isPlatformRootAdmin } from '@/libs/platformRouteAccess';
 
 Vue.use(VueRouter);
 
@@ -136,22 +135,8 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     });
   }
 
-  // 动态子路由可继承父级权限；不能假定末级路由自身声明 auth。
-  const permissionRoute = [...to.matched]
-    .reverse()
-    .find(route => route.meta && route.meta.auth);
-  let meta = permissionRoute ? permissionRoute.meta : {};
-  // Menu ancestors are navigation containers, not additional job grants.
-  // Resolve only registered frame reports, then use the same exact grant for
-  // cached and refreshed checks. The backend still enforces report/data scope.
-  if (meta.storeOperationReport) {
-    const report = String(to.params.report || '');
-    const prefix = STORE_OPERATION_REPORT_CODES.includes(report)
-      ? 'admin-report-store-operations-'
-      : PHASE_SIX_REPORT_CODES.includes(report) ? 'admin-report-phase-six-' : '';
-    if (!prefix) return next({ name: '403' });
-    meta = { ...meta, auth: [`${prefix}${report}`] };
-  }
+  const meta = resolveRouteAccessMeta(to);
+  if (!meta) return next({ name: '403' });
   const userInfo = store.state.admin.user.info || {};
   // Old login snapshots may not include account. Resolve this dedicated entry
   // from the current server principal, never from root-level or cached access.
@@ -172,11 +157,7 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     }
     return next();
   }
-  const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
-  const isRootAdmin = (
-    Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3
-  ) || account === 'admin';
-  let isPermission = isRootAdmin || includeArray(
+  let isPermission = isPlatformRootAdmin(userInfo) || includeArray(
     meta.auth,
     meta.isAgentRoute ? agent_access : access
   );

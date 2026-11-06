@@ -1,19 +1,8 @@
 import Setting from '@/setting';
 import util from '@/libs/util';
 import { getHeaderName, getHeaderSider, getMenuSider } from '@/libs/system';
+import { canOpenPlatformPath } from '@/libs/platformRouteAccess';
 import { hasMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
-
-/**
- * `/admin/home/` 是旧平台首页入口。未登录访问它时，路由守卫会把该地址写入
- * redirect；登录成功后若原样回跳，就会覆盖权限菜单计算出的首个业务功能。
- * 真实业务深链仍照常回跳，仅忽略这个默认首页地址。
- */
-function resolvePostLoginPath(defaultPath, redirect) {
-  const redirectPath = String(redirect || '').trim();
-  const pathname = redirectPath.split(/[?#]/)[0].replace(/\/+$/, '');
-  const legacyHome = `${Setting.roterPre}/home`.replace(/\/+$/, '');
-  return redirectPath && pathname !== legacyHome ? redirectPath : defaultPath;
-}
 
 /**
  * 三种平台登录方式共用成功处理。后端已判断登录资格，菜单/权限为空不再次拒绝。
@@ -37,11 +26,19 @@ export async function finishPlatformLogin(vm, data) {
   vm.$store.commit('admin/menus/getmenusNav', menus);
   // The login response carries the menu scoped to this freshly issued token.
   // Clear any previous account's verification when that entry is absent.
-  vm.$store.commit('admin/menu/setMoheAiVerifiedToken', hasMoheAiManagementMenu(menus) ? data.token : null);
-  vm.$store.commit('admin/menu/setHeader', getHeaderSider(menus));
-  const path = menus.length ? util.resolveDefaultMenuPath(menus) : `${Setting.roterPre}/workspace`;
-  const headerName = getHeaderName({ path, query: {}, params: {} }, menus);
-  const selected = getMenuSider(menus, headerName);
+  const aiVerified = hasMoheAiManagementMenu(menus);
+  vm.$store.commit('admin/menu/setMoheAiVerifiedToken', aiVerified ? data.token : null);
+  vm.$store.commit('admin/menu/setHeader', getHeaderSider(vm.$store.state.admin.menus.menusName));
+  const canOpen = path => canOpenPlatformPath(vm.$router, path, user, access, aiVerified);
+  const configuredMenus = vm.$store.state.admin.menus.menusName;
+  const path = util.resolveDefaultMenuPath(configuredMenus, canOpen);
+  const redirect = String(vm.$route.query.redirect || '').trim();
+  const redirectPath = redirect.split(/[?#]/)[0].replace(/\/+$/, '');
+  // 空工作区仅承载登录态。旧首页、错误页和已失效的深链都回到当前可用入口。
+  const destination = path !== `${Setting.roterPre}/workspace` && redirectPath !== `${Setting.roterPre}/home` && canOpen(redirect)
+    ? redirect : path;
+  const headerName = getHeaderName(vm.$router.resolve(destination).route, configuredMenus);
+  const selected = getMenuSider(configuredMenus, headerName);
   vm.$store.commit('admin/menu/setHeaderName', headerName || '');
   vm.$store.commit('admin/menu/setSider', (selected[0] && selected[0].children) || []);
   vm.$store.commit('admin/menu/setActivePath', '');
@@ -49,6 +46,9 @@ export async function finishPlatformLogin(vm, data) {
   vm.$store.commit('admin/menus/setIndexPath', path);
   await vm.$store.dispatch('admin/user/set', {
     name: user.account,
+    account: user.account,
+    level: user.level,
+    admin_type: user.admin_type,
     avatar: user.head_pic,
     access,
     logo: data.logo,
@@ -56,8 +56,5 @@ export async function finishPlatformLogin(vm, data) {
     version: data.version,
     newOrderAudioLink: data.newOrderAudioLink
   });
-  const destination = menus.length
-    ? resolvePostLoginPath(path, vm.$route.query.redirect)
-    : path;
   return vm.$router.replace({ path: destination });
 }
