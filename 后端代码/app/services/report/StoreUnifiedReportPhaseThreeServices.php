@@ -1426,7 +1426,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     {
         $roots = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('pid', 0)
             ->where('cate_name', '六维')->order('id', 'asc')->column('id');
-        if ($roots === []) throw new \RuntimeException('六维根商品分类尚未配置，无法生成六维业绩报表');
+        // 未配置六维目录的实例应返回空范围；哨兵 ID 防止空数组被底层查询解释为全部分类。
+        if ($roots === []) return [-1];
         if (count($roots) !== 1) throw new \RuntimeException('存在多个六维根商品分类，请先修正分类配置');
         return $this->categoryScope(['category_id' => (int)$roots[0]]);
     }

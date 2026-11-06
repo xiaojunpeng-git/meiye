@@ -317,9 +317,11 @@ phaseThreeReportAssert(
 );
 phaseThreeReportAssert(
     str_contains($service, "->where('pid', 0)")
+        && str_contains($service, 'if ($roots === []) return [-1]')
+        && str_contains(phaseThreeMethodSource($service, 'applyCurrentCategoryCandidate'), "whereRaw('1=0')")
         && str_contains($service, 'count($roots) !== 1')
         && str_contains($service, '存在多个六维根商品分类'),
-    'six-dimension category lookup is root-scoped and fails closed on duplicate configuration'
+    'six-dimension category lookup returns an empty guarded scope when absent and fails closed on duplicates'
 );
 phaseThreeReportAssert(
     str_contains(phaseThreeMethodSource($service, 'performanceMarketDistribution'), "configuredDimensionsAcrossRange('company', \$range, \$stores)")
