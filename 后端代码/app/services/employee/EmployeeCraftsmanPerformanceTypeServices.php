@@ -58,6 +58,12 @@ class EmployeeCraftsmanPerformanceTypeServices
         return $value;
     }
 
+    /** 新收银只恢复“仅消耗业绩”的手工费限制，其他类型继续使用现行双项口径。 */
+    public static function checkoutType($configuredType): string
+    {
+        return $configuredType === self::COMMISSION ? self::COMMISSION : self::COMMISSION_LABOR;
+    }
+
     /** 返回界面和下游读取使用的确定性能力投影。 */
     public function project(string $type): array
     {

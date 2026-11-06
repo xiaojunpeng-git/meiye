@@ -291,6 +291,19 @@ class SystemConfig extends AuthController
     public function save_basics(Request $request)
     {
         $post = $this->request->post();
+        $positionKey = \app\services\cashier\v3\CashierV3ServicePositionExclusion::CONFIG_KEY;
+        if (array_key_exists($positionKey, $post)) {
+            if (!$this->services->getOne(['menu_name' => $positionKey, 'is_store' => 0])) {
+                return $this->fail('服务岗位免计配置缺失，请先完成配置升级。');
+            }
+            try {
+                $post[$positionKey] = \app\services\cashier\v3\CashierV3ServicePositionExclusion::positionIds($post[$positionKey]);
+            } catch (\InvalidArgumentException $exception) {
+                return $this->fail($exception->getMessage());
+            }
+            $known = array_column(\app\services\cashier\v3\CashierV3ServicePositionExclusion::options(), 'id');
+            if (array_diff($post[$positionKey], $known)) return $this->fail('所选岗位已变更，请刷新后重试。');
+        }
         // 排班已迁至独立版本化保存；旧标签页不能绕过版本保护覆盖该开关。
         if (array_key_exists('reservation_schedule_manage', $post)) {
             if ((int)$post['reservation_schedule_manage'] !== (\app\services\store\roster\StaffRosterSwitch::enabled()?1:0)) return $this->fail('启用排班已更新，请在该参数处单独保存。');

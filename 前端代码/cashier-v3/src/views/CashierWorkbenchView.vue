@@ -991,6 +991,11 @@ function canonicalCheckoutPositiveId(...values) {
 // those rows only at the final snapshot boundary. No server lookup or current
 // workspace projection is used here; employee/store identity comes from the
 // selection payload, with the active store as the final local fallback.
+function checkoutCraftsmanType(record) {
+  return (record?.craftsmanPerformanceType ?? record?.craftsman_performance_type) === 'commission'
+    ? 'commission' : 'commission_labor'
+}
+
 function canonicalCheckoutCraftsmen(records = []) {
   const storeId = currentCashierStoreId.value
   const input = Array.isArray(records) ? records : []
@@ -1029,9 +1034,10 @@ function canonicalCheckoutCraftsmen(records = []) {
       isPointCustomer: Boolean(record?.isPointCustomer ?? record?.marked)
     }
     if (personnelSource === 'other') row.personnelSource = 'other'
-    // 新草稿统一为双项业绩，避免旧员工设置使其中一个可编辑金额在保存时归零。
-    row.craftsmanPerformanceType = 'commission_labor'
-    row.laborFeeCents = Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
+    // 保留本次收银的手工费资格和金额，防止结账序列化把仅消耗业绩改回双项。
+    row.craftsmanPerformanceType = checkoutCraftsmanType(record)
+    row.laborFeeCents = row.craftsmanPerformanceType === 'commission' ? 0
+      : Math.max(0, Math.trunc(Number(record?.laborFeeCents ?? record?.labor_fee_cents ?? 0)))
     const positionId = Number(record?.positionId ?? record?.position_id ?? 0)
     const explicitGroupKey = String(record?.allocationGroupKey || '').trim()
     const isIndependent = (record?.performanceIndependent === true
@@ -2422,8 +2428,10 @@ async function defaultExclusivePersonnelForLine(line) {
       laborWeight: Number(record.performance || 0),
       performanceAmountCents: craftsmanAmounts.get(record) ?? 0,
       performanceAmountManual: false,
-      laborFeeCents: Number(record.laborDefaultFeeCents || 0),
-      projectCount: record.projectCountText || '0',
+      // 专属服务人员自动分配和完整分配使用同一岗位资格。
+      laborFeeCents: record.serviceCountsExcluded || checkoutCraftsmanType(record) === 'commission'
+        ? 0 : Number(record.laborDefaultFeeCents || 0),
+      projectCount: record.serviceCountsExcluded ? '0' : (record.projectCountText || '0'),
       isPrimary: index === 0,
       sequence: index + 1,
       isPointCustomer: false
@@ -4659,7 +4667,8 @@ async function confirmPersonnelAssignment(result = {}) {
       performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
       marked: Boolean(record.marked ?? record.isPointCustomer),
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
-      craftsmanPerformanceType: 'commission_labor',
+      craftsmanPerformanceType: checkoutCraftsmanType(record),
+      serviceCountsExcluded: record.serviceCountsExcluded === true,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
       // 优先保存输入框的原始文本；组件同时携带了已规范化 projectCount，
       // 这里保留双字段兼容，避免跨组件更新时把刚输入的 6.6 回退到旧值 0。
@@ -4783,7 +4792,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     performanceAmountManual: Boolean(record.performanceAmountManual ?? record.performance_amount_manual),
     marked: Boolean(record.marked ?? record.isPointCustomer),
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
-    craftsmanPerformanceType: 'commission_labor',
+    craftsmanPerformanceType: checkoutCraftsmanType(record),
+    serviceCountsExcluded: record.serviceCountsExcluded === true,
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
     projectCount: String(record.projectCount ?? record.project_count ?? ''),
     positionId: Number(record.positionId ?? record.position_id ?? 0),

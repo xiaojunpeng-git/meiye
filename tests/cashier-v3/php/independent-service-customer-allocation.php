@@ -191,3 +191,24 @@ $samePosition = serviceMetrics(serviceRows('E', $twoManagers, $managerSnapshot))
 expectShares(array_map(static function (int $id) use ($samePosition): int {
     return $samePosition['summary_by_store_employee']['23|' . $id]['visit_tenths'];
 }, array_keys($twoManagers)), [5, 5], 'employees in one independent position share its single visit');
+
+// A completed service's per-person exclusion is independent of point designation and legacy records.
+$excludedSnapshot = json_encode([
+    ['employeeId' => 101, 'storeId' => 23, 'positionId' => 69, 'serviceCountsExcluded' => true,
+        'excludedServicePositionId' => 69, 'isPointCustomer' => true],
+    ['employeeId' => 102, 'storeId' => 23, 'positionId' => 70],
+], JSON_THROW_ON_ERROR);
+$rows = serviceRows('excluded', [101 => '甲', 102 => '乙'], $excludedSnapshot);
+$rows[0]['role_snapshot'] = 'craftsman:point';
+$metrics = serviceMetrics($rows);
+$summary = $metrics['summary_by_store_employee'];
+expectShares([$summary['23|101']['visit_tenths'], $summary['23|101']['people_tenths'],
+    $summary['23|101']['point_visit_tenths'], $summary['23|102']['visit_tenths'], $summary['23|102']['people_tenths']],
+    [0, 0, 10, 10, 10], 'excluded coworker is removed before division, designated customer remains');
+expectShares(array_values($metrics['detail_by_labor_key']), [10], 'drilldown attributes visits to eligible coworker only');
+$summary = serviceMetrics([$rows[1]])['summary_by_store_employee'];
+expectShares([$summary['23|101']['point_visit_tenths'], $summary['23|102']['visit_tenths']], [10, 10],
+    'mixed service retains excluded point craftsman when that employee has no monetary or count fact');
+$summary = serviceMetrics([$rows[0]])['summary_by_store_employee'];
+expectShares([$summary['23|101']['visit_tenths'], $summary['23|101']['people_tenths'],
+    $summary['23|101']['point_visit_tenths']], [0, 0, 10], 'all excluded service does not add visits or people');

@@ -1306,8 +1306,9 @@ final class CashierV3CheckoutSettlementKernel
             if ($weight > 100) {
                 throw self::failure('entitlement_craftsman_selection_weight_invalid', ['path' => $path, 'staffId' => $staffId]);
             }
-            // 当前权益完成事实统一记双项业绩；输入中的旧员工类型仅属历史配置。
-            $performanceType = 'commission_labor';
+            // 保留本次权威快照里已经确认的手工费资格。
+            $performanceType = ($row['craftsmanPerformanceType'] ?? '') === 'commission'
+                ? 'commission' : 'commission_labor';
             $laborFeeCents = self::money($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
             $personnelSource = (string)($row['personnelSource'] ?? 'store');
             if (!in_array($personnelSource, ['store', 'other'], true)) {
@@ -1356,6 +1357,12 @@ final class CashierV3CheckoutSettlementKernel
                 $result[count($result) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
                     $row['projectCountHalfUnits'] ?? $row['project_count_half_units'],
                     $path . '.projectCountHalfUnits'
+                );
+            }
+            if (($row['serviceCountsExcluded'] ?? false) === true) {
+                $result[count($result) - 1]['serviceCountsExcluded'] = true;
+                $result[count($result) - 1]['excludedServicePositionId'] = self::positiveInt(
+                    $row['excludedServicePositionId'] ?? null, $path . '.excludedServicePositionId'
                 );
             }
             // The selection is persisted before the final entitlement

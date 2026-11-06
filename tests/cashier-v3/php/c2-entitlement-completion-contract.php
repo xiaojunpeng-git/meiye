@@ -656,6 +656,31 @@ b1Assert(
     'full entitlement completion plan accepts 39-yuan equal-weight craftsman allocation',
     array_column($roundingPlan['linePlans'][0]['laborPerformance']['allocations'], 'amountCents') === [1900, 2000]
 );
+// Restore only the fee restriction; staff weight and consumption keep their established basis.
+$feeSnapshot = $roundingSnapshot;
+$feeSnapshot['lines'][0]['craftsmen'][0]['craftsmanPerformanceType'] = 'commission';
+$feeSnapshot['lines'][0]['craftsmen'][0]['laborFeeCents'] = 300;
+$feeSnapshot['lines'][0]['craftsmen'][1]['craftsmanPerformanceType'] = 'commission_labor';
+$feeSnapshot['lines'][0]['craftsmen'][1]['laborFeeCents'] = 700;
+$feePlan = b1Plan(null, $feeSnapshot);
+$feeAllocations = $feePlan['linePlans'][0]['laborPerformance']['allocations'];
+b1Assert(
+    'commission-only entitlement craftsman keeps performance and saves zero hand fee',
+    array_column($feeAllocations, 'laborFeeCents') === [0, 700]
+        && array_column($feeAllocations, 'amountCents') === [1900, 2000]
+        && array_column($feeAllocations, 'craftsmanPerformanceType') === ['commission', 'commission_labor']
+);
+// A selected role is frozen on the employee, not on the project or the member.
+$roleSnapshot = $feeSnapshot;
+$roleSnapshot['lines'][0]['craftsmen'][1]['serviceCountsExcluded'] = true;
+$roleSnapshot['lines'][0]['craftsmen'][1]['excludedServicePositionId'] = 67;
+$roleSnapshot['lines'][0]['craftsmen'][1]['projectCountHalfUnits'] = 2;
+$roleAllocations = b1Plan(null, $roleSnapshot)['linePlans'][0]['laborPerformance']['allocations'];
+b1Assert('excluded position zeros fee and personnel projects but keeps performance and frozen role',
+    $roleAllocations[1]['laborFeeCents'] === 0 && $roleAllocations[1]['projectCount'] === '0'
+    && !isset($roleAllocations[1]['projectCountHalfUnits']) && $roleAllocations[1]['amountCents'] === 2000
+    && $roleAllocations[1]['serviceCountsExcluded'] === true && $roleAllocations[1]['excludedServicePositionId'] === 67
+);
 $fractionalBaseReason = b1Reason(static function () use ($craftsmanPlanMethod, $equalCraftsmen): void {
     $craftsmanPlanMethod->invoke(null, [11, 12], $equalCraftsmen, 7, 3950);
 });

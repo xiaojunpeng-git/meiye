@@ -12,6 +12,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
 use app\services\organization\OrganizationScopeService;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use think\facade\Db;
 
 /**
@@ -92,6 +93,17 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $before = $this->presentAllocations($currentFacts, $source, $operator);
         $totalCents = $this->writeoffAmountCents($source, $dataScope->tenantId());
         $after = $this->normalizeAllocations($payload['allocations'] ?? null, $operator, $totalCents);
+        // 调整只能沿用原单已冻结的免计结果，不能用今天的岗位配置倒改历史。
+        $excluded = CashierV3ServicePositionExclusion::frozenEmployeeIds(
+            (string)($source['craftsmen_snapshot_json'] ?? ''), (int)$source['store_id']
+        );
+        foreach ($after as &$allocation) {
+            if (isset($excluded[$allocation['employeeId']])) {
+                $allocation['laborFeeCents'] = 0;
+                $allocation['projectCount'] = '0';
+            }
+        }
+        unset($allocation);
         $now = time();
         $operationId = 'SRA-' . strtoupper(substr(hash_hmac(
             'sha256', $dataScope->tenantId() . '|' . $source['id'] . '|' . $commandKey, $this->secret()

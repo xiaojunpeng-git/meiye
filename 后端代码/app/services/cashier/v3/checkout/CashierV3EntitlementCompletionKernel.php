@@ -145,18 +145,6 @@ final class CashierV3EntitlementCompletionKernel
             $quantity = $intentLine['quantity'];
             $actualAmount = $lineAmounts[$lineId];
             $performance = self::performancePlan($authority['performance'], $actualAmount, $quantity);
-            // “仅手工费”手艺人不参与劳动业绩分摊。保留服务和手工费
-            // 快照，但不能把项目劳动业绩强行分配给这类人员。
-            $hasPerformanceCraftsman = false;
-            foreach ($authority['craftsmen'] as $craftsman) {
-                if (($craftsman['craftsmanPerformanceType'] ?? 'commission_labor') !== 'labor') {
-                    $hasPerformanceCraftsman = true;
-                    break;
-                }
-            }
-            if (!$hasPerformanceCraftsman) {
-                $performance['laborAmountCents'] = 0;
-            }
             $craftsmen = self::craftsmanPlan(
                 $intentLine['craftsmanIds'],
                 $authority['craftsmen'],
@@ -1131,6 +1119,7 @@ final class CashierV3EntitlementCompletionKernel
             $optionalKeys = [
                 'isPointCustomer',
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
+                'serviceCountsExcluded', 'excludedServicePositionId',
                 'performanceAmountCents', 'performanceAmountManual',
                 'projectCount', 'projectCountHalfUnits',
                 'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
@@ -1143,19 +1132,15 @@ final class CashierV3EntitlementCompletionKernel
             self::assertPositiveInt($row['storeId'], 'craftsman.storeId');
             self::assertPositiveInt($row['sequence'], 'craftsman.sequence', 20);
             self::assertNonnegativeInt($row['laborWeight'], 'craftsman.laborWeight', self::MAX_WEIGHT);
-            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
-            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
-                throw self::failure('authority_craftsman_performance_invalid', ['staffId' => $row['staffId']]);
-            }
+            // 结账权威人员快照只恢复“仅消耗业绩”约束，旧 labor 类型仍按双项兼容。
+            $performanceType = ($row['craftsmanPerformanceType'] ?? '') === 'commission'
+                ? 'commission' : 'commission_labor';
             self::assertWholeYuanMoney(
                 $row['laborFeeCents'] ?? 0,
                 'craftsman.laborFeeCents',
                 self::MAX_MONEY_CENTS
             );
-            $laborFeeCents = (int)($row['laborFeeCents'] ?? 0);
-            if ($performanceType === 'commission' && $laborFeeCents !== 0) {
-                throw self::failure('authority_craftsman_labor_fee_invalid', ['staffId' => $row['staffId']]);
-            }
+            $laborFeeCents = $performanceType === 'commission' ? 0 : (int)($row['laborFeeCents'] ?? 0);
             if (!is_bool($row['active']) || !is_bool($row['craftsmanEligible']) || !is_bool($row['isPrimary'])) {
                 throw self::failure('authority_craftsman_flags_invalid', ['staffId' => $row['staffId']]);
             }
@@ -1178,10 +1163,6 @@ final class CashierV3EntitlementCompletionKernel
                     throw self::failure('authority_craftsman_performance_amount_invalid', ['staffId' => $row['staffId']]);
                 }
                 self::assertWholeYuanMoney($row['performanceAmountCents'], 'craftsman.performanceAmountCents', self::MAX_MONEY_CENTS);
-                if ($performanceType === 'labor'
-                    && ((int)$row['performanceAmountCents'] !== 0 || $row['performanceAmountManual'])) {
-                    throw self::failure('authority_labor_performance_amount_invalid', ['staffId' => $row['staffId']]);
-                }
             }
             if (array_key_exists('projectCount', $row)) {
                 $row['projectCount'] = self::projectCount($row['projectCount'], 'craftsman.projectCount');
@@ -1789,6 +1770,14 @@ final class CashierV3EntitlementCompletionKernel
                 $allocation['projectCount'] = (string)$row['projectCount'];
             } elseif (array_key_exists('projectCountHalfUnits', $row)) {
                 $allocation['projectCountHalfUnits'] = (int)$row['projectCountHalfUnits'];
+            }
+            if (($row['serviceCountsExcluded'] ?? false) === true) {
+                self::assertPositiveInt($row['excludedServicePositionId'] ?? 0, 'craftsman.excludedServicePositionId');
+                $allocation['serviceCountsExcluded'] = true;
+                $allocation['excludedServicePositionId'] = $row['excludedServicePositionId'];
+                $allocation['laborFeeCents'] = 0;
+                $allocation['projectCount'] = '0';
+                unset($allocation['projectCountHalfUnits']);
             }
             if (isset($row['positionId'])) {
                 $allocation['positionId'] = (int)$row['positionId'];

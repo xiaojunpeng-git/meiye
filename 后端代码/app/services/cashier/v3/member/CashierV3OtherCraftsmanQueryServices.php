@@ -4,6 +4,8 @@ namespace app\services\cashier\v3\member;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\organization\OrganizationScopeService;
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use think\facade\Db;
 
 /** Shared read-only organization picker for other craftsmen and salespeople. Client nodes can only narrow the server-derived group. */
@@ -84,9 +86,11 @@ final class CashierV3OtherCraftsmanQueryServices
         }
         $total = (int)Db::query("SELECT COUNT(*) n FROM eb_employee e WHERE $where", $params)[0]['n'];
         $page = min($page, max(1, (int)ceil($total / $size))); $offset = ($page - 1) * $size;
-        $rows = Db::query("SELECT e.id,e.name,e.employment_type_code,e.employment_type_version,(SELECT MIN(st.name) FROM eb_system_store_staff ss JOIN eb_system_store st ON st.id=ss.store_id WHERE ss.employee_id=e.id AND ss.store_id IN ($storeList) AND ss.status=1 AND ss.is_del=0) store_name FROM eb_employee e WHERE $where ORDER BY e.id ASC LIMIT $offset,$size", $params);
+        $rows = Db::query("SELECT e.id,e.name,e.employment_type_code,e.employment_type_version,e.default_craftsman_performance_type,(SELECT MIN(st.name) FROM eb_system_store_staff ss JOIN eb_system_store st ON st.id=ss.store_id WHERE ss.employee_id=e.id AND ss.store_id IN ($storeList) AND ss.status=1 AND ss.is_del=0) store_name FROM eb_employee e WHERE $where ORDER BY e.id ASC LIMIT $offset,$size", $params);
         $positions = $salesperson ? app()->make(CashierV3QueryEntitySelectorServices::class)->organizationDirectPositionMap(array_column($rows, 'id')) : [];
-        $records = array_map(static function ($row) use ($operator, $salesperson, $positions) {
+        $staffIds = array_map([\app\services\cashier\v3\CashierV3PersonnelIdentity::class, 'organizationStaffId'], array_column($rows, 'id'));
+        $positionExclusions = $salesperson ? [] : CashierV3ServicePositionExclusion::matches($staffIds, $operator->storeId());
+        $records = array_map(static function ($row) use ($operator, $salesperson, $positions, $positionExclusions) {
             // Keep the same authoritative direct-position grouping as the locked sales writer.
             $position = $positions[(int)$row['id']] ?? [];
             $positionId = (int)($position['position_id'] ?? 0);
@@ -96,7 +100,9 @@ final class CashierV3OtherCraftsmanQueryServices
                 'storeId'=>$operator->storeId(), 'storeName'=>$row['store_name'] ?: '组织直属', 'staffNo'=>'', 'positionName'=>$position['position_name'] ?? '在职员工',
                 'positionId'=>$positionId, 'performanceIndependent'=>$independent, 'allocationGroupKey'=>$independent ? 'independent:' . $positionId : 'normal', 'employeeTypeCode'=>$row['employment_type_code'] ?? 'internal',
                 'employeeTypeAuthorityVersion'=>(int)$row['employment_type_version'], 'craftsmanEligible'=>!$salesperson, 'salespersonEligible'=>$salesperson, 'partnerDefaultRatio'=>0,
-                'personnelSource'=>'other', 'craftsmanPerformanceType'=>'commission_labor', 'laborDefaultFeeCents'=>0, 'selectable'=>true, 'groupScoped'=>true];
+                'personnelSource'=>'other', 'serviceCountsExcluded'=>isset($positionExclusions[$id]), 'craftsmanPerformanceType'=>EmployeeCraftsmanPerformanceTypeServices::checkoutType(
+                    $row['default_craftsman_performance_type'] ?? null
+                ), 'laborDefaultFeeCents'=>0, 'selectable'=>true, 'groupScoped'=>true];
         }, $rows);
         return $metadata + ['records'=>$records, 'total'=>$total, 'page'=>$page, 'pageSize'=>$size, 'requiresKeyword'=>false, 'isLoading'=>false];
     }

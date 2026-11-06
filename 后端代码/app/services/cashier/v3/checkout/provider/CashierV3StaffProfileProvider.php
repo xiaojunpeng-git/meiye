@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
 use think\facade\Db;
 
 final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionProvider
@@ -156,6 +157,48 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
         return $current + 1;
     }
 
+    /**
+     * 锁定本次结账已选择人员的手工费资格。门店任职只在收银门店内读取，
+     * 组织人员沿用无门店任职的配置；人员归属仍由原结账流程校验。
+     * @return array<int, true> 仅计消耗业绩的人员键
+     */
+    public static function lockCommissionOnlyStaffInTx(array $staffIds, int $storeId): array
+    {
+        if (!$staffIds) return [];
+        CashierV3TransactionGuard::assertInTransaction('checkoutCraftsmanFeeEligibility');
+        $storeStaffIds = [];
+        $organizationEmployeeIds = [];
+        foreach (array_unique($staffIds) as $staffId) {
+            $staffId = (int)$staffId;
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                $organizationEmployeeIds[] = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
+            } elseif ($staffId > 0) {
+                $storeStaffIds[] = $staffId;
+            }
+        }
+        $blocked = [];
+        if ($storeStaffIds) {
+            $rows = Db::name('system_store_staff')->whereIn('id', $storeStaffIds)
+                ->where('store_id', $storeId)->order('id')->lock(true)
+                ->field('id,craftsman_performance_type')->select();
+            foreach ($rows as $row) {
+                if ($row['craftsman_performance_type'] === EmployeeCraftsmanPerformanceTypeServices::COMMISSION) {
+                    $blocked[(int)$row['id']] = true;
+                }
+            }
+        }
+        if ($organizationEmployeeIds) {
+            $rows = Db::name('employee')->whereIn('id', $organizationEmployeeIds)->order('id')->lock(true)
+                ->field('id,default_craftsman_performance_type')->select();
+            foreach ($rows as $row) {
+                if ($row['default_craftsman_performance_type'] === EmployeeCraftsmanPerformanceTypeServices::COMMISSION) {
+                    $blocked[CashierV3PersonnelIdentity::organizationStaffId((int)$row['id'])] = true;
+                }
+            }
+        }
+        return $blocked;
+    }
+
     public function lockProfileSnapshotInTx(
         int $staffId,
         CashierV3OperatorScope $operatorScope,
@@ -252,6 +295,10 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
             'employeeTypeCodeSnapshot' => $typeCode,
             'employeeTypeAuthorityVersion' => $typeVersion,
             'profileFingerprint' => $fingerprint,
+            // 同一结账事务内，手工费资格取锁定任职；无需增加快照版本字段。
+            'craftsmanPerformanceType' => EmployeeCraftsmanPerformanceTypeServices::checkoutType(
+                $staff['craftsman_performance_type'] ?? null
+            ),
         ];
     }
 
@@ -290,6 +337,9 @@ final class CashierV3StaffProfileProvider implements CashierV3DataScopedVersionP
             'storeId' => $storeId, 'active' => true, 'craftsmanEligible' => true,
             'employeeTypeCodeSnapshot' => $typeCode, 'employeeTypeAuthorityVersion' => $typeVersion,
             'profileFingerprint' => $fingerprint, 'personnelSource' => 'other',
+            'craftsmanPerformanceType' => EmployeeCraftsmanPerformanceTypeServices::checkoutType(
+                $employee['default_craftsman_performance_type'] ?? null
+            ),
         ];
     }
 

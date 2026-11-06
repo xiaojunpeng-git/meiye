@@ -79,6 +79,21 @@ foreach (['summary_by_store_employee', 'daily_by_store_employee'] as $key) scChe
 scCheck(count($compact) === 2 && !isset($compact['detail_context_by_labor_key']), 'aggregate has no retained detail projection');
 scCheck($compact['summary_by_store_employee']['23|1']['point_visit_tenths'] === 100, 'point customer counts once per day, including zero value');
 scCheck($compact['summary_by_store_employee']['24|1']['people_tenths'] === 10, 'same member in another store keeps separate denominator');
+// The compact metrics used by staff dashboards must agree with payroll details.
+$excludedSnapshot = json_encode([
+    ['employeeId' => 1, 'storeId' => 23, 'serviceCountsExcluded' => true,
+        'excludedServicePositionId' => 67, 'isPointCustomer' => true, 'name' => 'Employee-1'],
+    ['employeeId' => 2, 'storeId' => 23, 'name' => 'Employee-2'],
+], JSON_THROW_ON_ERROR);
+$excludedReader = scReader([scRow(9, 932, 2, ['craftsmen_snapshot_json' => $excludedSnapshot])]);
+$fullExcluded = $excludedReader->employeeMetrics('0', [23], $range);
+$compactExcluded = $excludedReader->aggregateEmployeeMetrics('0', [23], $range);
+scCheck($fullExcluded['summary_by_store_employee'] === $compactExcluded['summary_by_store_employee'],
+    'role-excluded mixed service yields identical compact and detail summaries');
+$excludedSummary = $compactExcluded['summary_by_store_employee'];
+scCheck($excludedSummary['23|1']['point_visit_tenths'] === 10 && $excludedSummary['23|1']['visit_tenths'] === 0
+    && $excludedSummary['23|2']['visit_tenths'] === 10 && $excludedSummary['23|2']['people_tenths'] === 10,
+    'role-excluded service preserves point counts and attributes visits and people to the eligible coworker');
 $calls = 0;
 $factory = scFactory(static function (bool $stream) use ($rows): Generator { usort($rows, static fn(array $a, array $b): int => scSortKey($a) <=> scSortKey($b)); yield from $rows; }, $calls);
 $cached = new RegisteredMetricReadServices($factory, static function () {}, static function () {}, false, true);

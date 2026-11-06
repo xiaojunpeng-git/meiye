@@ -130,11 +130,21 @@ function selectOtherSalespersonNode(node) {
 const otherSalespersonSearchOpen = ref(false)
 const otherSalespersonKeyword = ref('')
 const validationMessage = ref('')
-const PERFORMANCE_TYPES = { COMMISSION_LABOR: 'commission_labor' }
+function configuredCraftsmanType(item = {}) {
+  return item.craftsmanPerformanceType ?? item.craftsman_performance_type
+}
 
-function craftsmanType() {
-  // 旧类型仅供已落账事实追溯；本次编辑统一允许消耗业绩和手工费同时输入。
-  return PERFORMANCE_TYPES.COMMISSION_LABOR
+function craftsmanType(item = {}, configuredType = configuredCraftsmanType(item)) {
+  // 仅本次收银按任职类型锁定手工费；历史服务调整沿用原有可编辑金额。
+  return !props.historyAdjustment && configuredType === 'commission' ? 'commission' : 'commission_labor'
+}
+
+function servicePositionExcluded(item) {
+  return !props.historyAdjustment && item?.serviceCountsExcluded === true
+}
+
+function laborFeeLocked(item) {
+  return servicePositionExcluded(item) || craftsmanType(item) === 'commission'
 }
 
 function defaultLaborFeeCents() {
@@ -142,6 +152,7 @@ function defaultLaborFeeCents() {
 }
 
 function laborFeeCentsFor(item = {}) {
+  if (laborFeeLocked(item)) return 0
   const saved = Number(item.laborFeeCents ?? item.labor_fee_cents ?? 0)
   const candidateDefault = Number(item.laborDefaultFeeCents ?? item.labor_default_fee_cents ?? 0)
   return saved > 0
@@ -158,6 +169,10 @@ function blockNonDigitLaborFeeInput(event) {
 
 function updateWholeYuanLaborFee(item = {}, event) {
   const input = event?.target
+  if (laborFeeLocked(item)) {
+    if (input) input.value = '0'
+    return
+  }
   const raw = String(input?.value ?? '')
   if (!/^[0-9]*$/.test(raw)) {
     // beforeinput 不可用或被脚本绕过时恢复最近的整数值，不能把 3.5
@@ -365,6 +380,8 @@ function distributeProjectCounts(records, selectionChanged = false) {
   // 分配未被人工改动的项目数，不能让新选中的人一直留在 0。
   if ((props.historyAdjustment && !selectionChanged) || !Array.isArray(records)) return
   defaultProjectCounts(records, props.projectCountTotal, selectionChanged)
+  // 人员项目数是独立分配字段，归零不会改变购物车的实际服务数量。
+  records.filter(servicePositionExcluded).forEach((record) => { record.projectCountText = '0' })
 }
 
 function recordId(record = {}) {
@@ -458,6 +475,10 @@ function mergeCandidates(candidates, selected, role) {
     if (!id || seen.has(id)) continue
     seen.add(id)
     const saved = selectedById.get(id)
+    // 任职候选可能比购物车更新，类型以候选为准，手工费金额仍优先读取草稿。
+    const type = craftsmanType(candidate, configuredCraftsmanType(candidate) ?? configuredCraftsmanType(saved ?? {}))
+    const serviceCountsExcluded = (candidate.serviceCountsExcluded ?? saved?.serviceCountsExcluded) === true
+    const laborFeeCents = laborFeeCentsFor({ ...candidate, ...saved, craftsmanPerformanceType: type, serviceCountsExcluded })
     merged.push({
       ...candidate,
       id,
@@ -479,10 +500,11 @@ function mergeCandidates(candidates, selected, role) {
       marked: Boolean(saved?.marked ?? saved?.isPreSale ?? saved?.isPointCustomer),
       performance: Number(saved?.allocationWeight ?? saved?.laborWeight ?? saved?.performance ?? 0),
       performanceTouched: Boolean(saved && hasSavedAllocationWeight(saved)),
-      craftsmanPerformanceType: craftsmanType(saved || candidate),
+      craftsmanPerformanceType: type,
+      serviceCountsExcluded,
       partnerDefaultRatio: Number(candidate.partnerDefaultRatio ?? saved?.partnerDefaultRatio ?? 0),
-      laborFeeCents: laborFeeCentsFor({ ...candidate, ...(saved || {}) }),
-      laborFeeYuan: laborFeeCentsFor({ ...candidate, ...(saved || {}) }) / 100,
+      laborFeeCents,
+      laborFeeYuan: laborFeeCents / 100,
       allocationAmountCents: allocationAmountCentsFor(saved || {}),
       allocationAmountYuan: allocationAmountYuanText(saved || {}),
       performanceAmountCents: performanceAmountCentsFor(saved || {}),
@@ -997,13 +1019,14 @@ function selectedCraftsmenPayload() {
     performanceAmountCents: performanceAmountCentsFor(item),
     performanceAmountManual: Boolean(item.performanceAmountManual),
     craftsmanPerformanceType: craftsmanType(item),
-    laborFeeCents: Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+    serviceCountsExcluded: servicePositionExcluded(item),
+    laborFeeCents: laborFeeLocked(item) ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
     positionId: Number(item.positionId || 0),
     positionName: item.position || '在职员工',
     performanceIndependent: performanceIndependent(item),
     allocationGroupKey: allocationGroupKey(item),
-    projectCountText: item.projectCountText,
-    projectCount: projectCountTextFor(item),
+    projectCountText: servicePositionExcluded(item) ? '0' : item.projectCountText,
+    projectCount: servicePositionExcluded(item) ? '0' : projectCountTextFor(item),
     ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
     isPrimary: index === 0,
     sequence: index + 1
@@ -1150,15 +1173,16 @@ function confirm() {
       performanceAmountCents: performanceAmountCentsFor(item),
       performanceAmountManual: Boolean(item.performanceAmountManual),
       craftsmanPerformanceType: craftsmanType(item),
-      laborFeeCents: Math.max(0, Number(item.laborFeeYuan || 0) * 100),
+      serviceCountsExcluded: servicePositionExcluded(item),
+      laborFeeCents: laborFeeLocked(item) ? 0 : Math.max(0, Number(item.laborFeeYuan || 0) * 100),
       positionId: Number(item.positionId || 0),
       positionName: item.position || '在职员工',
       performanceIndependent: performanceIndependent(item),
       allocationGroupKey: allocationGroupKey(item),
       ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
       allocationAmountCents: allocationAmountCentsFor(item),
-      projectCountText: item.projectCountText,
-      projectCount: projectCountTextFor(item),
+      projectCountText: servicePositionExcluded(item) ? '0' : item.projectCountText,
+      projectCount: servicePositionExcluded(item) ? '0' : projectCountTextFor(item),
       isPrimary: index === 0,
       sequence: index + 1
     }))
@@ -1287,8 +1311,8 @@ function searchGroupPersonnel(scope) {
               <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" @input="markPerformanceTouched(item)"><b>%</b></label>
               <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
               <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint()" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
-              <label v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="item.laborFeeYuan" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
-              <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @input="markProjectCountEdited(item)" @blur="normalizeProjectCount(item)"><b>个</b></label>
+              <label v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="laborFeeLocked(item) ? 0 : item.laborFeeYuan" :disabled="laborFeeLocked(item)" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
+              <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" :disabled="servicePositionExcluded(item)" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @input="markProjectCountEdited(item)" @blur="normalizeProjectCount(item)"><b>个</b></label>
               <button type="button" @click="selectRecord(item)">删除</button>
             </div>
             <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>

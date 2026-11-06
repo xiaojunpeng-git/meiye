@@ -2239,8 +2239,8 @@ final class CashierV3CashierWorkspaceServices
                 ->whereIn('oe.org_id', $organizationIds)
                 ->where('oe.status', 1)->where('oe.is_del', 0)
                 ->where('e.status', 1)->where('e.is_del', 0)
-                ->field('oe.employee_id,e.name as employee_name')
-                ->group('oe.employee_id,e.name')
+                ->field('oe.employee_id,e.name as employee_name,e.default_craftsman_performance_type')
+                ->group('oe.employee_id,e.name,e.default_craftsman_performance_type')
                 ->lock(true)->select()->toArray();
             foreach ($organizationRows as $row) {
                 $employeeId = (int)($row['employee_id'] ?? 0);
@@ -2251,7 +2251,7 @@ final class CashierV3CashierWorkspaceServices
                     'store_id' => $operatorScope->storeId(),
                     'staff_name' => (string)($row['employee_name'] ?? ''),
                     'cashier_craftsman_enabled' => 1,
-                    'craftsman_performance_type' => EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR,
+                    'craftsman_performance_type' => $row['default_craftsman_performance_type'] ?? null,
                     'position_id' => 0,
                     'position_name' => '',
                     'performance_independent' => 0,
@@ -2303,7 +2303,7 @@ final class CashierV3CashierWorkspaceServices
                     ['staff_id' => $staffId, 'reason' => 'craftsman_not_active_in_store']
                 );
             }
-            $type = EmployeeCraftsmanPerformanceTypeServices::COMMISSION_LABOR;
+            $type = EmployeeCraftsmanPerformanceTypeServices::checkoutType($row['craftsman_performance_type'] ?? null);
             $effectiveWeight = $weights[$staffId];
             $positionId = (int)($row['position_id'] ?? 0);
             $positionName = trim((string)($row['position_name'] ?? '')) ?: '在职员工';
@@ -2311,7 +2311,9 @@ final class CashierV3CashierWorkspaceServices
             $allocationGroupKey = $performanceIndependent
                 ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
                 : 'normal';
-            $laborFeeCents = $requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents;
+            // 任职只计消耗业绩时，旧草稿和项目默认费都不能覆盖 0。
+            $laborFeeCents = $type === EmployeeCraftsmanPerformanceTypeServices::COMMISSION ? 0
+                : ($requestedFees[$staffId] > 0 ? $requestedFees[$staffId] : $defaultLaborFeeCents);
             $personnelSource = ($personnelSources[$staffId] ?? '') === 'other' ? 'other' : 'store';
             // The virtual staff id is only the internal staff-resource key used to
             // avoid collisions with system_store_staff.id. Facts and snapshots

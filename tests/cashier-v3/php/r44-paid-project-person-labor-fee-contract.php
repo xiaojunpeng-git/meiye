@@ -10,15 +10,6 @@ namespace app\services\cashier\v3 {
     }
 }
 
-namespace app\services\cashier\v3\checkout {
-    /** Keep the production labor-mode value while isolating the paid-project calculation. */
-    final class CashierV3EntitlementCompletionKernel
-    {
-        public const PERFORMANCE_ACTUAL = 'actual_entitlement_amount';
-        public const PERFORMANCE_CONFIGURED = 'project_configured_amount';
-    }
-}
-
 namespace app\services\cashier\v3\settlement {
     /** Read the same JSON personnel snapshot shape supplied by the checkout line. */
     final class CashierV3CheckoutCraftsmenSnapshot
@@ -60,6 +51,8 @@ namespace think\facade {
 }
 
 namespace {
+    require_once dirname(__DIR__, 3)
+        . '/后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php';
     require_once dirname(__DIR__, 3)
         . '/后端代码/app/services/cashier/v3/CashierV3ProjectPersonnelDefaults.php';
     require_once dirname(__DIR__, 3)
@@ -110,4 +103,26 @@ namespace {
         exit(1);
     }
     echo "PASS configured staff default changes labor performance without changing hand fee\n";
+
+    // An old line-level fee must never reintroduce a fee for a commission-only worker.
+    $commissionOnly = $craftsmen[2];
+    $commissionOnly['laborWeight'] = 50;
+    $eligible = $craftsmen[0];
+    $eligible['laborFeeCents'] = 0;
+    foreach ([[$commissionOnly], [$commissionOnly, $eligible]] as $index => $staff) {
+        $legacy = CashierV3PaidProjectCraftsmanPerformanceServices::planInTx([
+            'item_id' => 901,
+            'quantity' => 1,
+            'sale_amount_cents' => 10000,
+            'manual_labor_fee_cents' => 700,
+            'craftsmen_snapshot_json' => json_encode($staff, JSON_THROW_ON_ERROR),
+        ], 'test-tenant');
+        $byStaff = array_column($legacy['allocations'], null, 'staffId');
+        if ($byStaff[13]['laborFeeCents'] !== 0 || $legacy['laborFeeAmountCents'] !== ($index ? 700 : 0)
+            || ($index && $byStaff[11]['laborFeeCents'] !== 700)) {
+            fwrite(STDERR, 'FAIL old line fee bypassed staff eligibility' . "\n");
+            exit(1);
+        }
+    }
+    echo "PASS old line fee is split only among eligible craftsmen\n";
 }

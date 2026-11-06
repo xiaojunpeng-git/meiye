@@ -36,6 +36,8 @@ use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutRequestRepositor
 use app\services\order\store\WriteOffOrderServices;
 use app\services\product\inventory\completion\InventoryCompletionDataScope;
 use app\services\product\inventory\completion\InventoryEntitlementCompletionContract;
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
 use think\facade\Db;
 use think\facade\Log;
@@ -456,6 +458,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             return $left['staffId'] <=> $right['staffId'];
         });
 
+        // 新结账沿用同一事务冻结的人员资格；旧待提交权益在实际完成时应用规则。
+        $legacyExclusions = $directSnapshot ? [] : CashierV3ServicePositionExclusion::matches(
+            array_keys($staffById), $operatorScope->storeId(), true
+        );
         $snapshotLines = [];
         foreach ($entitlementLines as $index => $line) {
             $lineId = (string)$line['line_id'];
@@ -573,6 +579,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             foreach ($intent['craftsmanIds'] as $sequence => $staffId) {
                 $profile = $staffById[$staffId];
                 $settings = $intent['craftsmanSettingsById'][$staffId] ?? [];
+                // 已锁定的员工配置优先于浏览器输入与旧待结账草稿。
+                $performanceType = $profile['craftsmanPerformanceType'];
                 $craftsmen[] = [
                     'staffId' => $staffId,
                     'staffVersion' => (int)$profile['staffVersion'],
@@ -585,8 +593,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     // 页面单行与应用全部的点客选择必须进入核销权威快照。
                     'isPointCustomer' => !empty($settings['isPointCustomer']),
                     'laborWeight' => (int)($settings['laborWeight'] ?? 0),
-                    'craftsmanPerformanceType' => (string)($settings['craftsmanPerformanceType'] ?? 'commission_labor'),
-                    'laborFeeCents' => max(0, (int)($settings['laborFeeCents'] ?? 0)),
+                    'craftsmanPerformanceType' => $performanceType,
+                    'laborFeeCents' => $performanceType === EmployeeCraftsmanPerformanceTypeServices::COMMISSION
+                        ? 0 : max(0, (int)($settings['laborFeeCents'] ?? 0)),
                     'personnelSource' => (string)($settings['personnelSource'] ?? 'store'),
                     'positionId' => max(0, (int)($settings['positionId'] ?? 0)),
                     'positionName' => trim((string)($settings['positionName'] ?? '')),
@@ -601,6 +610,12 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     $craftsmen[count($craftsmen) - 1]['projectCount'] = (string)$settings['projectCount'];
                 } elseif (array_key_exists('projectCountHalfUnits', $settings)) {
                     $craftsmen[count($craftsmen) - 1]['projectCountHalfUnits'] = max(0, (int)$settings['projectCountHalfUnits']);
+                }
+                $excludedPosition = $directSnapshot
+                    ? ($settings['excludedServicePositionId'] ?? 0)
+                    : ($legacyExclusions[$staffId]['position_id'] ?? 0);
+                if ($excludedPosition > 0) {
+                    CashierV3ServicePositionExclusion::freeze($craftsmen[count($craftsmen) - 1], ['position_id' => $excludedPosition]);
                 }
             }
             $inventory = $inventorySnapshot['lineInventoryByLineId'][$lineId] ?? null;
@@ -1082,6 +1097,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                         0,
                         (int)$craftsman['projectCountHalfUnits']
                     );
+                }
+                if (($craftsman['serviceCountsExcluded'] ?? false) === true) {
+                    $settingsById[$staffId]['excludedServicePositionId'] = (int)$craftsman['excludedServicePositionId'];
                 }
                 $positionId = is_array($craftsman) ? max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0)) : 0;
                 $performanceIndependent = is_array($craftsman) && !empty($craftsman['performanceIndependent']);

@@ -2260,6 +2260,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
+            \app\services\cashier\v3\CashierV3ServicePositionExclusion::CONFIG_KEY,
             'cashier_project_auto_complete_switch', 'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'reservation_service_voice_mode', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_presale_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'cashier_member_default_all_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
@@ -2270,6 +2271,15 @@ WSS;
             'param_filter_type', 'param_filter_data'
         ]);
 
+        $excludedPositions = \app\services\cashier\v3\CashierV3ServicePositionExclusion::positionIds(
+            $data[\app\services\cashier\v3\CashierV3ServicePositionExclusion::CONFIG_KEY]['value'] ?: []
+        );
+        $positionOptions = [];
+        foreach (\app\services\cashier\v3\CashierV3ServicePositionExclusion::options() as $position) {
+            $id = (int)$position['id'];
+            if ((int)$position['status'] !== 1 && !in_array($id, $excludedPositions, true)) continue;
+            $positionOptions[] = ['value' => $id, 'label' => $position['name'] . ((int)$position['status'] === 1 ? '' : '（已停用）')];
+        }
         $system = [];
         foreach (['site_name', 'site_url', 'site_phone', 'cache_config','recharge_per'] as $key) {
             $system[] = Build::input($key, $data[$key]['info'], $data[$key]['value'])->maxlength($key === 'site_name' ? 20 : null)->info($data[$key]['desc'])->type($data[$key]['type']);
@@ -2303,6 +2313,9 @@ WSS;
                 Build::switch('cashier_experience_switch', '体验', (int)($data['cashier_experience_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的体验按钮'),
                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
+                Build::select(\app\services\cashier\v3\CashierV3ServicePositionExclusion::CONFIG_KEY, '门店不算服务人数、服务人次、手工费', $excludedPositions)
+                    ->multiple(true)->filterable(true)->options($positionOptions)
+                    ->info('可选多个岗位。所选岗位的人员项目数和手工费为 0，且不计员工服务人数、人次，仅对保存后完成的服务生效。'),
                 // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
                 Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
                 // 开启后收银和预约统一查询全部并隐藏范围切换；本店与全部的服务端权限校验保持原样。

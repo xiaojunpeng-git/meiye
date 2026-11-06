@@ -543,6 +543,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             $allowed = [
                 'staffId', 'laborWeight', 'isPointCustomer',
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
+                'serviceCountsExcluded', 'excludedServicePositionId',
                 'performanceAmountCents', 'performanceAmountManual',
                 'id', 'employeeId', 'storeId', 'name', 'staffName', 'employeeName',
                 'isPrimary', 'sequence', 'projectCount', 'projectCountHalfUnits',
@@ -563,10 +564,9 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $row['laborWeight'],
                 'entitlement.craftsman.labor_weight'
             );
-            $performanceType = (string)($row['craftsmanPerformanceType'] ?? 'commission_labor');
-            if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
-                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
-            }
+            // 重建时保留已冻结的手工费资格；旧 labor 快照仍按双项兼容。
+            $performanceType = ($row['craftsmanPerformanceType'] ?? '') === 'commission'
+                ? 'commission' : 'commission_labor';
             if ($laborWeight > 100 || !is_bool($row['isPointCustomer'])) {
                 throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
             }
@@ -574,9 +574,6 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $row['laborFeeCents'] ?? 0,
                 'entitlement.craftsman.labor_fee_cents'
             );
-            if ($performanceType === 'commission' && $laborFeeCents !== 0) {
-                throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
-            }
             $personnelSource = array_key_exists('personnelSource', $row)
                 ? trim((string)$row['personnelSource'])
                 : 'store';
@@ -602,11 +599,14 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             ];
             if (array_key_exists('performanceAmountCents', $row)) {
                 $amount = self::nonNegativeInt($row['performanceAmountCents'], 'entitlement.craftsman.performance_amount_cents');
-                if ($performanceType === 'labor' && ($amount !== 0 || !empty($row['performanceAmountManual']))) {
-                    throw self::failure('checkout_draft_entitlement_craftsmen_snapshot_invalid');
-                }
                 $assignment['performanceAmountCents'] = $amount;
                 $assignment['performanceAmountManual'] = !empty($row['performanceAmountManual']);
+            }
+            if (($row['serviceCountsExcluded'] ?? false) === true) {
+                $assignment['serviceCountsExcluded'] = true;
+                $assignment['excludedServicePositionId'] = self::positiveInt(
+                    $row['excludedServicePositionId'] ?? null, 'entitlement.craftsman.excluded_position_id'
+                );
             }
             // 项目数是完整分配的业务输入，不能在“草稿 JSON → 权威快照”
             // 重建时退化为旧的半个单位字段；否则页面填写的小数会在结账后

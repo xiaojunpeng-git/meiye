@@ -12,6 +12,8 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\checkout\provider\CashierV3EntitlementProviderContracts;
 use app\services\organization\OrganizationScopeService;
+use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use think\facade\Db;
 
 /**
@@ -212,6 +214,9 @@ final class CashierV3QueryEntitySelectorServices
             ->where('id', $operatorScope->storeId())
             ->value('name');
 
+        $positionExclusions = $requiresCraftsmanEligibility
+            ? CashierV3ServicePositionExclusion::matches(array_column($rows, 'staff_id'), $operatorScope->storeId())
+            : [];
         $records = [];
         foreach ($rows as $row) {
             $name = trim((string)($row['employee_name'] ?? ''));
@@ -244,8 +249,11 @@ final class CashierV3QueryEntitySelectorServices
                 'salespersonEligible' => (int)($row['cashier_salesperson_enabled'] ?? 0) === 1,
                 'craftsmanEligible' => (int)($row['cashier_craftsman_enabled'] ?? 0) === 1,
                 'personnelSource' => $selectorScope === 'cashier_other_craftsmen' ? 'other' : 'store',
-                // 员工档案旧类型只供历史追溯；当前可选手艺人均允许两项业绩。
-                'craftsmanPerformanceType' => 'commission_labor',
+                // 取当前门店任职；同一员工不同门店的手工费资格可以不同。
+                'craftsmanPerformanceType' => EmployeeCraftsmanPerformanceTypeServices::checkoutType(
+                    $row['craftsman_performance_type'] ?? null
+                ),
+                'serviceCountsExcluded' => isset($positionExclusions[(int)$row['staff_id']]),
                 'laborDefaultFeeCents' => $selectorScope === 'service_actual_craftsmen' ? $laborDefaultFeeCents : 0,
                 'craftsmanDefaultUnitAmountCents' => $selectorScope === 'service_actual_craftsmen'
                     ? $craftsmanDefaultUnitAmountCents : null,

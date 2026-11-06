@@ -2,6 +2,7 @@
 
 namespace app\services\query\metric;
 
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
@@ -181,13 +182,18 @@ final class ServiceCustomerMetricReadServices
                     'origin_other_collection' => (int)($row['origin_other_collection'] ?? 0) === 1,
                     'craftsmen_snapshot_json' => (string)($row['craftsmen_snapshot_json'] ?? ''),
                     'allocation_groups' => $this->snapshotAllocationGroups((string)($row['craftsmen_snapshot_json'] ?? ''), $storeId),
+                    'excluded_employees' => CashierV3ServicePositionExclusion::frozenEmployeeIds((string)($row['craftsmen_snapshot_json'] ?? ''), $storeId),
                     'labor_amount_cents' => $this->integer($row['labor_amount_cents'] ?? 0),
                     'labor_fee_amount_cents' => $this->integer($row['labor_fee_amount_cents'] ?? 0),
                     'had_labor_fact' => false,
+                    'employees_with_labor_fact' => [],
                     'first_row_order' => (int)($row['id'] ?? 0),
                 ];
             }
-            if (trim((string)($row['fact_id'] ?? '')) !== '') $services[$serviceLineKey]['had_labor_fact'] = true;
+            if (trim((string)($row['fact_id'] ?? '')) !== '') {
+                $services[$serviceLineKey]['had_labor_fact'] = true;
+                $services[$serviceLineKey]['employees_with_labor_fact'][(int)$row['employee_id']] = true;
+            }
         }
 
         /** @var array<string,array<string,mixed>> $lines */
@@ -229,6 +235,7 @@ final class ServiceCustomerMetricReadServices
                     'allocation_group' => $this->factAllocationGroup($row)
                         ?? ($services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal'),
                     'people_eligible' => !$services[$serviceLineKey]['origin_other_collection'],
+                    'service_counts_excluded' => isset($services[$serviceLineKey]['excluded_employees'][$employeeId]),
                     'service_line_key' => $serviceLineKey,
                 ];
                 if ($details) { $lines[$lineKey]['service'] = $services[$serviceLineKey]; unset($lines[$lineKey]['service']['first_row_order']); }
@@ -242,10 +249,16 @@ final class ServiceCustomerMetricReadServices
         // not fall back after a performance allocation (including an adjusted
         // one) existed, otherwise an adjustment could be silently overridden.
         foreach ($services as $serviceLineKey => $service) {
-            if ($service['subject'] === null || $service['had_labor_fact']
-                || (int)$service['labor_amount_cents'] !== 0 || (int)$service['labor_fee_amount_cents'] !== 0) continue;
+            if ($service['subject'] === null) continue;
+            $zeroService = !$service['had_labor_fact'] && (int)$service['labor_amount_cents'] === 0
+                && (int)$service['labor_fee_amount_cents'] === 0;
+            if (!$zeroService && (!$service['excluded_employees'] || $includeAllServices)) continue;
             $pointEmployees = $this->snapshotPointEmployeeIds((string)$service['craftsmen_snapshot_json'], (int)$service['store_id']);
             foreach ($this->snapshotEmployees((string)$service['craftsmen_snapshot_json'], (int)$service['store_id']) as $employeeId => $employeeName) {
+                // 免计员工可能没有劳动事实，但同单其他人员有，仍需保留原点客。
+                // 已有事实（包括被冲销的事实）时，由事实决定该员工归属。
+                if (!$zeroService && (!isset($service['excluded_employees'][$employeeId], $pointEmployees[$employeeId])
+                    || isset($service['employees_with_labor_fact'][$employeeId]))) continue;
                 $lineKey = (int)$service['store_id'] . '|' . $employeeId . '|' . $service['request_id'] . '|' . $service['source_line_id'];
                 $lines[$lineKey] = [
                     'store_id' => $service['store_id'], 'business_date' => $service['business_date'],
@@ -253,6 +266,7 @@ final class ServiceCustomerMetricReadServices
                     'employee_name' => $employeeName, 'point' => isset($pointEmployees[$employeeId]),
                     'allocation_group' => $service['allocation_groups'][$employeeId] ?? 'normal',
                     'people_eligible' => !$service['origin_other_collection'],
+                    'service_counts_excluded' => isset($service['excluded_employees'][$employeeId]),
                     'service_line_key' => $serviceLineKey,
                 ];
                 if ($details) { $lines[$lineKey]['service'] = $service; unset($lines[$lineKey]['service']['first_row_order']); }
@@ -274,7 +288,18 @@ final class ServiceCustomerMetricReadServices
             $employeeName = (string)$line['employee_name'];
             $dailyKey = $storeId . '|' . (string)$line['business_date'] . '|' . (string)$line['subject'];
             $periodKey = $storeId . '|' . (string)$line['subject'];
+            // 免计人员退出人数、人次分摊，仍保留独立的点客归属与合格条件。
+            $excluded = !empty($line['service_counts_excluded']);
+            if ($excluded && empty($line['point'])) continue;
             if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => [], 'allocation_groups' => []];
+            if ($excluded) {
+                $daily[$dailyKey]['point_employees'][$employeeId] = true;
+                $daily[$dailyKey]['excluded_point_names'][$employeeId] = $employeeName;
+                if (!$details && !isset($daily[$dailyKey]['first_order'])) {
+                    $daily[$dailyKey]['first_order'] = $line['source_order'];
+                }
+                continue;
+            }
             // Other-collection funding removes only period people. The same
             // completed service still contributes visits, labor and consumption.
             if (!empty($line['people_eligible']) && !isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => [], 'lines' => []];
@@ -341,6 +366,16 @@ final class ServiceCustomerMetricReadServices
                 // customer share to one deterministic project line only.
                 $detail[$lineKeys[0]] = ($detail[$lineKeys[0]] ?? 0) + $tenths;
                 $detailContext[$lineKeys[0]] = $lines[$lineKeys[0]];
+            }
+            // 同一员工当天也有合格服务时，上面的循环已经计过该点客。
+            foreach ($group['excluded_point_names'] ?? [] as $employeeId => $employeeName) {
+                if (isset($parts[$employeeId])) continue;
+                $summaryKey = (int)$storeId . '|' . $employeeId;
+                $this->initSummary($summary, $summaryKey, $employeeName);
+                if (!$details && !isset($summaryNameOrder[$summaryKey])) {
+                    $summaryNameOrder[$summaryKey] = $employeeName !== '' ? $group['first_order'] : null;
+                }
+                $summary[$summaryKey]['point_visit_tenths'] += 10;
             }
         }
         // Keep the store identity tied to the period key rather than employee

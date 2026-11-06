@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
@@ -15,6 +16,7 @@ use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementService
 use app\services\cashier\v3\card\CashierV3MultiCardUpgradeSettlementServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceWriterAdapter;
+use app\services\cashier\v3\checkout\provider\CashierV3StaffProfileProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactContractException;
@@ -220,6 +222,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 !empty($scope['direct_snapshot_submission'])
             );
             $this->assertSupportedSaleLines($aggregate['lines'], $dataScope);
+            if (empty($scope['direct_snapshot_submission'])) {
+                $this->assertLegacySalePersonnelInTx($aggregate['lines'], $operatorScope->storeId());
+            }
             // The ordinary checkout grant is insufficient for historical
             // card entry. Recheck the server-locked payment draft at submit.
             foreach ((array)$aggregate['payments'] as $payment) {
@@ -688,6 +693,41 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             throw self::translatedFailure($exception->reason(), $exception->detail());
         } catch (CashierV3CheckoutFactContractException $exception) {
             throw self::translatedFailure($exception->reason(), $exception->detail());
+        }
+    }
+
+    /** 旧的待提交快照已冻结，若有冲突要求重新确认，避免改写其内容或落错费用。 */
+    private function assertLegacySalePersonnelInTx(array $lines, int $storeId): void
+    {
+        $staffWithFees = [];
+        $unfrozenStaff = [];
+        foreach ($lines as $line) {
+            if (($line['line_role'] ?? '') !== 'sale' || ($line['source_type'] ?? '') !== 'project') continue;
+            $craftsmen = CashierV3CheckoutCraftsmenSnapshot::decode((string)($line['craftsmen_snapshot_json'] ?? ''));
+            $hasLegacyLineFee = (int)($line['manual_labor_fee_cents'] ?? 0) > 0;
+            foreach ($craftsmen as $craftsman) {
+                if (empty($craftsman['serviceCountsExcluded'])) $unfrozenStaff[] = (int)$craftsman['staffId'];
+                if ((int)($craftsman['laborFeeCents'] ?? 0) > 0
+                    || ($hasLegacyLineFee && ($craftsman['craftsmanPerformanceType'] ?? '') !== 'commission')) {
+                    $staffWithFees[] = (int)$craftsman['staffId'];
+                }
+            }
+        }
+        if (CashierV3StaffProfileProvider::lockCommissionOnlyStaffInTx($staffWithFees, $storeId)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                '有手艺人只计消耗业绩，请返回业绩分配重新确认手工费后再结账。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'checkout_legacy_craftsman_labor_fee_disallowed']
+            );
+        }
+        if (CashierV3ServicePositionExclusion::matches($unfrozenStaff, $storeId, true)) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
+                '有手艺人的岗位已设置为免计，请返回业绩分配重新确认后再结账。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'checkout_legacy_craftsman_position_exclusion_missing']
+            );
         }
     }
 

@@ -6,6 +6,7 @@ namespace app\services\cashier\v3\reservation;
 
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
@@ -36,6 +37,14 @@ final class CashierV3ReservationCompletionFactServices
         foreach ($occupations as $occupation) {
             $occupationByLine[(int)$occupation['reservation_line_id']] = $occupation;
         }
+        $staffIds = [];
+        foreach ($lines as $line) {
+            if (strtoupper((string)($line['project_source'] ?? '')) === 'UNPAID') continue;
+            $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
+            if (is_array($ids)) $staffIds = array_merge($staffIds, $ids);
+        }
+        // 预约实际完成也写服务事实，和收银核销使用同一个岗位规则。
+        $positionExclusions = CashierV3ServicePositionExclusion::matches($staffIds, (int)$header['store_id'], true);
         $serviceRows = [];
         $writeoffCount = 0;
         $performanceCount = 0;
@@ -44,7 +53,7 @@ final class CashierV3ReservationCompletionFactServices
             // service-order trail. Checkout, if any, owns their later business facts.
             if (strtoupper((string)($line['project_source'] ?? '')) === 'UNPAID') continue;
             $occupation = $occupationByLine[(int)$line['id']] ?? null;
-            $facts = $this->persistLineInTx($header, $line, is_array($occupation) ? $occupation : null, $eventNo, $commandKey, $operatorId, $operatorName, $now);
+            $facts = $this->persistLineInTx($header, $line, is_array($occupation) ? $occupation : null, $eventNo, $commandKey, $operatorId, $operatorName, $now, $positionExclusions);
             $serviceRows[] = $facts['service'];
             $writeoffCount += $facts['writeoff'];
             $performanceCount += $facts['performance'];
@@ -58,7 +67,7 @@ final class CashierV3ReservationCompletionFactServices
         return ['service' => count($serviceRows), 'writeoff' => $writeoffCount, 'performance' => $performanceCount];
     }
 
-    private function persistLineInTx(array $header, array $line, ?array $occupation, string $eventNo, string $commandKey, int $operatorId, string $operatorName, int $now): array
+    private function persistLineInTx(array $header, array $line, ?array $occupation, string $eventNo, string $commandKey, int $operatorId, string $operatorName, int $now, array $positionExclusions): array
     {
         $tenantId = (string)$header['tenant_id'];
         $reservationId = (int)$header['id'];
@@ -75,6 +84,11 @@ final class CashierV3ReservationCompletionFactServices
             (string)($line['artisan_staff_ids_json'] ?? '[]'),
             (array)($line['point_customer_staff_ids'] ?? [])
         );
+        foreach ($craftsmen as &$craftsman) {
+            $position = $positionExclusions[$craftsman['staffId']] ?? null;
+            if ($position) CashierV3ServicePositionExclusion::freeze($craftsman, $position);
+        }
+        unset($craftsman);
         $amount = $occupation ? $this->entitlementAmount($occupation, $quantity, $tenantId) : [
             'actualCents' => 0, 'purchaseCents' => 0, 'totalTimes' => 0,
             'consumedBefore' => 0, 'calculationVersion' => CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
@@ -225,7 +239,9 @@ final class CashierV3ReservationCompletionFactServices
             $denominator = count($craftsmen);
             $halfUnits = $quantity * 2;
             foreach ($craftsmen as $index => $craftsman) {
-                $projectCount = intdiv($halfUnits, $denominator) + ($index >= $denominator - ($halfUnits % $denominator) ? 1 : 0);
+                $projectCount = empty($craftsman['serviceCountsExcluded'])
+                    ? intdiv($halfUnits, $denominator) + ($index >= $denominator - ($halfUnits % $denominator) ? 1 : 0)
+                    : 0;
                 $this->performanceFact($common, $header, $line, $category, $eventNo, $commandKey, $sourceLineId,
                     'labor_performance_allocated', (int)$craftsman['employeeId'], (string)$craftsman['name'],
                     (string)$craftsman['employeeType'], (int)$craftsman['employeeTypeVersion'],

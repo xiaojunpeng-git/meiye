@@ -53,6 +53,9 @@ final class CashierV3CheckoutCraftsmenSnapshot
                     : 'projectCountHalfUnits';
             }
             if ($hasPersonnelSource) $optionalKeys[] = 'personnelSource';
+            $hasServiceExclusion = array_key_exists('serviceCountsExcluded', $row)
+                || array_key_exists('excludedServicePositionId', $row);
+            if ($hasServiceExclusion) $optionalKeys = array_merge($optionalKeys, ['serviceCountsExcluded', 'excludedServicePositionId']);
             foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey'] as $positionKey) {
                 if (array_key_exists($positionKey, $row)) $optionalKeys[] = $positionKey;
             }
@@ -110,6 +113,13 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 'laborWeight' => $laborWeight,
                 'isPointCustomer' => $row['isPointCustomer'],
             ];
+            if ($hasServiceExclusion) {
+                if ($row['serviceCountsExcluded'] !== true || $laborFeeCents !== 0 || ($row['projectCount'] ?? null) !== '0') {
+                    throw new \InvalidArgumentException('craftsmen_snapshot_service_exclusion_invalid');
+                }
+                $normalized[count($normalized) - 1]['serviceCountsExcluded'] = true;
+                $normalized[count($normalized) - 1]['excludedServicePositionId'] = self::positiveInt($row['excludedServicePositionId']);
+            }
             if ($hasPerformanceFields) {
                 $normalized[count($normalized) - 1]['craftsmanPerformanceType'] = $performanceType;
                 $normalized[count($normalized) - 1]['laborFeeCents'] = $laborFeeCents;

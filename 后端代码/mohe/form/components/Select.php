@@ -22,6 +22,8 @@ use mohe\form\BuildInterface;
  * @method placeholder(string $placeholder)
  * @method options(array $options = [])
  * @method info(string $info)
+ * @method multiple(bool $enabled)
+ * @method filterable(bool $enabled)
  */
 class Select extends BaseComponent implements BuildInterface
 {
@@ -42,6 +44,9 @@ class Select extends BaseComponent implements BuildInterface
         'field' => '',
         'info' => '',
         'placeholder' => '',
+        // Vue uses these top-level flags to distinguish single and multiple selection.
+        'multiple' => false,
+        'filterable' => false,
         'options' => [],
     ];
 

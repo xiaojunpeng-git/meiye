@@ -49,9 +49,9 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         $ruleVersion = max(1, (int)($rule['current_version'] ?? 1));
         $laborAmountCents = $craftsmanUnitCents === null ? $saleAmountCents : $craftsmanUnitCents * $quantity;
 
-        $performanceCraftsmen = [];
         $weights = [];
         $fees = [];
+        $feeEligible = [];
         $hasExplicitProjectCount = in_array(true, array_map(static function (array $craftsman): bool {
             return array_key_exists('projectCount', $craftsman)
                 || array_key_exists('project_count', $craftsman)
@@ -86,22 +86,13 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         }
         foreach ($craftsmen as $craftsman) {
             $staffId = (int)$craftsman['staffId'];
-            $type = (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
-            // 每人手工费是本次分配输入的最终金额；购买数量只参与项目业绩，不能再次放大人工输入。
-            $fees[$staffId] = $type === 'commission'
-                ? 0
-                : max(0, (int)($craftsman['laborFeeCents'] ?? 0));
-            if ($type !== 'labor') {
-                $performanceCraftsmen[] = $staffId;
-                $weights[$staffId] = (int)$craftsman['laborWeight'];
-            }
+            // 只计消耗业绩的员工不参与手工费，也不能被旧整行手工费分摊覆盖。
+            $feeEligible[$staffId] = ($craftsman['craftsmanPerformanceType'] ?? '') !== 'commission'
+                && empty($craftsman['serviceCountsExcluded']);
+            $fees[$staffId] = $feeEligible[$staffId] ? max(0, (int)($craftsman['laborFeeCents'] ?? 0)) : 0;
+            $weights[$staffId] = (int)$craftsman['laborWeight'];
         }
 
-        // A labor-only selection intentionally receives no labor performance.
-        // It can still receive its independently entered manual labor fee.
-        if ($performanceCraftsmen === []) {
-            $laborAmountCents = 0;
-        }
         $performanceByStaff = [];
         $manualPerformanceByStaff = [];
         foreach ($craftsmen as $craftsman) {
@@ -118,29 +109,26 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         // total-fee meaning for drafts created before the per-person UI while
         // keeping it outside the labor-performance amount.
         if (array_sum($fees) === 0 && (int)($line['manual_labor_fee_cents'] ?? 0) > 0) {
-            $lineFeeCents = max(0, (int)$line['manual_labor_fee_cents']) * $quantity;
-            if ($performanceCraftsmen !== []) {
-                foreach ($groupMembers as $members) {
-                    $groupIds = [];
-                    $groupWeights = [];
-                    foreach ($members as $index) {
-                        $staffId = (int)$craftsmen[$index]['staffId'];
-                        if (isset($weights[$staffId])) {
-                            $groupIds[] = $staffId;
-                            $groupWeights[$staffId] = $weights[$staffId];
-                        }
-                    }
-                    if ($groupIds === []) continue;
-                    foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
-                        $lineFeeCents,
-                        $groupIds,
-                        $groupWeights
-                    ) as $allocation) {
-                        $fees[(int)$allocation['staffId']] = (int)$allocation['amountCents'];
+            // Allocate in whole yuan so excluding an ineligible worker cannot leave fractional fees.
+            $lineFeeYuan = intdiv(max(0, (int)$line['manual_labor_fee_cents']) * $quantity, 100);
+            foreach ($groupMembers as $members) {
+                $groupIds = [];
+                $groupWeights = [];
+                foreach ($members as $index) {
+                    $staffId = (int)$craftsmen[$index]['staffId'];
+                    if ($feeEligible[$staffId]) {
+                        $groupIds[] = $staffId;
+                        $groupWeights[$staffId] = $weights[$staffId];
                     }
                 }
-            } else {
-                $fees[(int)$craftsmen[0]['staffId']] = $lineFeeCents;
+                if ($groupIds === []) continue;
+                foreach (CashierV3EntitlementCompletionKernel::allocateLaborAmount(
+                    $lineFeeYuan,
+                    $groupIds,
+                    $groupWeights
+                ) as $allocation) {
+                    $fees[(int)$allocation['staffId']] = (int)$allocation['amountCents'] * 100;
+                }
             }
         }
 

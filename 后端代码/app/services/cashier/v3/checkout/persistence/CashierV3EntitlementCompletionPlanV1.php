@@ -624,6 +624,13 @@ final class CashierV3EntitlementCompletionPlanV1
                 'allocation_group_key' => $allocationGroupKey,
                 'performance_independent' => $performanceIndependent ? 1 : 0,
             ];
+            if (($row['serviceCountsExcluded'] ?? false) === true) {
+                // 记录于服务人员快照，即使零金额没有单独劳动事实也能正确统计。
+                $normalized['serviceCountsExcluded'] = true;
+                $normalized['excludedServicePositionId'] = self::positiveInt(
+                    $row['excludedServicePositionId'] ?? null, 'labor_excluded_position_invalid'
+                );
+            }
             if (array_key_exists('projectCount', $row)) {
                 $normalized['project_count_decimal'] = self::projectCount(
                     $row['projectCount'],

@@ -16,6 +16,8 @@ use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementService
 use app\services\cashier\v3\card\CashierV3CustomCardConfigurationServices;
 use app\services\cashier\v3\checkout\CashierV3ServiceProjectCategorySnapshotServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\cashier\v3\checkout\provider\CashierV3StaffProfileProvider;
+use app\services\cashier\v3\CashierV3ServicePositionExclusion;
 use think\facade\Db;
 use think\facade\Log;
 
@@ -869,6 +871,34 @@ final class CashierV3CheckoutPreparationServices
                 $entitlementLines[] = $this->entitlementSnapshotLine((array)$line, $dataScope->forcedStoreId());
             }
         }
+        // 校验手工费资格后才冻结本次唯一结账快照，避免旧草稿绕过任职设置。
+        $staffIds = [];
+        foreach (array_merge($saleLines, $entitlementLines) as $line) {
+            $staffIds = array_merge($staffIds, array_column($line['craftsmen'], 'staffId'));
+        }
+        $commissionOnly = CashierV3StaffProfileProvider::lockCommissionOnlyStaffInTx(
+            $staffIds, $operatorScope->storeId()
+        );
+        $positionExclusions = CashierV3ServicePositionExclusion::matches($staffIds, $operatorScope->storeId(), true);
+        foreach ([&$saleLines, &$entitlementLines] as &$serviceLines) {
+            foreach ($serviceLines as &$serviceLine) {
+                foreach ($serviceLine['craftsmen'] as &$craftsman) {
+                    // 草稿不能声明免计。只在本次事务按锁定岗位冻结人员标记。
+                    unset($craftsman['serviceCountsExcluded'], $craftsman['excludedServicePositionId']);
+                    $staffId = (int)($craftsman['staffId'] ?? 0);
+                    if (isset($positionExclusions[$staffId])) {
+                        CashierV3ServicePositionExclusion::freeze($craftsman, $positionExclusions[$staffId]);
+                    }
+                    if (isset($commissionOnly[$staffId])) {
+                        $craftsman['craftsmanPerformanceType'] = 'commission';
+                        $craftsman['laborFeeCents'] = 0;
+                    }
+                }
+                unset($craftsman);
+            }
+            unset($serviceLine);
+        }
+        unset($serviceLines);
         $now = time();
         $browserSnapshot = is_array($authority['browserSnapshot'] ?? null)
             ? $authority['browserSnapshot'] : [];
