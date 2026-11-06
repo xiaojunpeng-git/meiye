@@ -1,0 +1,39 @@
+{
+  "query_scope": "STORE",
+  "hq_checks": "not applicable: no HQ warehouse configured",
+  "schema": "PASS",
+  "admin_id": 1,
+  "hq_id": 0,
+  "queries": {
+    "inventory_inbound": {
+      "all": 0,
+      "mine": 0,
+      "xlsx_data_rows": 0,
+      "xlsx_sha256": "17e386185e6bbe596fe5be14e217bd7f77ff8e555d5c0aed94c8c190780ed9aa"
+    },
+    "inventory_outbound": {
+      "all": 0,
+      "mine": 0,
+      "xlsx_data_rows": 0,
+      "xlsx_sha256": "de446e117950d2a2b30de5e26e60b6c38d0dc6fa9bb4e05bdeefdb1cb6954ec7"
+    },
+    "inventory_transfer": {
+      "all": 0,
+      "mine": 0,
+      "xlsx_data_rows": 0,
+      "xlsx_sha256": "2d646b641fe4bba6628cb6d265bebdd7ab823a6c54fbc7f8bd4ec4a8428b3548"
+    },
+    "inventory_salon_usage": {
+      "all": 0,
+      "mine": 0,
+      "xlsx_data_rows": 0,
+      "xlsx_sha256": "4997a53176d3db38926fc408a1dee95d46db6ee6a811f709139a6e12ea9158c1"
+    }
+  },
+  "stock": {
+    "authorized_locations": 10,
+    "selected_products": [],
+    "filtered_rows": 0
+  },
+  "result": "PASS"
+}

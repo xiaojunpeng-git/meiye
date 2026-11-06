@@ -1,0 +1,10 @@
+{
+  "commit": "334d91a2e03ab631e078da57ca7584ac4e164f8a",
+  "tree": "c18e5b459f5ce8ffcc74e0aae91525aeb9d8ddb2",
+  "branch": "release/employee-dashboard-drilldown-20261106",
+  "baselineCommit": "c5bf7c138768a3819a6cd276be6fe5bb34ec7ca3",
+  "baselineTree": "0402f08b7c30c36a777e5af2da07e69f3aa0bf95",
+  "sharedHead": "d0d98b382f3b3f5250fe58cdef67ff551376e973",
+  "sharedIndexSHA256": "7072ad65c8b3177c58c84331a206cb6e77446a125ab9cfda63f390155b98e345",
+  "acceptance": "统一候选补验通过"
+}

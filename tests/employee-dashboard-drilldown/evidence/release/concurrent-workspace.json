@@ -1,0 +1,6 @@
+{
+  "originalHead": "d0d98b382f3b3f5250fe58cdef67ff551376e973",
+  "archiveStartHead": "14874f1e7f53fa0ca36b72d5b845825897d80477",
+  "archiveStartIndex": "e8770cd404ee1bd92426d01432bf061dbe3ae35889714ef099b728d4bfb5f389",
+  "note": "Other task advanced shared branch to staffing change; this release remains pinned to accepted tree. Archive does not touch shared HEAD or index."
+}

@@ -1,0 +1,22 @@
+{
+  "tree": "c18e5b459f5ce8ffcc74e0aae91525aeb9d8ddb2",
+  "builds": {
+    "admin": {
+      "entry": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/employee-final-fixed-ev09giv3/compiled-admin/system.html",
+      "sha256": "7dac59c2eab209932601d34d8685716d294a08740e9beba7ed7da23d5732bab7",
+      "js": [
+        "https://g.alicdn.com/de/prismplayer/2.13.2/aliplayer-min.js",
+        "/view_admin/js/chunk-vendors.e6b3496e.js",
+        "/view_admin/js/app.998aa18f.js"
+      ]
+    },
+    "cashier": {
+      "entry": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/employee-final-fixed-ev09giv3/compiled-cashier/index.html",
+      "sha256": "85450a89b6e7345a5f7d86305963a767a19df23a59015bf23c48354457161932",
+      "js": [
+        "/view_cashier_v3/assets/index-e99f2a20.js"
+      ]
+    }
+  },
+  "allBuildInputsMatchFixedTree": true
+}

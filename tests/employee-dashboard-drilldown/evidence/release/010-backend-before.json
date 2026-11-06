@@ -1,0 +1,18 @@
+{
+  "app/services/report/EmployeeDashboardServices.php": "d25db7541528ea2911ab9d71f2facb5912f4d116fa6915217750b891e93523f6",
+  "app/services/report/EmployeeDashboardPopulationServices.php": null,
+  "app/controller/admin/v1/report/UnifiedReport.php": "3d5668297106bd47118fe53c38a4b0fd091874792b2b31aa563cb06888a93064",
+  "route/admin.php": "167f18b7cee313b1c334b81761ca8f01c92c0dee4233b89e3feff6c0bcb10ff3",
+  "app/controller/admin/v1/merchant/SystemStoreStaff.php": "f2ac1aa01663838f09ea574b11b977cbd04941f177b2881f0fc09b85824876a2",
+  "app/controller/admin/v1/other/export/ExportExcel.php": "7386000e2b2690bf94c312b698bb3763d61c7148fd58ff4209981143412087ab",
+  "app/services/employee/EmployeeProfileExportServices.php": null,
+  "app/services/organization/PlatformStaffAccessServices.php": null,
+  "app/services/organization/OrganizationWorkspaceWriteGate.php": "859479c355b477d0f097d29b169880380258bd463ec60743e43f424fe12e869c",
+  "app/services/organization/OrganizationEditAccessServices.php": "f43967ae62a2bb83553aaefb81881b5ab3ba7abd7760149edc5828550836c832",
+  "app/services/organization/OrganizationWorkspaceWriteServices.php": "8812484713f35bbf3ee5637734df84085db9da9fe364588cbe02c0327c1d8ae6",
+  "app/services/organization/StoreOrganizationEditAccessServices.php": "f46e45ff80b526a090d90f47aec896f32764a29af60c422cdf968501664dd1cc",
+  "app/services/system/SystemMenusServices.php": "6df3775c256c596ded9f4a98644e1310445f1e1664eabb72aeebff467a971602",
+  "app/services/user/PlatformMemberAccessPolicy.php": null,
+  "app/services/user/PlatformMemberScopeServices.php": "17954f6a13c2409a3695cc402306bbd86145097630208a801a51df0b4cbbab5d",
+  "database/upgrades/20261106_platform_staff_management_menu.php": null
+}

@@ -1,0 +1,17 @@
+{
+  "commit": "334d91a2e03ab631e078da57ca7584ac4e164f8a",
+  "backup": "/www/backup/employee-dashboard-20261106-334d91a2-008",
+  "fingerprints": "PASS",
+  "configurationUnchanged": true,
+  "menuMigration": {
+    "menu_id": 1829,
+    "parent_id": 1587,
+    "changed_fields": [
+      "pid",
+      "menu_name",
+      "path"
+    ],
+    "descendants_updated": 0,
+    "grants_changed": 0
+  }
+}

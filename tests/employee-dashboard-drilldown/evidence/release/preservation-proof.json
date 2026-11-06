@@ -1,0 +1,13 @@
+{
+  "liveCashierCommit": "151e02fe13ed3754e689c7a3822899eb1d833221",
+  "candidateTree": "c18e5b459f5ce8ffcc74e0aae91525aeb9d8ddb2",
+  "cashierAndSharedChanges": [
+    "前端代码/cashier-v3/src/views/EmployeeDashboardView.vue"
+  ],
+  "adminBase": "20bb0102783f9217400eefe7babc7dca08344e4e",
+  "authorizedDependencyRollout": [
+    "008",
+    "010"
+  ],
+  "result": "all other cashier, inventory, shared source identical to verified three-site live Git tree"
+}

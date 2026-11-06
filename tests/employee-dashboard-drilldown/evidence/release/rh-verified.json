@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "commit": "334d91a2e03ab631e078da57ca7584ac4e164f8a",
+  "runtime": {
+    "result": "PASS",
+    "activeEmployees": 1044,
+    "actualBeauticianEmployees": 702,
+    "cohortChecks": 20,
+    "exportColumns": 35,
+    "listAndExportCount": 1222,
+    "exportPageRows": 1222,
+    "deniedExistingIdentity": 162,
+    "menuParentCorrect": true,
+    "editorFieldsReconciled": true,
+    "memberPermissionPreserved": true,
+    "businessWrites": false
+  },
+  "publicHTTP": {
+    "public/system.html": "7dac59c2eab209932601d34d8685716d294a08740e9beba7ed7da23d5732bab7",
+    "public/view_cashier_v3/index.html": "85450a89b6e7345a5f7d86305963a767a19df23a59015bf23c48354457161932",
+    "public/view_cashier_v3/assets/index-e99f2a20.js": "866fc6ea98383ec74477d1929bb8ac5c0cc4a3dc014675c296733f88abcb8d2d",
+    "public/view_cashier_v3/assets/index-7c10c9f5.css": "7c10c9f52437e07a8db47c0da498cfbc3c8c581aed7841de17e2302ed3e3a03c"
+  },
+  "backup": "/www/backup/employee-dashboard-20261106-334d91a2-rh"
+}
