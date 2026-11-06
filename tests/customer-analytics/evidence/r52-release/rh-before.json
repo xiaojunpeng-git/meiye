@@ -1,0 +1,12 @@
+{
+  "files": {
+    "app/services/report/CustomerAnalyticsServices.php": "44cf136659e84c35982170d7431d880424fb44c280a20f368cb5d684f9e0bf9c",
+    "app/services/report/StoreUnifiedReportPhaseFourServices.php": "cbfd500688ef5454b396b6c7cc24d7eba5189a3c071f65ddb3eb067ed4b3f006",
+    "public/view_cashier_v3/index.html": "523b7b143280dffa0b4a04912cdd127d1436c1d57cc5e58625a9eac8b15454dc",
+    "public/system.html": "ee3e910db84ae5c2b7784d67a4c9dcb3e2775a9545977b79bbbe4d5c0f4b8bd4",
+    "public/view_inventory_v3/index.html": "a720af8526c77734b90e0ec844b516bb51ce525ff8cdc8a1a5b16ce2e25094b1",
+    "public/view_cashier_v3/assets/index-a27217f6.js": "c37441acc10cd5b5f742d4ca446f78f2841d30d82b38757b1abe405dabd008a8",
+    "public/view_cashier_v3/assets/index-8179a57e.css": "8179a57ed4b4d5b294c692ee1d75c8e546a1cd8765b2db402a99b8ec25dff39c"
+  },
+  "environment": "024e1b8c489328ceadbc0f62786fb8dd66b215fde80e4cea7e32c30bc988dc9d"
+}

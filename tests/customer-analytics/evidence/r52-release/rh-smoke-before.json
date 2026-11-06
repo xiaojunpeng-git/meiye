@@ -1,0 +1,19 @@
+{
+  "stores": [
+    1
+  ],
+  "range": {
+    "start": "2026-10-01",
+    "end": "2026-10-01"
+  },
+  "existingReaders": {
+    "cashRows": {
+      "count": 0,
+      "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "serviceRows": {
+      "count": 12,
+      "sha": "d472e7af0590572b7297cf6539b0c3fc4460bceac5618911122e89b001eebdb8"
+    }
+  }
+}

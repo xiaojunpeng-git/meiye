@@ -1,0 +1,15 @@
+{
+  "base": "c75e0d1a1886c0b508aeab806994f0cec0475b8c",
+  "baselineTree": "f3a276c2c40ba52e36000c392c619b194ec0d3d9",
+  "preservedPhaseFourSource": "10ac3688728bb83f5587c1fc77d7a7a9263bcf47",
+  "tree": "3c5f476e4c66589cad564bbdb1be326bee7059f4",
+  "buildInput": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r52-fixed-build-oqb9k2s6",
+  "patchSHA256": "b7f8a1d5502edf92cb977ef68c02788c0d8358179d75d50ba35306f91384a6d1",
+  "files": [
+    "后端代码/app/services/report/CustomerAnalyticsServices.php",
+    "后端代码/app/services/report/StoreUnifiedReportPhaseFourServices.php",
+    "前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue",
+    "tests/customer-analytics/php/beauty-item-regression.php",
+    "tests/customer-analytics/php/item-analysis-benchmark.php"
+  ]
+}

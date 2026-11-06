@@ -1,0 +1,16 @@
+PASS: same trimmed name merges different item IDs; consumption-only item retained
+PASS: signed cash sums and merged member dedup
+PASS: consumption dedup after name grouping
+PASS: report total people is union rather than sum
+PASS: consumption total people union
+PASS: display and export columns do not mislabel grouped name as product ID
+PASS: category filter and share use same population
+PASS: empty facts remain empty
+PASS: local 生美 category subtree exists
+PASS: full-month signed cash fact multiset identical to original reader
+PASS: full-month service and consumption fact multiset identical to original reader
+PASS: all returned facts belong to 生美 subtree; cash=6498, services=55918
+PASS: single-store query/export rows and totals identical
+PASS: XLSX uses identical grouped columns
+PASS: export is valid XLSX archive
+PASS: personal scope without employee fails closed

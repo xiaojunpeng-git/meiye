@@ -1,0 +1,38 @@
+{
+  "stores": [
+    1
+  ],
+  "range": {
+    "start": "2026-10-01",
+    "end": "2026-10-01"
+  },
+  "existingReaders": {
+    "cashRows": {
+      "count": 0,
+      "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "serviceRows": {
+      "count": 0,
+      "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  },
+  "report": {
+    "records": 0,
+    "metricVersion": "customer-analytics-store-visits-v2:beauty-item-name-v1",
+    "summary": {
+      "item_name": "合计",
+      "cash_amount": "-",
+      "deal_people": "0",
+      "average_amount": "-",
+      "people_share": "-",
+      "amount_share": "-",
+      "consumption_amount": "-",
+      "consumption_people": "0",
+      "consumption_average_amount": "-",
+      "consumption_share": "-"
+    },
+    "queryExportEqual": true,
+    "xlsx": true,
+    "seconds": 0.03
+  }
+}
