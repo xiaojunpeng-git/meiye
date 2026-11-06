@@ -1436,6 +1436,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function salespersonBeautyLargeOrder(array $stores,array $range,array $input):array
     {
+        $role = (string)($input['large_order_role'] ?? 'salesperson');
+        if (!in_array($role, ['salesperson', 'sales_manager'], true)) {
+            throw new \InvalidArgumentException('请选择销售人或销售经理');
+        }
         // Read at most six originating months for the selected month's accrual.
         // Keep immutable money/weights, existing organization and participant scopes.
         $calculationRange = ['start' => (new \DateTimeImmutable($range['start']))->modify('-5 months')->format('Y-m-d'), 'end' => $range['end']];
@@ -1499,28 +1503,71 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date,s.fact_id,bc.component_product_id')->select()->toArray();
         foreach ($managerFacts as &$managerFact) $managerFact['role_snapshot'] = 'sales_manager';
         unset($managerFact);
+        // 直接项目有自己的商品身份和现金业绩事实，不会生成卡内分类分摊。
+        // 使用售出项目 ID 解析当前平台分类，沿用卡项相同的达标与分期投影；
+        // 销售人与经理仍分别读取权威人员事实，不能把订单总收款重复分给两种角色。
+        $directSalespersonFacts = $this->participantEmployeeFact($this->applyOrganizationFilters(
+            $this->scope(Db::name('cashier_v3_performance_fact')->alias('direct_p'), $stores, 'direct_p'),
+            'direct_p', $input, $calculationRange), 'direct_p.employee_id')
+            ->join('cashier_v3_sale_fact direct_s', "direct_s.tenant_id=direct_p.tenant_id AND direct_s.store_id=direct_p.store_id AND direct_s.source_line_id=direct_p.source_line_id AND direct_s.status='effective' AND direct_s.fact_direction='forward' AND direct_s.source_type='project'")
+            ->whereBetween('direct_p.business_date', [$calculationRange['start'], $calculationRange['end']])
+            ->where('direct_p.status', 'effective')->where('direct_p.fact_direction', 'forward')
+            ->where('direct_p.performance_type', 'sales_performance_allocated')
+            ->where('direct_s.item_id', '>', 0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($directSalespersonFacts, 'direct_p.tenant_id', 'direct_p.order_id');
+        $directSalespersonFacts = $directSalespersonFacts
+            ->fieldRaw('direct_p.tenant_id,direct_p.store_id,direct_p.organization_id,direct_p.organization_path_snapshot,MAX(direct_p.organization_name_snapshot) division_name,MAX(direct_p.store_name_snapshot) store_name,direct_p.business_date,direct_p.employee_id,direct_p.order_id,direct_p.source_line_id,MAX(direct_p.employee_name_snapshot) salesperson,direct_p.member_id,MAX(direct_s.member_name_snapshot) member_name_snapshot,direct_s.fact_id sale_fact_id,direct_s.item_id component_product_id,SUM(direct_p.amount_cents) direct_amount_cents')
+            ->group('direct_p.tenant_id,direct_p.store_id,direct_p.organization_id,direct_p.organization_path_snapshot,direct_p.business_date,direct_p.employee_id,direct_p.order_id,direct_p.source_line_id,direct_p.member_id,direct_s.fact_id,direct_s.item_id')
+            ->having('direct_amount_cents', '>', 0)->select()->toArray();
+        foreach ($directSalespersonFacts as &$directFact) $directFact['role_snapshot'] = 'salesperson';
+        unset($directFact);
+        $directManagerFacts = $this->participantEmployeeFact($this->applyOrganizationFilters(
+            $this->scope(Db::name('cashier_v3_sales_manager_fact')->alias('direct_sm'), $stores, 'direct_sm'),
+            'direct_sm', $input, $calculationRange), 'direct_sm.sales_manager_employee_id')
+            ->join('cashier_v3_sales_order_line direct_sol', 'direct_sol.tenant_id=direct_sm.tenant_id AND direct_sol.order_id=direct_sm.order_id AND direct_sol.checkout_line_id=direct_sm.source_line_id')
+            ->join('cashier_v3_sale_fact direct_s', "direct_s.tenant_id=direct_sol.tenant_id AND direct_s.store_id=direct_sol.store_id AND direct_s.source_line_id=direct_sol.order_line_id AND direct_s.status='effective' AND direct_s.fact_direction='forward' AND direct_s.source_type='project'")
+            ->leftJoin([$managerPaymentSql => 'direct_smp'], 'direct_smp.tenant_id=direct_sm.tenant_id AND direct_smp.sales_order_id=direct_sm.order_id')
+            ->whereBetween('direct_sm.business_date', [$calculationRange['start'], $calculationRange['end']])
+            ->where('direct_sm.status', 'effective')->where('direct_s.item_id', '>', 0);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($directManagerFacts, 'direct_sm.tenant_id', 'direct_sm.order_id');
+        $directManagerAmountSql = str_replace(['sm.', 'smp.'], ['direct_sm.', 'direct_smp.'], $managerAmountSql);
+        $directManagerFacts = $directManagerFacts
+            ->fieldRaw("direct_sm.tenant_id,direct_sm.store_id,direct_sm.organization_id,direct_sm.sales_manager_employee_id employee_id,MAX(direct_sm.sales_manager_name_snapshot) salesperson,direct_sm.order_id,direct_sol.order_line_id source_line_id,direct_sm.member_id,MAX(direct_s.member_name_snapshot) member_name_snapshot,direct_sm.business_date,direct_s.fact_id sale_fact_id,direct_s.item_id component_product_id,MAX(direct_s.organization_path_snapshot) organization_path_snapshot,MAX(direct_s.organization_name_snapshot) division_name,MAX(direct_s.store_name_snapshot) store_name,SUM({$directManagerAmountSql}) direct_amount_cents")
+            ->group('direct_sm.tenant_id,direct_sm.store_id,direct_sm.organization_id,direct_sm.sales_manager_employee_id,direct_sm.order_id,direct_sol.order_line_id,direct_sm.member_id,direct_sm.business_date,direct_s.fact_id,direct_s.item_id')
+            ->having('direct_amount_cents', '>', 0)->select()->toArray();
+        foreach ($directManagerFacts as &$directFact) $directFact['role_snapshot'] = 'sales_manager';
+        unset($directFact);
         $refundFacts = $this->salespersonBeautyRefundFacts($stores, $calculationRange, $input);
         $managerRefundFacts = $this->managerBeautyRefundFacts($stores, $calculationRange, $input);
         $repaymentFacts = $this->salespersonBeautyRepaymentFacts($stores, $calculationRange, $input);
         // Sales and repayments have an exact component product. A whole-card refund intentionally
         // stores card_component_id=0, so it must use the shared verified refund-category reader
         // instead of disappearing at an exact-component inner join.
+        // 角色在达标计算之前过滤，销售人和销售经理分别使用自己的业绩事实；
+        // 列表、合计、下钻与导出因此共享同一批入选结果，不能在页面上二次隐藏。
+        $selectedRole = static fn(array $fact): bool => (string)($fact['role_snapshot'] ?? '') === $role;
         $facts = array_merge(
-            $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts, $repaymentFacts)),
-            $this->currentBeautyLargeOrderRefundFacts(array_merge($refundFacts, $managerRefundFacts))
+            $this->currentBeautyLargeOrderFacts(array_values(array_filter(
+                array_merge($facts, $managerFacts, $directSalespersonFacts, $directManagerFacts, $repaymentFacts), $selectedRole
+            ))),
+            $this->currentBeautyLargeOrderRefundFacts(array_values(array_filter(
+                array_merge($refundFacts, $managerRefundFacts), $selectedRole
+            )))
         );
         usort($facts, static function (array $a, array $b): int {
             return strcmp((string)$a['business_date'], (string)$b['business_date'])
                 ?: strcmp((string)$a['source_line_id'], (string)$b['source_line_id']);
         });
-        // 明细和父表读取同一批权限过滤后的分类事实，避免再次查询造成数值漂移。
+        // 明细沿用本次分类、人员与退款投影，不再另查一套可能漂移的金额来源。
         $detailFacts = $facts;
         $awards = self::beautyLargeOrderMonthlyAwards($facts);
         $selectedMonth = substr($range['start'], 0, 7);
-        $dueRows = StoreLargeOrderInstallmentServices::dueRows($facts, $awards, $selectedMonth);
-        // 未达标退款仍是已成功的现金退款事实，仅补展示行；不能改变已选中的达标类别或分期。
-        $facts = array_merge($dueRows, self::beautyLargeOrderUnqualifiedRefundRows($facts, $awards, $selectedMonth));
-        // 姓名沿销售或补交事实的历史快照；历史卡退款可取本次退款收款事实的姓名快照。
+        $unqualifiedManagerRows = $role === 'sales_manager'
+            ? self::unqualifiedLargeOrderManagerRows($facts, $awards, $selectedMonth) : [];
+        // 保留线上未达标退款独立行；销售经理未达标业绩与退款各有独立事实，不能重复计数。
+        $refundOnlyRows = self::beautyLargeOrderUnqualifiedRefundRows($facts, $awards, $selectedMonth);
+        $facts = array_merge(StoreLargeOrderInstallmentServices::dueRows($facts, $awards, $selectedMonth), $unqualifiedManagerRows, $refundOnlyRows);
+        // 姓名沿销售或补交事实的历史快照；退款使用关联原销售的姓名。
         // 手机号原事实未保存，只读会员当前登记号码，不能伪装为历史号码。
         // 游客身份以 member_id=0 为准，不从姓名或空手机号猜测。
         $memberIds = [];
@@ -1534,7 +1581,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return ['store_id'=>(int)($fact['store_id']??0),'employee_id'=>(int)($fact['employee_id']??0)];
         },$facts));
         foreach ($facts as &$row) {
-            // 每行只代表一名会员；姓名沿该会员成交快照，手机号读取当前登记资料。
             $memberId = (int)($row['member_id'] ?? 0);
             $row['member_name_snapshot'] = $memberId === 0 ? '游客'
                 : (string)(($row['member_names'][$memberId] ?? null) ?: ($row['member_name_snapshot'] ?? ''));
@@ -1543,53 +1589,54 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['position_name'] = $positions[(int)($row['store_id']??0).'|'.(int)($row['employee_id']??0)] ?? '-';
             $refundOnly = !empty($row['refund_only']);
             $row['award_amount'] = $refundOnly ? '-' : $this->money($row['award_amount_cents']);
-            // 退款只进入展示与合计，不能进入门槛、档位或任何一期应计公式。
+            // 退款与达标本金同组展示，但不进入门槛、档位或任何一期应计公式。
             $row['refund_amount'] = $this->money($row['refund_amount_cents']);
-            $row['monthly_due'] = $refundOnly ? '-' : $this->money($row['due_amount_cents']);
-            $row['installment'] = $refundOnly ? '-' : $row['installment_number'] . '/' . $row['installment_count'];
-            $row['tier'] = $refundOnly ? '-' : (($row['rule_type'] === 'partner' ? '合作方' : '生美')
-                . $this->money($row['threshold_cents']) . '元档');
+            $isUnqualified = !empty($row['_unqualified_manager']);
+            $row['monthly_due'] = $refundOnly ? '-' : ($isUnqualified ? '' : $this->money($row['due_amount_cents']));
+            $row['installment'] = $refundOnly ? '-' : ($isUnqualified ? '' : $row['installment_number'] . '/' . $row['installment_count']);
+            $row['tier'] = $refundOnly ? '-' : ($isUnqualified ? '未达标' : (($row['rule_type'] === 'partner' ? '合作方' : '生美')
+                . $this->money($row['threshold_cents']) . '元档'));
             foreach (range(1, 6) as $i) {
-                $row['installment_' . $i] = $refundOnly ? '-' : ($row['installment_number'] === $i ? $row['monthly_due'] : '');
+                $row['installment_' . $i] = $refundOnly ? '-' : (!$isUnqualified && $row['installment_number'] === $i ? $row['monthly_due'] : '');
             }
-            // 只对可由同组原单精确解释的金额签发下钻；未达标退款没有本金或期次。
+            // 只有后端能把该金额解释为同组原单时才声明可点击；零退款和空期次不生成链接。
             $row['_drilldown'] = [];
-            if (!$refundOnly) {
-                foreach (['award_amount', 'monthly_due', 'installment_' . $row['installment_number']] as $key) {
-                    $row['_drilldown'][$key] = ['report' => 'salesperson_large_order_statistics'];
-                }
+            foreach ($refundOnly ? ['refund_amount'] : ($isUnqualified ? ['award_amount'] : ['award_amount', 'refund_amount', 'monthly_due']) as $key) {
+                if ($key === 'refund_amount' && (int)$row['refund_amount_cents'] === 0) continue;
+                $row['_drilldown'][$key] = ['report' => 'salesperson_large_order_statistics'];
             }
-            if ((int)$row['refund_amount_cents'] > 0) {
-                $row['_drilldown']['refund_amount'] = ['report' => 'salesperson_large_order_statistics'];
-            }
-            // 成员集合只用于本次后端分组与展示，不作为单个会员身份交给页面或导出。
+            if (!$isUnqualified && !$refundOnly) $row['_drilldown']['installment_' . $row['installment_number']] = ['report' => 'salesperson_large_order_statistics'];
             unset($row['member_ids'], $row['member_names']);
         }
         unset($row);
         $columns = $this->columns([
-            'division_name' => '分公司', 'store_name' => '门店', 'award_month' => '达标月份',
-            'salesperson' => '销售人/销售经理', 'position_name' => '岗位', 'member_name_snapshot' => '会员', 'phone' => '手机', 'classification' => '分类',
-            'beauty_category' => '商品分类', 'tier' => '达标档位', 'award_amount' => '达标月累计现金业绩',
+            'division_name' => '分公司', 'store_name' => '门店', 'award_month' => $role === 'sales_manager' ? '业绩月份' : '达标月份',
+            'salesperson' => $role === 'sales_manager' ? '销售经理' : '销售人', 'position_name' => '岗位', 'member_name_snapshot' => '会员', 'phone' => '手机', 'classification' => '分类',
+            'beauty_category' => '商品分类', 'tier' => '达标档位', 'award_amount' => $role === 'sales_manager' ? '当月累计现金业绩' : '达标月累计现金业绩',
             'refund_amount' => '退款金额',
             'accrual_month' => '应计月份', 'installment' => '本月期次', 'monthly_due' => '本月应计金额',
         ]);
         // 本报表的页面与导出共用业务说明；只解释已确认的应计规则，不暗示已发放或改变计算。
         $explanations = [
-            'division_name' => '显示达标业绩或成功退款所属的分公司，仅包含当前账号有权查看的范围。',
-            'store_name' => '显示达标业绩或成功退款所在门店；按现有人员月度规则统计，不扩大门店权限。',
-            'award_month' => '本行销售人或销售经理在本门店、本会员、入选商品分类中正向现金业绩累计达标的月份，也是第1期应计月份。不同会员分别判断达标，未达标退款行显示“-”。',
-            'salesperson' => '取得这笔现金业绩的销售人或销售经理。两种角色分别按自己的业绩计算，不合并判断是否达标，也不能将两种角色的金额相加当作门店实收。',
+            'division_name' => '显示达标归属记录所属的分公司，仅包含当前账号有权查看的范围。',
+            'store_name' => '显示达标归属记录所在门店；按现有人员月度规则统计，不扩大门店权限。',
+            'award_month' => $role === 'sales_manager'
+                ? '销售经理的业绩发生月；达标行从该月开始分摊，未达标行只在本月展示，不产生分期。'
+                : '该销售人在本会员、入选商品分类中累计现金业绩达标的整月，也是开始分摊的月份。例如10月达标，第1期计入10月，第2期计入11月。',
+            'salesperson' => $role === 'sales_manager'
+                ? '只显示取得这笔现金业绩的销售经理；按销售经理本人业绩独立判断是否达标，不计入销售人业绩。'
+                : '只显示取得这笔现金业绩的销售人；按销售人本人业绩独立判断是否达标，不计入销售经理业绩。',
             'position_name' => '显示该人员当前有效岗位；跨组织参与人员依次读取业务门店任职、直属岗位和其他有效任职。岗位只供查看，不改变历史业绩、达标金额或分期结果。',
-            'member_name_snapshot' => '每名会员分别累计现金业绩并判断达标，显示成交时保存的会员姓名，游客显示“游客”。',
-            'phone' => '显示本行会员当前登记的手机号。业务事实没有保存历史号码，会员改号后此列会更新；游客或未登记时留空。',
+            'member_name_snapshot' => '显示销售或补交时保存的会员姓名；退款取关联原销售的姓名。游客显示“游客”。不同会员的金额分别累计，不合并凑门槛。',
+            'phone' => '显示该会员当前登记的手机号；业务事实没有保存历史号码，会员改号后此列会更新，游客或未登记号码时留空。',
             'classification' => '属于生美的显示“生美”；非生美且商品分类已开启合作方的显示“合作方”。同时符合两项时优先按生美计算，同一笔业绩不重复计入合作方。',
-            'beauty_category' => '取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员在同一门店跨顾客按整月累计，生美、合作方各取累计业绩最高的一个分类；不同分类不拼凑金额达标。',
-            'tier' => '生美：正向现金业绩满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：正向现金业绩满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。退款不降低档位，也不参与达标判断；未达标退款行显示“-”。',
-            'award_amount' => '本行人员在达标月、本门店、本会员的入选商品分类中取得的正向累计现金业绩。不同会员、人员、角色、门店不合并凑门槛，退款仅展示，未达标退款行显示“-”。',
-            'refund_amount' => '已成功的现金退款金额，按本门店、本会员、人员、商品分类和月份分别展示。达标组的退款显示在该会员行；未达标退款独立显示。退款不改变正向达标本金或分期，作废不计。',
-            'accrual_month' => '查询时选择的月份。统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；不重复计入整笔达标金额。未达标退款行没有应计月份，显示“-”。',
-            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。退款仅展示，不改变总期数或当前期次；未达标退款行显示“-”。',
-            'monthly_due' => '本行会员对应的达标月正向累计现金业绩乘以当前期次比例。退款不改变本金或期次。合计取当前查询范围内全部会员本月应计金额。计算和导出保留分，尾差归最后一期；页面按元四舍五入。未达标退款行不进入应计合计。',
+            'beauty_category' => '直接项目取售出项目、卡项取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员对每位会员按整月累计，生美、合作方各取累计业绩最高的一个分类；不同会员或分类不拼凑金额达标。',
+            'tier' => '生美：正向现金业绩满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：正向现金业绩满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。销售经理低于门槛时显示“未达标”，不计算分期。退款不降低档位，也不参与达标判断。',
+            'award_amount' => '该人员对本会员在所示月份、入选商品分类中的正向现金业绩。达标行以此为分摊基数，按实际金额计算、不按档位金额封顶；销售经理未达标行只展示金额，不计算分期。销售收款、欠款补交计入各自业务月；退款不扣减本列。',
+            'refund_amount' => '成功现金退款按退款业务月正数展示；达标组退款随达标行展示，未达标退款沿用独立行且只计一次。退款不扣减正向业绩，也不参与达标、档位或分期；作废不计。',
+            'accrual_month' => '查询时选择的月份。达标行统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；销售经理未达标行只展示本月业绩，不产生应计。',
+            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。退款仅展示，不改变总期数或当前期次。',
+            'monthly_due' => '本行所选销售角色、会员与分类在达标月的正向累计现金业绩×本月对应比例，退款不加、不减，也不改变期次。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
         ];
         foreach (range(1, 6) as $i) {
             $key = 'installment_' . $i;
@@ -1611,12 +1658,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $result = $this->result('销售人生美大单统计表', $columns, $facts,
             $detailKey === '' ? $input : array_merge($input, ['_internal_all' => true]));
         if ($detailKey !== '') return $this->largeOrderDetail($result, $detailFacts, $detailKey, $detailMetric, $input, $selectedMonth);
-        $result['metric_version'] = 'large-order-member-month-category-v14';
+        $result['metric_version'] = 'large-order-role-refund-preserved-v15';
         $result['range'] = $range;
         $result['filter_schema'][] = ['key' => 'month', 'type' => 'month', 'label' => '应计月份'];
         return $result;
     }
 
+    /** 从已授权且已通过父表筛选的行键回到同一批事实；应计额按正向原单权重稳定分摊，末笔收尾差。 */
     private function largeOrderDetail(array $parent, array $facts, string $key, string $metric, array $input, string $selectedMonth): array
     {
         if (!preg_match('/^[a-f0-9]{64}$/D', $key)
@@ -1673,7 +1721,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return ['title' => '销售人生美大单明细', 'columns' => $columns, 'records' => $visible, 'total' => $total,
             'page' => $page, 'page_size' => $limit,
             'summary_row' => ['receipt_amount' => $this->money(array_sum(array_map(fn(array $item): int => $this->decimalCents($item['receipt_amount']), $details)))],
-            'metric_version' => 'large-order-member-month-category-v14', 'data_as_of' => date('Y-m-d H:i:s')];
+            'metric_version' => 'large-order-role-refund-preserved-v15', 'data_as_of' => date('Y-m-d H:i:s')];
     }
 
     /**
@@ -2164,6 +2212,64 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /**
      * 每名人员、每位会员、每月在生美、合作方两套规则内分别选累计最高的一类，
      * 不同会员或不同分类不能拼凑金额达标；同组内的原门槛和分期规则保持不变。
+     * 生美优先的互斥归类已在组件投影完成；销售人与经理保持独立。
+     * 退款与正向现金按同组分别累计：只用正向现金选择档位和分期本金，
+     * 退款只形成展示金额，不能降低达标金额或改变任何计算结果。
+     * 稳定选择最后一条正向事实承载追溯信息。
+     *
+     * @return array<int,array{beauty_category:string,amount_cents:int,refund_amount_cents:int,threshold_cents:int}>
+     */
+    private static function unqualifiedLargeOrderManagerRows(array $facts, array $awards, string $month): array
+    {
+        $groupKey = static function (array $fact) use ($month): string {
+            return json_encode([(string)($fact['tenant_id'] ?? ''), (int)($fact['store_id'] ?? 0),
+                (int)($fact['employee_id'] ?? 0), (int)($fact['member_id'] ?? 0), $month,
+                (string)($fact['rule_type'] ?? ''), (int)($fact['award_category_id'] ?? 0)], JSON_UNESCAPED_UNICODE);
+        };
+        $qualified = [];
+        foreach (array_keys($awards) as $index) {
+            if (isset($facts[$index]) && substr((string)$facts[$index]['business_date'], 0, 7) === $month) {
+                $qualified[$groupKey($facts[$index])] = true;
+            }
+        }
+        $groups = [];
+        foreach ($facts as $fact) {
+            if ((string)($fact['role_snapshot'] ?? '') !== 'sales_manager'
+                || substr((string)($fact['business_date'] ?? ''), 0, 7) !== $month) continue;
+            $key = $groupKey($fact);
+            if (isset($qualified[$key])) continue;
+            $amount = (int)($fact['amount_cents'] ?? 0);
+            if (!isset($groups[$key])) $groups[$key] = ['positive' => 0, 'last' => null];
+            if ($amount > 0) {
+                $groups[$key]['positive'] += $amount;
+                $groups[$key]['last'] = $fact;
+            }
+        }
+        $rows = [];
+        foreach ($groups as $group) {
+            if ($group['positive'] <= 0 || !is_array($group['last'])) continue;
+            $row = $group['last'];
+            $row['award_month'] = $month;
+            $row['accrual_month'] = $month;
+            $row['award_amount_cents'] = $group['positive'];
+            // 未达标退款沿用线上独立退款行，防止经理业绩行重复计入。
+            $row['refund_amount_cents'] = 0;
+            $row['due_amount_cents'] = 0;
+            $row['installment_number'] = 0;
+            $row['installment_count'] = 0;
+            $row['threshold_cents'] = 0;
+            $row['_unqualified_manager'] = true;
+            $row['row_key'] = hash('sha256', json_encode([$row['tenant_id'], (int)$row['store_id'],
+                $row['role_snapshot'], $row['employee_id'], (int)$row['member_id'], $month,
+                $row['rule_type'], $row['award_category_id'], $month]));
+            $rows[] = $row;
+        }
+        return $rows;
+    }
+
+    /**
+     * 每名人员、每门店、每名会员按月分别选生美、合作方累计最高的一类。
+     * 不同会员、门店、人员或角色不能拼凑达标；门槛与分期比例沿用原规则。
      * 生美优先的互斥归类已在组件投影完成；销售人与经理保持独立。
      * 退款与正向现金按同组分别累计：只用正向现金选择档位和分期本金，
      * 退款只形成展示金额，不能降低达标金额或改变任何计算结果。

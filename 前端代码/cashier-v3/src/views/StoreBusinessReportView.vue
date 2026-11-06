@@ -70,6 +70,9 @@ const initialDateRange = defaultReportDateRange()
 const startDate = ref(initialDateRange.start)
 const endDate = ref(initialDateRange.end)
 const selectedMonth = ref(today().slice(0, 7))
+// 草稿只随查询提交；导出始终读取已查询角色，避免可见结果与文件不符。
+const largeOrderRoleDraft = ref('salesperson')
+const largeOrderRoleApplied = ref('salesperson')
 const selectedYear = ref(today().slice(0, 4))
 const categoryId = ref('')
 const categoryPath = ref('')
@@ -829,6 +832,7 @@ function reportParams(overrides = {}) {
     ...(reportPeriodMode.value === 'year' ? { year: selectedYear.value } : {}),
     // 月份和日期使用同一次归一化，避免无效输入造成参数相互矛盾。
     ...(reportPeriodMode.value === 'month' ? { month: dates.start.slice(0, 7) } : {}),
+    ...(isLargeOrderReport.value ? { large_order_role: largeOrderRoleApplied.value } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
     product_type: productType.value,
@@ -880,6 +884,7 @@ function currentRouteQuery() {
     if (['report', 'page', 'limit'].includes(key) || value === undefined || value === null || value === '') return
     query[key] = String(value)
   })
+  if (isLargeOrderReport.value) query.large_order_role = largeOrderRoleDraft.value
   if (scopePicker.value.selectedStoreIds.length) query.scope_label = scopePicker.value.label
   // Detail re-filtering must not erase the summary context that opened this drilldown.
   if (salarySummaryReturnLocation.value) query.salary_report_return_to = salarySummaryReturnLocation.value
@@ -954,6 +959,8 @@ function formatCell(value, column) {
     const amount = Number(value)
     return formatMoney(Math.sign(amount) * Math.round(Math.abs(amount))).replace(/^¥/, '')
   }
+  // 大单金额仅在展示层四舍五入；接口、下钻与导出仍保留分精度。
+  if (isLargeOrderReport.value && column?.value_type === 'money' && Number.isFinite(Number(value))) return formatMoney(Math.round(Number(value)))
   if (value === true) return '是'
   if (value === false) return '否'
   return String(value)
@@ -980,6 +987,9 @@ function syncActiveReportFromRoute() {
 
 function syncFiltersFromRoute() {
   const query = route.query || {}
+  const role = String(query.large_order_role || '')
+  largeOrderRoleDraft.value = role === 'sales_manager' ? 'sales_manager' : 'salesperson'
+  largeOrderRoleApplied.value = largeOrderRoleDraft.value
   if (query.start_date) startDate.value = String(query.start_date)
   if (query.end_date) endDate.value = String(query.end_date)
   if (query.month && /^\d{4}-\d{2}$/.test(String(query.month))) selectedMonth.value = String(query.month)
@@ -992,7 +1002,7 @@ function syncFiltersFromRoute() {
   if (storeIds.length) {
     scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
   }
-  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label', 'salary_report_return_to', 'row_filters'])
+  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label', 'salary_report_return_to', 'row_filters', 'large_order_role'])
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
@@ -1908,6 +1918,10 @@ onMounted(async () => {
       </label>
       <button v-if="resultFilterColumns.length" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary" :disabled="loading" @click="query">{{ loading ? '查询中' : '查询' }}</button>
+      <div v-if="isLargeOrderReport" class="store-business-report__large-order-roles" role="radiogroup" aria-label="大单业绩角色">
+        <label><input v-model="largeOrderRoleDraft" type="radio" name="large-order-role" value="sales_manager" />销售经理</label>
+        <label><input v-model="largeOrderRoleDraft" type="radio" name="large-order-role" value="salesperson" />销售人</label>
+      </div>
       <div class="store-business-report__query-actions" aria-label="报表操作">
         <button type="button" class="button button--secondary" @click="isFieldGuideOpen = true">
           <BookOpen :size="15" aria-hidden="true" /> 列名取值来源
@@ -2079,6 +2093,9 @@ onMounted(async () => {
 .store-business-report__result-filters input { width: 100%; }
 .store-business-report__result-filter-actions { display: flex; align-items: end; }
 .store-business-report__filters label { display: grid; gap: 5px; min-width: 140px; color: #687586; font-size: 12px; }
+.store-business-report__large-order-roles { display: inline-flex; align-items: center; gap: 14px; min-height: 34px; }
+.store-business-report__large-order-roles label { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: #35465b; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.store-business-report__filters .store-business-report__large-order-roles input { width: 15px; height: 15px; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; accent-color: #1769d2; cursor: pointer; }
 .store-business-report__period-picker { flex: 0 1 260px; width: 260px; min-width: 230px; }
 .store-business-report__filters .store-business-report__date-field { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: #526174; font-size: 13px; }
 .store-business-report__date-field input { width: 116px; }

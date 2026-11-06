@@ -1034,7 +1034,7 @@ class UnifiedReport extends AuthController
             ['detail_store_id', 0], ['detail_store_key', ''], ['detail_category_path', ''], ['item_group_key', ''],
             ['company_dimension_id', ''], ['city_manager_dimension_id', ''],
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
-            ['tier_id', ''], ['month', ''],
+            ['tier_id', ''], ['month', ''], ['large_order_role', 'salesperson'],
             ['target_amount', ''], ['target_count', ''], ['visit_count', ''],
             // 薪资单号筛选及分类/指标下钻仍按平台权限裁剪稳定员工、门店 ID。
             ['employee_name', ''], ['document_no', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''], ['salary_metric_key', ''],

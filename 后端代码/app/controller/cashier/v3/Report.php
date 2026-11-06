@@ -293,7 +293,7 @@ class Report extends AuthController
             ['company_dimension_id', ''], ['payment_method', ''], ['operator_id', 0],
             ['channel_id', 0], ['customer_segment', 'all'],
             // 月度大单查询/导出共用明确月份；门店权限仍从登录上下文注入。
-            ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['month', ''],
+            ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['month', ''], ['large_order_role', 'salesperson'],
             // Exact path is reserved for a grouped row's drilldown; ordinary category_path remains prefix-searchable.
             ['category_id', 0], ['category_path', ''], ['category_path_exact', ''], ['product_type', ''], ['partner_name', ''],
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0],
