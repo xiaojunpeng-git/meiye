@@ -147,6 +147,7 @@
 <script>
 	let windowHeight = (uni.getSystemInfoSync().windowHeight*(3/4)-238)*2;
 	import {storeListApi} from '@/api/store.js'
+	import {getList as getSelectableStores} from '@/api/new_store.js'
 	import {
 		mapGetters,
 		mapState
@@ -330,9 +331,16 @@
 					type: this.type == 1?1:0,
 					// store_id: id?id:this.nearbyStore
 				};
-				storeListApi(data)
+				// 拼团规格与外部选店页必须使用同一活动范围；否则外部选中的跨区域门店会被旧列表改回。
+				const isCombination = Number(this.type) === 3;
+				if (isCombination && !(Number(this.storeInfo && this.storeInfo.id) > 0)) return;
+				const query = isCombination
+					? getSelectableStores({latitude: data.latitude, longitude: data.longitude,
+						product_id: this.productId, combination_id: this.storeInfo.id})
+					: storeListApi(data);
+				query
 					.then(res => {
-						let list = res.data.list.list;
+						let list = isCombination ? res.data : res.data.list.list;
 						// 会员选择购买门店，不按商品或门店的配送配置过滤。
 						this.storeList = list;
 						// 活动商品没有适用门店时不能把空门店回传为购买门店。
@@ -342,7 +350,7 @@
 						}
 						this.defaultStore();
 						this.$emit('onstoreId',this.storeList[this.active],this.flag);
-						this.$emit('storeCount',res.data.list.count);
+						this.$emit('storeCount',isCombination ? list.length : res.data.list.count);
 					})
 					.catch(err => {
 						this.$util.Tips({

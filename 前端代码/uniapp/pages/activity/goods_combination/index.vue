@@ -41,8 +41,8 @@
 									</view>
 									<view class="text-line text--w111-999 fs-22 lh-30rpx mt-12">¥{{item.product_price}}</view>
 								</view>
-								<view class="w-144 h-56 rd-30rpx flex-center fs-24 bg-gradient text--w111-fff" v-if="item.stock > 0 && item.quota > 0">参与拼团</view>
-								<view class="w-144 h-56 rd-30rpx flex-center fs-24 bg-gray text--w111-fff" v-else>参与拼团</view>
+								<view class="w-144 h-56 rd-30rpx flex-center fs-24 bg-gradient text--w111-fff" v-if="item.stock > 0 && item.quota > 0">{{item.activity_status === 'upcoming' ? '即将开团' : '参与拼团'}}</view>
+								<view class="w-144 h-56 rd-30rpx flex-center fs-24 bg-gray text--w111-fff" v-else>{{item.activity_status === 'upcoming' ? '即将开团' : '参与拼团'}}</view>
 							</view>
 						</view>
 					</view>
@@ -142,7 +142,11 @@
 				this.$util.JumpPath(url);
 			},
 			openSubcribe: function(item) {
-				let page = item;
+				// 预告只浏览活动，不先请求参团订阅或会员身份。
+				if (item.activity_status === 'upcoming') {
+					uni.navigateTo({url: `/pages/activity/goods_details/index?id=${item.id}&type=3`});
+					return;
+				}
 				// #ifndef MP
 				uni.navigateTo({
 					url: `/pages/activity/goods_details/index?id=${item.id}&type=3`
@@ -177,7 +181,6 @@
 					that.page++;
 					that.loadend = limit > res.data.length;
 					that.combinationList = combinationList.concat(res.data);
-					that.page = that.data.page;
 					that.loading = false;
 				}).catch(() => {
 					that.loading = false
@@ -192,7 +195,6 @@
 				let that = this;
 				let uid = this.uid ? this.uid : 0;
 				if (that.$wechat.isWeixin()) {
-					let data = res.data;
 					let configAppMessage = {
 						title: '拼团活动',
 						link: location.href + '?spid=' + uid

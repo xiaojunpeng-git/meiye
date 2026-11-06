@@ -26,16 +26,28 @@
 					<button hover-class="none" v-if="authPreparing" disabled class="bg-color btn1">正在准备登录...</button>
 					<button hover-class="none" v-else-if="!authReady" @tap="userLogin"
 						class="bg-color btn1">重新准备登录</button>
+					<button hover-class="none" v-else-if="!protocol || (canGetPrivacySetting && !wechatPrivacyReady)"
+						@tap="showAgreementRequired" class="bg-color btn1">授权登录</button>
 					<button hover-class="none" v-else-if="bindPhone" open-type="getPhoneNumber" @getphonenumber="getphonenumber"
 						class="bg-color btn1">授权登录</button>
 					<button hover-class="none" v-else @tap="getAuthLogin"
 						class="bg-color btn1">授权登录</button>
 				</template>
 				<view class="acea-row row-center-wrapper fs-30 text--w111-999">授权手机号后可使用会员权益</view>
-				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @tap="browseHome">先浏览首页</view>
+				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @tap="browseHome">{{publicActivityReturn ? '返回活动，暂不授权' : '先浏览首页'}}</view>
 				<!-- #endif -->
 			</view>
 		</view>
+		<!-- #ifdef MP -->
+		<view class="protocol">
+			<checkbox-group @change="changeIsDefault">
+				<checkbox value="agree" :checked="protocol" />已阅读并同意
+				<text class="font-num" @tap.stop="privacy('user')">《用户服务协议》</text>
+				与<text class="font-num" @tap.stop="privacy('privacy')">《隐私政策》</text>
+			</checkbox-group>
+		</view>
+		<!-- #endif -->
+		<!-- #ifndef MP -->
 		<view class="protocol" v-if="!canGetPrivacySetting">
 			<checkbox-group @change='changeIsDefault' v-if="configData.store_user_agreement">
 				<checkbox :checked="protocol ? true : false" />已阅读并同意<text class="font-num"
@@ -47,13 +59,15 @@
 				<text class="font-num" @tap="privacy('user')">《用户协议》</text>与<text class="font-num" @click="privacy('privacy')">《隐私协议》</text>
 			</view>
 		</view>
+		<!-- #endif -->
 	
 		<block>
 			<editUserModal :isShow="isShow" :initialProfile="userInfo" :navigateOnSuccess="profileEditNavigatesBack" @closeEdit="closeEdit" @editSuccess="editSuccess">
 			</editUserModal>
 		</block>
 		<!-- #ifdef MP -->
-		<privacyAgreementPopup v-if="canGetPrivacySetting" @onReject="onReject" @onAgree="onAgree">
+		<privacyAgreementPopup v-if="canGetPrivacySetting" :return-home-on-reject="false"
+			@onReject="onReject" @onAgree="onAgree">
 		</privacyAgreementPopup>
 		<!-- #endif -->
 	</view>
@@ -108,6 +122,7 @@
 				codeNum: 0,
 				canUseGetUserProfile: false,
 				canGetPrivacySetting: false,
+				wechatPrivacyReady: false,
 				mp_is_new: this.$Cache.get('MP_VERSION_ISNEW') || false,
 				configData: this.$Cache.get('BASIC_CONFIG'), 
 				imgHost: HTTP_REQUEST_URL,
@@ -124,6 +139,11 @@
 			privacyAgreementPopup
 		},
 		computed: {
+			// 取消购买授权只回活动展示页，不能借登录返回进入订单或个人业务页。
+			publicActivityReturn() {
+				const url = normalizeMemberLoginReturn(this.loginReturnUrl);
+				return /^\/pages\/activity\/goods_(details|combination_status)\/index\?/.test(url) ? url : '';
+			},
 			// 小程序登录由本页统一收尾，资料弹窗只报告保存结果，避免再次返回上一页。
 			profileEditNavigatesBack() {
 				// #ifdef MP
@@ -184,8 +204,13 @@
 			uni.removeStorageSync('form_type_cart');
 		},
 		methods: {
-			// 访客主动退出登录页只回公开首页，领取权益等受保护操作仍由全局门禁拦截。
+			// 访客可回原活动继续浏览；其他受保护深链仍只能退出到公开首页。
 			browseHome() {
+				if (this.publicActivityReturn) {
+					this.$Cache.clear('login_back_url');
+					uni.reLaunch({url: this.publicActivityReturn});
+					return;
+				}
 				uni.switchTab({ url: '/pages/index/index' });
 			},
 			getErrorMessage(error, fallback = '登录失败，请稍后重试') {
@@ -311,7 +336,7 @@
 				});
 			},
 			changeIsDefault(e) {
-				this.$set(this, 'protocol', !this.protocol);
+				this.protocol = e.detail.value.length > 0;
 			},
 			editSuccess() {
 				this.isShow = false
@@ -334,12 +359,17 @@
 				})
 			},
 			onAgree() {
-				this.protocol = true
+				// 微信隐私接口可用与用户勾选本站协议是两个独立状态。
+				this.wechatPrivacyReady = true;
 			},
 			onReject() {
-				this.showPhoneAuthorizationRequired();
+				this.browseHome();
+			},
+			showAgreementRequired() {
+				this.$util.Tips({ title: '请先阅读并同意协议' });
 			},
 			back() {
+				if (this.publicActivityReturn) return this.browseHome();
 				this.showPhoneAuthorizationRequired();
 			},
 			home() {

@@ -7,11 +7,18 @@ const PHONE_GATE_ALLOWLIST = [
 	'pages/users/wechat_login/index',
 	'pages/users/privacy/index',
 	'pages/users/survey/index',
+	// 小程序默认先打开公开启动页，再切换到首页。
+	'pages/guide/index',
 	'pages/index/index',
 	'pages/goods_cate/goods_cate',
 	'pages/store_list/index',
 	'pages/store/home/index',
-	'pages/goods_details/index'
+	'pages/goods_details/index',
+	// 活动展示和适用门店是公开信息；购买及参团仍在操作入口校验手机号。
+	'pages/activity/goods_details/index',
+	'pages/activity/goods_combination/index',
+	'pages/activity/goods_combination_status/index',
+	'pages/store/list/index'
 ];
 const LOGIN_ROUTE = '/pages/users/wechat_login/index';
 let interceptorsInstalled = false;
