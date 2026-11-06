@@ -1,0 +1,16 @@
+{
+  "base": "128c3af369b98d430f2ba1b9cc5370856d91a9ae",
+  "acceptedFix": "b6662b01a4b163eb4a1d4d20ea5eda7859f609ad",
+  "tree": "dfc676cf9b404fe626d1394a2dee0e04ae0e0603",
+  "files": [
+    "后端代码/app/services/user/PlatformMemberAccessPolicy.php",
+    "后端代码/app/services/user/PlatformMemberScopeServices.php",
+    "后端代码/app/services/system/SystemMenusServices.php",
+    "前端代码/admin/src/router/index.js",
+    "前端代码/admin/src/router/modules/user.js"
+  ],
+  "input": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r3-release-readonly-h6yzl8x9",
+  "output": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r3-release-readonly-h6yzl8x9/compiled",
+  "branch": "release/r3-member-permission-20261106",
+  "commit": "37e7a89dff93cfcf65b221a4b0c58f11a154a150"
+}

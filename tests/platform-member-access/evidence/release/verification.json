@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "entry": "https://rh.cc3798.com/admin/login",
+  "publicAssetsVerified": [
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.e6b3496e.js",
+    "/view_admin/js/app.fe9add72.js"
+  ],
+  "deniedAdminId": 278,
+  "deniedOperations": [
+    "read",
+    "create",
+    "edit",
+    "deactivate"
+  ],
+  "memberMenuRemoved": true,
+  "browserDirectLink": "403 抱歉，你无权访问该页面",
+  "authorizedNonrootAdminId": 163,
+  "authorizedStoreCount": 102,
+  "authorizedOperationsPreserved": true,
+  "humanEfficiencyStillLoads": true,
+  "protectedEntriesUnchanged": true,
+  "backup": "/www/backup/r3-member-permission-20261106/before.tar.gz",
+  "databaseChanges": false
+}
