@@ -20,12 +20,21 @@ final class StaffingQuotaServices
         $page = 1;
         $limit = min(100000, max(1, (int)($input['limit'] ?? 100000)));
         $keyword = trim((string)($input['keyword'] ?? ''));
+        $organizationId = max(0, (int)($input['org_id'] ?? 0));
+        $positionId = max(0, (int)($input['position_id'] ?? 0));
         // 岗位表没有排序字段；按主键保持配置表中岗位顺序稳定。
         // 门店只能维护“门店可用”岗位，其余岗位归组织维护；该标识由岗位策略统一维护。
         $positionsQuery = Db::name('position')->where('status', 1);
         $positionsQuery->where('allow_store_select', $scopeType === 'store' ? 1 : 0);
-        $positions = $positionsQuery->field('id,name')->order('id asc')->select()->toArray();
-        $scopes = $scopeType === 'store' ? $this->stores($keyword) : $this->organizations($keyword);
+        $availablePositions = $positionsQuery->field('id,name')->order('id asc')->select()->toArray();
+        // 筛选和岗位选项共用启用且适用于当前范围的岗位集合，避免前端按名称二次过滤。
+        $positions = $positionId > 0
+            ? array_values(array_filter($availablePositions, static fn(array $row): bool => (int)$row['id'] === $positionId))
+            : $availablePositions;
+        $organizationIds = $this->organizationSubtreeIds($organizationId);
+        $scopes = $scopeType === 'store'
+            ? $this->stores($keyword, $organizationId, $organizationIds)
+            : $this->organizations($keyword, $organizationId, $organizationIds);
         $scopeIds = array_map(static fn(array $row): int => (int)$row['id'], $scopes);
         $positionIds = array_map(static fn(array $row): int => (int)$row['id'], $positions);
         $quotaMap = $this->quotas($scopeType, $scopeIds, $positionIds);
@@ -62,7 +71,7 @@ final class StaffingQuotaServices
             'page' => $page,
             'limit' => $limit,
             'scope_type' => $scopeType,
-            'positions' => $positions,
+            'positions' => $availablePositions,
             'data_as_of' => date('Y-m-d H:i:s'),
             'source_explanations' => [
                 'active_count' => '在职且启用员工按当前岗位关系统计。',
@@ -121,17 +130,50 @@ final class StaffingQuotaServices
         return $result;
     }
 
-    private function stores(string $keyword): array
+    /** 组织筛选只缩小到所选节点及其下级；不存在的节点返回空范围。 */
+    private function organizationSubtreeIds(int $organizationId): array
     {
+        if ($organizationId <= 0) return [];
+        $rows = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
+        $children = [];
+        $known = [];
+        foreach ($rows as $row) {
+            $id = (int)$row['id'];
+            $known[$id] = true;
+            $children[(int)$row['pid']][] = $id;
+        }
+        if (!isset($known[$organizationId])) return [];
+        $selected = [];
+        $stack = [$organizationId];
+        while ($stack) {
+            $id = array_pop($stack);
+            if (isset($selected[$id])) continue;
+            $selected[$id] = true;
+            foreach ($children[$id] ?? [] as $child) $stack[] = $child;
+        }
+        return array_keys($selected);
+    }
+
+    private function stores(string $keyword, int $organizationId, array $organizationIds): array
+    {
+        if ($organizationId > 0 && !$organizationIds) return [];
         $q = Db::name('system_store')->where('is_del', 0)->field('id,name')->order('id asc');
         if ($keyword !== '') $q->whereLike('name', '%' . $keyword . '%');
+        if ($organizationId > 0) {
+            // 门店归属以组织绑定关系为准，查询时只取选中组织子树内的门店。
+            $storeIds = Db::name('organization_store')->whereIn('org_id', $organizationIds)->column('store_id');
+            if (!$storeIds) return [];
+            $q->whereIn('id', array_values(array_unique(array_map('intval', $storeIds))));
+        }
         return $q->select()->toArray();
     }
 
-    private function organizations(string $keyword): array
+    private function organizations(string $keyword, int $organizationId, array $organizationIds): array
     {
+        if ($organizationId > 0 && !$organizationIds) return [];
         $q = Db::name('organization')->where('is_del', 0)->field('id,name')->order('sort desc,id asc');
         if ($keyword !== '') $q->whereLike('name', '%' . $keyword . '%');
+        if ($organizationId > 0) $q->whereIn('id', $organizationIds);
         return $q->select()->toArray();
     }
 
