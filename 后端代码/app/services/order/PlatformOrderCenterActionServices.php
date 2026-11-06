@@ -17,6 +17,9 @@ final class PlatformOrderCenterActionServices
         try {
             $scopes = app()->make(PlatformOrderCenterReadServices::class);
             [$anchor, $dataScope] = $scopes->trustedScopes($adminId);
+            // 平台配置是附加业务约束，保留同一身份、范围和共用命令路径。
+            $policyAction = trim((string)($body['action'] ?? '')) ?: trim((string)($body['command']['action'] ?? ''));
+            PlatformDocumentEditPolicy::assertAllowed($policyAction);
             $dispatcher = CashierV3Bootstrap::dispatcher();
             $storeId = $this->targetStore($body, $anchor, $dataScope, $dispatcher);
             [$operator, $scope] = $scopes->trustedScopes($adminId, $storeId);

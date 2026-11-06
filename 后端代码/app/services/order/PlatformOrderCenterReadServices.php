@@ -51,14 +51,14 @@ final class PlatformOrderCenterReadServices
         $context = $this->context($adminInfo);
         if ($context === null) {
             return [
-                'readOnly' => false,
+                'readOnly' => !PlatformDocumentEditPolicy::enabled(),
                 'scope' => ['mode' => 'none'],
                 'businessTypes' => $this->businessTypes(),
             ];
         }
         [, , $scopeMeta] = $context;
         return [
-            'readOnly' => false,
+            'readOnly' => !PlatformDocumentEditPolicy::enabled(),
             'scope' => $scopeMeta,
             'businessTypes' => $this->businessTypes(),
         ];
@@ -70,7 +70,7 @@ final class PlatformOrderCenterReadServices
         $context = $this->context($adminInfo);
         if ($context === null) {
             return [
-                'readOnly' => false,
+                'readOnly' => !PlatformDocumentEditPolicy::enabled(),
                 'scope' => ['mode' => 'none'],
                 'page' => $this->emptyPage($payload),
             ];
@@ -90,7 +90,7 @@ final class PlatformOrderCenterReadServices
             $payload['recordType'] = $type;
             $page = $this->recordQueries->queryRecords($payload, $operator, $scope);
         }
-        return ['readOnly' => false, 'scope' => $scopeMeta, 'page' => $page];
+        return ['readOnly' => !PlatformDocumentEditPolicy::enabled(), 'scope' => $scopeMeta, 'page' => $page];
     }
 
     /**
@@ -104,6 +104,7 @@ final class PlatformOrderCenterReadServices
             return [
                 'tree' => [],
                 'allowed_store_ids' => [],
+                'document_edit_enabled' => PlatformDocumentEditPolicy::enabled(),
                 'authorization_mode' => 'none',
                 'permission_version' => '',
             ];
@@ -120,6 +121,7 @@ final class PlatformOrderCenterReadServices
         return [
             'tree' => $organizations->buildPickerTree($allowedStoreIds),
             'allowed_store_ids' => $allowedStoreIds,
+            'document_edit_enabled' => PlatformDocumentEditPolicy::enabled(),
             'authorization_mode' => (string)($scopeMeta['mode'] ?? 'none'),
             'permission_version' => $scope->permissionVersion(),
         ];
@@ -130,11 +132,11 @@ final class PlatformOrderCenterReadServices
     {
         $context = $this->context($adminInfo);
         if ($context === null) {
-            return ['readOnly' => false, 'scope' => ['mode' => 'none'], 'detail' => null];
+            return ['readOnly' => !PlatformDocumentEditPolicy::enabled(), 'scope' => ['mode' => 'none'], 'detail' => null];
         }
         [$operator, $scope, $scopeMeta] = $context;
         return [
-            'readOnly' => false,
+            'readOnly' => !PlatformDocumentEditPolicy::enabled(),
             'scope' => $scopeMeta,
             'detail' => $this->salesQueries->salesOrderDetail($payload, $operator, $scope),
         ];
@@ -299,7 +301,7 @@ final class PlatformOrderCenterReadServices
             'pageSize' => (int)($page['pageSize'] ?? 20),
             'uiPolicy' => (new CashierV3DisplayPolicyServices())->snapshot(),
             'businessTypes' => $this->businessTypes(),
-            'readOnly' => false, 'scope' => $result['scope'],
+            'readOnly' => !PlatformDocumentEditPolicy::enabled(), 'scope' => $result['scope'],
         ];
     }
 
@@ -322,7 +324,7 @@ final class PlatformOrderCenterReadServices
             'statusOptionsByType' => $type === '' ? [] : [$type => $page['statusOptions'] ?? []],
             'uiPolicy' => (new CashierV3DisplayPolicyServices())->snapshot(),
             'businessTypes' => $this->businessTypes(),
-            'readOnly' => false, 'scope' => $result['scope'],
+            'readOnly' => !PlatformDocumentEditPolicy::enabled(), 'scope' => $result['scope'],
         ];
     }
 

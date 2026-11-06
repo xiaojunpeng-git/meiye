@@ -291,6 +291,13 @@ class SystemConfig extends AuthController
     public function save_basics(Request $request)
     {
         $post = $this->request->post();
+        // 定义缺失或非二值参数必须在写入任何配置前失败，避免显示成功却没有保存。
+        $documentKey = \app\services\order\PlatformDocumentEditPolicy::CONFIG_KEY;
+        if (array_key_exists($documentKey, $post)) {
+            if (!in_array($post[$documentKey], [0, 1, '0', '1'], true)) return $this->fail('平台端允许修改单据选项无效');
+            if (!$this->services->getOne(['menu_name' => $documentKey, 'is_store' => 0])) return $this->fail('平台单据配置缺失，请先完成配置升级');
+        }
+
         // 排班已迁至独立版本化保存；旧标签页不能绕过版本保护覆盖该开关。
         if (array_key_exists('reservation_schedule_manage', $post)) {
             if ((int)$post['reservation_schedule_manage'] !== (\app\services\store\roster\StaffRosterSwitch::enabled()?1:0)) return $this->fail('启用排班已更新，请在该参数处单独保存。');

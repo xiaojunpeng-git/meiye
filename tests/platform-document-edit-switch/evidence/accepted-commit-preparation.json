@@ -1,0 +1,11 @@
+{
+  "acceptedFingerprint": "e18f46c1f0d11c95595209c1240cfc64c2ee11b1c6778d0e14a182f747c839f4",
+  "head": "14874f1e7f53fa0ca36b72d5b845825897d80477",
+  "tree": "8209b85858d35bddebd648a830af0a993f91ce36",
+  "excludedPreexistingChanges": [
+    "service position exclusion config",
+    "debtPaymentEnabled default false"
+  ],
+  "sharedIndex": "preserved; commit uses alternate index",
+  "status": "PM accepted; local commit preparation"
+}

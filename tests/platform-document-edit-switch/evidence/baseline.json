@@ -1,0 +1,14 @@
+{
+  "head": "14874f1e7f53fa0ca36b72d5b845825897d80477",
+  "remote": "not applicable: local development only, no round 5 release authorization",
+  "files": {
+    "后端代码/app/services/system/config/SystemConfigServices.php": "e1ce403a22560db3def6997bf6bf426da36cd71da6cf3d1b0839850cc4032307",
+    "后端代码/app/controller/admin/v1/system/config/SystemConfig.php": "b378757955e34f9a3b07a4009a515f1c850380f38f807e7db8520fdefa529e83",
+    "后端代码/app/services/order/PlatformOrderCenterActionServices.php": "4ed261a1b4f54e4396048cae688b0de8f2c846f01f9c5a478c3b8e6d77afa1ae",
+    "后端代码/app/services/order/PlatformOrderCenterReadServices.php": "d462d010cf3193e4ed2575c1da9a4c63ad941a1a9870990f0bba24ffe02fb8ed",
+    "后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php": "d9a62727648b528f427b6c04a1698dabe03a23a3af7bb07ad6367117bda3bc5b",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue": "03f331cfb91196f0e4186ef955cd452d1bc8feecc6779992f0ebe9b80f48b038",
+    "前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue": "b051f7ad661f9c84b05f7d56f94ddf18b4ccc117bc7238a96a9ac72f6aba329f"
+  },
+  "status": "MM 前端代码/cashier-v3/src/components/order/SalesOrderDetailOverlay.vue\nMM 前端代码/cashier-v3/src/views/OrderCenterView.vue\nMM 后端代码/app/controller/admin/v1/system/config/SystemConfig.php\nMM 后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php\nD  后端代码/app/services/order/PlatformOrderCenterActionServices.php\nMM 后端代码/app/services/order/PlatformOrderCenterReadServices.php\nMM 后端代码/app/services/system/config/SystemConfigServices.php\n?? 后端代码/app/services/order/PlatformOrderCenterActionServices.php\n"
+}
