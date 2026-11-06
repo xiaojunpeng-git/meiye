@@ -54,9 +54,15 @@
 				<view class="care-page__detail-status"><text class="care-page__status">{{ selectedTask.statusLabel || selectedTask.status || '—' }}</text><text v-if="selectedTask.isOverdue" class="care-page__detail-overdue">已逾期</text></view>
 				<view class="care-page__detail-section"><text class="care-page__detail-section-title">任务信息</text><view class="care-page__detail-fact"><text>计划时间</text><text>{{ selectedTask.plannedAt || '—' }}</text></view><view class="care-page__detail-fact"><text>当前负责人</text><text>{{ selectedTask.owner != null ? selectedTask.owner.name : '—' }}</text></view><view class="care-page__detail-fact"><text>归属门店</text><text>{{ selectedTask.store != null ? selectedTask.store.name : '—' }}</text></view><view class="care-page__detail-fact"><text>任务来源</text><text>{{ selectedTask.sourceLabel || '—' }}</text></view></view>
 				<view v-if="selectedTask.relatedBusiness != null" class="care-page__detail-section"><text class="care-page__detail-section-title">关联业务</text><text class="care-page__detail-section-strong">{{ selectedTask.relatedBusiness.label || '—' }}</text><text class="care-page__detail-section-copy">{{ selectedTask.relatedBusiness.summary || '暂无关联业务摘要' }}</text></view>
+				<!-- 任务附件直接使用该授权任务的保存投影；不与后续客情记录照片混用。 -->
+				<view v-if="selectedTask.note || (selectedTask.taskPhotos != null && selectedTask.taskPhotos.length > 0)" class="care-page__detail-section">
+					<text class="care-page__detail-section-title">任务备注</text>
+					<text v-if="selectedTask.note" class="care-page__detail-section-copy">{{ selectedTask.note }}</text>
+					<view v-if="selectedTask.taskPhotos != null && selectedTask.taskPhotos.length > 0" class="care-page__photo-row"><view v-for="(photo, index) in selectedTask.taskPhotos" :key="'task-detail-' + String(index)" class="care-page__photo-item" role="button" :aria-label="'预览任务图片' + (Number(index) + 1)" @tap="previewTaskPhoto(selectedTask.taskPhotos, Number(index))"><image class="care-page__photo-image" :src="photo" mode="aspectFill" /></view></view>
+				</view>
 				<view v-if="selectedTask.latestCare != null" class="care-page__detail-section"><text class="care-page__detail-section-title">最近客情</text><text class="care-page__detail-section-strong">{{ selectedTask.latestCare.methodLabel || '跟进记录' }} · {{ selectedTask.latestCare.resultLabel || '—' }}</text><text class="care-page__detail-section-copy">{{ selectedTask.latestCare.followedAt || '—' }}</text><text class="care-page__detail-section-copy">{{ selectedTask.latestCare.content || '暂无跟进内容' }}</text></view>
 			</scroll-view>
-			<view class="care-page__detail-actions"><text v-if="taskDetailMessage.length > 0" class="care-page__detail-message">{{ taskDetailMessage }}</text><text v-else-if="!canCall(selectedTask) && !canStart(selectedTask) && !canComplete(selectedTask) && !canDelete(selectedTask)" class="care-page__detail-empty">当前任务没有可执行操作</text><view v-if="canCall(selectedTask)" class="care-page__call-entry" @tap="callCustomer(selectedTask)"><text>拨打电话</text></view><view v-if="canStart(selectedTask)" class="care-page__complete-entry" :class="{ 'care-page__complete-entry--loading': taskActionSubmitting }" @tap.stop="startSelectedTask"><text>{{ taskActionSubmitting ? '正在开始…' : '开始跟进' }}</text></view><view v-if="canComplete(selectedTask)" class="care-page__complete-entry" @tap="openCompleteFromDetail"><text>记录本次客情</text></view><view v-if="canDelete(selectedTask)" class="care-page__delete-entry" @tap.stop="requestDeleteSelectedTask"><text>删除任务</text></view></view>
+			<view class="care-page__detail-actions"><text v-if="taskDetailMessage.length > 0" class="care-page__detail-message">{{ taskDetailMessage }}</text><text v-else-if="!canCall(selectedTask) && !canStart(selectedTask) && !canComplete(selectedTask) && !canDelete(selectedTask)" class="care-page__detail-empty">当前任务没有可执行操作</text><view class="care-page__detail-action-row"><view v-if="canCall(selectedTask)" class="care-page__call-entry" @tap="callCustomer(selectedTask)"><text>拨打电话</text></view><view v-if="canStart(selectedTask)" class="care-page__complete-entry" :class="{ 'care-page__complete-entry--loading': taskActionSubmitting }" @tap.stop="startSelectedTask"><text>{{ taskActionSubmitting ? '正在开始…' : '开始跟进' }}</text></view><view v-if="canComplete(selectedTask)" class="care-page__complete-entry" @tap="openCompleteFromDetail"><text>记录本次客情</text></view><view v-if="canDelete(selectedTask)" class="care-page__delete-entry" @tap.stop="requestDeleteSelectedTask"><text>删除任务</text></view></view></view>
 		</view>
 		<view v-if="deletingTask != null" class="care-page__confirm-mask" @tap="cancelDeleteTask"><view class="care-page__confirm-panel" @tap.stop><text class="care-page__confirm-title">删除未开始任务？</text><text class="care-page__confirm-copy">删除后任务不再出现在待跟进列表，审计记录会保留。</text><view class="care-page__confirm-actions"><view class="care-page__confirm-cancel" @tap="cancelDeleteTask"><text>取消</text></view><view class="care-page__confirm-danger" :class="{ 'care-page__confirm-danger--loading': taskActionSubmitting }" @tap.stop="confirmDeleteTask"><text>{{ taskActionSubmitting ? '正在删除…' : '确认删除' }}</text></view></view></view></view>
 		<view v-if="completingTask != null" class="care-page__complete-panel">
@@ -88,8 +94,10 @@
 				</view>
 				<text class="care-page__complete-label">任务备注</text>
 				<textarea class="care-page__complete-textarea" :value="taskContent" placeholder="填写本次需要跟进的事项" @input="updateTaskContent" />
+				<view class="care-page__photo-row"><view v-for="(photo, index) in taskPhotos" :key="'task-photo-' + index" class="care-page__photo-item"><image class="care-page__photo-image" :src="photo" mode="aspectFill" @tap="previewTaskPhoto(taskPhotos, index)" /><text class="care-page__photo-remove" role="button" :aria-label="'移除任务图片' + (index + 1)" @tap.stop="removeTaskPhoto(index)">×</text></view><view v-if="taskPhotos.length < 9" class="care-page__photo-add" role="button" aria-label="添加任务图片" @tap="chooseTaskPhotos"><text>＋</text><text>拍照/选图</text></view></view>
+				<text v-if="taskPhotoUploading" class="care-page__photo-uploading" role="status">正在上传任务图片…</text>
 				<text v-if="createFormMessage.length > 0" class="care-page__form-message">{{ createFormMessage }}</text>
-				<view class="care-page__complete-submit" :class="{ 'care-page__complete-submit--loading': creatingTask }" @tap.stop="submitCreateTask"><text>{{ creatingTask ? '正在提交…' : '创建客情任务' }}</text></view>
+				<view class="care-page__complete-submit" :class="{ 'care-page__complete-submit--loading': creatingTask || taskPhotoUploading }" @tap.stop="submitCreateTask"><text>{{ taskPhotoUploading ? '图片上传中…' : creatingTask ? '正在提交…' : '创建客情任务' }}</text></view>
 			</scroll-view>
 		</view>
 		<view v-if="creatingRecord" class="care-page__complete-panel">
@@ -179,6 +187,8 @@
 	const taskMemberSearched = ref(false)
 	const taskMemberLoading = ref(false)
 	const taskContent = ref('')
+	const taskPhotos = ref<Array<string>>([])
+	const taskPhotoUploading = ref(false)
 	const plannedAt = ref('')
 	const plannedDate = ref('')
 	const plannedTime = ref('')
@@ -274,8 +284,8 @@
 	function openComplete(task : any) { completingTask.value = task; completeContent.value = ''; methodCode.value = 'PHONE'; resultCode.value = 'FOLLOW_UP'; createNextTask.value = false; nextPlannedAt.value = ''; nextOwnerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; message.value = '' }
 	function closeComplete() { if (!submitting.value) completingTask.value = null }
 	function openFloatingCreate() { if (activeTab.value == 'records') openCreateRecord(); else openCreateTask(null) }
-	function openCreateTask(customer : any) { creatingTaskPanel.value = true; creatingForCustomer.value = customer; taskMemberKeyword.value = ''; taskMemberCandidates.value = []; taskMemberSearched.value = false; taskMemberLoading.value = false; taskContent.value = ''; plannedAt.value = ''; plannedDate.value = ''; plannedTime.value = ''; showCreateTimePicker.value = false; taskTypeCode.value = 'FOLLOWUP'; ownerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; createFormMessage.value = ''; message.value = '' }
-	function closeCreateTask() { if (!creatingTask.value) { creatingTaskPanel.value = false; creatingForCustomer.value = null; taskMemberCandidates.value = []; showCreateTimePicker.value = false; createFormMessage.value = '' } }
+	function openCreateTask(customer : any) { if (taskPhotoUploading.value || creatingTask.value) return; creatingTaskPanel.value = true; creatingForCustomer.value = customer; taskMemberKeyword.value = ''; taskMemberCandidates.value = []; taskMemberSearched.value = false; taskMemberLoading.value = false; taskContent.value = ''; taskPhotos.value = []; taskPhotoUploading.value = false; plannedAt.value = ''; plannedDate.value = ''; plannedTime.value = ''; showCreateTimePicker.value = false; taskTypeCode.value = 'FOLLOWUP'; ownerId.value = assignees.value.length > 0 ? String(assignees.value[0].value) : ''; createFormMessage.value = ''; message.value = '' }
+	function closeCreateTask() { if (!creatingTask.value && !taskPhotoUploading.value) { creatingTaskPanel.value = false; creatingForCustomer.value = null; taskMemberCandidates.value = []; showCreateTimePicker.value = false; createFormMessage.value = '' } }
 	function clearTaskMember() { if (!creatingTask.value) { creatingForCustomer.value = null; taskMemberCandidates.value = []; taskMemberSearched.value = false } }
 	function searchTaskMembers() {
 		if (taskMemberLoading.value) return
@@ -306,13 +316,14 @@
 		})
 	}
 	function submitCreateTask() {
-		if (creatingTask.value) return
+		// 仅提交上传成功的持久地址，上传中的草稿不能生成缺图任务。
+		if (creatingTask.value || taskPhotoUploading.value) return
 		if (creatingForCustomer.value == null) { createFormMessage.value = '请选择会员。'; return }
 		if (ownerId.value.length == 0) { createFormMessage.value = '请选择负责人。'; return }
 		if (plannedAt.value.trim().length == 0) { createFormMessage.value = '请选择计划跟进时间。'; return }
 		createFormMessage.value = ''
 		creatingTask.value = true
-		createMobileCustomerCareTask({ memberId: creatingForCustomer.value.memberId, ownerId: Number(ownerId.value), taskTypeCode: taskTypeCode.value, plannedAt: plannedAt.value.trim(), content: taskContent.value.trim(), idempotencyKey: 'care-create-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }, (response : any) => {
+		createMobileCustomerCareTask({ memberId: creatingForCustomer.value.memberId, ownerId: Number(ownerId.value), taskTypeCode: taskTypeCode.value, plannedAt: plannedAt.value.trim(), content: taskContent.value.trim(), taskPhotos: taskPhotos.value.slice(), idempotencyKey: 'care-create-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString() }, (response : any) => {
 			creatingTask.value = false
 			if (!response.ok) { createFormMessage.value = String(response.message || '客情任务创建失败。'); return }
 			createdTaskMemberId.value = String(creatingForCustomer.value.memberId)
@@ -325,6 +336,41 @@
 			taskStatusGroup.value = 'open'
 			loadWorkbench()
 		})
+	}
+
+
+	// 复用客情上传通道；一次选择多张，顺序上传，失败保留已成功的图片供重选。
+	// 选图起即锁定该草稿，避免切换任务时把异步回调写进另一个任务。
+	function chooseTaskPhotos() {
+		if (taskPhotoUploading.value || creatingTask.value) return
+		let remaining = 9 - taskPhotos.value.length
+		if (remaining <= 0) return
+		taskPhotoUploading.value = true
+		createFormMessage.value = ''
+		uni.chooseImage({ count: remaining, sizeType: ['compressed'], sourceType: ['album', 'camera'], success: (result : any) => {
+			let paths = result != null && Array.isArray(result.tempFilePaths) ? result.tempFilePaths.slice(0, remaining) : []
+			uploadTaskPhotos(paths, 0)
+		}, fail: () => { taskPhotoUploading.value = false } })
+	}
+	function uploadTaskPhotos(paths : Array<any>, index : number) {
+		if (index >= paths.length) { taskPhotoUploading.value = false; return }
+		let key = 'CARE_PHOTO-' + Date.now().toString() + '-' + Math.floor(Math.random() * 100000).toString()
+		uploadMobileCustomerCarePhoto(String(paths[index]), key, (response : any) => {
+			if (!response.ok || response.body == null || String(response.body.photoUrl || '').length == 0) {
+				taskPhotoUploading.value = false
+				createFormMessage.value = String(response.message || '任务图片上传失败，请重试。')
+				return
+			}
+			taskPhotos.value.push(String(response.body.photoUrl))
+			uploadTaskPhotos(paths, index + 1)
+		})
+	}
+	function removeTaskPhoto(index : number) {
+		if (!taskPhotoUploading.value && !creatingTask.value) taskPhotos.value.splice(index, 1)
+	}
+	// 预览只读原任务的图片数组，原图顺序与保存顺序相同。
+	function previewTaskPhoto(photos : Array<string>, index : number) {
+		if (index >= 0 && index < photos.length) uni.previewImage({ urls: photos, current: photos[index] })
 	}
 
 	function openCreateRecord() {
@@ -643,8 +689,11 @@
 	.care-page__detail-fact text:last-child { max-width: 64%; color: #50677d; text-align: right; }
 	.care-page__detail-section-strong { margin-top: 10px; font-size: 13px; font-weight: 700; line-height: 20px; color: #50677d; }
 	.care-page__detail-section-copy { margin-top: 5px; font-size: 13px; line-height: 20px; color: #8997a7; }
-	.care-page__detail-actions { display: flex; align-items: center; justify-content: flex-end; min-height: 72px; padding: 0 22px calc(10px + env(safe-area-inset-bottom)); background-color: #eef6ff; }
-	.care-page__detail-actions .care-page__call-entry, .care-page__detail-actions .care-page__complete-entry { margin-top: 0; margin-left: 9px; }
+	.care-page__detail-actions { display: flex; flex-direction: column; align-items: stretch; justify-content: center; min-height: 72px; padding: 0 22px calc(10px + env(safe-area-inset-bottom)); background-color: #eef6ff; }
+	/* uni-app view defaults to a column: explicitly keep all available actions
+	   in one equal-width row; feedback stays above it without squeezing buttons. */
+	.care-page__detail-action-row { display: flex; flex-direction: row; align-items: stretch; width: 100%; column-gap: 9px; }
+	.care-page__detail-action-row .care-page__call-entry, .care-page__detail-action-row .care-page__complete-entry, .care-page__detail-action-row .care-page__delete-entry { flex: 1; min-width: 0; min-height: 42px; align-self: stretch; flex-direction: row; align-items: center; margin: 0; padding: 8px 6px; box-sizing: border-box; justify-content: center; }
 	.care-page__detail-empty { margin-right: auto; font-size: 12px; color: #8997a7; }
 	.care-page--native-mini .care-page__topbar { padding-top: 84px; }
 	.care-page--native-mini .care-page__complete-header { padding-top: 84px; }
