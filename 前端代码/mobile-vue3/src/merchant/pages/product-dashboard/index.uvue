@@ -1,6 +1,6 @@
 <template>
   <MoheAiEntry />
-	<view class="product-detail-page">
+	<view class="product-detail-page" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="product-detail-page__header"><view class="product-detail-page__back" @tap="goBack"><text>‹</text><text>返回经营</text></view><text class="product-detail-page__eyebrow">经营首页 · 商品与库存</text><text class="product-detail-page__title">商品与库存明细</text><text class="product-detail-page__subtitle">按当前员工数据权限查看商品销售与库存提醒</text></view>
 		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="product-detail-page__content"><view class="product-detail-page__content-inner">
 			<view class="product-detail-page__context"><view><text class="product-detail-page__context-label">当前范围</text><text class="product-detail-page__context-value">{{ scopeLabel }}</text></view><text class="product-detail-page__period">本月</text></view>
@@ -13,6 +13,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
   import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
 	const loading = ref(false)
@@ -41,6 +42,14 @@
 	function displayMetric(metric : any) : string { if (metric == null || metric.value == null || String(metric.state || '') !== 'ready') return '—'; let value = Number(metric.value); if (!isFinite(value)) return '—'; return String(metric.unit || '') === 'amount' ? '¥' + value.toLocaleString() : value.toLocaleString() }
 	function formatDate(timestamp : number) : string { if (timestamp <= 0) return '—'; let date = new Date(timestamp * 1000); return date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0') }
 	function goBack() : void { uni.navigateBack({ delta: 1 }) }
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

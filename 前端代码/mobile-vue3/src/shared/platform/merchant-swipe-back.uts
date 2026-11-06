@@ -1,0 +1,109 @@
+import { onMounted, onUnmounted } from 'vue'
+import { switchMerchantPrimaryTab } from './mobile-navigation.uts'
+
+// This gesture owns navigation only: it never submits a form, cancels a server
+// command or writes business data. Pages reuse their existing close callbacks.
+let backLayers : Array<any> = []
+let nextLayerId = 0
+let navigating = false
+
+function currentPage() : any {
+	let pages = getCurrentPages()
+	return pages.length > 0 ? pages[pages.length - 1] : null
+}
+
+// Shared overlays register against their owning page, so a hidden page's AI or
+// report dialog cannot consume another page's gesture. Higher visual layers win.
+export function useMerchantBackLayer(handler : () => boolean, priority : number = 100) : void {
+	let id = ++nextLayerId
+	onMounted(() => { backLayers.push({ id: id, owner: currentPage(), priority: priority, handler: handler }) })
+	onUnmounted(() => { backLayers = backLayers.filter((item : any) : boolean => item.id != id) })
+}
+
+function consumeSharedLayer() : boolean {
+	let owner = currentPage()
+	let layers = backLayers.filter((item : any) : boolean => item.owner === owner)
+	layers.sort((a : any, b : any) : number => b.priority - a.priority || b.id - a.id)
+	for (let index = 0; index < layers.length; index++) {
+		if (layers[index].handler()) return true
+	}
+	return false
+}
+
+// A direct link has no back stack. Use an enumerated existing merchant tab with
+// its normal permission guard; never follow an arbitrary caller URL or exit H5.
+export function returnByMerchantSwipe(fallbackTab : string = 'home') : void {
+	if (navigating) return
+	let page = currentPage()
+	if (page == null) return
+	if (getCurrentPages().length <= 1) {
+		if (String(page.route) != 'src/merchant/pages/home/index') switchMerchantPrimaryTab(fallbackTab)
+		return
+	}
+	navigating = true
+	uni.navigateBack({ delta: 1, complete: () : void => { navigating = false } })
+}
+
+// Single-finger rightward edge swipe: lock direction early, require a deliberate
+// distance and reject vertical scroll, reversal, long presses and multi-touch.
+// Listeners never stop normal vertical scrolling. Controls/scroll-x regions
+// stop touchstart at their own boundary before this recognizer can arm.
+export function createMerchantSwipeBack(action : () => void) : any {
+	let armed = false
+	let startX = 0
+	let startY = 0
+	let lastX = 0
+	let startAt = 0
+	let horizontal = false
+	let lastAccepted = -1000
+	let touchId : any = null
+	let cancel = () : void => { armed = false; horizontal = false; touchId = null }
+	let start = (event : any) : void => {
+		cancel()
+		if (event.touches == null || event.touches.length != 1) return
+		let touch = event.touches[0]
+		let x = Number(touch.clientX)
+		let y = Number(touch.clientY)
+		if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 32) return
+		armed = true; startX = x; startY = y; lastX = x; startAt = Date.now(); touchId = touch.identifier
+	}
+	let move = (event : any) : void => {
+		if (!armed) return
+		if (event.touches == null || event.touches.length != 1) { cancel(); return }
+		let touch = event.touches[0]
+		if (touch.identifier !== touchId) { cancel(); return }
+		let x = Number(touch.clientX); let y = Number(touch.clientY)
+		let dx = x - startX; let dy = Math.abs(y - startY)
+		if (!Number.isFinite(x) || !Number.isFinite(y) || dx < -8 || (dy > 12 && dy > Math.abs(dx)) || (horizontal && x < lastX - 18)) { cancel(); return }
+		if (dx > 12 && dx > dy * 2) horizontal = true
+		lastX = x
+		// H5 browsers may otherwise also consume a horizontal gesture for history.
+		// Only claim a recognized horizontal move, never a normal scroll or tap.
+		// #ifdef WEB
+		if (horizontal && event.preventDefault != null) event.preventDefault()
+		// #endif
+	}
+	let end = (event : any) : void => {
+		let wasArmed = armed
+		let id = touchId
+		cancel()
+		if (!wasArmed || event.changedTouches == null || event.changedTouches.length != 1) return
+		let touch = event.changedTouches[0]
+		if (touch.identifier !== id || (event.touches != null && event.touches.length > 0)) return
+		let dx = Number(touch.clientX) - startX; let dy = Math.abs(Number(touch.clientY) - startY)
+		let now = Date.now(); let elapsed = now - startAt
+		if (!Number.isFinite(dx) || !Number.isFinite(dy) || dx < 72 || dx < dy * 2 || elapsed < 40 || elapsed > 800 || now - lastAccepted < 450) return
+		lastAccepted = now
+		action()
+	}
+	return { start: start, move: move, end: end, cancel: cancel }
+}
+
+// One page adapter for every merchant route. A consumed layer/busy command is
+// one back step; a gesture never falls through to both close and navigateBack.
+export function useMerchantSwipeBack(closeLayer : () => boolean, back : () => void) : any {
+	let consume = () : boolean => consumeSharedLayer() || closeLayer()
+	let gesture = createMerchantSwipeBack(() : void => { if (!consume()) back() })
+	onUnmounted(() => { gesture.cancel() })
+	return gesture
+}

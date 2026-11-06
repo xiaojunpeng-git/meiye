@@ -1,6 +1,6 @@
 <template>
   <MoheAiEntry />
-	<view class="customer-settings">
+	<view class="customer-settings" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="customer-settings__header"><navigator class="customer-settings__back" url="/src/merchant/pages/customers/index" open-type="navigate"><text>‹</text></navigator><view class="customer-settings__header-copy"><text class="customer-settings__eyebrow">客户</text><text class="customer-settings__title">列表字段</text></view><view class="customer-settings__header-save" @tap="saveVisibleFields"><text>{{ savingSettings ? '正在保存' : '保存设置' }}</text></view></view>
 		<scroll-view scroll-y class="customer-settings__content">
 			<view v-if="loading" class="customer-settings__empty"><text>正在读取数据设置</text></view>
@@ -10,7 +10,7 @@
 				<view class="customer-settings__section"><view v-for="field in fields" :key="field.key" class="customer-settings__row" @tap="toggleVisible(field.key)"><view class="customer-settings__row-copy"><text class="customer-settings__label">{{ field.label }}</text><text class="customer-settings__key">{{ field.key }}</text></view><text class="customer-settings__check">{{ isVisible(field.key) ? '已显示' : '隐藏' }}</text></view></view>
 				<view class="customer-settings__save" @tap="saveVisibleFields"><text>{{ savingSettings ? '正在保存…' : '保存显示字段' }}</text></view>
 				<view class="customer-settings__intro customer-settings__intro--aliases"><text class="customer-settings__intro-title">字段改名</text><text class="customer-settings__intro-copy">只改你的显示名称，不改变字段含义、数据范围或报表口径。</text></view>
-				<view class="customer-settings__section"><view v-for="field in fields" :key="'alias-' + field.key" class="customer-settings__alias-row"><text class="customer-settings__label">{{ field.label }}</text><input class="customer-settings__alias-input" :value="aliasFor(field.key)" placeholder="保持原名称" @input="setAlias(field.key, $event.detail.value)" /></view></view>
+				<view class="customer-settings__section"><view v-for="field in fields" :key="'alias-' + field.key" class="customer-settings__alias-row"><text class="customer-settings__label">{{ field.label }}</text><input class="customer-settings__alias-input" :value="aliasFor(field.key)" placeholder="保持原名称" @input="setAlias(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/></view></view>
 				<view class="customer-settings__save" @tap="saveAliases"><text>{{ savingAliases ? '正在保存…' : '保存字段名称' }}</text></view>
 				<text class="customer-settings__hint">自定义字段和导出任务将继续沿用同一受控接口；本页不会把门店、组织或员工范围发送给服务端。</text>
 			</view>
@@ -19,6 +19,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
   import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { dispatchMobileCustomerUnifiedQueryCommand, queryMobileCustomerUnifiedQueryCapabilities } from '../../../shared/api/mobile-customer-client.uts'
 	const loading = ref(false)
@@ -85,6 +86,15 @@
 			loadCapability()
 		})
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		if (savingSettings.value || savingAliases.value) return true
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

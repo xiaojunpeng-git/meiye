@@ -1,6 +1,6 @@
 <template>
   <MoheAiEntry />
-	<view class="customer-profile">
+	<view class="customer-profile" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="customer-profile__header">
 			<view class="customer-profile__back" role="button" @tap="goBack"><text>‹</text></view>
 			<text class="customer-profile__title">{{ pageTitle() }}</text>
@@ -25,12 +25,12 @@
 					<view class="customer-profile__section-heading"><text>基本资料</text></view>
 					<view v-for="field in fixedFields" :key="field.key" class="customer-profile__field">
 						<text class="customer-profile__label">{{ field.label }}<text v-if="field.required" class="customer-profile__required"> *</text></text>
-						<input v-if="isTextField(field)" class="customer-profile__input" :value="textValue(form[field.key])" type="text" :maxlength="inputMaxLength(field)" :placeholder="field.label" @input="setFixedText(field.key, $event.detail.value)" />
-						<textarea v-else-if="field.format === 'textarea'" class="customer-profile__textarea" :value="textValue(form[field.key])" :maxlength="500" placeholder="填写备注" @input="setFixedText(field.key, $event.detail.value)" />
-						<picker v-else-if="field.key === 'sex'" class="customer-profile__picker" mode="selector" :range="sexLabels" @change="setSex($event.detail.value)"><text>{{ sexLabel() }}</text></picker>
-						<picker v-else-if="field.key === 'birthday'" class="customer-profile__picker" mode="date" :value="textValue(form.birthday)" @change="setFixedText('birthday', $event.detail.value)"><text>{{ textValue(form.birthday, '选择生日') }}</text></picker>
-						<picker v-else-if="field.key === 'memberLevelId'" class="customer-profile__picker" mode="selector" :range="levelLabels()" @change="setLevel($event.detail.value)"><text>{{ levelLabel() }}</text></picker>
-						<picker v-else-if="field.key === 'exclusiveServicePersonId'" class="customer-profile__picker" mode="selector" :range="servicePersonLabels()" @change="setServicePerson($event.detail.value)"><text>{{ servicePersonLabel() }}</text></picker>
+						<input v-if="isTextField(field)" class="customer-profile__input" :value="textValue(form[field.key])" type="text" :maxlength="inputMaxLength(field)" :placeholder="field.label" @input="setFixedText(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
+						<textarea v-else-if="field.format === 'textarea'" class="customer-profile__textarea" :value="textValue(form[field.key])" :maxlength="500" placeholder="填写备注" @input="setFixedText(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
+						<picker v-else-if="field.key === 'sex'" class="customer-profile__picker" mode="selector" :range="sexLabels" @change="setSex($event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ sexLabel() }}</text></picker>
+						<picker v-else-if="field.key === 'birthday'" class="customer-profile__picker" mode="date" :value="textValue(form.birthday)" @change="setFixedText('birthday', $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ textValue(form.birthday, '选择生日') }}</text></picker>
+						<picker v-else-if="field.key === 'memberLevelId'" class="customer-profile__picker" mode="selector" :range="levelLabels()" @change="setLevel($event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ levelLabel() }}</text></picker>
+						<picker v-else-if="field.key === 'exclusiveServicePersonId'" class="customer-profile__picker" mode="selector" :range="servicePersonLabels()" @change="setServicePerson($event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ servicePersonLabel() }}</text></picker>
 						<view v-else-if="field.key === 'memberTagIds'" class="customer-profile__tag-list"><view v-for="tag in memberTags" :key="tag.value" class="customer-profile__tag" :class="{ 'customer-profile__tag--active': tagSelected(tag.value) }" @tap="toggleTag(tag.value)"><text>{{ tag.label }}</text></view></view>
 					</view>
 				</view>
@@ -38,10 +38,10 @@
 					<view class="customer-profile__section-heading"><text>自定义资料</text></view>
 					<view v-for="field in customFields" :key="field.key" class="customer-profile__field">
 						<text class="customer-profile__label">{{ field.label }}<text v-if="field.required" class="customer-profile__required"> *</text></text>
-						<textarea v-if="field.format === 'textarea'" class="customer-profile__textarea" :value="customText(field.key)" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)" />
-						<picker v-else-if="field.format === 'date'" class="customer-profile__picker" mode="date" :value="customText(field.key)" @change="setCustomText(field.key, $event.detail.value)"><text>{{ customText(field.key, customPlaceholder(field)) }}</text></picker>
-						<picker v-else-if="hasOptions(field)" class="customer-profile__picker" mode="selector" :range="optionLabels(field)" @change="setCustomOption(field, $event.detail.value)"><text>{{ customOptionLabel(field) }}</text></picker>
-						<input v-else class="customer-profile__input" :value="customText(field.key)" type="text" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)" />
+						<textarea v-if="field.format === 'textarea'" class="customer-profile__textarea" :value="customText(field.key)" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
+						<picker v-else-if="field.format === 'date'" class="customer-profile__picker" mode="date" :value="customText(field.key)" @change="setCustomText(field.key, $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ customText(field.key, customPlaceholder(field)) }}</text></picker>
+						<picker v-else-if="hasOptions(field)" class="customer-profile__picker" mode="selector" :range="optionLabels(field)" @change="setCustomOption(field, $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ customOptionLabel(field) }}</text></picker>
+						<input v-else class="customer-profile__input" :value="customText(field.key)" type="text" :placeholder="customPlaceholder(field)" @input="setCustomText(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
 					</view>
 				</view>
 				<text v-if="saveMessage.length > 0" class="customer-profile__error">{{ saveMessage }}</text>
@@ -52,6 +52,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
   import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { createMobileCustomerProfile, queryMobileCustomerProfile, queryMobileCustomerProfileDraft, updateMobileCustomerProfile, uploadMobileCustomerProfileAvatar } from '../../../shared/api/mobile-customer-client.uts'
 	import { replaceMerchantCustomerDetail, returnFromMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
@@ -179,6 +180,15 @@
 		if (mode.value === 'edit') updateMobileCustomerProfile(memberId.value, payload(), done)
 		else createMobileCustomerProfile(payload(), done)
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		if (saving.value || uploadingAvatar.value) return true
+		return false
+	}, () : void => { goBack() })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

@@ -1,5 +1,5 @@
 <template>
-	<view class="goal-page">
+	<view class="goal-page" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="goal-page__header"><text class="goal-page__eyebrow">商家端</text><text class="goal-page__title">目标</text><text class="goal-page__subtitle">员工按月创建，完成情况由统一 V3 指标后续汇总</text></view>
 		<scroll-view scroll-y class="goal-page__content">
 			<view class="goal-page__month"><text class="goal-page__month-label">目标周期</text><text class="goal-page__month-value">{{ monthLabel }}</text></view>
@@ -7,7 +7,7 @@
 			<view v-else-if="message.length > 0" class="goal-page__notice"><text class="goal-page__notice-title">{{ message }}</text><view class="goal-page__retry" @tap="loadTarget"><text>重新加载</text></view></view>
 			<view v-else>
 				<view class="goal-page__card"><text class="goal-page__card-kicker">本月个人目标</text><text class="goal-page__card-title">{{ targetName }}</text><text class="goal-page__card-copy">一期由员工在手机端创建；团队汇总只读取后端数据权限范围内已创建的目标。</text></view>
-				<view class="goal-page__section"><text class="goal-page__section-title">填写三项目标</text><view v-for="item in metricCatalog" :key="item.code" class="goal-page__line"><view class="goal-page__line-copy-wrap"><text class="goal-page__line-label">{{ item.label }}</text><text class="goal-page__line-copy">{{ item.code === 'SERVICE_VISITS' ? '填写预计服务客次数' : '填写整数元金额' }}</text></view><input class="goal-page__input" type="number" :value="inputValue(item.code)" :placeholder="item.code === 'SERVICE_VISITS' ? '0 次' : '0 元'" @input="setMetric(item.code, $event.detail.value)" /></view></view>
+				<view class="goal-page__section"><text class="goal-page__section-title">填写三项目标</text><view v-for="item in metricCatalog" :key="item.code" class="goal-page__line"><view class="goal-page__line-copy-wrap"><text class="goal-page__line-label">{{ item.label }}</text><text class="goal-page__line-copy">{{ item.code === 'SERVICE_VISITS' ? '填写预计服务客次数' : '填写整数元金额' }}</text></view><input class="goal-page__input" type="number" :value="inputValue(item.code)" :placeholder="item.code === 'SERVICE_VISITS' ? '0 次' : '0 元'" @input="setMetric(item.code, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/></view></view>
 				<view class="goal-page__save" :class="{ 'goal-page__save--disabled': saving }" @tap="saveTarget"><text>{{ saving ? '正在保存…' : (targetVersion > 0 ? '保存修改' : '创建本月目标') }}</text></view>
 				<view v-if="teamAvailable" class="goal-page__section"><text class="goal-page__section-title">授权范围团队目标</text><text class="goal-page__team-copy">已创建目标 {{ teamTargetCount }} 份 · 员工 {{ teamEmployeeCount }} 人</text><view v-for="item in teamMetrics" :key="item.code" class="goal-page__line"><text class="goal-page__line-label">{{ item.label }}</text><text class="goal-page__value">{{ displayValue(item) }}</text></view></view>
 				<view v-else class="goal-page__notice"><text class="goal-page__notice-title">团队汇总暂不可见</text><text class="goal-page__notice-copy">{{ teamMessage }}</text></view>
@@ -19,6 +19,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import { queryMobilePersonalMonthlyTarget, saveMobilePersonalMonthlyTarget } from '../../../shared/api/mobile-personal-target-client.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { showMobileNotice } from '../../../shared/platform/mobile-platform.uts'
@@ -96,6 +97,14 @@
 			showMobileNotice('本月目标已保存')
 		})
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

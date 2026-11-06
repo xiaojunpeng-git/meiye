@@ -1,5 +1,5 @@
 <template>
-	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }">
+	<view class="merchant-home-page" :class="{ 'merchant-home-page--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-home-page__content">
 			<view class="merchant-home-page__content-inner">
 				<view class="merchant-home-page__context"><view class="merchant-home-page__org-filter" @tap="openWarehouse"><text>{{ scopeLabel }}›</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
@@ -63,6 +63,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
@@ -220,6 +221,14 @@
 		const date = new Date(timestamp * 1000)
 		return date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0')
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

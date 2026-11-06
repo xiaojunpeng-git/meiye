@@ -1,5 +1,5 @@
 <template>
-	<view class="category-ranking">
+	<view class="category-ranking" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="category-ranking__header"><text @tap="goBack">‹ 返回</text><text class="category-ranking__title">{{ category == null ? '分类业绩排行' : category.name }}</text></view>
 		<view class="category-ranking__period"><text>{{ startDate }} 至 {{ endDate }}</text><text>当前授权范围 · 实际业绩</text></view>
 		<view class="category-ranking__tabs"><view :class="{ active: rankType === 'projects' }" @tap="rankType = 'projects'"><text>项目</text></view><view :class="{ active: rankType === 'products' }" @tap="rankType = 'products'"><text>产品</text></view></view>
@@ -13,6 +13,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
 	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
 	import { currentMerchantRoot, merchantRequestSession, clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
@@ -63,6 +64,14 @@
 		return Array.isArray(result) ? result : []
 	}
 	function goBack() : void { uni.navigateBack({ fail: () => { uni.redirectTo({ url: '/src/merchant/pages/home/index' }) } }) }
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

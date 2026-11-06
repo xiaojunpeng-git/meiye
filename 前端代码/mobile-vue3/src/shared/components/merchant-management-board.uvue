@@ -4,7 +4,7 @@
 		<view v-for="tableKey in ['roleTable', 'beautyTable']" :key="tableKey" class="management-board__section">
 			<view class="management-board__section-head"><text>{{ props.board[tableKey].title }}</text></view>
 			<text v-if="tableKey === 'beautyTable' && props.board[tableKey].columns.length === 1" class="management-board__empty">当前范围没有符合条件的美容师。</text>
-			<scroll-view scroll-x="true" class="management-board__scroll">
+			<scroll-view scroll-x="true" @touchstart.stop="ignoreSwipeStart" class="management-board__scroll">
 				<view class="management-board__table" :style="tableStyle(tableKey)" role="table" :aria-label="props.board[tableKey].title">
 					<view class="management-board__row management-board__row--head" role="row"><text :style="identityStyle()" class="management-board__cell management-board__cell--identity" role="columnheader">分类／指标</text><view v-for="column in props.board[tableKey].columns" :key="column.key" :style="valueStyle()" class="management-board__cell" :class="{ 'management-board__cell--total': column.key === 'total' }" role="columnheader"><text>{{ column.label }}</text><text v-if="column.store" class="management-board__store">{{ column.store }}</text></view></view>
 					<view v-for="row in props.board[tableKey].rows" :key="row.key" class="management-board__row" :class="{ 'management-board__row--emphasis': row.emphasis === true }" role="row"><text :style="identityStyle()" class="management-board__cell management-board__cell--identity" role="rowheader">{{ row.label }}</text><button role="button" v-for="cell in row.cells" :key="cell.key" :style="valueStyle()" class="management-board__cell management-board__value" :class="{ 'management-board__value--money': row.format === 'money', 'management-board__cell--total': cell.key === 'total' }" :disabled="!cell.drillable" :aria-label="row.label + ' ' + cell.display + ' 查看明细'" @tap="openDetail(tableKey, row.key, cell.key)">{{ cell.display }}</button></view>
@@ -16,8 +16,11 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantBackLayer } from '../platform/merchant-swipe-back.uts'
 	import { queryMobileWarehouse } from '../api/mobile-warehouse-client.uts'
 	import { formatDashboardMoney } from '../platform/merchant-dashboard-presentation.uts'
+	// The table owns horizontal panning; do not arm the page back recognizer.
+	function ignoreSwipeStart() : void {}
 	const props = defineProps<{ board : any, query : any }>()
 	const showDetail = ref(false)
 	const detailLoading = ref(false)
@@ -47,6 +50,12 @@
 			detail.value = result.managementBoard.detail
 		})
 	}
+
+	// Shared overlay consumes the current page's return before page navigation.
+	useMerchantBackLayer(() : boolean => {
+		if (showDetail.value) { closeDetail(); return true }
+		return false
+	}, 200)
 </script>
 
 <style>

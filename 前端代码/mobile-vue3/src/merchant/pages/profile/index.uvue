@@ -1,5 +1,5 @@
 <template>
-	<view class="merchant-profile" :class="{ 'merchant-profile--native-mini': platformUsesNativeCanvas }">
+	<view class="merchant-profile" :class="{ 'merchant-profile--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<scroll-view scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="merchant-profile__content">
 			<view class="merchant-profile__content-inner">
 				<view class="merchant-profile__account-card"><view class="merchant-profile__avatar" :aria-label="accountName"><text class="merchant-profile__avatar-label">{{ accountInitial }}</text></view><view class="merchant-profile__account-copy"><text class="merchant-profile__account-title">{{ accountName }}</text><text class="merchant-profile__account-detail">{{ accountDetail }}</text></view></view>
@@ -16,6 +16,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
@@ -56,6 +57,14 @@
 			openMerchantBootstrap()
 		})
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

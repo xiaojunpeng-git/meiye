@@ -1,5 +1,5 @@
 <template>
-  <view class="growth-home">
+  <view class="growth-home" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
     <view class="growth-hero"><text class="growth-kicker">BEAUTY ACADEMY</text><text class="growth-title">每一天，都在成长</text><text class="growth-subtitle">把学到的专业，变成手上的底气。</text><view class="growth-hero-bottom"><text>{{ employeeName }}，今天也加油</text><text @tap="loadTasks">刷新 ↻</text></view></view>
     <view class="growth-shortcuts"><text @tap="openKnowledge">随手学 · 有问有答 →</text><text @tap="openProfile">我的成长档案 →</text></view>
     <view class="growth-tabs"><text :class="tab == 'todo' ? 'growth-tab-active' : ''" @tap="switchTab('todo')">我的任务</text><text :class="tab == 'done' ? 'growth-tab-active' : ''" @tap="switchTab('done')">成长记录</text><text v-if="fieldCount>0" :class="tab == 'field' ? 'growth-tab-active' : ''" @tap="switchTab('field')">现场</text><text v-if="reviewCount>0" :class="tab == 'review' ? 'growth-tab-active' : ''" @tap="switchTab('review')">待我处理</text><text :class="tab == 'messages' ? 'growth-tab-active' : ''" @tap="switchTab('messages')">消息</text></view>
@@ -12,6 +12,7 @@
   </view>
 </template>
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 import { growthRequest, growthTaskUrl } from '../../api/mobile-growth-client.uts'
 import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 import { merchantActionIsAllowed } from '../../../shared/platform/merchant-tab-permissions.uts'
@@ -41,6 +42,14 @@ function next() : void { if (page.value < pages.value) { page.value++; loadTasks
 function kindLabel(value : string) : string { let names : any = { course: '课程学习', exam: '能力检验', practice: '练习', assignment: '实操作业', evaluation: '能力鉴定', coaching: '师傅带教', offline: '线下培训', inspection: '门店巡检', rectification: '整改问题' }; return String(names[value] || '成长任务') }
 function stateLabel(value : string) : string { let names : any = { NOT_STARTED: '未开始', IN_PROGRESS: '进行中', COMPLETED: '已完成', PENDING: '待处理', PAUSED: '已暂停', CANCELLED: '已取消', ASSIGNED: '待执行', OPEN: '待整改', PENDING_REVIEW: '待复查', SUBMITTED: '已提交', REVIEWED: '已复核', CLOSED: '已关闭', RETURNED: '待补交' }; return String(names[value] || value) }
 function time(value : number) : string { return new Date(value * 1000).toLocaleDateString() }
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('workbench') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 <style>
 .growth-home{display:flex;flex-direction:column;height:100%;min-height:100vh;background-color:#f6f7f2;color:#25483f}.growth-hero{padding:32px 24px 22px;background-color:#1b5b4e;color:#fff}.growth-kicker{display:block;font-size:10px;letter-spacing:3px;color:#c6d9c8}.growth-title{display:block;margin-top:14px;font-size:27px;font-weight:700}.growth-subtitle{display:block;margin-top:10px;font-size:13px;color:#d0dfd3}.growth-hero-bottom{display:flex;flex-direction:row;justify-content:space-between;margin-top:28px;font-size:12px;color:#d0dfd3}.growth-tabs{display:flex;flex-direction:row;padding:20px 22px 13px;gap:14px;flex-wrap:wrap;color:#89978b;font-size:14px}.growth-tab-active{color:#1b5b4e;font-weight:700;border-bottom:2px solid #1b5b4e;padding-bottom:7px}.growth-body{flex:1;min-height:0;padding:0 18px 30px;box-sizing:border-box}.growth-card{display:flex;flex-direction:column;margin:12px 0;padding:19px;background-color:#fff;border-radius:14px;border:1px solid #e7ece2}.growth-card-top,.growth-card-footer{display:flex;flex-direction:row;justify-content:space-between;align-items:center}.growth-tag{background-color:#eef4e9;color:#536a45;border-radius:5px;padding:4px 8px;font-size:10px}.growth-state{font-size:11px;color:#86917e}.growth-card-title{display:block;margin-top:15px;font-size:18px;font-weight:600;line-height:27px}.growth-card-note{display:block;margin-top:9px;font-size:12px;color:#929a8e;line-height:20px}.growth-card-footer{margin-top:20px;padding-top:14px;border-top:1px solid #f0f2eb;font-size:12px;color:#336554}.growth-empty{padding:50px 10px;color:#8b9985;font-size:13px;text-align:center;line-height:24px}.growth-empty-icon{display:block;color:#b7a775;font-size:40px;margin-bottom:20px}.growth-error{margin:10px 18px;padding:12px;background-color:#fff0e7;color:#99553c;font-size:12px}.growth-pages{display:flex;flex-direction:row;justify-content:space-around;padding:20px;color:#39634f;font-size:13px}

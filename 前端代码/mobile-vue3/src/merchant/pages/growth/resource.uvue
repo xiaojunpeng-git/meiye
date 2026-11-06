@@ -1,5 +1,6 @@
-<template><view class="resource-page"><text v-if="message.length>0" class="resource-message">{{ message }}</text><view v-if="asset!=null"><text class="resource-title">{{ asset.original_name }}</text><text class="resource-note">仅供本次授权业务查阅</text><image v-if="isImage && url.length>0" :src="url" mode="widthFix" class="resource-image" @tap="zoom"></image><video v-else-if="isVideo && url.length>0" :src="url" controls class="resource-video"></video><view v-else-if="url.length>0"><!-- #ifdef WEB --><iframe :src="url" title="证据文档预览" class="resource-pdf"></iframe><!-- #endif --><!-- #ifndef WEB --><button @tap="openDocument">打开证据文档</button><!-- #endif --></view></view></view></template>
+<template><view class="resource-page" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel"><text v-if="message.length>0" class="resource-message">{{ message }}</text><view v-if="asset!=null"><text class="resource-title">{{ asset.original_name }}</text><text class="resource-note">仅供本次授权业务查阅</text><image v-if="isImage && url.length>0" :src="url" mode="widthFix" class="resource-image" @tap="zoom"></image><video v-else-if="isVideo && url.length>0" :src="url" controls class="resource-video" @touchstart.stop="merchantSwipeBack.cancel"></video><view v-else-if="url.length>0"><!-- #ifdef WEB --><iframe :src="url" title="证据文档预览" class="resource-pdf"></iframe><!-- #endif --><!-- #ifndef WEB --><button @tap="openDocument">打开证据文档</button><!-- #endif --></view></view></view></template>
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 import{growthRequest,growthDownload}from '../../api/mobile-growth-client.uts'
 const asset=ref<any>(null)
 const url=ref('')
@@ -22,6 +23,14 @@ if(url.value.startsWith('blob:'))URL.revokeObjectURL(url.value)
 })
 function zoom():void{uni.previewImage({urls:[url.value]})}
 function openDocument():void{uni.openDocument({filePath:url.value,fileType:'pdf',showMenu:false,fail:()=>{message.value='当前设备暂不支持文档预览。'}})}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('workbench') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 <style>
 .resource-page{min-height:100vh;background-color:#f6f7f2;padding:24px 18px;box-sizing:border-box;color:#25483f}.resource-title{display:block;font-size:19px;line-height:28px;font-weight:600}.resource-note{display:block;color:#91a085;font-size:12px;margin:12px 0 22px}.resource-image{width:100%}.resource-video{width:100%;height:240px}.resource-pdf{width:100%;height:75vh;border:0}.resource-message{display:block;font-size:13px;line-height:23px;color:#a2593a;padding:12px;background-color:#fff0e7}

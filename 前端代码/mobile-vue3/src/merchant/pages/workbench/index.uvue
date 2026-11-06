@@ -1,9 +1,9 @@
 <template>
-	<view class="merchant-workbench" :class="{ 'merchant-workbench--native-mini': platformUsesNativeCanvas }">
+	<view class="merchant-workbench" :class="{ 'merchant-workbench--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<!-- 小程序胶囊占位独立于组织按钮；权限隐藏按钮时仍保留系统顶部安全区。 -->
 		<view v-if="platformUsesNativeCanvas && !organizationEntryVisible" class="merchant-workbench__native-top-inset" :style="{ height: nativeTopInset + 'px' }"></view>
 		<view v-if="organizationEntryVisible" class="merchant-workbench__header">
-			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore">
+			<picker v-if="storeContexts.length > 1" mode="selector" :range="storeLabels" :value="activeStoreIndex" @change="selectStore" @touchstart.stop="merchantSwipeBack.cancel">
 				<view class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
 			</picker>
 			<view v-else class="merchant-workbench__org-filter"><text>{{ activeStoreLabel }}›</text></view>
@@ -47,6 +47,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import { merchantMiniTopInset } from '../../../shared/platform/merchant-mini-top-inset.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
@@ -185,6 +186,14 @@
 		uni.navigateTo({ url: '/src/merchant/pages/reservations/index' })
 	}
 
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

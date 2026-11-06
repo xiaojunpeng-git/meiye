@@ -1,5 +1,5 @@
 <template>
-	<view class="employee-performance" :class="{ 'employee-performance--native-mini': platformUsesNativeCanvas }">
+	<view class="employee-performance" :class="{ 'employee-performance--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="employee-performance__header">
 			<view class="employee-performance__back" @tap="returnToWarehouse"><text>‹</text></view>
 			<view class="employee-performance__heading"><text class="employee-performance__title">员工业绩</text><text class="employee-performance__subtitle">{{ employeeName }}</text></view>
@@ -47,11 +47,12 @@
 
 		<!-- Detail pages retain the permission-filtered merchant navigation; the data tab owns this drill-down. -->
 		<MerchantPrimaryTabBar active-key="warehouse" />
-		<view v-if="showCustomRange" class="employee-performance__sheet-mask" @tap="closeCustomRange"><view class="employee-performance__sheet" @tap.stop><view class="employee-performance__sheet-head"><text>选择日期区间</text><text class="employee-performance__sheet-close" @tap="closeCustomRange">×</text></view><view class="employee-performance__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="employee-performance__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="employee-performance__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="employee-performance__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="employee-performance__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
+		<view v-if="showCustomRange" class="employee-performance__sheet-mask" @tap="closeCustomRange"><view class="employee-performance__sheet" @tap.stop><view class="employee-performance__sheet-head"><text>选择日期区间</text><text class="employee-performance__sheet-close" @tap="closeCustomRange">×</text></view><view class="employee-performance__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart" @touchstart.stop="merchantSwipeBack.cancel"><view class="employee-performance__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="employee-performance__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd" @touchstart.stop="merchantSwipeBack.cancel"><view class="employee-performance__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="employee-performance__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
 	</view>
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileWarehouseEmployeePerformance } from '../../../shared/api/mobile-warehouse-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
@@ -164,6 +165,15 @@
 		page.value = Number(payload.pagination != null ? payload.pagination.page || 1 : 1)
 		hasMore.value = payload.pagination != null && payload.pagination.hasMore === true
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		if (showCustomRange.value) { closeCustomRange(); return true }
+		return false
+	}, () : void => { returnToWarehouse() })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

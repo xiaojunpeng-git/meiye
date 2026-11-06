@@ -1,5 +1,5 @@
 <template>
-	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }">
+	<view class="customer-page" :class="{ 'customer-page--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<!-- 小程序胶囊占位独立于组织按钮；权限隐藏按钮时仍保留系统顶部安全区。 -->
 		<view v-if="platformUsesNativeCanvas && !customerOrganizationEntryVisible" class="customer-page__native-top-inset" :style="{ height: nativeTopInset + 'px' }"></view>
 		<view v-if="customerOrganizationEntryVisible" class="customer-page__header">
@@ -31,7 +31,7 @@
 					confirm-type="search"
 					placeholder="姓名、手机号或会员编号"
 					@confirm="applySearch"
-				/>
+				 @touchstart.stop="merchantSwipeBack.cancel"/>
 			</view>
 			<view v-if="activeTab === 'list'" class="customer-page__field-settings">
 				<navigator url="/src/merchant/pages/customer-settings/index" open-type="navigate"><text>列表字段</text></navigator>
@@ -46,7 +46,7 @@
 			<view class="customer-page__audience-tab" :class="{ 'customer-page__audience-tab--active': audienceViewMode === 'overview' }" role="tab" @tap="selectAudienceView('overview')"><text>概况</text></view>
 			<view class="customer-page__audience-tab" :class="{ 'customer-page__audience-tab--active': audienceViewMode === 'details' }" role="tab" @tap="selectAudienceView('details')"><text>明细</text></view>
 		</view>
-		<scroll-view v-if="activeTab === 'groups' && activeAudience != null && audienceOverviewEnabled && audienceViewMode === 'overview'" class="customer-page__audience-breadcrumbs" scroll-x>
+		<scroll-view v-if="activeTab === 'groups' && activeAudience != null && audienceOverviewEnabled && audienceViewMode === 'overview'" class="customer-page__audience-breadcrumbs" scroll-x @touchstart.stop="merchantSwipeBack.cancel">
 			<view class="customer-page__audience-breadcrumbs-inner"><text v-for="(crumb, index) in audienceOverviewBreadcrumbs" :key="crumb.entityType + '-' + crumb.entityId" class="customer-page__audience-breadcrumb" @tap="selectAudienceBreadcrumb(crumb)">{{ index > 0 ? ' / ' : '' }}{{ crumb.name }}</text></view>
 		</scroll-view>
 
@@ -133,7 +133,7 @@
 		<view v-if="customerStorePickerVisible" class="customer-page__store-picker-mask" @tap="closeCustomerStorePicker">
 			<view class="customer-page__store-picker" @tap.stop>
 				<view class="customer-page__store-picker-head"><text class="customer-page__store-picker-back" @tap="closeCustomerStorePicker">‹</text><view class="customer-page__store-picker-title"><text>选择门店</text><text>仅显示组织权限范围内的门店</text></view><text class="customer-page__store-picker-close" @tap="closeCustomerStorePicker">×</text></view>
-				<view class="customer-page__store-search-wrap"><input class="customer-page__store-search" type="text" :value="customerStoreKeyword" placeholder="搜索门店" @input="updateCustomerStoreKeyword" /></view>
+				<view class="customer-page__store-search-wrap"><input class="customer-page__store-search" type="text" :value="customerStoreKeyword" placeholder="搜索门店" @input="updateCustomerStoreKeyword"  @touchstart.stop="merchantSwipeBack.cancel"/></view>
 				<scroll-view scroll-y="true" class="customer-page__store-tree">
 					<view v-if="customerStorePickerLoading" class="customer-page__store-empty" role="status"><text>正在加载授权门店…</text></view>
 					<view v-else-if="customerStorePickerMessage.length > 0" class="customer-page__store-empty" role="alert"><text>{{ customerStorePickerMessage }}</text><button @tap="openCustomerStorePicker">重新加载</button></view>
@@ -169,14 +169,14 @@
 							<view v-for="option in filterOperatorOptions(field.key)" :key="option.value" class="customer-filter__operator-option" :class="{ 'customer-filter__operator-option--active': filterOperatorFor(field.key) === option.value }" @tap="setFilterOperatorValue(field.key, option.value)"><text>{{ option.label }}</text></view>
 						</view>
 						<view v-if="isBirthdayField(field.key)" class="customer-filter__shortcut-row"><view v-for="option in birthdayShortcutOptions" :key="option.value" class="customer-filter__shortcut" :class="{ 'customer-filter__shortcut--active': birthdayShortcutFor(field.key) === option.value }" @tap="setBirthdayShortcut(field.key, option.value)"><text>{{ option.label }}</text></view></view>
-						<view v-if="isDateField(field.key) && !isBirthdayField(field.key)" class="customer-filter__shortcut-row"><picker class="customer-filter__date-shortcut" mode="selector" :range="dateShortcutLabelsFor(field.key)" @change="setDateShortcut(field.key, $event.detail.value)"><text>{{ dateShortcutLabel(field.key) }}⌄</text></picker></view>
+						<view v-if="isDateField(field.key) && !isBirthdayField(field.key)" class="customer-filter__shortcut-row"><picker class="customer-filter__date-shortcut" mode="selector" :range="dateShortcutLabelsFor(field.key)" @change="setDateShortcut(field.key, $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ dateShortcutLabel(field.key) }}⌄</text></picker></view>
 						<view v-if="showFilterValue(field.key)" class="customer-filter__value-row">
-							<input v-if="isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueFor(field.key)" :placeholder="rollingDayPlaceholder(field.key)" @input="setFilterValue(field.key, $event.detail.value)" />
+							<input v-if="isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueFor(field.key)" :placeholder="rollingDayPlaceholder(field.key)" @input="setFilterValue(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
 							<text v-if="isRollingDayShortcut(field.key)" class="customer-filter__value-unit">天</text>
-							<picker v-else-if="isDateField(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueFor(field.key)" @change="setFilterValue(field.key, $event.detail.value)"><text>{{ filterValueFor(field.key, '选择日期') }}</text></picker>
-							<input v-else class="customer-filter__value-input" :value="filterValueFor(field.key)" :type="isNumberField(field.key) ? 'number' : 'text'" :placeholder="filterValuePlaceholder(field.key, false)" @input="setFilterValue(field.key, $event.detail.value)" />
-							<picker v-if="filterOperatorFor(field.key) === 'between' && isDateField(field.key) && !isRollingDayShortcut(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueToFor(field.key)" @change="setFilterValueTo(field.key, $event.detail.value)"><text>{{ filterValueToFor(field.key, '结束日期') }}</text></picker>
-							<input v-else-if="filterOperatorFor(field.key) === 'between' && !isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueToFor(field.key)" :placeholder="filterValuePlaceholder(field.key, true)" @input="setFilterValueTo(field.key, $event.detail.value)" />
+							<picker v-else-if="isDateField(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueFor(field.key)" @change="setFilterValue(field.key, $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ filterValueFor(field.key, '选择日期') }}</text></picker>
+							<input v-else class="customer-filter__value-input" :value="filterValueFor(field.key)" :type="isNumberField(field.key) ? 'number' : 'text'" :placeholder="filterValuePlaceholder(field.key, false)" @input="setFilterValue(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
+							<picker v-if="filterOperatorFor(field.key) === 'between' && isDateField(field.key) && !isRollingDayShortcut(field.key)" class="customer-filter__value-picker" mode="date" :value="filterValueToFor(field.key)" @change="setFilterValueTo(field.key, $event.detail.value)" @touchstart.stop="merchantSwipeBack.cancel"><text>{{ filterValueToFor(field.key, '结束日期') }}</text></picker>
+							<input v-else-if="filterOperatorFor(field.key) === 'between' && !isRollingDayShortcut(field.key)" class="customer-filter__value-input" type="number" :value="filterValueToFor(field.key)" :placeholder="filterValuePlaceholder(field.key, true)" @input="setFilterValueTo(field.key, $event.detail.value)"  @touchstart.stop="merchantSwipeBack.cancel"/>
 						</view>
 					</view>
 			</scroll-view>
@@ -190,7 +190,7 @@
 			</view>
 			<view class="customer-group-entry__body">
 				<text class="customer-group-entry__headline">创建动态客群</text>
-				<input class="customer-group-entry__input" v-model="groupName" placeholder="填写客群名称" @input="clearGroupEntryMessage" />
+				<input class="customer-group-entry__input" v-model="groupName" placeholder="填写客群名称" @input="clearGroupEntryMessage"  @touchstart.stop="merchantSwipeBack.cancel"/>
 				<text class="customer-group-entry__copy">客群会保存为动态条件，名单始终以当前权限和最新客户数据为准。</text>
 				<text v-if="groupEntryMessage.length > 0" class="customer-group-entry__error">{{ groupEntryMessage }}</text>
 				<view class="customer-group-entry__command" @tap="openFilterFromGroup">
@@ -204,6 +204,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
 	import { createMobileCustomerAudience, listMobileCustomerAudiences, queryMobileCustomerAudienceMembers, queryMobileCustomerAudienceOverview, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
 	import { merchantMiniTopInset } from '../../../shared/platform/merchant-mini-top-inset.uts'
 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
@@ -944,6 +945,19 @@
 	function setFilterValue(fieldKey : string, value : string) { filterValues.value[fieldKey] = String(value || '') }
 	function filterValueToFor(fieldKey : string, fallback : string = '') : string { let value = String(filterValueTos.value[fieldKey] || ''); return value.length > 0 ? value : fallback }
 	function setFilterValueTo(fieldKey : string, value : string) { filterValueTos.value[fieldKey] = String(value || '') }
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		if (creatingGroup.value || customerSwitchingStore.value) return true
+		if (customerStorePickerVisible.value) { closeCustomerStorePicker(); return true }
+		if (filterVisible.value) { closeFilter(); return true }
+		if (groupEntryVisible.value) { closeGroupEntry(); return true }
+		if (activeAudience.value != null) { closeAudience(); return true }
+		return false
+	}, () : void => { returnByMerchantSwipe('home') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>

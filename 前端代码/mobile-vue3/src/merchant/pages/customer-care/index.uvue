@@ -1,6 +1,6 @@
 <template>
   <MoheAiEntry />
-	<view class="care-page" :class="{ 'care-page--native-mini': platformUsesNativeCanvas }">
+	<view class="care-page" :class="{ 'care-page--native-mini': platformUsesNativeCanvas }" @touchstart="merchantSwipeBack.start" @touchmove="merchantSwipeBack.move" @touchend="merchantSwipeBack.end" @touchcancel="merchantSwipeBack.cancel">
 		<view class="care-page__topbar">
 			<view class="care-page__back" role="button" aria-label="返回工作台" @tap="returnToWorkbench"><text>‹</text></view>
 		</view>
@@ -14,13 +14,13 @@
 			<view v-if="activeTab === 'tasks' && metrics.length > 0" class="care-page__metrics"><view v-for="metric in metrics" :key="metric.code" class="care-page__metric-card"><text class="care-page__metric-label">{{ metric.label }}</text><text class="care-page__metric-value">{{ metric.value }}{{ metric.unit }}</text><text class="care-page__metric-copy">{{ metric.description }}</text></view></view>
 			<view v-if="activeTab === 'customers'" class="care-page__member-search">
 				<text class="care-page__member-search-symbol">⌕</text>
-				<input class="care-page__member-search-input" type="text" :value="customerKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateCustomerKeyword" @confirm="loadWorkbench" />
+				<input class="care-page__member-search-input" type="text" :value="customerKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateCustomerKeyword" @confirm="loadWorkbench"  @touchstart.stop="merchantSwipeBack.cancel"/>
 				<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
 			</view>
 			<view v-if="activeTab === 'records'" class="care-page__record-toolbar">
 				<view class="care-page__member-search care-page__member-search--record">
 					<text class="care-page__member-search-symbol">⌕</text>
-					<input class="care-page__member-search-input" type="text" :value="recordKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateRecordKeyword" @confirm="loadWorkbench" />
+					<input class="care-page__member-search-input" type="text" :value="recordKeyword" placeholder="搜索会员姓名、手机号或会员编号" @input="updateRecordKeyword" @confirm="loadWorkbench"  @touchstart.stop="merchantSwipeBack.cancel"/>
 					<view class="care-page__member-search-submit" @tap="loadWorkbench"><text>搜索</text></view>
 				</view>
 			</view>
@@ -67,14 +67,14 @@
 		<view v-if="deletingTask != null" class="care-page__confirm-mask" @tap="cancelDeleteTask"><view class="care-page__confirm-panel" @tap.stop><text class="care-page__confirm-title">删除未开始任务？</text><text class="care-page__confirm-copy">删除后任务不再出现在待跟进列表，审计记录会保留。</text><view class="care-page__confirm-actions"><view class="care-page__confirm-cancel" @tap="cancelDeleteTask"><text>取消</text></view><view class="care-page__confirm-danger" :class="{ 'care-page__confirm-danger--loading': taskActionSubmitting }" @tap.stop="confirmDeleteTask"><text>{{ taskActionSubmitting ? '正在删除…' : '确认删除' }}</text></view></view></view></view>
 		<view v-if="completingTask != null" class="care-page__complete-panel">
 			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeComplete">取消</text><text class="care-page__complete-title">完成客情</text><text class="care-page__complete-placeholder"></text></view>
-			<scroll-view scroll-y class="care-page__complete-body"><text class="care-page__complete-member">{{ completingTask.member.name }} · {{ completingTask.typeLabel }}</text><text class="care-page__complete-label">联系方式</text><view class="care-page__choice-row"><view v-for="method in methods" :key="method.value" class="care-page__choice" :class="{ 'care-page__choice--active': methodCode === method.value }" @tap="methodCode = method.value"><text>{{ method.label }}</text></view></view><text class="care-page__complete-label">跟进结果</text><view class="care-page__choice-row"><view v-for="result in results" :key="result.value" class="care-page__choice" :class="{ 'care-page__choice--active': resultCode === result.value }" @tap="resultCode = result.value"><text>{{ result.label }}</text></view></view><text class="care-page__complete-label">本次内容</text><textarea class="care-page__complete-textarea" :value="completeContent" placeholder="如实记录沟通内容和后续约定" @input="completeContent = $event.detail.value" /><view class="care-page__next-toggle" @tap="createNextTask = !createNextTask"><text>{{ createNextTask ? '已创建下一次跟进' : '创建下一次跟进' }}</text></view><view v-if="createNextTask"><text class="care-page__complete-label">下次跟进时间</text><input class="care-page__datetime-input" :value="nextPlannedAt" placeholder="例如 2026-07-31 10:00" @input="nextPlannedAt = $event.detail.value" /><text class="care-page__complete-label">下次负责人</text><view class="care-page__choice-row"><view v-for="assignee in assignees" :key="'next-' + assignee.value" class="care-page__choice" :class="{ 'care-page__choice--active': nextOwnerId === assignee.value }" @tap="nextOwnerId = assignee.value"><text>{{ assignee.label }}</text></view></view></view><view class="care-page__complete-submit" @tap="submitComplete"><text>{{ submitting ? '正在提交…' : '完成并保存记录' }}</text></view></scroll-view>
+			<scroll-view scroll-y class="care-page__complete-body"><text class="care-page__complete-member">{{ completingTask.member.name }} · {{ completingTask.typeLabel }}</text><text class="care-page__complete-label">联系方式</text><view class="care-page__choice-row"><view v-for="method in methods" :key="method.value" class="care-page__choice" :class="{ 'care-page__choice--active': methodCode === method.value }" @tap="methodCode = method.value"><text>{{ method.label }}</text></view></view><text class="care-page__complete-label">跟进结果</text><view class="care-page__choice-row"><view v-for="result in results" :key="result.value" class="care-page__choice" :class="{ 'care-page__choice--active': resultCode === result.value }" @tap="resultCode = result.value"><text>{{ result.label }}</text></view></view><text class="care-page__complete-label">本次内容</text><textarea class="care-page__complete-textarea" :value="completeContent" placeholder="如实记录沟通内容和后续约定" @input="completeContent = $event.detail.value"  @touchstart.stop="merchantSwipeBack.cancel"/><view class="care-page__next-toggle" @tap="createNextTask = !createNextTask"><text>{{ createNextTask ? '已创建下一次跟进' : '创建下一次跟进' }}</text></view><view v-if="createNextTask"><text class="care-page__complete-label">下次跟进时间</text><input class="care-page__datetime-input" :value="nextPlannedAt" placeholder="例如 2026-07-31 10:00" @input="nextPlannedAt = $event.detail.value"  @touchstart.stop="merchantSwipeBack.cancel"/><text class="care-page__complete-label">下次负责人</text><view class="care-page__choice-row"><view v-for="assignee in assignees" :key="'next-' + assignee.value" class="care-page__choice" :class="{ 'care-page__choice--active': nextOwnerId === assignee.value }" @tap="nextOwnerId = assignee.value"><text>{{ assignee.label }}</text></view></view></view><view class="care-page__complete-submit" @tap="submitComplete"><text>{{ submitting ? '正在提交…' : '完成并保存记录' }}</text></view></scroll-view>
 		</view>
 		<view v-if="creatingTaskPanel" class="care-page__complete-panel">
 			<view class="care-page__complete-header"><text class="care-page__complete-cancel" @tap="closeCreateTask">取消</text><text class="care-page__complete-title">新增客情任务</text><text class="care-page__complete-placeholder"></text></view>
 			<scroll-view scroll-y class="care-page__complete-body">
 				<text class="care-page__complete-label care-page__complete-label--first">会员</text>
 				<view v-if="creatingForCustomer == null" class="care-page__record-member-picker">
-					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="taskMemberKeyword" placeholder="搜索要跟进的会员" @input="updateTaskMemberKeyword" @confirm="searchTaskMembers" /><view class="care-page__member-search-submit" @tap="searchTaskMembers"><text>{{ taskMemberLoading ? '查询中' : '查找' }}</text></view></view>
+					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="taskMemberKeyword" placeholder="搜索要跟进的会员" @input="updateTaskMemberKeyword" @confirm="searchTaskMembers"  @touchstart.stop="merchantSwipeBack.cancel"/><view class="care-page__member-search-submit" @tap="searchTaskMembers"><text>{{ taskMemberLoading ? '查询中' : '查找' }}</text></view></view>
 					<text v-if="taskMemberSearched && !taskMemberLoading && taskMemberCandidates.length === 0" class="care-page__record-member-empty">没有找到当前授权范围内的会员。</text>
 					<view v-for="member in taskMemberCandidates" :key="'task-member-' + String(member.memberId)" class="care-page__record-member-option" @tap="selectTaskMember(member)"><text class="care-page__record-member-name">{{ member.name }}</text><text class="care-page__record-member-copy">{{ member.phone || '未登记手机号' }}</text></view>
 				</view>
@@ -89,11 +89,11 @@
 				</view>
 				<text class="care-page__complete-label">计划跟进时间</text>
 				<view class="care-page__schedule-row">
-					<picker class="care-page__schedule-picker" mode="date" :value="plannedDate" @change="changeCreatePlannedDate"><view class="care-page__schedule-value" :class="{ 'care-page__schedule-value--placeholder': plannedDate.length === 0 }"><text>{{ plannedDate.length > 0 ? plannedDate : '选择日期' }}</text><text class="care-page__schedule-arrow">›</text></view></picker>
+					<picker class="care-page__schedule-picker" mode="date" :value="plannedDate" @change="changeCreatePlannedDate" @touchstart.stop="merchantSwipeBack.cancel"><view class="care-page__schedule-value" :class="{ 'care-page__schedule-value--placeholder': plannedDate.length === 0 }"><text>{{ plannedDate.length > 0 ? plannedDate : '选择日期' }}</text><text class="care-page__schedule-arrow">›</text></view></picker>
 					<view class="care-page__schedule-picker" @tap.stop="openCreateTimePicker"><view class="care-page__schedule-value" :class="{ 'care-page__schedule-value--placeholder': plannedTime.length === 0 }"><text>{{ plannedTime.length > 0 ? plannedTime : '选择时间' }}</text><text class="care-page__schedule-arrow">›</text></view></view>
 				</view>
 				<text class="care-page__complete-label">任务备注</text>
-				<textarea class="care-page__complete-textarea" :value="taskContent" placeholder="填写本次需要跟进的事项" @input="updateTaskContent" />
+				<textarea class="care-page__complete-textarea" :value="taskContent" placeholder="填写本次需要跟进的事项" @input="updateTaskContent"  @touchstart.stop="merchantSwipeBack.cancel"/>
 				<view class="care-page__photo-row"><view v-for="(photo, index) in taskPhotos" :key="'task-photo-' + index" class="care-page__photo-item"><image class="care-page__photo-image" :src="photo" mode="aspectFill" @tap="previewTaskPhoto(taskPhotos, index)" /><text class="care-page__photo-remove" role="button" :aria-label="'移除任务图片' + (index + 1)" @tap.stop="removeTaskPhoto(index)">×</text></view><view v-if="taskPhotos.length < 9" class="care-page__photo-add" role="button" aria-label="添加任务图片" @tap="chooseTaskPhotos"><text>＋</text><text>拍照/选图</text></view></view>
 				<text v-if="taskPhotoUploading" class="care-page__photo-uploading" role="status">正在上传任务图片…</text>
 				<text v-if="createFormMessage.length > 0" class="care-page__form-message">{{ createFormMessage }}</text>
@@ -105,7 +105,7 @@
 			<scroll-view scroll-y class="care-page__complete-body">
 				<text class="care-page__complete-label">会员</text>
 				<view v-if="recordSelectedMember == null" class="care-page__record-member-picker">
-					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="recordMemberKeyword" placeholder="搜索要记录客情的会员" @input="updateRecordMemberKeyword" @confirm="searchRecordMembers" /><view class="care-page__member-search-submit" @tap="searchRecordMembers"><text>{{ recordMemberLoading ? '查询中' : '查找' }}</text></view></view>
+					<view class="care-page__member-search care-page__member-search--picker"><text class="care-page__member-search-symbol">⌕</text><input class="care-page__member-search-input" type="text" :value="recordMemberKeyword" placeholder="搜索要记录客情的会员" @input="updateRecordMemberKeyword" @confirm="searchRecordMembers"  @touchstart.stop="merchantSwipeBack.cancel"/><view class="care-page__member-search-submit" @tap="searchRecordMembers"><text>{{ recordMemberLoading ? '查询中' : '查找' }}</text></view></view>
 					<text v-if="recordMemberSearched && !recordMemberLoading && recordMemberCandidates.length === 0" class="care-page__record-member-empty">没有找到当前授权范围内的会员。</text>
 					<view v-for="member in recordMemberCandidates" :key="member.memberId" class="care-page__record-member-option" @tap="selectRecordMember(member)"><text class="care-page__record-member-name">{{ member.name }}</text><text class="care-page__record-member-copy">{{ member.phone || '未登记手机号' }}</text></view>
 				</view>
@@ -117,9 +117,9 @@
 				<text class="care-page__complete-label">跟进结果</text>
 				<view class="care-page__choice-row"><view v-for="result in results" :key="'record-result-' + result.value" class="care-page__choice" :class="{ 'care-page__choice--active': recordResultCode === result.value }" @tap="recordResultCode = result.value"><text>{{ result.label }}</text></view></view>
 				<text class="care-page__complete-label">实际跟进时间</text>
-				<view class="care-page__schedule-row"><picker class="care-page__schedule-picker" mode="date" :value="recordDate" @change="changeRecordDate"><view class="care-page__schedule-value"><text>{{ recordDate }}</text><text class="care-page__schedule-arrow">›</text></view></picker><picker class="care-page__schedule-picker" mode="time" :value="recordTime" @change="changeRecordTime"><view class="care-page__schedule-value"><text>{{ recordTime }}</text><text class="care-page__schedule-arrow">›</text></view></picker></view>
+				<view class="care-page__schedule-row"><picker class="care-page__schedule-picker" mode="date" :value="recordDate" @change="changeRecordDate" @touchstart.stop="merchantSwipeBack.cancel"><view class="care-page__schedule-value"><text>{{ recordDate }}</text><text class="care-page__schedule-arrow">›</text></view></picker><picker class="care-page__schedule-picker" mode="time" :value="recordTime" @change="changeRecordTime" @touchstart.stop="merchantSwipeBack.cancel"><view class="care-page__schedule-value"><text>{{ recordTime }}</text><text class="care-page__schedule-arrow">›</text></view></picker></view>
 				<text class="care-page__complete-label">本次内容</text>
-				<textarea class="care-page__complete-textarea" :value="recordContent" placeholder="如实记录沟通内容和后续约定" @input="updateRecordContent" />
+				<textarea class="care-page__complete-textarea" :value="recordContent" placeholder="如实记录沟通内容和后续约定" @input="updateRecordContent"  @touchstart.stop="merchantSwipeBack.cancel"/>
 				<text class="care-page__complete-label">服务前照片</text>
 				<view class="care-page__photo-row"><view v-for="(photo, index) in recordBeforePhotos" :key="'before-' + index" class="care-page__photo-item"><image class="care-page__photo-image" :src="photo" mode="aspectFill" /><text class="care-page__photo-remove" @tap="removeRecordPhoto('before', index)">×</text></view><view v-if="recordBeforePhotos.length < 9" class="care-page__photo-add" @tap="chooseRecordPhotos('before')"><text>＋</text><text>拍照/选图</text></view></view>
 				<text class="care-page__complete-label">服务后照片</text>
@@ -142,6 +142,7 @@
 </template>
 
 <script setup lang="uts">
+	import { useMerchantSwipeBack, returnByMerchantSwipe } from '../../../shared/platform/merchant-swipe-back.uts'
   import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { completeMobileCustomerCareTask, createMobileCustomerCareRecord, createMobileCustomerCareTask, deleteMobileCustomerCareTask, queryMobileCustomerCare, startMobileCustomerCareTask, uploadMobileCustomerCarePhoto } from '../../../shared/api/mobile-customer-care-client.uts'
 	import { callMobilePhone, currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
@@ -526,6 +527,21 @@
 		}
 		return result
 	}
+
+	// Swipe/back closes only one local layer; no submit or business command is triggered.
+	const merchantSwipeBack = useMerchantSwipeBack(() : boolean => {
+		if (taskActionSubmitting.value || submitting.value || creatingTask.value || taskPhotoUploading.value || recordSubmitting.value || recordPhotoUploading.value) return true
+		if (showCreateTimePicker.value) { closeCreateTimePicker(); return true }
+		if (deletingTask.value != null) { cancelDeleteTask(); return true }
+		if (creatingRecord.value) { closeCreateRecord(); return true }
+		if (creatingTaskPanel.value) { closeCreateTask(); return true }
+		if (completingTask.value != null) { closeComplete(); return true }
+		if (selectedTask.value != null) { closeTaskDetail(); return true }
+		return false
+	}, () : void => { returnByMerchantSwipe('workbench') })
+	// Page lifecycle hooks stay in .uvue; shared UTS has no page-hook imports.
+	onHide(() => { merchantSwipeBack.cancel() })
+	onUnload(() => { merchantSwipeBack.cancel() })
 </script>
 
 <style>
