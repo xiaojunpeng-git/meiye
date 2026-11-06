@@ -1,0 +1,23 @@
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/services/system/config/SystemConfigServices.php
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/controller/admin/v1/system/config/SystemConfig.php
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/services/order/PlatformOrderCenterActionServices.php
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/services/order/PlatformOrderCenterReadServices.php
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/services/cashier/v3/CashierV3CommandGatewayServices.php
+No syntax errors detected in /www/backup/data-r5-c75e0d1a-008/payload/app/services/order/PlatformDocumentEditPolicy.php
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+tar: app/services/system/config/SystemConfigServices.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: app/controller/admin/v1/system/config/SystemConfig.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: app/services/order/PlatformOrderCenterActionServices.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: app/services/order/PlatformOrderCenterReadServices.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: app/services/cashier/v3/CashierV3CommandGatewayServices.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: app/services/order/PlatformDocumentEditPolicy.php: implausibly old time stamp 1970-01-01 08:00:00
+tar: database/upgrades/20261106_platform_document_edit_switch.sql: implausibly old time stamp 1970-01-01 08:00:00
+tar: public/view_cashier_v3/index.html: implausibly old time stamp 1970-01-01 08:00:00
+tar: public/view_cashier_v3/assets/index-a27217f6.js: implausibly old time stamp 1970-01-01 08:00:00
+tar: public/view_cashier_v3/assets/index-8179a57e.css: implausibly old time stamp 1970-01-01 08:00:00
+tar: public/view_cashier_v3/assets/HumanEfficiencyView-167487b7.js: implausibly old time stamp 1970-01-01 08:00:00

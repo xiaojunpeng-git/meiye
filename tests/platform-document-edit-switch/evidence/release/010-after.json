@@ -1,0 +1,32 @@
+{
+  "files": {
+    "app/controller/admin/v1/system/config/SystemConfig.php": "7ef3ced9b1c69bbc6165f1d314860a2fcfebe209b443bb054c3a20714f5a00c6",
+    "app/services/cashier/v3/CashierV3CommandGatewayServices.php": "08e82967f30064c9d38ac42e884b9bc4389332bf27851a3f2ce4d663130fc0df",
+    "app/services/cashier/v3/settlement/CashierV3CheckoutMemberNotificationServices.php": "7284be5ee086258e02eb38eda9a9a56173e4d76a03b26382296ea45428af625b",
+    "app/services/order/PlatformDocumentEditPolicy.php": "e61a1ad93dd71f4563b2913ac191935fab4f8a4418715a8f9b9a7ce5831c5fc6",
+    "app/services/order/PlatformOrderCenterActionServices.php": "839f4938d1af00704aa4be32c844843558d792412ae41fddef537fbb3dcc90e8",
+    "app/services/order/PlatformOrderCenterReadServices.php": "76e37bee4e103ba9ce398ee683345ee0b0dfef1e790df1ef33bf700274593d85",
+    "app/services/system/config/SystemConfigServices.php": "f75baa62e065019526241939cfdf8a38bc9970806691835eedd8704b64044b6c",
+    "database/upgrades/20261106_platform_document_edit_switch.sql": "2ba15ca2c609b8ed2a6de5743cf030f37e31f18797ef6210201711120207dd54",
+    "public/system.html": "ee3e910db84ae5c2b7784d67a4c9dcb3e2775a9545977b79bbbe4d5c0f4b8bd4",
+    "public/view_cashier_v3/assets/HumanEfficiencyView-167487b7.js": "de50bf92fda73730605f06de3b6a47d7ecc4823bbdc0c66a355bf9466a845326",
+    "public/view_cashier_v3/assets/HumanEfficiencyView-522883cf.css": "522883cf9376ed4f1243ab25f7bd8999958bf6bc52288c41f880286b2d1e05a0",
+    "public/view_cashier_v3/assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "public/view_cashier_v3/assets/index-8179a57e.css": "8179a57ed4b4d5b294c692ee1d75c8e546a1cd8765b2db402a99b8ec25dff39c",
+    "public/view_cashier_v3/assets/index-a27217f6.js": "c37441acc10cd5b5f742d4ca446f78f2841d30d82b38757b1abe405dabd008a8",
+    "public/view_cashier_v3/assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "public/view_cashier_v3/audio/reservation-five-minutes.mp3": "d406256a42cca2496461a5d18fdce93472b42b5574fdd8b6435fde12bfad94a4",
+    "public/view_cashier_v3/audio/reservation-time-up.mp3": "c64fdb466e2aceb70fde3e6f173c9d223b7024278ca1383669241716b36acfd8",
+    "public/view_cashier_v3/index.html": "523b7b143280dffa0b4a04912cdd127d1436c1d57cc5e58625a9eac8b15454dc",
+    "public/view_fund_v3/index.html": "66f76e25a8151c14482b4b4b7ec022f87a3f4f515e53b84061950e9ed42aa380",
+    "public/view_inventory_v3/index.html": "a720af8526c77734b90e0ec844b516bb51ce525ff8cdc8a1a5b16ce2e25094b1",
+    "public/view_mobile_v3/index.html": "cf96a655e91f6e83936262b82221a8709bd0666f5295951c0d1e55896bb7c7d1"
+  },
+  "environment": "979db85a10b371545219191b4e0faaf2ada5f47afa73019ab95241a1872c8013",
+  "config": [
+    {
+      "id": 855,
+      "value": "1"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+PASS cloned payload and server-result filters; permission and loading gates
+PASS rejects foreign frame/origin; fixed personnel route
+PASS pagination preserves submitted query and excludes injected identity

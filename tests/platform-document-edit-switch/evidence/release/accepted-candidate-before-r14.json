@@ -1,0 +1,32 @@
+{
+  "base": "334d91a2e03ab631e078da57ca7584ac4e164f8a",
+  "tree": "b4a1eddd4ce61f8c8f880cbf76740ce9f3e43c81",
+  "patchCommit": "185447d01ff47a19eacfd1308e33494a2a5a8d41",
+  "preservedGatewaySource": "d38109fe5d7686052fa2c579f95d87ec40c7da3f",
+  "buildInput": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk",
+  "status": "product manager supplemental acceptance passed",
+  "patchSHA256": "8ccd3544f1c505e61a1495e784b18844e1788434a34d0aea1e83924b4a591398",
+  "preservedNotificationSource": "6b85d3f1dd5b51e51055bc06698510190fbde611",
+  "buildJS": "index-2cc0679a.js",
+  "regressions": {
+    "phpAssertions": 271,
+    "frontendActionEntries": 243,
+    "employeeDashboard": "PASS",
+    "notification": "PASS",
+    "build": "PASS"
+  },
+  "buildFiles": {
+    "index.html": "8ee882b34f846f6b6531738db8258d2e7c721dfb5f28470db0bc9a0a94ca474e",
+    "audio/reservation-five-minutes.mp3": "d406256a42cca2496461a5d18fdce93472b42b5574fdd8b6435fde12bfad94a4",
+    "audio/reservation-time-up.mp3": "c64fdb466e2aceb70fde3e6f173c9d223b7024278ca1383669241716b36acfd8",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "assets/index-2cc0679a.js": "c1056c8a3691799c6c8e7e0dcaab2c30b8e4cb747032e1d379e5bc395c84bcef",
+    "assets/index-a35149e4.css": "a35149e4d99ed029ef69ade4ceee730336352bdeda05fb7fe5933aff5e218f70",
+    "assets/HumanEfficiencyView-440f0df3.js": "ee56bdd62579fd0143a869c9953e0084e9e12d6c52f0a29907a3b4f0379283d6",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/HumanEfficiencyView-522883cf.css": "522883cf9376ed4f1243ab25f7bd8999958bf6bc52288c41f880286b2d1e05a0"
+  },
+  "releaseCommit": "6e7d14bbf16794d9f0fd2ff81ae7759c01eb83dd",
+  "baselineCommit": "54d1326332e6cd915da3332c161b50696a715a00",
+  "branch": "release/platform-document-edit-20261106"
+}

@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "commit": "c75e0d1a1886c0b508aeab806994f0cec0475b8c",
+  "publicAssets": {
+    "index": "523b7b143280dffa0b4a04912cdd127d1436c1d57cc5e58625a9eac8b15454dc",
+    "/view_cashier_v3/assets/index-a27217f6.js": "c37441acc10cd5b5f742d4ca446f78f2841d30d82b38757b1abe405dabd008a8",
+    "/view_cashier_v3/assets/index-8179a57e.css": "8179a57ed4b4d5b294c692ee1d75c8e546a1cd8765b2db402a99b8ec25dff39c"
+  },
+  "runtime": {
+    "result": "PASS",
+    "manifestActions": 243,
+    "settingsField": true,
+    "scopeSwitch": true,
+    "queryAndDetail": true,
+    "blockedMutation": true,
+    "defaultEnabledAfterTest": true,
+    "businessWrites": false,
+    "otherConnectionsSeeEnabled": true
+  },
+  "preserved": {
+    "result": "PASS",
+    "activeEmployees": 1045,
+    "actualBeauticianEmployees": 703,
+    "cohortChecks": 20,
+    "exportColumns": 35,
+    "listAndExportCount": 1223,
+    "exportPageRows": 50,
+    "deniedExistingIdentity": 162,
+    "menuParentCorrect": true,
+    "editorFieldsReconciled": true,
+    "memberPermissionPreserved": true,
+    "businessWrites": false
+  },
+  "backup": "/www/backup/data-r5-c75e0d1a-rh"
+}

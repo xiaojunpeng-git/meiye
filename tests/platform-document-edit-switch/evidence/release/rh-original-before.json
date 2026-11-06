@@ -1,0 +1,15 @@
+{
+  "files": {
+    "app/services/system/config/SystemConfigServices.php": "8636005d7cb95c548f06318c04e6c3f0d4e437088a0acee155838e5a10f5e69f",
+    "app/controller/admin/v1/system/config/SystemConfig.php": "65da4db360847d973f509dcfbc2893bb3a4172613641a782066c1a1146211263",
+    "app/services/order/PlatformOrderCenterActionServices.php": "4ed261a1b4f54e4396048cae688b0de8f2c846f01f9c5a478c3b8e6d77afa1ae",
+    "app/services/order/PlatformOrderCenterReadServices.php": "d462d010cf3193e4ed2575c1da9a4c63ad941a1a9870990f0bba24ffe02fb8ed",
+    "app/services/cashier/v3/CashierV3CommandGatewayServices.php": "160cc593cbbd38f6585d37404b60d27eef07bf2fe3edb51f9e2aa867a35c8c15",
+    "app/services/order/PlatformDocumentEditPolicy.php": null,
+    "database/upgrades/20261106_platform_document_edit_switch.sql": null,
+    "public/system.html": "ee3e910db84ae5c2b7784d67a4c9dcb3e2775a9545977b79bbbe4d5c0f4b8bd4",
+    "public/view_cashier_v3/index.html": "85450a89b6e7345a5f7d86305963a767a19df23a59015bf23c48354457161932"
+  },
+  "cashierEntry": "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\" />\n    <title>\u65b0\u6536\u94f6\u53f0</title>\n    <script type=\"module\" crossorigin src=\"/view_cashier_v3/assets/index-e99f2a20.js\"></script>\n    <link rel=\"stylesheet\" href=\"/view_cashier_v3/assets/index-7c10c9f5.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n    \n  </body>\n</html>\n",
+  "config": []
+}

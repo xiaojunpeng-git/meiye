@@ -1,0 +1,19 @@
+{
+  "files": {
+    "app/controller/admin/v1/system/config/SystemConfig.php": "b378757955e34f9a3b07a4009a515f1c850380f38f807e7db8520fdefa529e83",
+    "app/services/cashier/v3/CashierV3CommandGatewayServices.php": "160cc593cbbd38f6585d37404b60d27eef07bf2fe3edb51f9e2aa867a35c8c15",
+    "app/services/cashier/v3/settlement/CashierV3CheckoutMemberNotificationServices.php": "7284be5ee086258e02eb38eda9a9a56173e4d76a03b26382296ea45428af625b",
+    "app/services/order/PlatformDocumentEditPolicy.php": null,
+    "app/services/order/PlatformOrderCenterActionServices.php": "4ed261a1b4f54e4396048cae688b0de8f2c846f01f9c5a478c3b8e6d77afa1ae",
+    "app/services/order/PlatformOrderCenterReadServices.php": "d462d010cf3193e4ed2575c1da9a4c63ad941a1a9870990f0bba24ffe02fb8ed",
+    "app/services/system/config/SystemConfigServices.php": "b70b3e1c64cd9d1802271a6308eebca7316926025657abbb3fb262ce5c251d20",
+    "database/upgrades/20261106_platform_document_edit_switch.sql": null,
+    "public/system.html": "ee3e910db84ae5c2b7784d67a4c9dcb3e2775a9545977b79bbbe4d5c0f4b8bd4",
+    "public/view_cashier_v3/index.html": "4f4a9c5980a7c4f44a7b10706c48325832299acf26415f1d3ba61c53d0c1d72f",
+    "public/view_fund_v3/index.html": "66f76e25a8151c14482b4b4b7ec022f87a3f4f515e53b84061950e9ed42aa380",
+    "public/view_inventory_v3/index.html": "a720af8526c77734b90e0ec844b516bb51ce525ff8cdc8a1a5b16ce2e25094b1",
+    "public/view_mobile_v3/index.html": "cf96a655e91f6e83936262b82221a8709bd0666f5295951c0d1e55896bb7c7d1"
+  },
+  "environment": "9532307b4ddb82755e064b33e33f1c5cf56e6c67253e6b48926497fcd7c6a92c",
+  "config": []
+}

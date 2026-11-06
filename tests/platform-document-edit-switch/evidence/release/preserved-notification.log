@@ -1,0 +1,9 @@
+PASS committed writeoff and balance debit each request one notification
+PASS writeoff reads committed remaining rights
+PASS balance uses actual debit and post-balance
+PASS disabled switches send nothing
+PASS no committed wallet debit sends no balance message
+PASS unsettled sale cannot request balance notice
+PASS notification dispatch occurs only after the checkout transaction closes
+PASS command receipt replay never requests a second delivery
+PASS runtime delivery reads only local notification switches

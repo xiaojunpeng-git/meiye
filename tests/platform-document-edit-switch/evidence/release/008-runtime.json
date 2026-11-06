@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "manifestActions": 243,
+  "settingsField": true,
+  "scopeSwitch": true,
+  "queryAndDetail": true,
+  "blockedMutation": true,
+  "defaultEnabledAfterTest": true,
+  "businessWrites": false,
+  "otherConnectionsSeeEnabled": true
+}

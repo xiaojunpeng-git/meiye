@@ -1,0 +1,26 @@
+{
+  "base": "16eba79a7",
+  "tree": "05bfad481c8adb9152ab582c7f9843aff923ed65",
+  "patchCommit": "185447d01ff47a19eacfd1308e33494a2a5a8d41",
+  "preservedGatewaySource": "d38109fe5d7686052fa2c579f95d87ec40c7da3f",
+  "buildInput": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-k61bvjv_",
+  "status": "new unified candidate accepted",
+  "patchSHA256": "7ca3e4ebd05883e5f3b36a9cb3990116c1b9e18637e3a2091ac4c0aa2073d149",
+  "buildJS": "index-a27217f6.js",
+  "buildFiles": {
+    "index.html": "523b7b143280dffa0b4a04912cdd127d1436c1d57cc5e58625a9eac8b15454dc",
+    "audio/reservation-five-minutes.mp3": "d406256a42cca2496461a5d18fdce93472b42b5574fdd8b6435fde12bfad94a4",
+    "audio/reservation-time-up.mp3": "c64fdb466e2aceb70fde3e6f173c9d223b7024278ca1383669241716b36acfd8",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "assets/index-a27217f6.js": "c37441acc10cd5b5f742d4ca446f78f2841d30d82b38757b1abe405dabd008a8",
+    "assets/index-8179a57e.css": "8179a57ed4b4d5b294c692ee1d75c8e546a1cd8765b2db402a99b8ec25dff39c",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/HumanEfficiencyView-167487b7.js": "de50bf92fda73730605f06de3b6a47d7ecc4823bbdc0c66a355bf9466a845326",
+    "assets/HumanEfficiencyView-522883cf.css": "522883cf9376ed4f1243ab25f7bd8999958bf6bc52288c41f880286b2d1e05a0"
+  },
+  "preservedNotificationSource": "6b85d3f1dd5b51e51055bc06698510190fbde611",
+  "reasonForSupplement": "All three live sites changed after acceptance: R14 service position exclusion/labor fee, verified canonical rebuild matches live entry.",
+  "releaseCommit": "c75e0d1a1886c0b508aeab806994f0cec0475b8c",
+  "baselineCommit": "994b5f325a7027b356d0936512102690df96ab99",
+  "branch": "release/platform-document-edit-r14-20261106"
+}

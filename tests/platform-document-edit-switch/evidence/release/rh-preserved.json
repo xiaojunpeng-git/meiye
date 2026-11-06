@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "activeEmployees": 1045,
+  "actualBeauticianEmployees": 703,
+  "cohortChecks": 20,
+  "exportColumns": 35,
+  "listAndExportCount": 1223,
+  "exportPageRows": 50,
+  "deniedExistingIdentity": 162,
+  "menuParentCorrect": true,
+  "editorFieldsReconciled": true,
+  "memberPermissionPreserved": true,
+  "businessWrites": false
+}

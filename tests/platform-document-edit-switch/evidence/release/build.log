@@ -1,0 +1,27 @@
+
+> mohe-cashier-v3@0.1.0 prebuild
+> node ../../tests/cashier-v3/js/entitlement-experience-checkout-snapshot.mjs
+
+ENTITLEMENT_EXPERIENCE_CHECKOUT_SNAPSHOT=PASS checks=70
+
+> mohe-cashier-v3@0.1.0 build
+> vite build --outDir /var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier
+
+vite v4.5.14 building for production...
+transforming...
+✓ 2087 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/index.html                                   0.48 kB │ gzip:   0.33 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/login-beauty-quiet-826510a5.png   1,159.06 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/HumanEfficiencyView-522883cf.css     12.14 kB │ gzip:   3.08 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/index-a35149e4.css                  743.80 kB │ gzip: 112.92 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/HumanEfficiencyView-440f0df3.js      19.42 kB │ gzip:   7.77 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/exceljs.min-a0d233a6.js             939.05 kB │ gzip: 269.76 kB
+../../../../../../../../../var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r5-fixed-build-zxn0awkk/compiled-cashier/assets/index-2cc0679a.js                 2,358.41 kB │ gzip: 696.43 kB
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.31s
