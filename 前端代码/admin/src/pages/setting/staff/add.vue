@@ -32,9 +32,6 @@
                     empty-label="请选择所属组织"
                     @change="onOrganizationScopePick"
                   />
-                  <div v-if="organizationMemberships.length > 1" class="form-tip">
-                    已有组织关系：{{ organizationMembershipLabel }}
-                  </div>
                 </FormItem>
               </Col>
               <Col :span="12">
@@ -800,12 +797,6 @@ export default {
     },
     hasAppointmentStore() {
       return Number(this.formInline.store_id) > 0;
-    },
-    organizationMembershipLabel() {
-      return this.organizationMemberships
-        .map((item) => String(item.org_name || '').trim())
-        .filter(Boolean)
-        .join('、');
     },
     hasMobileCapablePosition() {
       const selected = new Set((this.formInline.position_ids || []).map((id) => Number(id)));

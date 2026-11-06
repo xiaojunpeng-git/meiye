@@ -364,15 +364,17 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $oe = Db::name('organization_employee')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
+            ->where('status', 1)
             ->order('id', 'desc')
             ->find();
         $orgId = $oe ? (int)$oe['org_id'] : 0;
-        // 员工可以同时归属多个组织；org_id 继续作为兼容的主组织回显，
-        // 另返回完整关系供列表/编辑页说明，避免把最新一条误认为唯一归属。
+        // 所属组织执行“一人一个当前组织”。数组字段继续保留接口兼容，但只
+        // 返回当前有效关系；数据权限和组织管理授权由独立字段/关系表达。
         $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
             ->leftJoin('organization o', 'o.id = oe.org_id')
             ->where('oe.employee_id', $employeeId)
             ->where('oe.is_del', 0)
+            ->where('oe.status', 1)
             ->where('o.is_del', 0)
             ->field('oe.id,oe.org_id,oe.job_title,o.name as org_name')
             ->order('oe.id', 'asc')

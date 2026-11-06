@@ -109,6 +109,49 @@ class OrganizationEmployeeServices extends BaseServices
             $hasSort = $this->hasColumn('sort');
             $hasStatus = $this->hasColumn('status');
 
+            // 所属组织是人员当前归属，不是数据权限或管理授权。切换时必须在
+            // 同一事务内关闭其他名册关系，避免编辑一次就累积一个“所属组织”；
+            // organization_admin 与门店任职由各自流程维护，此处不能顺带撤销。
+            $otherMembershipFields = 'id,org_id,job_title,is_del' . ($hasStatus ? ',status' : '');
+            $otherMemberships = Db::name('organization_employee')
+                ->where('employee_id', $employeeId)
+                ->where('org_id', '<>', $orgId)
+                ->where('is_del', 0)
+                ->lock(true)
+                ->field($otherMembershipFields)
+                ->select()
+                ->toArray();
+            if ($otherMemberships) {
+                $close = ['is_del' => 1, 'update_time' => $now];
+                if ($hasStatus) {
+                    $close['status'] = 0;
+                }
+                $otherIds = array_map(static fn(array $item): int => (int)$item['id'], $otherMemberships);
+                Db::name('organization_employee')->whereIn('id', $otherIds)->update($close);
+                foreach ($otherMemberships as $membership) {
+                    Db::name('employee_change_log')->insert([
+                        'employee_id' => $employeeId,
+                        'action' => 'organization_employee_replace',
+                        'target_type' => 'organization_employee',
+                        'target_id' => (int)$membership['id'],
+                        'source' => (string)($operatorContext['source'] ?? 'admin'),
+                        'before_data' => json_encode($membership, JSON_UNESCAPED_UNICODE) ?: '',
+                        'after_data' => json_encode([
+                            'is_del' => 1,
+                            'status' => 0,
+                            'replacement_org_id' => $orgId,
+                        ], JSON_UNESCAPED_UNICODE) ?: '',
+                        'reason' => (string)($operatorContext['reason'] ?? '变更当前所属组织'),
+                        'operator_type' => 'admin',
+                        'operator_id' => (int)($operatorContext['operator_id'] ?? 0),
+                        'operator_name' => (string)($operatorContext['operator_name'] ?? ''),
+                        'operator_ip' => (string)($operatorContext['operator_ip'] ?? ''),
+                        'request_id' => (string)($operatorContext['request_id'] ?? ''),
+                        'add_time' => $now,
+                    ]);
+                }
+            }
+
             $row = Db::name('organization_employee')
                 ->where('org_id', $orgId)
                 ->where('employee_id', $employeeId)
@@ -169,7 +212,12 @@ class OrganizationEmployeeServices extends BaseServices
                 'add_time' => $now,
             ]);
 
-            return ['id' => $id, 'employee_id' => $employeeId, 'org_id' => $orgId];
+            return [
+                'id' => $id,
+                'employee_id' => $employeeId,
+                'org_id' => $orgId,
+                'replaced_org_employee_ids' => $otherIds ?? [],
+            ];
         };
         if (!empty($options['use_outer_transaction'])) {
             return $runner();
