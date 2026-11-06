@@ -298,13 +298,8 @@ try {
     $voidAllocations = $loadPaymentAllocations($stores[0], $memberNew, $firstDay, $secondDay);
     $storedVoidFacts = (int)Db::name('cashier_v3_payment_sale_allocation_fact')
         ->where('tenant_id', '0')->where('order_id', $voidOrderId)->count();
-    phaseThreeMysqlOk('void preserves the original-period amount and appends a dated negative adjustment',
-        $storedVoidFacts === 2 && count($voidAllocations) === 2
-        && (string)$voidAllocations[0]['allocation_fact_id'] === 'phase3-void-forward'
-        && (int)$voidAllocations[0]['amount_cents'] === 500
-        && (string)$voidAllocations[1]['allocation_fact_id'] === 'phase3-void-reversal'
-        && (int)$voidAllocations[1]['amount_cents'] === -500
-        && (string)$voidAllocations[1]['reversal_type'] === 'void');
+    phaseThreeMysqlOk('void keeps both audit facts while excluding the order from operating totals',
+        $storedVoidFacts === 2 && $voidAllocations === []);
     $context = [
         'tenant_id' => $tenant, 'store_id' => $stores[0], 'store_ids' => [$stores[0]],
         'operator_id' => 7, 'operator_name' => '集成测试', 'authorization_mode' => 'stores',
@@ -468,6 +463,55 @@ try {
         ]);
     }
 
+    // Current-category reports resolve the live platform product identity;
+    // a historical category snapshot alone must never make a fact six-dimensional.
+    $matrixProducts = [
+        88000001 => ['direct', '矩阵项目A'], 88000002 => ['direct', '矩阵项目B'],
+        88000101 => ['card', '矩阵卡内项目C'], 88000102 => ['card', '矩阵卡内项目D'],
+        88000201 => ['performance', '矩阵新老客项目'],
+        88000320 => ['tier', '矩阵分级项目LOW'],
+        88000321 => ['tier', '矩阵分级项目BOUNDARY'],
+        88000322 => ['tier', '矩阵分级项目NEGATIVE'],
+        88000400 => ['rank', '矩阵排名项目1'], 88000401 => ['rank', '矩阵排名项目2'],
+    ];
+    foreach ($matrixProducts as $productId => [$categoryKey, $productName]) {
+        Db::name('store_product')->insert([
+            'id' => $productId, 'pid' => 0, 'type' => 0, 'relation_id' => 0,
+            'product_type' => 6, 'store_name' => $productName,
+            'cate_id' => (string)$matrixCategories[$categoryKey],
+        ]);
+    }
+    $outsideCategoryId = (int)Db::name('store_product_category')->insertGetId($categorySeed + [
+        'pid' => 0, 'cate_name' => '矩阵非六维', 'path' => '', 'level' => 0,
+    ]);
+    foreach ([
+        [88000500, $matrixCategories['direct'], '矩阵六维现金项目'],
+        [88000901, $outsideCategoryId, '矩阵生美卡项'],
+    ] as [$productId, $categoryId, $productName]) {
+        Db::name('store_product')->insert([
+            'id' => $productId, 'pid' => 0, 'type' => 0, 'relation_id' => 0,
+            'product_type' => 6, 'store_name' => $productName, 'cate_id' => (string)$categoryId,
+        ]);
+    }
+    $positionIds = [];
+    foreach (['操作师', '咨询师'] as $positionName) {
+        $positionIds[$positionName] = (int)(Db::name('position')->where('name', $positionName)
+            ->where('status', 1)->value('id') ?? 0);
+        if ($positionIds[$positionName] <= 0) {
+            $positionIds[$positionName] = (int)Db::name('position')->insertGetId([
+                'name' => $positionName, 'status' => 1,
+            ]);
+        }
+    }
+    foreach ([990001 => '操作师', 990002 => '咨询师'] as $employeeId => $positionName) {
+        Db::name('staff_job_position')->insert([
+            'employee_id' => $employeeId, 'store_id' => (int)$matrixStores[0]['id'],
+            'staff_id' => 0, 'position_id' => $positionIds[$positionName],
+            'status' => 1, 'is_del' => 0, 'end_time' => 0,
+            'request_token' => $matrixFixturePrefix . '-POSITION-' . $employeeId,
+        ]);
+    }
+
     $saleRows = [];
     $insertSale = static function (
         string $suffix,
@@ -614,7 +658,10 @@ try {
             'labor_amount_cents' => 0, 'labor_fee_amount_cents' => 0,
             'labor_mode' => 'project_rule', 'primary_craftsman_staff_id' => 0,
             'craftsmen_snapshot_json' => json_encode([
-                ['employeeId' => 990001, 'employeeName' => '矩阵操作师'],
+                ['employee_id' => 990001, 'store_id' => (int)$store['id'],
+                    'staff_name_snapshot' => '矩阵操作师'],
+                ['employee_id' => 990002, 'store_id' => (int)$store['id'],
+                    'staff_name_snapshot' => '矩阵咨询师'],
             ], JSON_UNESCAPED_UNICODE),
             'service_status' => 'completed',
         ];
@@ -725,6 +772,19 @@ try {
         'rule_code_snapshot' => 'phase3_matrix', 'rule_name_snapshot' => '矩阵消耗业绩',
         'rule_version_snapshot' => 'phase3-matrix-v1',
     ]);
+    $salespersonFact = Db::name('cashier_v3_performance_fact')
+        ->where('fact_id', $matrixFixturePrefix . '-PERFORMANCE-DIRECT-A')->find();
+    unset($salespersonFact['id']);
+    $salespersonFact['fact_id'] = $matrixFixturePrefix . '-SALESPERSON-DIRECT-A';
+    $salespersonFact['natural_key'] = $matrixFixturePrefix . '-SALESPERSON-NATURAL-DIRECT-A';
+    $salespersonFact['command_idempotency_key'] = $matrixFixturePrefix . '-SALESPERSON-CMD-DIRECT-A';
+    $salespersonFact['immutable_fingerprint'] = hash('sha256', $salespersonFact['fact_id']);
+    $salespersonFact['source_line_id'] = (string)$directA['source_line_id'];
+    $salespersonFact['performance_type'] = 'sales_performance_allocated';
+    $salespersonFact['employee_id'] = 990002;
+    $salespersonFact['employee_name_snapshot'] = '矩阵咨询师';
+    $salespersonFact['role_snapshot'] = 'salesperson';
+    Db::name('cashier_v3_performance_fact')->insert($salespersonFact);
     Db::name('cashier_v3_card_operation')->insert([
         'operation_id' => $matrixFixturePrefix . '-CARD-UPGRADE',
         'operation_no' => $matrixFixturePrefix . '-CARD-UPGRADE-NO',
@@ -789,6 +849,62 @@ try {
         'payment_fact_ids_json' => json_encode([$refundAllocation['payment_fact_id']]),
         'command_idempotency_key' => $matrixFixturePrefix . '-REFUND-REVERSAL-CMD',
         'status' => 'succeeded', 'occurred_at' => (int)$refundAllocation['occurred_at'], 'created_at' => time(),
+    ]);
+
+    $standaloneOperationId = $matrixFixturePrefix . '-STANDALONE-REFUND';
+    $standaloneAt = (int)strtotime('2098-02-12 13:00:00 Asia/Shanghai');
+    $standaloneOperation = Db::name('cashier_v3_order_lifecycle_operation')
+        ->where('operation_id', $matrixFixturePrefix . '-REFUND-OP')->find();
+    unset($standaloneOperation['id']);
+    $standaloneOperation['operation_id'] = $standaloneOperationId;
+    $standaloneOperation['operation_no'] = $standaloneOperationId;
+    $standaloneOperation['source_type'] = 'document';
+    $standaloneOperation['source_order_id'] = (string)$directA['order_id'];
+    $standaloneOperation['source_order_no_snapshot'] = (string)$directA['order_no_snapshot'];
+    $standaloneOperation['business_event_no'] = $matrixFixturePrefix . '-STANDALONE-REFUND-EVENT';
+    $standaloneOperation['command_idempotency_key'] = $standaloneOperationId . '-CMD';
+    $standaloneOperation['immutable_fingerprint'] = hash('sha256', $standaloneOperationId);
+    $standaloneOperation['business_date'] = '2098-02-12';
+    $standaloneOperation['occurred_at'] = $standaloneAt;
+    $standaloneOperation['settled_at'] = $standaloneAt;
+    $standaloneOperation['recorded_at'] = $standaloneAt;
+    Db::name('cashier_v3_order_lifecycle_operation')->insert($standaloneOperation);
+    Db::name('cashier_v3_refund_adjustment')->insert([
+        'adjustment_id' => $standaloneOperationId . '-ADJUST', 'operation_id' => $standaloneOperationId,
+        'command_idempotency_key' => $standaloneOperationId . '-CMD', 'tenant_id' => '0',
+        'store_id' => (int)$matrixStores[0]['id'], 'member_id' => $directMember, 'operator_id' => 0,
+        'target_type' => 'document', 'source_order_id' => (string)$directA['order_id'],
+        'source_line_id' => (string)$directA['source_line_id'],
+        'source_order_no_snapshot' => (string)$directA['order_no_snapshot'],
+        'source_sales_order_id' => (string)$directA['order_id'],
+        'source_sales_line_id' => (string)$directA['source_line_id'],
+        'target_name_snapshot' => '矩阵项目A', 'refund_amount_cents' => 2000,
+        'balance_kind' => 'cash', 'remaining_before_cents' => 10000,
+        'remaining_after_cents' => 8000, 'reason_snapshot' => '矩阵独立退款',
+        'business_date' => '2098-02-12', 'occurred_at' => $standaloneAt,
+        'settled_at' => $standaloneAt, 'recorded_at' => $standaloneAt, 'status' => 'effective',
+    ]);
+    Db::name('cashier_v3_payment_fact')->insert([
+        'fact_id' => $standaloneOperationId . '-PAY',
+        'business_event_no' => $standaloneOperation['business_event_no'],
+        'fact_type' => 'manual_refund_adjustment', 'fact_direction' => 'adjustment',
+        'natural_key' => $standaloneOperationId . '-PAY-NATURAL',
+        'command_idempotency_key' => $standaloneOperationId . '-PAY-CMD',
+        'immutable_fingerprint' => hash('sha256', $standaloneOperationId . '-PAY'),
+        'fact_version' => 1, 'status' => 'effective', 'tenant_id' => '0',
+        'organization_id' => (string)$directA['organization_id'],
+        'organization_path_snapshot' => (string)$directA['organization_path_snapshot'],
+        'store_id' => (int)$directA['store_id'],
+        'store_name_snapshot' => (string)$directA['store_name_snapshot'],
+        'member_id' => $directMember, 'operator_id' => 0,
+        'business_date' => '2098-02-12', 'business_timezone' => 'Asia/Shanghai',
+        'occurred_at' => $standaloneAt, 'settled_at' => $standaloneAt, 'recorded_at' => $standaloneAt,
+        'checkout_request_id' => $standaloneOperationId,
+        'order_id' => $standaloneOperationId,
+        'source_document_type' => 'manual_refund',
+        'source_line_id' => $standaloneOperationId,
+        'payment_method' => 'wechat', 'payment_authority_key' => 'matrix-refund',
+        'amount_cents' => -2000,
     ]);
 
     $cardMember = 990000002;
@@ -899,6 +1015,60 @@ try {
         }
     }
 
+    // A paid six-dimension purchase needs no completed service to enter cash analysis.
+    // The similarly dated non-six-dimension sale is excluded by current product identity.
+    $sixCashSale = $insertSale('SIX-CASH-50000', $matrixStores[0], 990000031, '2098-04-01',
+        $matrixCategories['direct'], 88000500, '矩阵六维现金项目', 1, 5000000, 0, 'project', 0);
+    $insertPayment('SIX-CASH-50000', $sixCashSale, 5000000, '2098-04-01', 'wechat',
+        $matrixFixturePrefix . '-SIX-CASH-PAY', 5000000);
+    $sixTierSale = $insertSale('SIX-CASH-TIER', $matrixStores[0], 990000032, '2098-04-02',
+        $matrixCategories['direct'], 88000500, '矩阵六维现金项目', 1, 499999, 0, 'project', 0);
+    $insertPayment('SIX-CASH-TIER', $sixTierSale, 499999, '2098-04-02', 'wechat',
+        $matrixFixturePrefix . '-SIX-TIER-PAY', 499999);
+    $outsideSale = $insertSale('OUTSIDE-CASH', $matrixStores[0], 990000033, '2098-04-02',
+        $outsideCategoryId, 88000901, '矩阵生美卡项', 1, 3840000, 0, 'project', 0);
+    $insertPayment('OUTSIDE-CASH', $outsideSale, 3840000, '2098-04-02', 'wechat',
+        $matrixFixturePrefix . '-OUTSIDE-CASH-PAY', 3840000);
+    $mixedCard = $insertSale('MIXED-CARD', $matrixStores[0], 990000034, '2098-04-03',
+        $matrixCategories['card'], 88000100, '矩阵混合卡', 1, 10000, 0, 'card', 0);
+    foreach ([
+        ['SIX', 88000101, $matrixCategories['card'], 6000],
+        ['OUTSIDE', 88000901, $outsideCategoryId, 4000],
+    ] as [$suffix, $productId, $categoryId, $amount]) {
+        $item = Db::name('cashier_v3_card_sale_item_allocation_fact')
+            ->where('allocation_fact_id', $matrixFixturePrefix . '-CARD-ITEM-C')->find();
+        unset($item['id']);
+        $item['allocation_fact_id'] = $matrixFixturePrefix . '-MIXED-ITEM-' . $suffix;
+        $item['natural_key'] = $matrixFixturePrefix . '-MIXED-NATURAL-' . $suffix;
+        $item['sale_fact_id'] = (string)$mixedCard['fact_id'];
+        $item['business_event_no'] = (string)$mixedCard['business_event_no'];
+        $item['order_id'] = (string)$mixedCard['order_id'];
+        $item['source_line_id'] = (string)$mixedCard['source_line_id'];
+        $item['card_receipt_id'] = $matrixFixturePrefix . '-MIXED-RECEIPT';
+        $item['member_id'] = (int)$mixedCard['member_id'];
+        $item['component_product_id'] = $productId;
+        $item['item_name_snapshot'] = $suffix === 'SIX' ? '矩阵卡内项目C' : '矩阵生美卡项';
+        $item['component_count'] = 1;
+        $item['category_id_snapshot'] = $categoryId;
+        $item['configured_amount_cents'] = $amount;
+        $item['sale_amount_cents'] = $amount;
+        $item['cash_performance_amount_cents'] = $amount;
+        $item['business_date'] = '2098-04-03';
+        $item['command_idempotency_key'] = $matrixFixturePrefix . '-MIXED-CMD-' . $suffix;
+        $item['immutable_fingerprint'] = hash('sha256', $item['allocation_fact_id']);
+        Db::name('cashier_v3_card_sale_item_allocation_fact')->insert($item);
+    }
+    $insertPayment('MIXED-CARD', $mixedCard, 10000, '2098-04-03', 'wechat',
+        $matrixFixturePrefix . '-MIXED-CARD-PAY', 10000);
+    foreach ([990000031, 990000032, 990000033] as $memberId) {
+        $matrixFoundation->recordMemberStoreAssignmentInTx(['tenant_id' => '0'], [
+            'member_id' => $memberId, 'assigned' => true, 'store_id' => (int)$matrixStores[0]['id'],
+            'effective_at' => (int)strtotime('2098-03-31 12:00:00 Asia/Shanghai'),
+            'source_type' => 'MYSQL_MATRIX', 'source_event_id' => $matrixFixturePrefix . '-ASSIGN-' . $memberId,
+            'idempotency_key' => $matrixFixturePrefix . '-ASSIGN-' . $memberId,
+        ]);
+    }
+
     $matrixService = new StoreUnifiedReportPhaseThreeServices();
     $matrixInput = [
         'page' => 1, 'limit' => 100, '_internal_all' => true,
@@ -917,7 +1087,7 @@ try {
     $directAResult = (array)($directRows['矩阵项目A'] ?? []);
     $directBResult = (array)($directRows['矩阵项目B'] ?? []);
     phaseThreeMysqlOk('item report fields reconcile multi-product, multi-payment, debt collection and refund',
-        count($directRows) === 2
+        count($directRows) === 4
         && (int)($directAResult['store_id'] ?? 0) === $matrixStoreIds[0]
         && (string)($directAResult['store_name'] ?? '') === (string)$matrixStores[0]['name']
         && trim((string)($directAResult['company_name'] ?? '')) !== ''
@@ -938,9 +1108,9 @@ try {
         json_encode($directRows, JSON_UNESCAPED_UNICODE));
     phaseThreeMysqlOk('item report summary uses net full-result values',
         (int)($directResult['summary_row']['experience_people'] ?? -1) === 1
-        && (int)($directResult['summary_row']['purchase_people'] ?? -1) === 2
-        && (int)($directResult['summary_row']['purchase_count'] ?? -1) === 3
-        && (string)($directResult['summary_row']['purchase_amount'] ?? '') === '130');
+        && (int)($directResult['summary_row']['purchase_people'] ?? -1) === 4
+        && (int)($directResult['summary_row']['purchase_count'] ?? -1) === 7
+        && (string)($directResult['summary_row']['purchase_amount'] ?? '') === '230');
 
     $januaryResult = $matrixService->query('six_dimension_item_deal_analysis', [$matrixStoreIds[0]],
         ['start' => '2098-01-31', 'end' => '2098-01-31'],
@@ -1005,6 +1175,7 @@ try {
     phaseThreeMysqlOk('detail report reads service consumption from performance fact and keeps event amounts exclusive',
         count($serviceRows) === 1
         && (string)$serviceRows[0]['craftsman'] === '矩阵操作师'
+        && (string)$serviceRows[0]['consultant'] === '矩阵咨询师'
         && (string)$serviceRows[0]['item_name'] === '矩阵项目A'
         && (string)$serviceRows[0]['purchase_date'] === '2098-01-31'
         && (string)$serviceRows[0]['consumption_amount'] === '25'
@@ -1012,23 +1183,17 @@ try {
         && (string)$serviceRows[0]['transfer_amount'] === '0'
         && (string)$serviceRows[0]['refund_amount'] === '0',
         json_encode($serviceRows, JSON_UNESCAPED_UNICODE));
-    phaseThreeMysqlOk('detail report reads card-upgrade remaining value as transfer performance',
-        count($transferRows) === 1
-        && (string)$transferRows[0]['craftsman'] === '-'
-        && (string)$transferRows[0]['item_name'] === '矩阵升级旧卡'
-        && (string)$transferRows[0]['consumption_amount'] === '0'
-        && (string)$transferRows[0]['received_amount'] === '0'
-        && (string)$transferRows[0]['transfer_amount'] === '35'
-        && (string)$transferRows[0]['refund_amount'] === '0'
+    phaseThreeMysqlOk('six-dimension detail excludes whole-card transfers without a verified project',
+        count($transferRows) === 0
         && (string)($eventDetailResult['summary_row']['consumption_amount'] ?? '') === '25'
-        && (string)($eventDetailResult['summary_row']['transfer_amount'] ?? '') === '35',
+        && (string)($eventDetailResult['summary_row']['transfer_amount'] ?? '') === '0',
         json_encode($transferRows, JSON_UNESCAPED_UNICODE));
 
     $matrixAnnotationContext = [
         'tenant_id' => '0', 'store_id' => $matrixStoreIds[0], 'store_ids' => [$matrixStoreIds[0]],
         'operator_id' => 7, 'operator_name' => '集成测试', 'authorization_mode' => 'stores',
     ];
-    foreach ([[$serviceRows[0], '6', 'SERVICE'], [$transferRows[0], '7', 'TRANSFER']] as [$eventRow, $value, $suffix]) {
+    foreach ([[$serviceRows[0], '6', 'SERVICE'], [$refundRows[0], '7', 'REFUND']] as [$eventRow, $value, $suffix]) {
         $annotations->saveAnnotation($matrixAnnotationContext, [
             'store_id' => $matrixStoreIds[0],
             'report_code' => 'six_dimension_consumption_refund_detail',
@@ -1052,9 +1217,9 @@ try {
     );
     $annotatedBySubject = $rowsBy((array)$eventDetailAfterAnnotation['records'], 'annotation_subject_key');
     $pageAnnotatedBySubject = $rowsBy((array)$eventDetailPageAfterAnnotation['records'], 'annotation_subject_key');
-    phaseThreeMysqlOk('complaint count saves and refreshes on service and transfer event rows',
+    phaseThreeMysqlOk('complaint count saves and refreshes on service and refund event rows',
         (string)($annotatedBySubject[(string)$serviceRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '6'
-        && (string)($annotatedBySubject[(string)$transferRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '7'
+        && (string)($annotatedBySubject[(string)$refundRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '7'
         && (string)($pageAnnotatedBySubject[(string)$serviceRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '6'
         && $eventDetailPageAfterAnnotation['columns'] === $eventDetailAfterAnnotation['columns']
         && $eventDetailPageAfterAnnotation['summary_row'] === $eventDetailAfterAnnotation['summary_row']
@@ -1076,7 +1241,7 @@ try {
     $clearedBySubject = $rowsBy((array)$eventDetailAfterClear['records'], 'annotation_subject_key');
     phaseThreeMysqlOk('complaint count clear survives refresh without affecting another event row',
         (string)($clearedBySubject[(string)$serviceRows[0]['annotation_subject_key']]['complaint_count'] ?? 'missing') === ''
-        && (string)($clearedBySubject[(string)$transferRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '7'
+        && (string)($clearedBySubject[(string)$refundRows[0]['annotation_subject_key']]['complaint_count'] ?? '') === '7'
         && (string)($eventDetailAfterClear['summary_row']['complaint_count'] ?? '') === '7');
 
     $cardResult = $matrixService->query('six_dimension_item_deal_analysis', [$matrixStoreIds[0]],
@@ -1084,7 +1249,7 @@ try {
         $matrixInput + ['category_id' => $matrixCategories['card']]);
     $cardRows = $rowsBy((array)$cardResult['records'], 'item_name');
     phaseThreeMysqlOk('card sale expands contained projects with weighted cash and counts',
-        count($cardRows) === 2
+        count($cardRows) === 4
         && (int)($cardRows['矩阵卡内项目C']['experience_people'] ?? -1) === 0
         && (int)($cardRows['矩阵卡内项目C']['purchase_people'] ?? -1) === 1
         && (string)($cardRows['矩阵卡内项目C']['conversion_rate'] ?? '') === '-'
@@ -1103,21 +1268,62 @@ try {
         ['start' => '2098-02-10', 'end' => '2098-02-11'],
         $matrixInput + ['category_id' => $matrixCategories['performance']]);
     $performanceRow = (array)($performanceResult['records'][0] ?? []);
-    phaseThreeMysqlOk('performance deal classifies system-created first purchase and imported/ repeat purchases',
+    phaseThreeMysqlOk('performance deal uses first paid six-dimension purchase and excludes gifts',
         count((array)$performanceResult['records']) === 1
-        && (int)($performanceRow['new_visit_purchase'] ?? -1) === 1
-        && (int)($performanceRow['new_visit_gift'] ?? -1) === 1
-        && (int)($performanceRow['old_visit_people'] ?? -1) === 2
-        && (int)($performanceRow['new_deal_purchase'] ?? -1) === 1
-        && (int)($performanceRow['old_deal_people'] ?? -1) === 2
-        && (int)($performanceRow['new_deal_gift'] ?? -1) === 1
-        && (string)($performanceRow['new_performance_purchase'] ?? '') === '100'
-        && (string)($performanceRow['old_performance'] ?? '') === '120'
-        && (string)($performanceRow['new_performance_gift'] ?? '') === '0'
-        && (string)($performanceRow['new_unit_output_purchase'] ?? '') === '100'
-        && (string)($performanceRow['old_unit_output'] ?? '') === '60'
-        && (string)($performanceRow['new_unit_output_gift'] ?? '') === '0',
+        && (int)($performanceRow['new_visit_purchase'] ?? -1) === 2
+        && !array_key_exists('new_visit_gift', $performanceRow)
+        && (int)($performanceRow['old_visit_people'] ?? -1) === 1
+        && (int)($performanceRow['new_deal_purchase'] ?? -1) === 2
+        && (int)($performanceRow['old_deal_people'] ?? -1) === 1
+        && !array_key_exists('new_deal_gift', $performanceRow)
+        && (string)($performanceRow['new_performance_purchase'] ?? '') === '170'
+        && (string)($performanceRow['old_performance'] ?? '') === '50'
+        && (string)($performanceRow['new_unit_output_purchase'] ?? '') === '85'
+        && (string)($performanceRow['old_unit_output'] ?? '') === '50',
         json_encode($performanceRow, JSON_UNESCAPED_UNICODE));
+
+    $refundOnlyDeal = $matrixService->query('six_dimension_performance_deal', [$matrixStoreIds[0]],
+        ['start' => '2098-02-12', 'end' => '2098-02-12'], $matrixInput);
+    phaseThreeMysqlOk('refund-only date retains original new-customer attribution and deducts once',
+        count((array)$refundOnlyDeal['records']) === 1
+        && (string)($refundOnlyDeal['summary_row']['new_performance_purchase'] ?? '') === '-20'
+        && (string)($refundOnlyDeal['summary_row']['old_performance'] ?? '') === '0');
+    $refundOnlyDetail = $matrixService->query('six_dimension_consumption_refund_detail', [$matrixStoreIds[0]],
+        ['start' => '2098-02-12', 'end' => '2098-02-12'], $matrixInput);
+    phaseThreeMysqlOk('standalone refund detail resolves original consultant and hides internal join keys',
+        count((array)$refundOnlyDetail['records']) === 1
+        && (string)($refundOnlyDetail['records'][0]['consultant'] ?? '') === '矩阵咨询师'
+        && (string)($refundOnlyDetail['records'][0]['refund_amount'] ?? '') === '20'
+        && !array_key_exists('_origin_sales_order_id', $refundOnlyDetail['records'][0]));
+    $refundMemberTotals = \Closure::bind(function (array $stores, array $categoryIds): array {
+        return $this->memberCashTotals($stores, ['start' => '2098-02-12', 'end' => '2098-02-12'], $categoryIds);
+    }, $matrixService, get_class($matrixService));
+    phaseThreeMysqlOk('cash tier net amount deducts independent six-dimension refund',
+        (int)($refundMemberTotals([$matrixStoreIds[0]], [$matrixCategories['direct']])[$directMember] ?? 0) === -2000);
+    $refundMonthDistribution = $matrixService->query('six_dimension_performance_distribution',
+        $matrixStoreIds, ['start' => '2098-02-01', 'end' => '2098-02-28'], $matrixInput);
+    $refundMonthRows = $rowsBy((array)$refundMonthDistribution['records'], 'city_manager');
+    phaseThreeMysqlOk('city-manager net cash deducts independent refund without double counting',
+        (string)($refundMonthRows['矩阵城市经理1']['current_completed'] ?? '') === '250',
+        json_encode($refundMonthRows, JSON_UNESCAPED_UNICODE));
+
+    $sixCashResult = $matrixService->query('six_dimension_item_deal_analysis', [$matrixStoreIds[0]],
+        ['start' => '2098-04-01', 'end' => '2098-04-02'], $matrixInput);
+    phaseThreeMysqlOk('six-dimension cash uses the paid 50000 item and excludes outside-category 38400',
+        count((array)$sixCashResult['records']) === 1
+        && (string)($sixCashResult['summary_row']['purchase_amount'] ?? '') === '54999.99'
+        && (string)($sixCashResult['records'][0]['item_name'] ?? '') === '矩阵六维现金项目');
+    $mixedCardResult = $matrixService->query('six_dimension_item_deal_analysis', [$matrixStoreIds[0]],
+        ['start' => '2098-04-03', 'end' => '2098-04-03'], $matrixInput);
+    phaseThreeMysqlOk('mixed card keeps whole-card allocation but counts only current six-dimension project',
+        count((array)$mixedCardResult['records']) === 1
+        && (string)($mixedCardResult['records'][0]['item_name'] ?? '') === '矩阵卡内项目C'
+        && (string)($mixedCardResult['summary_row']['purchase_amount'] ?? '') === '60');
+    $sixTierResult = $matrixService->query('six_dimension_cash_consumption_analysis', [$matrixStoreIds[0]],
+        ['start' => '2098-04-02', 'end' => '2098-04-02'], $matrixInput);
+    phaseThreeMysqlOk('cash consumption includes a six-dimension buyer without service and excludes non-six buyer',
+        (int)($sixTierResult['summary_row']['accumulated_consumers'] ?? -1) === 1
+        && (string)($sixTierResult['summary_row']['total_consumption_amount'] ?? '') === '4999.99');
 
     $tierResult = $matrixService->query('six_dimension_cash_consumption_analysis', [$matrixStoreIds[0]],
         ['start' => '2098-03-01', 'end' => '2098-03-01'],

@@ -3,8 +3,6 @@
 declare(strict_types=1);
 
 namespace app\services\report;
-use app\services\query\metric\StoreCustomerVisitEligibility;
-
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
@@ -17,7 +15,7 @@ use think\facade\Db;
  */
 final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 {
-    public const METRIC_VERSION = 'six-dimension-current-category-v3';
+    public const METRIC_VERSION = 'six-dimension-current-category-v4';
     // The card-item projection is introduced by the Phase 3 release and has no
     // historical backfill. This date remains the first-purchase classification
     // boundary, but it must not prevent operators from querying earlier facts.
@@ -101,7 +99,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 
     private function itemDealAnalysis(array $stores, array $range, array $input): array
     {
-        $categoryIds = $this->categoryScope($input);
+        // 六维目录的分类由服务端固定，深链或导出参数不能扩展到其他品项。
+        $categoryIds = $this->sixDimensionCategoryIds();
         $records = [];
         // 品项体验人数由体验标记和实际完成服务决定；人员不计数开关不属于此顾客指标。
         foreach ($this->completedServices($stores, $range, $categoryIds) as $service) {
@@ -143,25 +142,21 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $this->column('average_sale_price', '平均销售价格', '购买金额除以购买次数；购买次数为零时显示“-”。', false),
             $this->column('average_unit_output', '平均单产', '购买金额除以购买人数；购买人数为零时显示“-”。', false),
         ];
-        return $this->result('品项成交分析表', $columns, array_values($records), $input, $range, [
-            'category' => true,
-        ]);
+        return $this->result('品项成交分析表', $columns, array_values($records), $input, $range);
     }
 
     private function cashConsumptionAnalysis(array $stores, array $range, array $input): array
     {
-        $categoryIds = $this->categoryScope($input);
+        $categoryIds = $this->sixDimensionCategoryIds();
         $authorizedStores = $this->storeIds((array)($input['_authorized_store_ids'] ?? $stores));
         if ($authorizedStores === []) $authorizedStores = $stores;
-        $memberIds = $this->activeMemberIds($authorizedStores, $range);
         $metric = (string)($input['consumption_metric'] ?? 'cash');
         if (!in_array($metric, ['cash', 'consumption'], true)) $metric = 'cash';
+        // 消费分级的对象是期间内有六维现金或消耗事实的会员，购买后尚未服务也必须出现。
         $memberTotals = $metric === 'consumption'
-            ? $this->memberConsumptionTotals($authorizedStores, $range, [])
-            : $this->memberCashTotals($authorizedStores, $range, []);
-        $categoryTotals = $metric === 'consumption'
             ? $this->memberConsumptionTotals($authorizedStores, $range, $categoryIds)
             : $this->memberCashTotals($authorizedStores, $range, $categoryIds);
+        $memberIds = array_keys($memberTotals);
         $assignments = $this->memberStoreAssignments($memberIds, $range['end'], $authorizedStores);
         $tiers = $this->foundation()->consumptionTiers(CashierV3ScopeResolver::TENANT_SCOPE_ID);
         $records = [];
@@ -186,7 +181,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 ];
             }
             $records[$key]['_members'][(string)$memberId] = true;
-            $records[$key]['category_amount_cents'] += (int)($categoryTotals[$memberId] ?? 0);
+            $records[$key]['category_amount_cents'] += $total;
             $records[$key]['total_amount_cents'] += $total;
         }
         foreach ($records as &$row) {
@@ -202,14 +197,14 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         $columns = [
             $this->column('company_name', '分公司', '读取会员截止日归属门店所属组织路径中配置为分公司的组织名称。', false, true, 130),
             $this->column('store_name', '门店', '取会员在筛选截止日生效的归属门店；无法还原时显示“未配置归属门店”。', false, true, 140),
-            $this->column('consumption_tier', '消费分级', '按会员期间内全部门店、全部分类的净现金业绩匹配当前启用分级；负数按零进入最低档。', false, true, 150),
-            $this->column('accumulated_consumers', '累计消费人数', '落入当前消费分级的不同会员数，同一会员只计一次。', true, false, 120),
-            $this->column('people_share', '人数占比', '当前分级累计消费人数除以同期该归属门店完成非体验服务的不同会员数；“不算人数人次”只影响人员统计。', false),
-            $this->column('category_consumption_amount', '分类消费金额', '当前分级会员在所选分类及全部下级分类产生的净现金业绩。', true, false, 130),
-            $this->column('total_consumption_amount', '总消费金额', '当前分级会员在期间内全部门店、全部商品分类产生的净现金业绩。', true, false, 130),
+            $this->column('consumption_tier', '消费分级', '按会员期间内全部有权门店的六维净现金业绩或六维消耗业绩匹配当前启用分级；负数按零进入最低档。', false, true, 150),
+            $this->column('accumulated_consumers', '累计消费人数', '期间内发生六维现金或消耗事实并落入该分级的不同会员数，同一会员只计一次。', true, false, 120),
+            $this->column('people_share', '人数占比', '当前分级会员数除以同期该归属门店发生六维现金或消耗事实的不同会员数。', false),
+            $this->column('category_consumption_amount', '分类消费金额', '当前分级会员在六维及全部下级分类产生的净现金或消耗业绩。', true, false, 130),
+            $this->column('total_consumption_amount', '总消费金额', '当前分级会员在全部有权门店产生的六维净现金或消耗业绩，不混入其他分类。', true, false, 130),
             $this->column('category_consumption_share', '分类消费金额占比', '当前分级分类消费金额合计除以当前分级总消费金额合计；分母为零时显示“-”。', false, false, 150),
         ];
-        $result = $this->result($metric === 'consumption' ? '消耗业绩分级分析' : '现金业绩分级分析', $columns, array_values($records), $input, $range, ['category' => true]);
+        $result = $this->result($metric === 'consumption' ? '消耗业绩分级分析' : '现金业绩分级分析', $columns, array_values($records), $input, $range);
         $result['consumption_metric'] = $metric;
         return $result;
     }
@@ -218,10 +213,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     {
         $range = $this->drilldownRange($range, $input);
         $stores = $this->drilldownStores($stores, $range, $input);
-        // 汇总列传入的分类路径必须继续约束明细；旧入口仅传六维标记时
-        // 仍兼容整棵六维分类，未传任何分类才展示全部授权事件。
-        $categoryIds = !empty($input['six_dimension_only'])
-            ? $this->sixDimensionCategoryIds() : $this->categoryScope($input);
+        // 六维目录默认只能读取六维。第四阶段明确传入分类的历史下钻
+        // 仍沿用本明细服务，必须保留其原分类条件和精确下钻金额。
+        $categoryIds = (string)($input['metric_code'] ?? '') === 'phase_four_amount'
+            ? $this->categoryScope($input) : $this->sixDimensionCategoryIds();
         $itemId = trim((string)($input['item_id'] ?? ''));
         $metricCode = trim((string)($input['metric_code'] ?? ''));
         $cashOnly = in_array($metricCode, [
@@ -245,7 +240,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 'store_id' => (int)$cash['store_id'], 'store_name' => (string)$cash['store_name'],
                 'craftsman' => '-', 'item_name' => (string)$cash['item_name'],
                 'purchase_date' => (string)$cash['purchase_date'], 'consumption_amount_cents' => 0,
-                'consultant' => (string)($cash['sales_manager_name'] ?: '-'),
+                'consultant' => '-',
                 'received_amount_cents' => $isRefund ? 0 : (int)$cash['amount_cents'],
                 'transfer_amount_cents' => 0,
                 'refund_amount_cents' => $isRefund ? abs((int)$cash['amount_cents']) : 0,
@@ -259,7 +254,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         foreach ($this->standaloneRefundEventRows($stores, $range, $categoryIds, $itemId) as $refundEvent) {
             $events[] = $refundEvent;
         }
-        $serviceRows = $cashOnly || $stores === [] ? [] : $this->serviceEventRows($stores, $range);
+        $serviceRows = $cashOnly || $stores === [] ? [] : $this->serviceEventRows($stores, $range, $categoryIds, $itemId);
         foreach ($serviceRows as $service) {
             if ($itemId !== '' && (string)$service['project_id'] !== $itemId) continue;
             $events[] = [
@@ -270,19 +265,21 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                     (int)$service['store_id'], (string)$service['business_date']
                 ),
                 'store_id' => (int)$service['store_id'], 'store_name' => (string)$service['store_name_snapshot'],
-                'craftsman' => $this->craftsmanNames((string)$service['craftsmen_snapshot_json']),
+                'craftsman' => '-', '_craftsmen_snapshot_json' => (string)$service['craftsmen_snapshot_json'],
                 'item_name' => (string)$service['project_name_snapshot'],
                 'purchase_date' => (string)$service['purchase_date'],
                 'consumption_amount_cents' => (int)$service['consumption_amount_cents'],
-                'consultant' => (string)($service['sales_manager_name'] ?: '-'),
+                'consultant' => '-',
                 'received_amount_cents' => 0, 'transfer_amount_cents' => 0, 'refund_amount_cents' => 0,
                 'annotation_subject_key' => 'service:' . (string)$service['service_fact_id'],
                 'annotation_subject_type' => 'business_event_line',
                 'source_fact_id' => (int)$service['id'], 'source_order_id' => (string)$service['origin_order_id'],
                 'source_line_id' => (string)$service['source_line_id'],
+                '_sale_order_id' => (string)$service['origin_sales_order_id'],
+                '_sale_line_id' => (string)$service['origin_sales_order_line_id'],
             ];
         }
-        $transferRows = $cashOnly || $stores === [] ? [] : $this->transferEventRows($stores, $range);
+        $transferRows = $cashOnly || $stores === [] ? [] : $this->transferEventRows($stores, $range, $categoryIds, $itemId);
         foreach ($transferRows as $transfer) {
             $events[] = [
                 'event_sort_at' => (int)$transfer['occurred_at'], 'event_type' => '转卡',
@@ -294,14 +291,17 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 'store_id' => (int)$transfer['store_id'], 'store_name' => (string)$transfer['store_name_snapshot'],
                 'craftsman' => '-', 'item_name' => (string)$transfer['item_name'],
                 'purchase_date' => (string)$transfer['purchase_date'], 'consumption_amount_cents' => 0,
-                'consultant' => (string)($transfer['sales_manager_name'] ?: '-'), 'received_amount_cents' => 0,
+                'consultant' => '-', 'received_amount_cents' => 0,
                 'transfer_amount_cents' => (int)$transfer['transfer_amount_cents'], 'refund_amount_cents' => 0,
                 'annotation_subject_key' => (string)$transfer['annotation_subject_key'],
                 'annotation_subject_type' => 'business_event_line',
                 'source_fact_id' => (int)$transfer['line_row_id'], 'source_order_id' => (string)$transfer['origin_order_id'],
                 'source_line_id' => (string)($transfer['operation_line_id'] ?: $transfer['operation_id']),
+                '_sale_order_id' => (string)($transfer['origin_sales_order_id'] ?? ''),
+                '_sale_line_id' => (string)($transfer['origin_sales_order_line_id'] ?? ''),
             ];
         }
+        $this->applyCurrentPositionPersonnel($events);
         usort($events, static function (array $left, array $right): int {
             return (int)$right['event_sort_at'] <=> (int)$left['event_sort_at']
                 ?: strcmp((string)$right['annotation_subject_key'], (string)$left['annotation_subject_key']);
@@ -319,17 +319,17 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $row['complaint_count'] = $manual === [] ? '' : (string)$manual['value'];
             $row['complaint_count_version'] = $manual === [] ? 0 : (int)($manual['version'] ?? 0);
             $row['refund_amount'] = $this->money((int)$row['refund_amount_cents']);
-            unset($row['event_sort_at']);
+            unset($row['event_sort_at'], $row['_origin_sales_order_id'], $row['_origin_sales_line_id']);
         }
         unset($row);
         $columns = [
             $this->column('company_name', '分公司', '取该业务事件所属组织路径中配置为分公司的组织名称。', false, true, 130),
             $this->column('store_name', '门店', '取该事件实际发生时保存的门店名称。', false, true, 140),
-            $this->column('craftsman', '操作师', '服务消耗取实际完成项目的手艺人；其他事件没有操作师时显示“-”。', false, true, 120),
+            $this->column('craftsman', '操作师', '服务消耗取服务事实中当前岗位为操作师的手艺人；其他人员和事件显示“-”。', false, true, 120),
             $this->column('item_name', '商品名称', '取该收款、服务、转卡或退款分摊行对应的商品、项目或卡内项目名称快照。', false, true, 180),
             $this->column('purchase_date', '购买日期', '取该项目原始成功购买的业务日期；服务和退款仍显示原购买日期。', false, false, 112),
             $this->column('consumption_amount', '耗卡金额', '仅服务消耗事件显示项目成功核销后形成的消耗业绩。', true, false, 120),
-            $this->column('consultant', '咨询师', '取原成交业务确认并保存的销售经理名称；没有时显示“-”。', false, false, 120),
+            $this->column('consultant', '咨询师', '取原成交销售人事实中当前岗位为咨询师的员工；没有时显示“-”。', false, false, 120),
             $this->column('received_amount', '实收业绩', '仅成功收款事件显示该笔收款分摊到当前商品或项目的现金业绩。', true, false, 120),
             $this->column('transfer_amount', '转卡业绩', '卡升级取旧卡剩余金额；项目升级或替换取原卡内对应项目的实际支付分摊金额。', true, false, 120),
             $this->column('complaint_count', '客诉数量', '由有权限的人员人工填写并保存，刷新和导出读取同一保存结果。', true, false, 110),
@@ -364,11 +364,13 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                     ->where('refund_allocation.status', 'effective');
             });
         $identity = [];
-        foreach ((clone $query)->fieldRaw('refund_operation.id,payment.occurred_at,sale.business_date purchase_date')
+        foreach ((clone $query)->fieldRaw('refund_operation.id,payment.occurred_at,sale.business_date purchase_date,ra.source_sales_order_id,ra.source_sales_line_id')
             ->select()->toArray() as $row) {
             $identity[(int)$row['id']] = [
                 'occurred_at' => (int)($row['occurred_at'] ?? 0),
                 'purchase_date' => (string)($row['purchase_date'] ?? ''),
+                'source_sales_order_id' => (string)($row['source_sales_order_id'] ?? ''),
+                'source_sales_line_id' => (string)($row['source_sales_line_id'] ?? ''),
             ];
         }
         $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
@@ -395,6 +397,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                             (int)$refund['store_id'], (string)$refund['business_date']
                         ),
                         'store_id' => (int)$refund['store_id'], 'store_name' => (string)$refund['store_name_snapshot'],
+                        'member_id' => (int)$refund['member_id'],
+                        'business_date' => (string)$refund['business_date'],
+                        'organization_id' => (string)($refund['organization_id'] ?? ''),
+                        'organization_path_snapshot' => (string)($refund['organization_path_snapshot'] ?? ''),
                         'craftsman' => '-', 'item_name' => (string)$refund['item_name_snapshot'],
                         'purchase_date' => (string)($meta['purchase_date'] ?? ''),
                         'consumption_amount_cents' => 0, 'consultant' => '-', 'received_amount_cents' => 0,
@@ -403,6 +409,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                         'annotation_subject_type' => 'business_event_line',
                         'source_fact_id' => (int)$refund['id'], 'source_order_id' => (string)$refund['order_id'],
                         'source_line_id' => (string)$refund['order_id'],
+                        '_sale_order_id' => (string)($meta['source_sales_order_id'] ?? ''),
+                        '_sale_line_id' => (string)($meta['source_sales_line_id'] ?? ''),
+                        '_origin_sales_order_id' => (string)($meta['source_sales_order_id'] ?? ''),
+                        '_origin_sales_line_id' => (string)($meta['source_sales_line_id'] ?? ''),
                     ];
                 }
             }
@@ -412,12 +422,14 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 
     private function performanceDeal(array $stores, array $range, array $input): array
     {
-        $categoryIds = $this->categoryScope($input);
+        $categoryIds = $this->sixDimensionCategoryIds();
         $purchaseRows = $this->purchaseItemRows($stores, $range, $categoryIds);
         $periodCashRows = $this->cashItemRows($stores, $range, $categoryIds);
+        $periodStandaloneRefunds = $this->standaloneRefundEventRows($stores, $range, $categoryIds, '');
         $memberIds = array_values(array_unique(array_filter(array_map('intval', array_merge(
             array_column($purchaseRows, 'member_id'),
-            array_column($periodCashRows, 'member_id')
+            array_column($periodCashRows, 'member_id'),
+            array_column($periodStandaloneRefunds, 'member_id')
         )))));
         $historyStores = $this->historicalStoreIds();
         if ($historyStores === []) $historyStores = $stores;
@@ -435,9 +447,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             false,
             $memberIds
         );
-        $origins = $this->memberOrigins($memberIds);
         $identityMap = $this->memberIdentityMap($memberIds);
-        $firstPurchase = $this->firstPurchaseKeysFromRows($historicalPurchases, $origins, $identityMap);
         $lineMeta = [];
         foreach ($historicalPurchases as $purchase) {
             $memberId = (int)$purchase['member_id'];
@@ -447,8 +457,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $eventKey = $this->purchaseBusinessEventKey($purchase);
             $lineMeta[$lineKey] = [
                 'member_key' => $memberKey,
-                'is_first' => isset($firstPurchase[$memberKey])
-                    && (string)$firstPurchase[$memberKey] === $this->purchaseEventSortKey($purchase),
                 'event_key' => $eventKey,
                 'store_id' => (int)$purchase['store_id'], 'store_name' => (string)$purchase['store_name'],
                 'purchase_date' => (string)$purchase['business_date'],
@@ -461,6 +469,18 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 if (trim((string)($cashMeta['event_key'] ?? '')) !== '') {
                     $paidEvents[(string)$cashMeta['event_key']] = true;
                 }
+            }
+        }
+        $priorSixBuyers = $this->historicalSixDimensionPurchaseKeys($memberIds, $identityMap, $categoryIds);
+        $firstPurchase = $this->firstPurchaseKeysFromRows(
+            $historicalPurchases, $paidEvents, $priorSixBuyers, $identityMap
+        );
+        foreach ($historicalPurchases as $purchase) {
+            $lineKey = $this->saleLineKey($purchase);
+            $memberKey = (string)($identityMap[(int)$purchase['member_id']] ?? ('member:' . (int)$purchase['member_id']));
+            if (isset($lineMeta[$lineKey])) {
+                $lineMeta[$lineKey]['is_first'] = isset($firstPurchase[$memberKey])
+                    && (string)$firstPurchase[$memberKey] === $this->purchaseEventSortKey($purchase);
             }
         }
         $rows = [];
@@ -484,6 +504,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         }
         $peopleSeen = [];
         foreach ($events as $event) {
+            // Zero-cash gifts are not a six-dimension purchase and do not create visible deal people.
+            if (!isset($paidEvents[(string)$event['event_key']])) continue;
             $storeId = (int)$event['store_id'];
             $date = (string)$event['date'];
             $memberKey = (string)$event['member_key'];
@@ -495,16 +517,15 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             }
             $isFirst = isset($firstPurchase[$memberKey])
                 && (string)$firstPurchase[$memberKey] === (string)$event['event_sort_key'];
-            $isGift = !isset($paidEvents[(string)$event['event_key']]);
             $peopleKey = $groupKey . '|' . $date . '|' . $memberKey;
             if ($event['is_experience']) {
-                $metric = $isFirst ? ($isGift ? 'new_visit_gift' : 'new_visit_purchase') : 'old_visit_people';
+                $metric = $isFirst ? 'new_visit_purchase' : 'old_visit_people';
                 if (!isset($peopleSeen[$metric][$peopleKey])) {
                     $rows[$groupKey][$metric]++;
                     $peopleSeen[$metric][$peopleKey] = true;
                 }
             }
-            $metric = $isFirst ? 'new_deal_' . ($isGift ? 'gift' : 'purchase') : 'old_deal_people';
+            $metric = $isFirst ? 'new_deal_purchase' : 'old_deal_people';
             if (!isset($peopleSeen[$metric][$peopleKey])) {
                 $rows[$groupKey][$metric]++;
                 $peopleSeen[$metric][$peopleKey] = true;
@@ -524,38 +545,49 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 );
             }
             if (!empty($meta['is_first'])) {
-                $suffix = isset($paidEvents[(string)($meta['event_key'] ?? '')]) ? 'purchase' : 'gift';
-                $rows[$groupKey]['new_performance_' . $suffix . '_cents'] += (int)$cash['amount_cents'];
+                $rows[$groupKey]['new_performance_purchase_cents'] += (int)$cash['amount_cents'];
             } else {
                 $rows[$groupKey]['old_performance_cents'] += (int)$cash['amount_cents'];
             }
         }
+        // Refunds without sale-allocation facts are absent from cashItemRows.
+        // Their linked original sale keeps its first-purchase attribution; older
+        // imported-card refunds without a V3 sale belong to returning purchases.
+        foreach ($periodStandaloneRefunds as $refund) {
+            $date = (string)$refund['business_date'];
+            $groupKey = $this->performanceGroupKey($refund, $date);
+            if (!isset($rows[$groupKey])) {
+                $rows[$groupKey] = $this->emptyPerformanceDealRow(
+                    (int)$refund['store_id'], (string)$refund['store_name'], $date, $refund
+                );
+            }
+            $lineKey = (string)$refund['_origin_sales_order_id'] . '|'
+                . (string)$refund['_origin_sales_line_id'];
+            $field = !empty($lineMeta[$lineKey]['is_first'])
+                ? 'new_performance_purchase_cents' : 'old_performance_cents';
+            $rows[$groupKey][$field] -= (int)$refund['refund_amount_cents'];
+        }
         foreach ($rows as &$row) {
-            foreach (['old_performance', 'new_performance_purchase', 'new_performance_gift'] as $key) {
+            foreach (['old_performance', 'new_performance_purchase'] as $key) {
                 $row[$key] = $this->money((int)$row[$key . '_cents']);
             }
             $row['old_unit_output'] = $this->moneyRatio($row['old_performance_cents'], $row['old_deal_people']);
             $row['new_unit_output_purchase'] = $this->moneyRatio($row['new_performance_purchase_cents'], $row['new_deal_purchase']);
-            $row['new_unit_output_gift'] = $this->moneyRatio($row['new_performance_gift_cents'], $row['new_deal_gift']);
         }
         unset($row);
         $columns = [
             $this->column('company_name', '分公司', '取成交业务所属组织路径中配置为分公司的组织名称。', false, true, 130),
             $this->column('store_name', '门店', '取成交实际发生时保存的门店名称。', false, true, 140),
-            $this->column('old_visit_people', '老客见诊人次', '更早购买过所选分类、当前又发生带体验标记有效业务的会员人次；按业务日期和会员身份去重。', true, false, 120),
-            $this->column('new_visit_purchase', '购买', '第一次购买所选分类、成功现金业绩大于零且带体验标记的会员人次。', true, false, 100, [], '新客见诊人次'),
-            $this->column('new_visit_gift', '赠送', '第一次取得所选分类、现金业绩为零且带体验标记的会员人次。', true, false, 100, [], '新客见诊人次'),
-            $this->column('old_deal_people', '老客成交人次', '已购买过所选分类后再次成功取得该分类的会员人次。', true, false, 120),
-            $this->column('new_deal_purchase', '购买', '第一次购买所选分类且成功现金业绩大于零的会员人次。', true, false, 100, [], '新客成交人次'),
-            $this->column('new_deal_gift', '赠送', '第一次取得所选分类且现金业绩为零的会员人次。', true, false, 100, [], '新客成交人次'),
-            $this->column('old_performance', '老客成交业绩', '老客再次购买所选分类后按销售明细分摊到的净现金业绩。', true, false, 130),
-            $this->column('new_performance_purchase', '购买', '新客第一次付费购买所选分类后分摊到的净现金业绩。', true, false, 110, [], '新客成交业绩'),
-            $this->column('new_performance_gift', '赠送', '新客第一次零现金取得所选分类对应的现金业绩，正常情况下为零。', true, false, 110, [], '新客成交业绩'),
+            $this->column('old_visit_people', '老客见诊人次', '首次付费购买六维之前已有六维购买记录、当前又发生带体验标记的有效六维成交会员人次；按业务日期和会员去重。', true, false, 120),
+            $this->column('new_visit_purchase', '购买', '首次付费购买六维且带体验标记的会员人次，组合卡内多项目只计一人。', true, false, 100, [], '新客见诊人次'),
+            $this->column('old_deal_people', '老客成交人次', '首次六维购买之前已有六维购买记录的成交会员人次，同一组合卡只计一次。', true, false, 120),
+            $this->column('new_deal_purchase', '购买', '首次付费购买六维的会员人次，同一组合卡只计一次，赠送不显示。', true, false, 100, [], '新客成交人次'),
+            $this->column('old_performance', '老客成交业绩', '老客六维购买对应的净现金业绩，已关联退款按成功日冲减。', true, false, 130),
+            $this->column('new_performance_purchase', '购买', '新客首次六维付费购买对应的净现金业绩，已关联退款按成功日冲减。', true, false, 110, [], '新客成交业绩'),
             $this->column('old_unit_output', '老客成交单产', '老客成交业绩除以老客成交人次；分母为零时显示“-”。', false),
             $this->column('new_unit_output_purchase', '购买', '新客成交业绩/购买除以新客成交人次/购买；分母为零时显示“-”。', false, false, 110, [], '新客成交单产'),
-            $this->column('new_unit_output_gift', '赠送', '新客成交业绩/赠送除以新客成交人次/赠送；分母为零时显示“-”。', false, false, 110, [], '新客成交单产'),
         ];
-        return $this->result('业绩成交表', $columns, array_values($rows), $input, $range, ['category' => true]);
+        return $this->result('业绩成交表', $columns, array_values($rows), $input, $range);
     }
 
     private function performanceDistribution(array $stores, array $range, array $input): array
@@ -827,6 +859,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->whereIn('s.store_id', $stores)->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->where('s.status', 'effective')->where('s.fact_direction', 'forward')->where('s.source_type', '<>', 'card');
         $this->excludeVoidedSalesOrders($direct, 's.tenant_id', 's.order_id');
+        $this->applyCurrentCategoryCandidate($direct, 'd.item_id', $categoryIds);
         if ($memberIds !== []) $direct->whereIn('s.member_id', $memberIds);
         if ($applyParticipantScope && $this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($direct, 's.order_id', $this->participantEmployeeId);
@@ -841,6 +874,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->whereIn('ci.store_id', $stores)->whereBetween('ci.business_date', [$range['start'], $range['end']])
             ->where('ci.status', 'effective');
         $this->excludeVoidedSalesOrders($card, 'ci.tenant_id', 'ci.order_id');
+        $this->applyCurrentCategoryCandidate($card, 'ci.component_product_id', $categoryIds);
         if ($memberIds !== []) $card->whereIn('ci.member_id', $memberIds);
         if ($applyParticipantScope && $this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($card, 'ci.order_id', $this->participantEmployeeId);
@@ -868,9 +902,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
             ->leftJoin('cashier_v3_business_event payment_event', 'payment_event.tenant_id=p.tenant_id AND payment_event.event_no=p.business_event_no')
             ->leftJoin('cashier_v3_checkout_request payment_request', 'payment_request.tenant_id=p.tenant_id AND payment_request.request_id=p.checkout_request_id')
-            ->leftJoin('cashier_v3_sales_manager_fact sm', "sm.tenant_id=s.tenant_id AND sm.order_id=s.order_id AND sm.source_line_id=s.source_line_id")
             ->where('s.source_type', '<>', 'card');
-        $rows = $query->fieldRaw("p.id source_fact_row_id,p.allocation_fact_id,p.business_event_no,p.fact_direction,MAX(financial_reversal.reversal_type) reversal_type,p.organization_id,COALESCE(MAX(payment_event.organization_path),MAX(payment_request.organization_path),'') organization_path_snapshot,p.store_id,COALESCE(MAX(payment_event.store_name_snapshot),MAX(payment_request.store_name_snapshot),'') store_name,p.member_id,p.order_id,p.source_line_id,p.business_date,p.occurred_at,p.amount_cents,s.business_date purchase_date,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,MAX(sm.sales_manager_name_snapshot) sales_manager_name")
+        $this->applyCurrentCategoryCandidate($query, 'd.item_id', $categoryIds);
+        $rows = $query->fieldRaw("p.id source_fact_row_id,p.allocation_fact_id,p.business_event_no,p.fact_direction,MAX(financial_reversal.reversal_type) reversal_type,p.organization_id,COALESCE(MAX(payment_event.organization_path),MAX(payment_request.organization_path),'') organization_path_snapshot,p.store_id,COALESCE(MAX(payment_event.store_name_snapshot),MAX(payment_request.store_name_snapshot),'') store_name,p.member_id,p.order_id,p.source_line_id,p.business_date,p.occurred_at,p.amount_cents,s.business_date purchase_date,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path")
             ->group('p.id')->order('p.business_date', 'asc')->order('p.id', 'asc')->select()->toArray();
         foreach ($rows as &$row) {
             if (trim((string)$row['store_name']) === '') $row['store_name'] = $this->storeName((int)$row['store_id']);
@@ -881,9 +915,18 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original_allocation.sale_fact_id,p.sale_fact_id)')
             ->leftJoin('cashier_v3_business_event payment_event', 'payment_event.tenant_id=p.tenant_id AND payment_event.event_no=p.business_event_no')
             ->leftJoin('cashier_v3_checkout_request payment_request', 'payment_request.tenant_id=p.tenant_id AND payment_request.request_id=p.checkout_request_id')
-            ->leftJoin('cashier_v3_sales_manager_fact sm', "sm.tenant_id=s.tenant_id AND sm.order_id=s.order_id AND sm.source_line_id=s.source_line_id")
-            ->where('s.source_type', 'card')
-            ->fieldRaw("p.id source_fact_row_id,p.allocation_fact_id,p.business_event_no,p.fact_direction,MAX(financial_reversal.reversal_type) reversal_type,p.organization_id,COALESCE(MAX(payment_event.organization_path),MAX(payment_request.organization_path),'') organization_path_snapshot,p.store_id,COALESCE(MAX(payment_event.store_name_snapshot),MAX(payment_request.store_name_snapshot),'') store_name,p.member_id,p.order_id,p.source_line_id,p.business_date,p.occurred_at,p.amount_cents,s.fact_id effective_sale_fact_id,s.business_date purchase_date,MAX(sm.sales_manager_name_snapshot) sales_manager_name")
+            ->where('s.source_type', 'card');
+        if ($categoryIds !== []) {
+            // Keep the entire card allocation after selecting a card that has
+            // at least one eligible project; filtering items first loses cash.
+            $cardPayments->whereExists(function ($item) use ($categoryIds): void {
+                $item->name('cashier_v3_card_sale_item_allocation_fact')->alias('candidate_item')
+                    ->whereRaw('candidate_item.tenant_id=s.tenant_id AND candidate_item.sale_fact_id=s.fact_id')
+                    ->where('candidate_item.status', 'effective');
+                $this->applyCurrentCategoryCandidate($item, 'candidate_item.component_product_id', $categoryIds);
+            });
+        }
+        $cardPayments = $cardPayments->fieldRaw("p.id source_fact_row_id,p.allocation_fact_id,p.business_event_no,p.fact_direction,MAX(financial_reversal.reversal_type) reversal_type,p.organization_id,COALESCE(MAX(payment_event.organization_path),MAX(payment_request.organization_path),'') organization_path_snapshot,p.store_id,COALESCE(MAX(payment_event.store_name_snapshot),MAX(payment_request.store_name_snapshot),'') store_name,p.member_id,p.order_id,p.source_line_id,p.business_date,p.occurred_at,p.amount_cents,s.fact_id effective_sale_fact_id,s.business_date purchase_date")
             ->group('p.id')->order('p.business_date', 'asc')->order('p.id', 'asc')->select()->toArray();
         foreach ($cardPayments as &$payment) {
             if (trim((string)$payment['store_name']) === '') $payment['store_name'] = $this->storeName((int)$payment['store_id']);
@@ -919,7 +962,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                     'purchase_date' => (string)$payment['purchase_date'], 'item_id' => (int)$item['component_product_id'],
                     'item_name' => (string)$item['item_name_snapshot'], 'category_id' => (int)$item['category_id_snapshot'],
                     'category_path' => (string)$item['category_path_snapshot'],
-                    'sales_manager_name' => (string)$payment['sales_manager_name'],
                 ];
             }
         }
@@ -992,6 +1034,15 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $memberId = (int)$row['member_id'];
             if ($memberId > 0) $totals[$memberId] = (int)($totals[$memberId] ?? 0) + (int)$row['amount_cents'];
         }
+        // Refunds without sale-allocation rows are absent from cashItemRows;
+        // use the same scoped refund events as deal and distribution reports.
+        foreach ($this->standaloneRefundEventRows($stores, $range, $categoryIds, '') as $refund) {
+            $memberId = (int)$refund['member_id'];
+            if ($memberId > 0) {
+                $totals[$memberId] = (int)($totals[$memberId] ?? 0)
+                    - (int)$refund['refund_amount_cents'];
+            }
+        }
         return $totals;
     }
 
@@ -1005,6 +1056,11 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('sv.service_status', 'completed')
             ->where('pf.performance_type', 'consumption_performance_recorded')->where('pf.status', 'effective');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
+        if ($this->participantEmployeeId > 0) {
+            (new StoreReportParticipantScopeServices())->applyCheckout(
+                $query, 'sv.checkout_request_id', $this->participantEmployeeId
+            );
+        }
         $rows = $query->fieldRaw("sv.store_id,sv.project_id item_id,sv.member_id, SUM(CASE WHEN pf.fact_direction='reversal' THEN -ABS(pf.amount_cents) ELSE ABS(pf.amount_cents) END) amount_cents")
             ->where('sv.member_id', '>', 0)->group('sv.store_id,sv.project_id,sv.member_id')->select()->toArray();
         $totals = [];
@@ -1013,6 +1069,28 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $totals[$memberId] = (int)($totals[$memberId] ?? 0) + (int)$row['amount_cents'];
         }
         return $totals;
+    }
+
+    /** Check current platform category in SQL before expanding costly payment rows; final fact verification remains authoritative. */
+    private function applyCurrentCategoryCandidate($query, string $itemColumn, array $categoryIds): void
+    {
+        if ($categoryIds === []) return;
+        $predicates = [];
+        foreach (array_unique(array_map('intval', $categoryIds)) as $id) {
+            if ($id > 0) $predicates[] = "FIND_IN_SET({$id},REPLACE(candidate_platform.cate_id,' ',''))>0";
+        }
+        if ($predicates === []) {
+            $query->whereRaw('1=0');
+            return;
+        }
+        $query->whereExists(function ($product) use ($itemColumn, $predicates): void {
+            $product->name('store_product')->alias('candidate_product')
+                ->join('store_product candidate_platform',
+                    'candidate_platform.id=IF(candidate_product.type=0,candidate_product.id,candidate_product.pid)'
+                    . ' AND candidate_platform.type=0 AND candidate_platform.relation_id=0')
+                ->whereRaw('candidate_product.id=' . $itemColumn)
+                ->whereRaw('(' . implode(' OR ', $predicates) . ')');
+        });
     }
 
     /** Project authorized fact rows by their linked platform product before category filters or aggregation. */
@@ -1036,20 +1114,36 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         return $result;
     }
 
-    private function activeMemberIds(array $stores, array $range): array
+    /** Narrow service facts by verified current project category before the expensive origin and performance joins. */
+    private function serviceEventRows(array $stores, array $range, array $categoryIds, string $itemId): array
     {
-        $result = [];
-        // 活跃会员是门店到店人数：只取非体验完成服务；人员不计数开关不参与。
-        foreach ($this->completedServices($stores, $range, []) as $service) {
-            if (!StoreCustomerVisitEligibility::allows($service)) continue;
-            $memberId = (int)$service['member_id'];
-            if ($memberId > 0) $result[(string)$memberId] = $memberId;
+        if ($categoryIds !== []) {
+            $candidate = Db::name('cashier_v3_entitlement_service_fact')->alias('candidate')
+                ->where('candidate.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('candidate.store_id', $stores)
+                ->whereBetween('candidate.business_date', [$range['start'], $range['end']])
+                ->where('candidate.service_status', 'completed');
+            $this->normalDataScope()->excludeVoidedSalesOrderServices($candidate, 'candidate');
+            if ($this->participantEmployeeId > 0) {
+                (new StoreReportParticipantScopeServices())->applyCheckout(
+                    $candidate, 'candidate.checkout_request_id', $this->participantEmployeeId
+                );
+            }
+            if ($itemId !== '') $candidate->where('candidate.project_id', $itemId);
+            $pairs = $candidate->field('candidate.store_id,candidate.project_id')->distinct(true)->select()->toArray();
+            $links = array_map(static function (array $row): array {
+                return ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['project_id']];
+            }, $pairs);
+            $categories = (new StoreReportCurrentProductCategoryServices())->resolveVerifiedFactItems($links);
+            $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
+            $projectIds = [];
+            foreach ($pairs as $index => $pair) {
+                if (isset($allowed[(int)($categories[$index]['id'] ?? 0)])) {
+                    $projectIds[(int)$pair['project_id']] = true;
+                }
+            }
+            if ($projectIds === []) return [];
         }
-        return array_values($result);
-    }
-
-    private function serviceEventRows(array $stores, array $range): array
-    {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
             ->leftJoin('cashier_v3_entitlement_writeoff_fact w', 'w.tenant_id=sv.tenant_id AND w.checkout_request_id=sv.checkout_request_id AND w.source_line_id=sv.source_line_id')
             ->leftJoin('cashier_v3_card_purchase_receipt cr', 'cr.tenant_id=sv.tenant_id AND cr.legacy_order_id=w.origin_order_id')
@@ -1058,6 +1152,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('sv.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
+        if (isset($projectIds)) $query->whereIn('sv.project_id', array_keys($projectIds));
+        elseif ($itemId !== '') $query->where('sv.project_id', $itemId);
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
@@ -1083,58 +1179,46 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             }
         }
 
-        $salesOrderIds = array_values(array_unique(array_filter(array_column($rows, 'origin_sales_order_id'))));
-        $managerBySaleLine = [];
-        if ($salesOrderIds !== []) {
-            $managerRows = Db::name('cashier_v3_sales_manager_fact')
-                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                ->whereIn('order_id', $salesOrderIds)->where('status', 'effective')
-                ->fieldRaw('order_id,source_line_id,MAX(sales_manager_name_snapshot) sales_manager_name')
-                ->group('order_id,source_line_id')->select()->toArray();
-            foreach ($managerRows as $manager) {
-                $key = (string)$manager['order_id'] . '|' . (string)$manager['source_line_id'];
-                $managerBySaleLine[$key] = (string)$manager['sales_manager_name'];
-            }
-        }
         foreach ($rows as &$row) {
             $serviceKey = (string)$row['checkout_request_id'] . '|' . (string)$row['source_line_id'];
-            $saleKey = (string)$row['origin_sales_order_id'] . '|' . (string)$row['origin_sales_order_line_id'];
             $row['consumption_amount_cents'] = (int)($consumptionByServiceLine[$serviceKey] ?? 0);
-            $row['sales_manager_name'] = (string)($managerBySaleLine[$saleKey] ?? '');
         }
         unset($row);
         return $rows;
     }
 
-    private function transferEventRows(array $stores, array $range): array
+    private function transferEventRows(array $stores, array $range, array $categoryIds, string $itemId): array
     {
-        $headerQuery = Db::name('cashier_v3_card_operation')->alias('op')
-            ->leftJoin('store_order origin_order', 'origin_order.id=op.origin_order_id')
-            ->leftJoin('cashier_v3_card_purchase_receipt transfer_receipt', 'transfer_receipt.tenant_id=op.tenant_id AND transfer_receipt.legacy_order_id=op.origin_order_id')
-            ->leftJoin('cashier_v3_sales_manager_fact transfer_manager', "transfer_manager.tenant_id=op.tenant_id AND transfer_manager.order_id=transfer_receipt.sales_order_id AND transfer_manager.source_line_id=transfer_receipt.sales_order_line_id AND transfer_manager.status='effective'")
-            ->where('op.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereIn('op.store_id', $stores)->whereBetween('op.business_date', [$range['start'], $range['end']])
-            ->where('op.operation_status', 'succeeded')->where('op.operation_type', 'card_upgrade');
-        if ($this->participantEmployeeId > 0) {
-            (new StoreReportParticipantScopeServices())->applyCheckout($headerQuery, 'op.checkout_request_id', $this->participantEmployeeId);
-        }
-        $rows = $headerQuery->fieldRaw("op.id line_row_id,op.operation_id,op.operation_type,op.organization_id,op.organization_path_snapshot,op.store_id,op.store_name_snapshot,op.origin_order_id,op.card_name_snapshot,op.source_remaining_value_cents,op.business_date,op.occurred_at,FROM_UNIXTIME(COALESCE(NULLIF(origin_order.pay_time,0),origin_order.add_time),'%Y-%m-%d') purchase_date,MAX(transfer_manager.sales_manager_name_snapshot) sales_manager_name")
-            ->group('op.id')
-            ->order('op.business_date', 'desc')->order('op.id', 'desc')->select()->toArray();
         $normalized = [];
-        foreach ($rows as $row) {
-            $row['operation_line_id'] = '';
-            $row['item_name'] = (string)$row['card_name_snapshot'];
-            $row['transfer_amount_cents'] = abs((int)$row['source_remaining_value_cents']);
-            $row['annotation_subject_key'] = 'card-operation:' . (string)$row['operation_id'];
-            $normalized[] = $row;
+        // The whole-card transfer has no project identity, so it cannot prove
+        // membership in the fixed six-dimension category tree.
+        if ($categoryIds === []) {
+            $headerQuery = Db::name('cashier_v3_card_operation')->alias('op')
+                ->leftJoin('store_order origin_order', 'origin_order.id=op.origin_order_id')
+                ->leftJoin('cashier_v3_card_purchase_receipt transfer_receipt', 'transfer_receipt.tenant_id=op.tenant_id AND transfer_receipt.legacy_order_id=op.origin_order_id')
+                ->where('op.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('op.store_id', $stores)->whereBetween('op.business_date', [$range['start'], $range['end']])
+                ->where('op.operation_status', 'succeeded')->where('op.operation_type', 'card_upgrade');
+            if ($this->participantEmployeeId > 0) {
+                (new StoreReportParticipantScopeServices())->applyCheckout(
+                    $headerQuery, 'op.checkout_request_id', $this->participantEmployeeId
+                );
+            }
+            $rows = $headerQuery->fieldRaw("op.id line_row_id,op.operation_id,op.operation_type,op.organization_id,op.organization_path_snapshot,op.store_id,op.store_name_snapshot,op.origin_order_id,op.card_name_snapshot,op.source_remaining_value_cents,op.business_date,op.occurred_at,FROM_UNIXTIME(COALESCE(NULLIF(origin_order.pay_time,0),origin_order.add_time),'%Y-%m-%d') purchase_date,MAX(transfer_receipt.sales_order_id) origin_sales_order_id,MAX(transfer_receipt.sales_order_line_id) origin_sales_order_line_id")
+                ->group('op.id')->order('op.business_date', 'desc')->order('op.id', 'desc')->select()->toArray();
+            foreach ($rows as $row) {
+                $row['operation_line_id'] = '';
+                $row['item_name'] = (string)$row['card_name_snapshot'];
+                $row['transfer_amount_cents'] = abs((int)$row['source_remaining_value_cents']);
+                $row['annotation_subject_key'] = 'card-operation:' . (string)$row['operation_id'];
+                $normalized[] = $row;
+            }
         }
 
         $lineQuery = Db::name('cashier_v3_card_operation')->alias('op')
             ->join('cashier_v3_card_operation_line line', 'line.tenant_id=op.tenant_id AND line.operation_id=op.operation_id')
             ->leftJoin('store_order origin_order', 'origin_order.id=op.origin_order_id')
             ->leftJoin('cashier_v3_card_purchase_receipt transfer_receipt', 'transfer_receipt.tenant_id=op.tenant_id AND transfer_receipt.legacy_order_id=op.origin_order_id')
-            ->leftJoin('cashier_v3_sales_manager_fact transfer_manager', "transfer_manager.tenant_id=op.tenant_id AND transfer_manager.order_id=transfer_receipt.sales_order_id AND transfer_manager.source_line_id=transfer_receipt.sales_order_line_id AND transfer_manager.status='effective'")
             ->where('op.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('op.store_id', $stores)->whereBetween('op.business_date', [$range['start'], $range['end']])
             ->where('op.operation_status', 'succeeded')
@@ -1143,36 +1227,60 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($lineQuery, 'op.checkout_request_id', $this->participantEmployeeId);
         }
-        $projectRows = $lineQuery->fieldRaw("line.id line_row_id,line.operation_line_id,line.line_snapshot_json,line.amount_cents,op.operation_id,op.operation_type,op.organization_id,op.organization_path_snapshot,op.store_id,op.store_name_snapshot,op.origin_order_id,op.card_name_snapshot,op.source_remaining_value_cents,op.business_date,op.occurred_at,FROM_UNIXTIME(COALESCE(NULLIF(origin_order.pay_time,0),origin_order.add_time),'%Y-%m-%d') purchase_date,MAX(transfer_manager.sales_manager_name_snapshot) sales_manager_name")
+        $projectRows = $lineQuery->fieldRaw("line.id line_row_id,line.operation_line_id,line.line_snapshot_json,line.amount_cents,op.operation_id,op.operation_type,op.organization_id,op.organization_path_snapshot,op.store_id,op.store_name_snapshot,op.origin_order_id,op.card_name_snapshot,op.source_remaining_value_cents,op.business_date,op.occurred_at,FROM_UNIXTIME(COALESCE(NULLIF(origin_order.pay_time,0),origin_order.add_time),'%Y-%m-%d') purchase_date,MAX(transfer_receipt.sales_order_id) origin_sales_order_id,MAX(transfer_receipt.sales_order_line_id) origin_sales_order_line_id")
             ->group('line.id')
             ->order('op.business_date', 'desc')->order('line.id', 'desc')->select()->toArray();
         foreach ($projectRows as $row) {
             $snapshot = json_decode((string)$row['line_snapshot_json'], true);
             $row['item_name'] = trim((string)($snapshot['projectNameSnapshot'] ?? $snapshot['sourceProjectName'] ?? ''))
                 ?: (string)$row['card_name_snapshot'];
+            $row['item_id'] = (int)($snapshot['sourceProjectId'] ?? 0);
             $row['transfer_amount_cents'] = abs((int)$row['amount_cents']);
             $row['annotation_subject_key'] = 'card-operation-line:' . (string)$row['operation_line_id'];
             $normalized[] = $row;
         }
+        // A card header has no verified project identity; it cannot enter a six-dimension-only detail.
+        if ($categoryIds !== []) $normalized = $this->currentCategoryRows($normalized, $categoryIds);
+        if ($itemId !== '') $normalized = array_values(array_filter($normalized,
+            static fn(array $row): bool => (string)($row['item_id'] ?? '') === $itemId));
         return $normalized;
     }
 
-    private function firstPurchaseKeysFromRows(array $rows, array $origins, array $identityMap): array
+    /**
+     * Pre-V3 purchases count only when a paid legacy project can be linked to
+     * the current six-dimension tree. The outer card shell is not a project.
+     */
+    private function historicalSixDimensionPurchaseKeys(array $memberIds, array $identityMap, array $categoryIds): array
+    {
+        $cutoff = strtotime($this->coverageStart() . ' 00:00:00');
+        $prior = [];
+        foreach (array_chunk($memberIds, 300) as $chunk) {
+            $legacy = Db::name('store_order')->alias('o')
+                ->join('store_order_cart_info ci', 'ci.oid=o.id AND ci.uid=o.uid')
+                ->whereIn('o.uid', $chunk)->where('o.paid', 1)->where('o.is_del', 0)
+                ->where('o.pay_time', '>', 0)->where('o.pay_time', '<', $cutoff)
+                ->whereIn('ci.cart_type', [0, 2])->where('ci.product_type', 6)->where('ci.is_gift', 0)
+                ->field('o.uid member_id,o.store_id,ci.product_id item_id')->select()->toArray();
+            foreach ($this->currentCategoryRows($legacy, $categoryIds) as $purchase) {
+                $memberId = (int)$purchase['member_id'];
+                $prior[(string)($identityMap[$memberId] ?? ('member:' . $memberId))] = true;
+            }
+        }
+        return $prior;
+    }
+
+    /** One paid sale event is one purchase, even when a combination card expands to many item facts. */
+    private function firstPurchaseKeysFromRows(array $rows, array $paidEvents, array $priorSixBuyers, array $identityMap): array
     {
         $first = [];
-        $returningIdentities = [];
         foreach ($rows as $row) {
             $memberId = (int)$row['member_id'];
             if ($memberId <= 0) continue;
             $key = (string)($identityMap[$memberId] ?? ('member:' . $memberId));
-            if (!$this->newMemberEligible((array)($origins[$memberId] ?? $origins[(string)$memberId] ?? []))) {
-                $returningIdentities[$key] = true;
-                continue;
-            }
+            if (isset($priorSixBuyers[$key]) || !isset($paidEvents[$this->purchaseBusinessEventKey($row)])) continue;
             $value = $this->purchaseEventSortKey($row);
             if (!isset($first[$key]) || strcmp($value, $first[$key]) < 0) $first[$key] = $value;
         }
-        foreach (array_keys($returningIdentities) as $key) unset($first[$key]);
         return $first;
     }
 
@@ -1200,11 +1308,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             . $this->purchaseBusinessEventKey($row);
     }
 
-    private function newMemberEligible(array $origin): bool
-    {
-        return !empty($origin['is_new_customer_eligible']);
-    }
-
     private function ensureItemRow(array &$records, string $key, array $source, string $date): void
     {
         if (isset($records[$key])) return;
@@ -1229,10 +1332,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 (string)($source['organization_path_snapshot'] ?? ''), $storeId, $date
             ),
             'store_id' => $storeId, 'store_name' => $storeName,
-            'old_visit_people' => 0, 'new_visit_purchase' => 0, 'new_visit_gift' => 0,
-            'old_deal_people' => 0, 'new_deal_purchase' => 0, 'new_deal_gift' => 0,
+            'old_visit_people' => 0, 'new_visit_purchase' => 0,
+            'old_deal_people' => 0, 'new_deal_purchase' => 0,
             'old_performance_cents' => 0, 'new_performance_purchase_cents' => 0,
-            'new_performance_gift_cents' => 0,
         ];
     }
 
@@ -1342,6 +1444,20 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             if ($dimensionId === '') continue;
             $totals[$dimensionId] = (int)($totals[$dimensionId] ?? 0) + (int)$row['amount_cents'];
         }
+        // The detail reader already excludes refunds represented by sale
+        // allocations, so these independent refund facts are subtracted once.
+        foreach ($this->standaloneRefundEventRows($stores, $range, $categoryIds, '') as $refund) {
+            $dimension = $this->dimensionForEvent(
+                $type, (string)$refund['organization_id'],
+                (string)$refund['organization_path_snapshot'],
+                (int)$refund['store_id'], (string)$refund['business_date']
+            );
+            $dimensionId = (string)($dimension['organization_id'] ?? '');
+            if ($dimensionId !== '') {
+                $totals[$dimensionId] = (int)($totals[$dimensionId] ?? 0)
+                    - (int)$refund['refund_amount_cents'];
+            }
+        }
         return $totals;
     }
 
@@ -1377,11 +1493,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         }
         unset($assignment);
         return $result;
-    }
-
-    private function memberOrigins(array $memberIds): array
-    {
-        return $this->foundation()->memberOrigins(CashierV3ScopeResolver::TENANT_SCOPE_ID, $memberIds);
     }
 
     /** Expand configured organization dimensions to the authorized descendant stores. */
@@ -1668,14 +1779,90 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         return $result;
     }
 
-    private function craftsmanNames(string $json): string
+    /** Supplement authorized fact rows with current positions without changing their historical amounts or owners. */
+    private function applyCurrentPositionPersonnel(array &$events): void
     {
-        $names = [];
-        foreach ((array)json_decode($json, true) as $row) {
-            $name = trim((string)($row['employeeName'] ?? $row['employee_name'] ?? $row['name'] ?? ''));
-            if ($name !== '') $names[$name] = true;
+        $saleOrders = [];
+        $legacyOrders = [];
+        $positionPairs = [];
+        $craftsmen = [];
+        foreach ($events as $index => $event) {
+            $saleOrderId = trim((string)($event['_sale_order_id'] ?? $event['source_order_id'] ?? ''));
+            if ($saleOrderId !== '') $saleOrders[$saleOrderId] = true;
+            $legacyOrderId = (string)($event['source_order_id'] ?? '');
+            if (preg_match('/^[1-9][0-9]*$/D', $legacyOrderId) === 1) {
+                $legacyOrders[$legacyOrderId] = true;
+            }
+            foreach ((array)json_decode((string)($event['_craftsmen_snapshot_json'] ?? '[]'), true) as $person) {
+                if (!is_array($person)) continue;
+                $employeeId = (int)($person['employee_id'] ?? $person['employeeId'] ?? 0);
+                $storeId = (int)($person['store_id'] ?? $person['storeId'] ?? $event['store_id']);
+                $name = trim((string)($person['staff_name_snapshot'] ?? $person['employeeName']
+                    ?? $person['employee_name'] ?? $person['name'] ?? ''));
+                if ($employeeId <= 0 || $name === '') continue;
+                $craftsmen[$index][] = ['store_id' => $storeId, 'employee_id' => $employeeId, 'name' => $name];
+                $positionPairs[$storeId . '|' . $employeeId] = ['store_id' => $storeId, 'employee_id' => $employeeId];
+            }
         }
-        return $names === [] ? '-' : implode('、', array_keys($names));
+        $receiptSales = [];
+        foreach (array_chunk(array_keys($legacyOrders), 300) as $chunk) {
+            foreach (Db::name('cashier_v3_card_purchase_receipt')
+                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->where('status', 'succeeded')->whereIn('legacy_order_id', $chunk)
+                ->field('legacy_order_id,sales_order_id,sales_order_line_id')->select()->toArray() as $receipt) {
+                $legacyId = (string)$receipt['legacy_order_id'];
+                $receiptSales[$legacyId] = [(string)$receipt['sales_order_id'], (string)$receipt['sales_order_line_id']];
+                $saleOrders[(string)$receipt['sales_order_id']] = true;
+            }
+        }
+        $salespeople = [];
+        foreach (array_chunk(array_keys($saleOrders), 300) as $chunk) {
+            foreach (Db::name('cashier_v3_performance_fact')
+                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('order_id', $chunk)->where('performance_type', 'sales_performance_allocated')
+                ->where('fact_direction', 'forward')->where('status', 'effective')
+                ->where('employee_id', '>', 0)
+                ->field('order_id,source_line_id,store_id,employee_id,employee_name_snapshot')
+                ->select()->toArray() as $person) {
+                $storeId = (int)$person['store_id'];
+                $employeeId = (int)$person['employee_id'];
+                $key = (string)$person['order_id'] . '|' . (string)$person['source_line_id'];
+                $salespeople[$key][$employeeId] = $person;
+                $positionPairs[$storeId . '|' . $employeeId] = ['store_id' => $storeId, 'employee_id' => $employeeId];
+            }
+        }
+        $positions = (new EmployeeCurrentPositionDimensionServices())->resolve(array_values($positionPairs));
+        foreach ($events as $index => &$event) {
+            $craftNames = [];
+            foreach ((array)($craftsmen[$index] ?? []) as $person) {
+                $key = $person['store_id'] . '|' . $person['employee_id'];
+                if ($this->hasCurrentPosition($positions[$key] ?? '', '操作师')) $craftNames[$person['name']] = true;
+            }
+            $event['craftsman'] = $craftNames === [] ? '-' : implode('、', array_keys($craftNames));
+            $saleOrderId = trim((string)($event['_sale_order_id'] ?? $event['source_order_id'] ?? ''));
+            $saleLineId = trim((string)($event['_sale_line_id'] ?? $event['source_line_id'] ?? ''));
+            $legacyId = (string)($event['source_order_id'] ?? '');
+            if (isset($receiptSales[$legacyId])) {
+                [$saleOrderId, $saleLineId] = $receiptSales[$legacyId];
+            }
+            $consultantNames = [];
+            foreach ((array)($salespeople[$saleOrderId . '|' . $saleLineId] ?? []) as $person) {
+                $key = (int)$person['store_id'] . '|' . (int)$person['employee_id'];
+                $name = trim((string)$person['employee_name_snapshot']);
+                if ($name !== '' && $this->hasCurrentPosition($positions[$key] ?? '', '咨询师')) {
+                    $consultantNames[$name] = true;
+                }
+            }
+            $event['consultant'] = $consultantNames === [] ? '-' : implode('、', array_keys($consultantNames));
+            unset($event['_sale_order_id'], $event['_sale_line_id'], $event['_craftsmen_snapshot_json']);
+        }
+        unset($event);
+    }
+
+    /** A person may hold multiple current positions; only the exact named role counts. */
+    private function hasCurrentPosition(string $positions, string $required): bool
+    {
+        return in_array($required, explode('、', $positions), true);
     }
 
     private function validRange(array $range): array

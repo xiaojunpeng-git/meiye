@@ -130,11 +130,14 @@ phaseThreeReportAssert(
 $platformAnnotations = phaseThreeMethodSource($controller, 'annotations');
 $platformSaveAnnotation = phaseThreeMethodSource($controller, 'saveAnnotation');
 $platformAnnotationPermission = phaseThreeMethodSource($controller, 'canAccessAnnotationReport');
+$platformReportPermission = phaseThreeMethodSource($controller, 'canAccessReport');
 phaseThreeReportAssert(
     str_contains($platformAnnotations, 'canAccessAnnotationReport')
         && str_contains($platformSaveAnnotation, 'canAccessAnnotationReport')
         && str_contains($platformAnnotationPermission, 'self::SIX_DIMENSION_REPORTS')
-        && str_contains($platformAnnotationPermission, 'canAccessSixDimensionReport'),
+        && str_contains($platformAnnotationPermission, 'canAccessReport')
+        && str_contains($platformReportPermission, 'self::SIX_DIMENSION_REPORTS')
+        && str_contains($platformReportPermission, 'canAccessSixDimensionReport'),
     'platform annotation reads and writes require an explicit registered report with its menu permission'
 );
 phaseThreeReportAssert(
@@ -238,10 +241,11 @@ phaseThreeReportAssert(
 phaseThreeReportAssert(
     str_contains($service, "->where('fact_direction', 'forward')")
         && str_contains($service, 'consumptionByServiceLine')
-        && str_contains($service, 'managerBySaleLine')
-        && str_contains($service, 'MAX(transfer_manager.sales_manager_name_snapshot) sales_manager_name')
-        && str_contains($service, "(string)(\$transfer['sales_manager_name'] ?: '-')"),
-    'service consumption and sales managers are pre-aggregated independently without multiplication'
+        && str_contains($service, "->where('performance_type', 'sales_performance_allocated')")
+        && str_contains($service, 'EmployeeCurrentPositionDimensionServices')
+        && str_contains($service, "hasCurrentPosition(\$positions[\$key] ?? '', '咨询师')")
+        && str_contains($service, "hasCurrentPosition(\$positions[\$key] ?? '', '操作师')"),
+    'service amounts and current-position personnel are read in separate batches without multiplying facts'
 );
 phaseThreeReportAssert(
     str_contains($paymentAllocations, 'persistLifecycleReversalsInTx')
@@ -260,25 +264,28 @@ phaseThreeReportAssert(
 );
 phaseThreeReportAssert(
     substr_count(phaseThreeMethodSource($service, 'purchaseItemRows'), '$this->excludeVoidedSalesOrders(') === 2
-        && !str_contains(phaseThreeMethodSource($service, 'paymentAllocationQuery'), '$this->excludeVoidedSalesOrders(')
+        && str_contains(phaseThreeMethodSource($service, 'paymentAllocationQuery'), '$this->excludeVoidedSalesOrders(')
         && str_contains(phaseThreeMethodSource($service, 'excludeVoidedSalesOrders'), 'whereNotExists(')
         && str_contains(phaseThreeMethodSource($service, 'excludeVoidedSalesOrders'), "->where('void_operation.source_type', 'sales')")
         && str_contains(phaseThreeMethodSource($service, 'excludeVoidedSalesOrders'), "->where('void_operation.operation_type', 'void')")
         && str_contains(phaseThreeMethodSource($service, 'excludeVoidedSalesOrders'), "->where('void_operation.status', 'succeeded')"),
-    'void cash remains append-only by business date while voided orders are excluded from successful purchase counts'
+    'void facts remain auditable while successful operating purchases and cash exclude voided sales orders'
 );
 phaseThreeReportAssert(
-    strpos($service, '$allocations = $this->allocateSigned') !== false
-        && strpos($service, "!isset(\$categoryFilter[(int)\$item['category_id_snapshot']])")
-            > strpos($service, '$allocations = $this->allocateSigned'),
+    strpos(phaseThreeMethodSource($service, 'cashItemRows'), '$allocations = $this->allocateSigned') !== false
+        && strrpos(phaseThreeMethodSource($service, 'cashItemRows'), 'return $this->currentCategoryRows($rows, $categoryIds);')
+            > strpos(phaseThreeMethodSource($service, 'cashItemRows'), '$allocations = $this->allocateSigned')
+        && str_contains(phaseThreeMethodSource($service, 'cashItemRows'), 'candidate_item.component_product_id'),
     'card payments allocate across every configured component before category filtering'
 );
 phaseThreeReportAssert(
     str_contains($service, 'private function purchaseBusinessEventKey')
         && str_contains($service, "return 'event:' . \$eventNo")
         && str_contains($service, "return 'order:' . (string)(\$row['order_id'] ?? '')")
-        && str_contains($service, "\$paidEvents[(string)\$cashMeta['event_key']] = true"),
-    'new or returning and purchase or gift classification is consistent for the whole sale event'
+        && str_contains($service, "\$paidEvents[(string)\$cashMeta['event_key']] = true")
+        && str_contains($service, "if (!isset(\$paidEvents[(string)\$event['event_key']])) continue")
+        && !str_contains($service, "'new_deal_gift'"),
+    'first paid six-dimension purchase is classified by the whole sale event and gifts stay hidden'
 );
 phaseThreeReportAssert(
     str_contains($service, "'start' => max(\$range['start'], \$monthRange['start'])")
@@ -293,10 +300,10 @@ phaseThreeReportAssert(
     'cash tier totals use every authorized store while selected scope only narrows visible assignment rows'
 );
 phaseThreeReportAssert(
-    str_contains($service, '$memberIds = $this->activeMemberIds($authorizedStores, $range)')
+    str_contains($service, '$memberIds = array_keys($memberTotals)')
         && str_contains($service, '$activeByAssignmentStore[$storeId][(string)$memberId] = true')
         && str_contains($service, '$activeByAssignmentStore[(int)$row[\'store_id\']]'),
-    'cash tier cohort and denominator both use period-active members grouped by cutoff assignment store'
+    'cash tier cohort and denominator both use six-dimension fact members grouped by cutoff assignment store'
 );
 phaseThreeReportAssert(
     str_contains($annotations, "'complaint_count' => 'nonnegative_integer'")
@@ -311,7 +318,7 @@ phaseThreeReportAssert(
 phaseThreeReportAssert(
     str_contains($service, "->where('pid', 0)")
         && str_contains($service, 'count($roots) !== 1')
-        && str_contains($service, '存在多个启用的六维根商品分类'),
+        && str_contains($service, '存在多个六维根商品分类'),
     'six-dimension category lookup is root-scoped and fails closed on duplicate configuration'
 );
 phaseThreeReportAssert(
