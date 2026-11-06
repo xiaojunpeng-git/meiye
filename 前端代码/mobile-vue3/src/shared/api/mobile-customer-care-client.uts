@@ -1,6 +1,8 @@
 import { buildMobileRequestPlan, mobileRequestPlanMatchesContract } from './request-context.uts'
 import { sendMobileRequest } from './mobile-http.uts'
 import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+// 上传与任务请求使用同一实例地址，不能落到旧缓存或另一个客户。
+import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
 
 // Runtime mirror only. The frozen JSON contract remains the source checked by tests.
 const customerCareTransportContract : any = {

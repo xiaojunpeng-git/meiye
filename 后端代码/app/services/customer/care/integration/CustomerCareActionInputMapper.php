@@ -149,6 +149,8 @@ final class CustomerCareActionInputMapper
             'sourceId' => 'MANUAL:' . $memberId . ':' . substr(hash('sha256', $idempotencyKey), 0, 24),
             'title' => CustomerCareProjectionContract::taskLabel($taskType),
             'note' => $this->text($payload['content'] ?? '', 'content', 500, false),
+            // 沿用领域照片校验；最终命令统一检查上限、地址及幂等指纹。
+            'taskPhotos' => $payload['taskPhotos'] ?? [],
             'plannedAt' => $this->dateTime(
                 $payload['plannedAt'] ?? null,
                 'plannedAt',

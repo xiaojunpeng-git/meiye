@@ -400,6 +400,9 @@ final class CustomerCareWorkbenchQueryService
                 'name' => (string)$row['business_store_name_snapshot'],
             ],
             'relatedBusiness' => $related,
+            // 列表及详情共用已授权任务投影；历史任务无附件时返回空数组。
+            'note' => (string)($row['note'] ?? ''),
+            'taskPhotos' => $this->decodePhotos($row['task_photos'] ?? ''),
             'recentServiceSummary' => (string)($memberSummary['latestService'] ?? '暂无服务记录'),
             'recentServiceSource' => (string)($memberSummary['latestServiceSource'] ?? 'unavailable'),
             'latestCare' => $latestRecord === null ? null : $this->latestCareDto($latestRecord, $scope),

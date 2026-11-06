@@ -86,6 +86,8 @@ final class CustomerCareCommandService
                 'source_id' => $command['sourceId'],
                 'title' => $command['title'],
                 'note' => $command['note'],
+                // 图片属于任务原始备注，不混入后续客情记录或改变任务状态。
+                'task_photos' => $this->encodePhotos($command['taskPhotos']),
                 'status' => CustomerCareTaskState::UNSTARTED,
                 'is_visible' => 1,
                 'version' => 1,

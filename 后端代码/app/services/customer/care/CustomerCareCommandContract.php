@@ -116,6 +116,8 @@ final class CustomerCareCommandContract
             'sourceId' => self::asciiIdentifier($command['sourceId'] ?? null, 'sourceId', 64),
             'title' => self::text($command['title'] ?? null, 'title', 128, true),
             'note' => self::text($command['note'] ?? '', 'note', 500, false),
+            // 任务附件参与同一创建指纹；重放不能偷偷替换图片，旧客户端不传时为空。
+            'taskPhotos' => self::photoUrls($command['taskPhotos'] ?? [], 'taskPhotos'),
             'plannedAt' => self::positiveInteger($command['plannedAt'] ?? null, 'plannedAt'),
             'plannedTimezone' => self::timezone($command['plannedTimezone'] ?? null),
         ];
@@ -274,6 +276,9 @@ final class CustomerCareCommandContract
 
     public static function fingerprint(string $operationType, array $actor, array $command): string
     {
+        // 空附件等同旧命令，升级后仍能重放升级前的无图创建请求。
+        // 有图时完整数组参与指纹，同一幂等键更换图片必须冲突。
+        if ($operationType === 'CREATE_TASK' && ($command['taskPhotos'] ?? []) === []) unset($command['taskPhotos']);
         $identity = [
             'tenantId' => $actor['tenantId'],
             'staffId' => $actor['staffId'],
@@ -342,16 +347,17 @@ final class CustomerCareCommandContract
     /** @return string[] */
     private static function photoUrls($value, string $field): array
     {
+        $label = $field === 'taskPhotos' ? '任务图片' : '服务照片';
         if ($value === null || $value === '') return [];
         if (!is_array($value) || count($value) > 9) {
-            throw self::invalid($field, '服务照片最多保存 9 张。');
+            throw self::invalid($field, $label . '最多保存 9 张。');
         }
         $urls = [];
         foreach ($value as $url) {
-            if (!is_string($url)) throw self::invalid($field, '服务照片地址无效。');
+            if (!is_string($url)) throw self::invalid($field, $label . '地址无效。');
             $url = trim($url);
             if ($url === '' || strlen($url) > 1024 || !preg_match('/^https?:\/\/[^\s]+$/D', $url)) {
-                throw self::invalid($field, '服务照片地址无效。');
+                throw self::invalid($field, $label . '地址无效。');
             }
             $urls[$url] = $url;
         }
