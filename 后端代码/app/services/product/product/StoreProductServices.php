@@ -375,13 +375,8 @@ class StoreProductServices extends BaseServices
         $storeBranchProductServices = app()->make(StoreBranchProductServices::class);
         $storeBranchProductServices->update(['pid' => $ids, 'type' => 1], ['is_show' => $is_show ? 1 : 0]);
 
-        /** @var StoreCardRelatedServices $relatedService */
-        $relatedService = app()->make(StoreCardRelatedServices::class);
-        $relatedService->setStatusInGuard(
-            $catalogLease,
-            array_merge($ids, $storeProductIds ?: []),
-            $is_show ? 1 : 0
-        );
+        // 上下架只控制单独销售；仓库项目仍可作为卡内项目，不能改写卡的组成。
+        // 卡内关联仅由显式卡项保存/删除管理，删除商品的保护仍走原删除路径。
 
         event('product.status', [$ids, $is_show]);
 
@@ -1213,18 +1208,25 @@ class StoreProductServices extends BaseServices
         }
         /** @var StoreCardRuleServices $cardRuleServices */
         $cardRuleServices = app()->make(StoreCardRuleServices::class);
+        $rebuildSelectedMembership = true;
+        $inheritedDefinitionSignature = null;
         if ($id > 0 && $type === 1 && (int)($data['product_type'] ?? 0) === 5) {
             $existingProduct = $this->dao->get($id, ['id', 'pid', 'product_type']);
             if ($existingProduct && (int)$existingProduct['pid'] > 0) {
                 $existingDefinition = $this->getInfo($id)['productInfo'] ?? [];
                 $data = $cardRuleServices->preserveLockedDefinition($data, $existingDefinition);
+                $inheritedDefinitionSignature = $cardRuleServices->inheritedDefinitionSignature($existingDefinition);
+                // 门店编辑继承卡不能借状态归整改变平台定义；应在平台保存后同步。
+                $rebuildSelectedMembership = false;
             }
         }
-        $data = $cardRuleServices->normalizeForSave($data);
+        $data = $cardRuleServices->normalizeForSave($data, $rebuildSelectedMembership);
         if ($data['product_type'] == 5) {
             if (!$data['related']) throw new AdminException('请选择关联商品');
             if ($data['card_cover'] == 1 && !$data['card_cover_image']) {
-                $data['card_cover_image'] = sys_config('site_url') . '/statics/images/card_cover_image.png';
+                // API clients without an explicit cover use the same bundled asset as the admin draft.
+                // A root-relative URL avoids site_url values ending in /admin and stays within this instance.
+                $data['card_cover_image'] = '/statics/images/card_cover_black_gold.jpg';
             }
             if ($data['card_cover'] == 2 && !$data['card_cover_color']) throw new AdminException('请选择卡项封面颜色');
         }
@@ -1583,9 +1585,20 @@ class StoreProductServices extends BaseServices
                 $this->dao->getColumn(['pid' => $id], 'id') ?: []
             );
         }
-        $catalogWrite = function (StoreCatalogWriteLease $catalogLease) use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId, $is_copy, $initialSkuQty, $createRequestKey, $createIdempotentServices, $resolvedIsInventoryEarly, $catalogGuard) {
+        $catalogWrite = function (StoreCatalogWriteLease $catalogLease) use ($id, $data, $description, $storeDescriptionServices, $storeProductAttrServices, $storeProductCouponServices, $detail, $attr, $coupon_ids, $storeDiscountProduct, $slider_image, $relatedService, $adminId, $is_copy, $initialSkuQty, $createRequestKey, $createIdempotentServices, $resolvedIsInventoryEarly, $catalogGuard, $cardRuleServices, $inheritedDefinitionSignature) {
 
             if ($id) {
+                // 规划后若平台同步改变了继承定义，不能用旧停用状态/旧次数覆盖新定义。
+                // 当前卡及其项目已被 lease 锁定，先重读比较，再进行任何资料写入。
+                if ($inheritedDefinitionSignature !== null) {
+                    // FOR UPDATE 是当前读，不能沿用锁规划阶段在 RR 事务中建立的旧一致性读快照。
+                    $currentDefinition = Db::name('store_product')->where('id', $id)->lock(true)->find() ?: [];
+                    $currentDefinition['related'] = Db::name('store_card_related')->where('card_product_id', $id)
+                        ->order('id')->lock(true)->select()->toArray();
+                    if (!hash_equals($inheritedDefinitionSignature, $cardRuleServices->inheritedDefinitionSignature($currentDefinition))) {
+                        throw new AdminException('平台卡项配置已变化，请刷新后重新编辑');
+                    }
+                }
                 //上下架处理
                 $this->setShowInGuard($catalogLease, [$id], $data['is_show']);
                 $oldInfo = $this->get($id)->toArray();
@@ -1619,12 +1632,11 @@ class StoreProductServices extends BaseServices
                     $cartService = app()->make(StoreCartServices::class);
                     $cartService->batchUpdate([$id], ['status' => 0], 'product_id');
                 }
-                if ($data['is_verify'] == 1 && $data['is_show'] == 1 && $data['is_sold'] == 0) {
-                    $status = 1;
-                } else {
-                    $status = 0;
+                // 仓库及缺货不改变卡内组成；审核未通过仍保留原有停用保护。
+                // 审核恢复不自动复活旧关联，须由显式卡项保存重新确认。
+                if ((int)$data['is_verify'] !== 1) {
+                    $relatedService->setStatusInGuard($catalogLease, [$id], 0);
                 }
-                $relatedService->setStatusInGuard($catalogLease, [$id], $status);
                 $is_new = 1;
             } else {
                 //默认评分
@@ -1766,7 +1778,11 @@ class StoreProductServices extends BaseServices
             }
             if ($id) {
                 // Editing a card changes its own definition and SKU, not other cards sharing
-                // the referenced projects. Keep their reverse closure for component edits only.
+                // the referenced projects. An ordinary product edit changes only its own and
+                // synchronized child identities: lock their direct referencing cards and those
+                // cards' complete definitions, without traversing unrelated cards that merely
+                // share another component. Historical dangling relations outside that boundary
+                // must not block a valid product edit.
                 $isCard = (int)$data['product_type'] === 5;
                 [$skuList, $id, $is_new, $data] = $catalogGuard->withCatalogMutation(
                     $isCard ? $catalogProductIds : [],
@@ -1774,7 +1790,8 @@ class StoreProductServices extends BaseServices
                     $targetRefs,
                     $catalogWrite,
                     true,
-                    !$isCard
+                    !$isCard,
+                    $isCard
                 );
             } else {
                 [$skuList, $id, $is_new, $data] = $catalogGuard->withNewProductCreation(
