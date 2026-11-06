@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\store\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\store\AuthController;
 use app\services\product\inventory\InventoryStoreAccessPolicy;
 use app\services\product\inventory\InventoryStoreReadModelServices;
@@ -17,10 +18,15 @@ final class InventoryStoreReadModel extends AuthController
     public function productSummary()
     {
         $input = $this->request->getMore([['keyword', ''], ['page', 1], ['limit', 20], ['category_id', 0]]);
-        return $this->success($this->services->productSummary(
+        $canViewCost = $this->canViewCost('stock');
+        $read = fn (int $readPage, int $readLimit): array => $this->services->productSummary(
             (int)$this->storeId, (int)$this->storeStaffId, (string)$input['keyword'],
-            (int)$input['page'], (int)$input['limit'], $this->canViewCost('stock'), (int)$input['category_id']
-        ));
+            $readPage, $readLimit, $canViewCost, (int)$input['category_id']
+        );
+        if ($this->request->get('list_export') === 'xlsx') {
+            return InventoryListExport::response('inventory_batch_stock', $read, 100);
+        }
+        return $this->success($read((int)$input['page'], (int)$input['limit']));
     }
     public function productDetail(int $productId) { return $this->success($this->services->productDetail((int)$this->storeId, (int)$this->storeStaffId, $productId, $this->canViewCost('stock'))); }
     private function canViewCost(string $feature): bool { return (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.' . $feature); }

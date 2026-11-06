@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\store\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\store\AuthController;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
 use app\services\product\inventory\query\InventoryOperationalUnifiedQueryContract;
@@ -33,6 +34,11 @@ final class InventoryUnifiedQuery extends AuthController
                 $cutoff
             );
             $provider = $runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE);
+            if ((string)$this->request->get('productOptions', '') === '1') return $this->success($provider->productOptions($context, $payload));
+            if ($this->request->get('list_export') === 'xlsx') {
+                $read = static fn (int $page, int $limit): array => $provider->query($context, array_replace($payload, compact('page', 'limit')));
+                return InventoryListExport::response(InventoryBatchStockQueryContract::PAGE_CODE, $read, 100);
+            }
             return $this->success($provider->query($context, $payload));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
@@ -54,7 +60,13 @@ final class InventoryUnifiedQuery extends AuthController
             $cutoff = (string)($payload['queryCutoffDate'] ?? $payload['query_cutoff_date'] ?? date('Y-m-d'));
             unset($payload['query_cutoff_date']);
             $context = $this->context($runtime, $cutoff, $pageCode);
-            return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
+            $provider = $runtime['providers']->resolve($pageCode);
+            if ($this->request->get('list_export') === 'xlsx') {
+                if (!InventoryListExport::supports($pageCode)) throw new \InvalidArgumentException('inventory_list_export_page_invalid');
+                $read = static fn (int $page, int $limit): array => $provider->query($context, array_replace($payload, compact('page', 'limit')));
+                return InventoryListExport::response($pageCode, $read, 100);
+            }
+            return $this->success($provider->query($context, $payload));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {

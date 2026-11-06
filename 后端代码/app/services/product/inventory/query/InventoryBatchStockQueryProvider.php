@@ -13,6 +13,9 @@ use think\facade\Db;
  */
 final class InventoryBatchStockQueryProvider
 {
+    // 库存事实保存的是仓内商品 ID；门店映射必须先核实归属，独立商品继续使用自身 ID。
+    private const CATALOG_PRODUCT_ID = 'CASE WHEN p.type=1 AND p.relation_id=s.store_id AND base.id IS NOT NULL THEN base.id ELSE s.consumable_product_id END';
+
     private const MAX_SOURCE_ROWS = 10000;
 
     public function pageCode(): string
@@ -44,6 +47,39 @@ final class InventoryBatchStockQueryProvider
             throw new \RuntimeException('inventory_query_source_window_too_large');
         }
         return $this->projectRows($rows, $scope, $request['queryCutoffDate']);
+    }
+
+    /** 从授权仓现有的库存档案分页选品。同一商品只出现一次，数量统计仍读取结存事实。 */
+    public function productOptions(InventoryBatchStockDataScope $scope, string $keyword, int $page, int $limit): array
+    {
+        $identity = self::CATALOG_PRODUCT_ID;
+        $query = $this->joinCatalogProduct(Db::name('inventory_stock')->alias('s'))
+            ->where('s.tenant_id', $scope->tenantId())
+            ->whereIn('s.location_id', $scope->locationIds());
+        if ($keyword !== '') {
+            $query->leftJoin('store_product_attr_value sku', 'sku.id=s.sku_id AND sku.product_id=s.consumable_product_id')
+                ->whereLike('p.store_name|p.code|p.bar_code|base.store_name|base.code|base.bar_code|sku.code|sku.bar_code|sku.suk', '%' . $keyword . '%');
+        }
+        $count = (clone $query)->fieldRaw('COUNT(DISTINCT ' . $identity . ') AS total')->find();
+        $total = (int)($count['total'] ?? 0);
+        $page = min($page, max(1, (int)ceil($total / $limit)));
+        $list = $query->fieldRaw($identity . ' AS product_id, MAX(COALESCE(base.store_name, p.store_name)) AS product_name')
+            ->group($identity)
+            ->order('product_id desc')
+            ->page($page, $limit)
+            ->select()->toArray();
+        foreach ($list as &$row) {
+            if (trim((string)$row['product_name']) === '') $row['product_name'] = '商品 #' . $row['product_id'];
+        }
+        unset($row);
+        return compact('list', 'total', 'page');
+    }
+
+    /** 确认上级是平台商品后才按总部商品归并，失去目录关系的历史库存保留原商品身份。 */
+    private function joinCatalogProduct($query)
+    {
+        return $query->leftJoin('store_product p', 'p.id=s.consumable_product_id')
+            ->leftJoin('store_product base', 'base.id=p.pid AND base.type=0 AND base.relation_id=0 AND p.type=1 AND p.relation_id=s.store_id');
     }
 
     /**
@@ -79,7 +115,7 @@ final class InventoryBatchStockQueryProvider
     private function balanceQuery(array $request, InventoryBatchStockDataScope $scope)
     {
         $signedQuantity = "SUM(IF(f.direction=1,f.quantity_units,-CAST(f.quantity_units AS SIGNED)))";
-        return Db::name('inventory_batch_movement_fact')
+        $query = Db::name('inventory_batch_movement_fact')
             ->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')
             ->join('inventory_stock s', 's.id=f.stock_id')
@@ -87,7 +123,13 @@ final class InventoryBatchStockQueryProvider
             ->where('f.tenant_id', $scope->tenantId())
             ->whereIn('f.location_id', $request['locationIds'])
             ->where('f.business_date', '<=', $request['queryCutoffDate'])
-            ->where('f.fact_status', 'SETTLED')
+            ->where('f.fact_status', 'SETTLED');
+        $this->joinCatalogProduct($query);
+        if ($request['catalogProductIds']) {
+            $placeholders = implode(',', array_fill(0, count($request['catalogProductIds']), '?'));
+            $query->whereRaw(self::CATALOG_PRODUCT_ID . " IN ({$placeholders})", $request['catalogProductIds']);
+        }
+        return $query
             ->field([
                 'b.id' => 'batch_balance_id',
                 'f.tenant_id',
@@ -99,6 +141,7 @@ final class InventoryBatchStockQueryProvider
                 'l.store_id',
                 'l.store_name_snapshot' => 'store_name',
                 's.consumable_product_id' => 'product_id',
+                Db::raw(self::CATALOG_PRODUCT_ID . ' AS catalog_product_id'),
                 's.sku_id',
                 // 领用选品必须沿用库存事实的 SKU 身份；已下架商品不能改用同名新目录 SKU。
                 's.product_unique' => 'sku_unique',
@@ -123,7 +166,7 @@ final class InventoryBatchStockQueryProvider
             ->group([
                 'b.id', 'f.tenant_id', 'l.organization_id', 'l.organization_path',
                 'l.organization_name_snapshot', 'l.id', 'l.location_name', 'l.store_id',
-                'l.store_name_snapshot', 's.consumable_product_id', 's.sku_id', 's.product_unique',
+                'l.store_name_snapshot', 's.consumable_product_id', 'catalog_product_id', 's.sku_id', 's.product_unique',
                 'b.product_name_snapshot', 'b.sku_name_snapshot', 'b.product_code_snapshot',
                 'b.barcode_snapshot', 'b.brand_name_snapshot', 'b.category_name_snapshot',
                 's.stock_unit', 's.quantity_scale', 's.stock_status', 'b.batch_no',
@@ -182,6 +225,8 @@ final class InventoryBatchStockQueryProvider
 
     private function normalizeRequest(array $request, InventoryBatchStockDataScope $scope): array
     {
+        $catalogProductIds = $request['catalogProductIds'] ?? [];
+        unset($request['catalogProductIds']);
         $allowed = ['queryCutoffDate', 'locationIds', 'includeZero'];
         $actual = array_keys($request);
         sort($allowed, SORT_STRING);
@@ -196,6 +241,7 @@ final class InventoryBatchStockQueryProvider
             ),
             'locationIds' => $scope->assertRequestedLocations($request['locationIds']),
             'includeZero' => $request['includeZero'],
+            'catalogProductIds' => $catalogProductIds,
         ];
     }
 
@@ -230,6 +276,7 @@ final class InventoryBatchStockQueryProvider
             'store_id' => $storeId,
             'store_name' => $storeName,
             'product_id' => (int)$row['product_id'],
+            'catalog_product_id' => (int)($row['catalog_product_id'] ?? $row['product_id']),
             'sku_id' => (int)$row['sku_id'],
             'sku_unique' => (string)$row['sku_unique'],
             'product_name' => (string)$row['product_name'],

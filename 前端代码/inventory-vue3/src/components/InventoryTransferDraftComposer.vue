@@ -203,18 +203,23 @@ async function openProducts(row) {
   }
   productRowId.value = row.id
 }
-function selectProducts(products) {
+function selectProducts(products, quantities = new Map()) {
   const row = activeProductRow.value
   if (!row || !products.length) { productRowId.value = 0; return }
   const [first, ...extra] = products
   row.product = first
+  // 每个 SKU 使用自己的每店数量，未填写的行仍沿用打开弹窗时的调拨设置。
   for (const product of extra) {
     const added = newRow(row.sourceKey)
     added.product = product
     added.quantity = row.quantity
     added.destinations = row.destinations.map((item) => ({ ...item }))
+    const quantity = quantities.get(Number(product.sku_id))
+    if (quantity !== undefined) updateDefaultQuantity(added, quantity)
     rows.value.push(added)
   }
+  const quantity = quantities.get(Number(first.sku_id))
+  if (quantity !== undefined) updateDefaultQuantity(row, quantity)
   productRowId.value = 0
 }
 async function openDestinations(row) {
@@ -438,7 +443,7 @@ watch(defaultSourceKey, (sourceKey, previous) => {
     </main>
     <footer class="composer-footer"><span>{{ rows.length }} 项商品 · {{ plannedCount }} 张调拨草稿</span><div><button v-if="!importMode" type="button" class="dispatch-button" :disabled="!canSubmit" @click="openDispatchConfirmation">生成调拨并发货</button><button type="button" :disabled="busy" @click="emit('close')">取消</button><button v-if="!importMode || !!error" type="button" class="primary" :disabled="!canSubmit" @click="submitDrafts()">{{ busy ? '生成中' : importMode ? '重试生成草稿' : '生成调拨草稿' }}</button></div></footer>
   </section>
-  <InventoryProductSelector :visible="!!productRowId" :selected-rows="activeProductRow?.product ? [activeProductRow.product] : []" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productRowId = 0" @confirm="selectProducts" />
+  <InventoryProductSelector :visible="!!productRowId" :selected-rows="activeProductRow?.product ? [activeProductRow.product] : []" :catalog-api="catalogApi" :catalog-query="catalogQuery" quantity-mode="document" @close="productRowId = 0" @confirm="selectProducts" />
   <Teleport to="body">
     <div v-if="destinationPreview" id="destination-preview-tooltip" class="destination-preview-tooltip" role="tooltip" :style="{ left: `${destinationPreview.left}px`, top: `${destinationPreview.top}px` }" @mouseenter="keepDestinationPreview" @mouseleave="hideDestinationPreview">
       <strong>已选调入方</strong>

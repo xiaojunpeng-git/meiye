@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\controller\admin\v1\product\inventory;
 
+use app\services\product\inventory\InventoryListExport;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryPlatformHqInboundServices;
 use app\services\query\UnifiedQueryException;
@@ -44,15 +45,21 @@ final class InventoryPlatformHqInbound extends AuthController
                 ['business_date_from', ''],
                 ['business_date_to', ''],
             ], true);
-            return $this->success($this->services->index(
+            $mineOnly = $this->request->get('creator_scope', '') === 'mine';
+            $read = fn (int $readPage, int $readLimit): array => $this->services->index(
                 (array)$this->adminInfo,
                 (int)$locationId,
                 (string)$keyword,
-                (int)$page,
-                (int)$limit,
+                $readPage,
+                $readLimit,
                 (string)$dateFrom,
-                (string)$dateTo
-            ));
+                (string)$dateTo,
+                $mineOnly
+            );
+            if ($this->request->get('list_export') === 'xlsx') {
+                return InventoryListExport::response('inventory_inbound', $read, 100, true);
+            }
+            return $this->success($read((int)$page, (int)$limit));
         } catch (\RuntimeException $exception) {
             return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
         }

@@ -63,6 +63,14 @@ button { cursor: pointer; }
   align-items: center;
   gap: 10px;
   margin-left: auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.inventory-stock-product-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
 }
 
 .inventory-query-subject > label {

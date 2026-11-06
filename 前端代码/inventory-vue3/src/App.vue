@@ -15,6 +15,7 @@ import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryRemarkModal from './components/InventoryRemarkModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
 import InventoryOrganizationStorePicker from './components/InventoryOrganizationStorePicker.vue'
+import InventoryProductSelector from './components/InventoryProductSelector.vue'
 import { formatBatchNumber } from './batchNumberDisplay'
 import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
@@ -51,6 +52,8 @@ const legacyRequestSupplyRow = ref(null)
 const platformTransferFromStoreId = ref(0)
 const platformTransferToStoreId = ref(0)
 const platformTransferStatus = ref('')
+const documentCreatorPages = new Set(['transfer', 'inbound', 'outbound', 'usage'])
+const documentCreatorScope = ref('mine')
 // 调拨写入口只消费服务端能力；菜单可读不代表允许新建或发货。
 const platformTransferCanCreate = ref(false)
 // 通用仓库管理与各单据添加功能分开；导入仍使用原有管理能力，不能由添加节点推导。
@@ -198,7 +201,23 @@ const movementStatistics = ref({ list: [], count: 0 })
 const movementStatisticsLoading = ref(false)
 const movementStatisticsError = ref('')
 const stockExecutedQuery = ref({})
+const stockListExecutedRequest = ref(null)
+const listExportBusy = ref(false)
+const listExportError = ref('')
+const executedInventoryExport = computed(() => {
+  if (active.value === 'stock') return stockListExecutedRequest.value
+  if (!documentCreatorPages.has(active.value)) return null
+  if (mode.value === 'platform') return platformListExecutedRequest.value
+  return storeOperationalExecutedQuery.value
+    ? { kind: 'unified', payload: storeOperationalExecutedQuery.value }
+    : null
+})
+const listExportDisabled = computed(() => !executedInventoryExport.value || listLoading.value
+  || !!listError.value || transferListRefreshFailed.value || listExportBusy.value)
 const stockPage = ref(1)
+const stockProductPickerOpen = ref(false)
+const stockSelectedProducts = ref([])
+let stockListRevision = 0
 // 两端库存查询按商品汇总行分页；金额与数量合计仍取服务端完整筛选范围。
 const stockPageSize = 100
 const stockPages = computed(() => Math.max(1, Math.ceil(Number(remoteTotal.value) / stockPageSize)))
@@ -389,19 +408,32 @@ const statisticsQueryFields = computed(() => (statisticsQueryPage.value?.fields 
   ...(key === 'business_date' ? { defaultQuick: true, quickDateRange: true } : {})
 })))
 
+// 选品、列表与导出沿用同一仓库范围；服务端仍按登录账号核定实际权限。
+function stockWarehouseScope() {
+  if (mode.value !== 'platform') return {}
+  if (platformStockSubject.value === 'HQ') return { subject: 'HQ', hq_location_id: Number(platformHqLocationId.value) }
+  if (platformStockOrganizationId.value !== null) return { subject: 'STORE', organizationId: platformStockOrganizationId.value }
+  return { subject: 'STORE', ...(platformStoreId.value > 0 ? { storeId: platformStoreId.value } : {}) }
+}
+
+const stockProductCatalog = {
+  searchCatalog({ keyword, page, limit }) {
+    const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
+    return client.unifiedBatchStock({ ...stockWarehouseScope(), productOptions: 1, keyword, page, limit })
+  }
+}
+
+function confirmStockProducts(rows) {
+  stockSelectedProducts.value = rows
+  stockProductPickerOpen.value = false
+}
+
 async function stockQueryRequestAction(action, payload = {}) {
   const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
   if (!client) throw new Error('库存查询服务尚未初始化。')
-  // 平台端只允许按已授权门店收窄，实际库存仓由服务端从门店范围计算。
-  const storeScope = mode.value === 'platform'
-    ? { subject: platformStockSubject.value, hq_location_id: platformStockSubject.value === 'HQ' ? Number(platformHqLocationId.value) : 0, ...(platformStockSubject.value === 'STORE' && Number(platformStoreId.value) > 0 ? { storeId: Number(platformStoreId.value) } : {}), ...(platformStockSubject.value === 'STORE' && platformStockOrganizationId.value !== null ? { organizationId: Number(platformStockOrganizationId.value) } : {}) }
-    : {}
+  const storeScope = stockWarehouseScope()
   if (action === 'query-unified-query-capabilities') {
     const data = await client.unifiedQueryCapabilities(storeScope)
-    return { result: { status: 'success' }, data }
-  }
-  if (action === 'query-unified-query-export-task') {
-    const data = await client.unifiedQueryExportTask(payload.taskId)
     return { result: { status: 'success' }, data }
   }
   return client.unifiedQueryCommand({ action, ...payload, ...storeScope })
@@ -434,14 +466,14 @@ const visibleStockQueryFields = computed(() => {
   const fields = mode.value === 'platform'
     ? stockQueryFields.value.filter((field) => !['organization_name', 'location_name', 'store_name'].includes(field.key))
     : stockQueryFields.value
-  return fields.map((field) => ({
+  return fields.filter((field) => field.key !== 'catalog_product_id').map((field) => ({
     ...field,
     ...(field.key === 'expiry_status' ? { label: '过期筛选', type: 'enum', options: ['已过期', '未过期', '到期日未知'].map(value => ({ value, label: value })) } : {}),
     // Both hosts use the same stock quantity presets; warehouse scope is still enforced by the server.
     ...(field.key === 'available_quantity'
       ? { label: '库存数量', quickRangePresets: true }
       : {}),
-    defaultQuick: ['product_name', 'expiry_status', 'available_quantity'].includes(field.key),
+    defaultQuick: ['expiry_status', 'available_quantity'].includes(field.key),
     quickRange: field.key === 'available_quantity'
   }))
 })
@@ -456,7 +488,7 @@ const stockQuerySettings = computed(() => {
     && legacyDefaults.every((key, index) => comparableQuickFields[index] === key)
   // 新筛选固定放在库存数量之前，保留账号已有的其他快捷条件。
   const selected = usesLegacyDefaults || !quickFields.length ? ['product_name', 'available_quantity'] : [...quickFields]
-  const ordered = selected.filter(key => key !== 'expiry_status')
+  const ordered = selected.filter(key => !['expiry_status', 'product_name', 'catalog_product_id'].includes(key))
   const quantityIndex = ordered.indexOf('available_quantity')
   ordered.splice(quantityIndex < 0 ? ordered.length : quantityIndex, 0, 'expiry_status')
   return { ...settings, quickFields: ordered }
@@ -581,14 +613,6 @@ const platformStoreOptions = computed(() => {
     return true
   })
 })
-const platformStoreSelectorOptions = computed(() => [
-  { key: '0', name: '全部门店', type: 'ALL' },
-  ...platformStockStoreLocations.value.map((location) => ({
-    key: String(Number(location.store_id)),
-    name: location.store_name_snapshot || location.store_name || `门店${location.store_id}`,
-    type: 'STORE'
-  }))
-])
 const platformListWarehouseOptions = computed(() => [
   ...platformHqLocations.value.map((location) => ({
     key: `HQ:${Number(location.id)}`,
@@ -602,13 +626,9 @@ const platformListWarehouseOptions = computed(() => [
   }))
 ])
 const platformHqListWarehouseOptions = computed(() => platformListWarehouseOptions.value.filter(option => option.type === 'HQ'))
-const platformStoreSelection = computed({
-  get: () => String(Number(platformStoreId.value) || 0),
-  set: (value) => {
-    platformStoreId.value = Number(value) || 0
-    platformStockOrganizationId.value = null
-    onPlatformLocationChanged()
-  }
+const platformStockScopeSelection = computed(() => {
+  if (platformStockOrganizationId.value !== null) return `ORG:${platformStockOrganizationId.value}`
+  return platformStoreId.value > 0 ? `STORE:${platformStoreId.value}` : 'SCOPE:0'
 })
 const platformListStoreSelection = computed({
   get: () => String(Number(platformListStoreId.value) || 0),
@@ -746,6 +766,7 @@ function selectPage(key, options = {}) {
     return
   }
   active.value = key
+  documentCreatorScope.value = 'mine'
   platformOrganizationSelection.value = 'HQ:0'
   if (mode.value === 'platform' && platformOrganizationPages.has(key)) platformListWarehouseSelection.value = `HQ:${Number(platformHqLocationId.value) || 0}`
   // 首页下钻保留选定的授权组织/门店；普通菜单切换继续使用页面自身默认范围。
@@ -756,7 +777,7 @@ function selectPage(key, options = {}) {
     platformStoreId.value = options.dashboardScope.startsWith('STORE:') ? Number(options.dashboardScope.split(':')[1]) : 0
     platformHqLocationId.value = Number(dashboardWarehouseId.value) || 0
   }
-  if (mode.value === 'platform' && platformOrganizationPages.has(key)) loadPlatformOrganizationScope(key)
+  if (mode.value === 'platform') loadPlatformOrganizationScope(key)
   if (key !== 'transfer') {
     transferSavedNotice.value = ''
     transferListRefreshFailed.value = false
@@ -788,7 +809,10 @@ function selectPage(key, options = {}) {
   if (key === 'stock') {
     stockPage.value = 1
     stockExecutedQuery.value = {}
+    stockListExecutedRequest.value = null
+    stockSelectedProducts.value = []
   }
+  stockProductPickerOpen.value = false
   if (options.tab) activeStatisticsTab.value = options.tab
   if (key === 'statistics') {
     // 下钻带入的分档同步到可见筛选，重新进入不沿用上次草稿。
@@ -1552,9 +1576,12 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
   // 分组呈现按单据类型选择，不按终端分支；平台与门店共用下面唯一的表格模板。
   const groupedPage = groupedListPages.has(active.value) ? active.value : ''
   const groupedRequest = groupedPage ? ++groupedListVersion : 0
+  const stockRequest = active.value === 'stock' ? ++stockListRevision : 0
+  const stockRequestIsCurrent = () => !stockRequest || (stockRequest === stockListRevision && active.value === 'stock')
   listLoading.value = true
   listError.value = ''
   copyError.value = ''
+  listExportError.value = ''
   if (mode.value === 'platform' && active.value === 'usage' && !reusePlatformListQuery && !platformReadScopeMode.value && !platformListWarehouseOptions.value.some((item) => item.key === platformListWarehouseSelection.value)) {
     sourceRows.value = []
     remoteRows.value = []
@@ -1582,13 +1609,8 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       query.page = reusePlatformListQuery ? platformListPage.value : 1
       query.limit = platformListPageSize
     }
-    if (mode.value === 'platform' && active.value === 'stock') {
-      query.subject = platformStockSubject.value
-      if (platformStockSubject.value === 'HQ') query.hq_location_id = Number(platformHqLocationId.value)
-      if (platformStockSubject.value === 'STORE' && Number(platformStoreId.value) > 0) query.storeId = Number(platformStoreId.value)
-      if (platformStockSubject.value === 'STORE' && platformStockOrganizationId.value !== null) query.organizationId = Number(platformStockOrganizationId.value)
-    }
     if (active.value === 'stock') {
+      Object.assign(query, stockWarehouseScope())
       query.page = stockPage.value
       query.limit = stockPageSize
     }
@@ -1637,6 +1659,12 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
     // contract. Legacy list endpoints consume business_date_from/to directly,
     // so remove those keys when a selected store uses unified query.
     const { business_date_from, business_date_to, ...unifiedOperationalQuery } = query
+    // 列表只传「本人」意图。平台和门店的录入身份都从各自的认证上下文解析。
+    const usesCreatorScope = documentCreatorPages.has(active.value)
+    const creatorConditions = usesCreatorScope && documentCreatorScope.value === 'mine'
+      ? [{ field: 'recorded_by_me', operator: 'eq', value: true }]
+      : []
+    if (usesCreatorScope) query.creator_scope = documentCreatorScope.value
     // 周期只筛服务端确认日期；清空周期时保留草稿，且平台/门店共用同一过滤契约。
     const countDateConditions = active.value === 'count' && countDateRange.value.min && countDateRange.value.max
       ? [{ field: 'count_date', operator: 'between', value: [countDateRange.value.min, countDateRange.value.max] }]
@@ -1650,6 +1678,7 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       ? { ...unifiedOperationalQuery, pageCode: `inventory_${active.value}`, subject: 'STORE', storeId: Number(listWarehouseId) || 0,
           topFilterConditions: [
             ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
+            ...creatorConditions,
             ...(filtersBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
               ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }]
               : [])
@@ -1661,6 +1690,7 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
       page: Number(query.page) || 1, limit: platformListPageSize,
       topFilterConditions: [
         ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
+        ...creatorConditions,
         // 首页待办下钻与卡片计数使用同一状态集合；范围仍由服务端授权交集决定。
         ...(statusFocus.value === '在途' && active.value === 'transfer' ? [{ field: 'status_name', operator: 'eq', value: '在途' }] : []),
         ...(statusFocus.value === '待处理' && active.value === 'request' ? [{ field: 'status_name', operator: 'in', value: ['申请中', '部分履约'] }] : []),
@@ -1671,9 +1701,10 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
     } : null
     // One payload drives both the document list and the frozen export, including permission-neutral filters.
     const storeDocumentQuery = {
-      ...query, pageCode: operationalQueryPage.value?.pageCode, dataScope: 'normal',
+      ...unifiedOperationalQuery, pageCode: operationalQueryPage.value?.pageCode, dataScope: 'normal',
       topFilterConditions: [
         ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
+        ...creatorConditions,
         ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
         ...(active.value === 'transfer' && mode.value === 'store' && storeTransferUnreceivedOnly.value
           ? [{ field: 'can_receive', operator: 'eq', value: true }] : []),
@@ -1701,21 +1732,22 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
     const requestedPlatformRequest = currentPlatformRequest && reusePlatformListQuery && platformListExecutedRequest.value
       ? { ...platformListExecutedRequest.value, payload: { ...platformListExecutedRequest.value.payload, page: query.page, limit: platformListPageSize } }
       : currentPlatformRequest
+    const stockListRequest = active.value === 'stock'
+      ? hasExplicitQuery || (mode.value === 'platform' && !(platformStockSubject.value === 'HQ' && Number(platformHqLocationId.value) > 0))
+        ? { kind: 'batch-stock', payload: query }
+        : mode.value === 'store'
+          ? { kind: 'store-stock', payload: { keyword: query.keyword, page: stockPage.value, limit: stockPageSize } }
+          : { kind: 'hq-stock', payload: { hq_location_id: Number(platformHqLocationId.value), keyword: query.keyword, page: stockPage.value, limit: stockPageSize } }
+      : null
     const response = requestedPlatformRequest
       ? await fetchPlatformListPage(requestedPlatformRequest)
       : operationalQueryPage.value && mode.value === 'store'
       ? await inventoryApi.unifiedOperationalQuery(requestedStoreDocumentQuery)
-      : active.value === 'stock' && hasExplicitQuery
-      ? await client.unifiedBatchStock(query)
-      : active.value === 'stock'
-      ? mode.value === 'store'
-        ? await client.list('productSummary', { keyword: query.keyword || keyword.value.trim(), page: stockPage.value, limit: stockPageSize })
-        : platformStockSubject.value === 'HQ' && Number(platformHqLocationId.value) > 0
-          ? await platformInventoryApi.hqProductSummary({ hq_location_id: Number(platformHqLocationId.value), keyword: query.keyword || keyword.value.trim(), page: stockPage.value, limit: stockPageSize })
-          : await client.unifiedBatchStock(query)
+      : stockListRequest
+      ? await fetchStockListPage(client, stockListRequest)
       : await client.list(active.value, query)
     const list = Array.isArray(response?.records) ? response.records : (Array.isArray(response?.list) ? response.list : (Array.isArray(response?.items) ? response.items : (Array.isArray(response) ? response : [])))
-    if (groupedRequest && groupedRequest !== groupedListVersion) return
+    if (!stockRequestIsCurrent() || (groupedRequest && groupedRequest !== groupedListVersion)) return
     if (active.value === 'outbound' && mode.value === 'store') outboundExecutedQuery.value = JSON.parse(JSON.stringify(requestedStoreDocumentQuery))
     // 平台门店仓目前仅有读接口；不能把门店投影的 can_void 当作总部冲销权限。
     const displayRows = requestedPlatformRequest?.readOnlyStore
@@ -1784,11 +1816,17 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
     listDateRange.value = active.value === 'usage' && response?.from && response?.to
       ? { from: response.from, to: response.to }
       : null
-    if (active.value === 'stock' && unifiedQuery && typeof unifiedQuery === 'object') {
-      stockExecutedQuery.value = JSON.parse(JSON.stringify(unifiedQuery))
+    if (stockListRequest) {
+      // Keep the real reader and its authorized warehouse filters, even before the first manual query.
+      const cutoff = response?.queryCutoffDate
+      stockListExecutedRequest.value = JSON.parse(JSON.stringify({
+        ...stockListRequest,
+        payload: { ...stockListRequest.payload, ...(cutoff ? { queryCutoffDate: cutoff } : {}) },
+      }))
+      stockExecutedQuery.value = hasExplicitQuery ? JSON.parse(JSON.stringify(unifiedQuery)) : {}
     }
   } catch (error) {
-    if (groupedRequest && groupedRequest !== groupedListVersion) return
+    if (!stockRequestIsCurrent() || (groupedRequest && groupedRequest !== groupedListVersion)) return
     // A confirmed batch command must not be presented as a failed transfer because its follow-up read failed.
     if (mode.value === 'platform' && active.value === 'transfer' && transferRefreshAfterSave.value) {
       transferListRefreshFailed.value = true
@@ -1805,7 +1843,44 @@ async function loadCurrentList(unifiedQuery = null, { reuseStoreOperationalQuery
     stockTableLayout.value = { fixed: false, summaryRow: false }
     listError.value = error instanceof Error ? error.message : '库存数据加载失败。'
   } finally {
-    if (!groupedRequest || groupedRequest === groupedListVersion) listLoading.value = false
+    if (stockRequestIsCurrent() && (!groupedRequest || groupedRequest === groupedListVersion)) listLoading.value = false
+  }
+}
+
+/** Reuse the same list endpoint when loading a page or downloading all its results. */
+function fetchStockListPage(client, request) {
+  if (request.kind === 'store-stock') return client.list('productSummary', request.payload)
+  if (request.kind === 'hq-stock') return client.hqProductSummary(request.payload)
+  return client.unifiedBatchStock(request.payload)
+}
+
+/** Only a successful query supplies a download request. Unsubmitted controls never enter it. */
+async function exportInventoryList() {
+  if (listExportDisabled.value) return
+  const request = executedInventoryExport.value
+  const page = active.value
+  const fileName = `${currentPage.value.title}_${todayDate().replaceAll('-', '')}.xlsx`
+  const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
+  listExportBusy.value = true
+  listExportError.value = ''
+  try {
+    const blob = await client.downloadListExport(request)
+    const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+    if (signature.length !== 4 || signature[0] !== 80 || signature[1] !== 75 || signature[2] !== 3 || signature[3] !== 4) {
+      throw new Error('库存导出未返回有效的 Excel 文件。')
+    }
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    if (active.value === page) listExportError.value = error instanceof Error ? error.message : '库存导出失败。'
+  } finally {
+    listExportBusy.value = false
   }
 }
 
@@ -1814,7 +1889,11 @@ async function queryBatchStock(query) {
   const firstKeyword = keywordFilters.map((item) => item?.value).find((value) => typeof value === 'string')
   keyword.value = typeof query?.keyword === 'string' ? query.keyword.trim() : (firstKeyword || '')
   stockPage.value = 1
-  await loadCurrentList({ ...(query && typeof query === 'object' ? query : {}), keyword: keyword.value })
+  // 商品多选只在查询时进入固定条件，翻页和导出继续读取已提交的条件。
+  const selectedIds = stockSelectedProducts.value.map(row => Number(row.product_id))
+  const topFilterConditions = [...(query?.topFilterConditions || [])]
+  if (selectedIds.length) topFilterConditions.push({ field: 'catalog_product_id', operator: 'in', value: selectedIds })
+  await loadCurrentList({ ...query, keyword: keyword.value, topFilterConditions })
 }
 
 /** A page turn keeps the submitted filters and the host-authorized warehouse scope. */
@@ -1851,6 +1930,12 @@ async function queryStoreOperationalPage() {
     page: 1,
     limit: storeOperationalPageSize
   })
+}
+
+/** 切换录入人范围时从第一页重新查询，分页随后沿用该次执行条件。 */
+function changeDocumentCreatorScope() {
+  if (mode.value === 'store') queryStoreOperationalPage()
+  else loadCurrentList()
 }
 
 /** 周期控件确认后才发布区间，并在当前库存功能的服务端筛选条件中生效。 */
@@ -2045,10 +2130,11 @@ async function loadPlatformLocations() {
 
 /** 页面授权决定组织目录；选择组织或单店只扩大读取，不授予库存写入。 */
 async function loadPlatformOrganizationScope(page = active.value) {
-  if (mode.value !== 'platform' || !platformOrganizationPages.has(page)) return
+  if (mode.value !== 'platform' || (!platformOrganizationPages.has(page) && !(page === 'stock' && platformStockSubject.value === 'STORE'))) return
+  platformOrganizationTree.value = []
   platformOrganizationLoading.value = true
   try {
-    const pageCode = page === 'usage' ? 'inventory_salon_usage' : `inventory_${page}`
+    const pageCode = page === 'stock' ? 'inventory_batch_stock' : page === 'usage' ? 'inventory_salon_usage' : `inventory_${page}`
     const response = await platformInventoryApi.list('organizationScope', { pageCode })
     if (active.value === page) platformOrganizationTree.value = Array.isArray(response?.tree) ? response.tree : []
   } catch (error) {
@@ -2097,22 +2183,27 @@ async function loadStoreSessionContext() {
 
 function onPlatformLocationChanged() {
   if (mode.value === 'platform' && active.value === 'stock') {
-    stockPage.value = 1
+    const executed = stockExecutedQuery.value
     stockExecutedQuery.value = {}
+    stockListExecutedRequest.value = null
+    stockPage.value = 1
     stockUnifiedQuery.reset()
     stockUnifiedQuery.load()
-    loadCurrentList()
+    loadCurrentList(Object.keys(executed).length ? { ...executed, page: 1 } : null)
   }
 }
 
 function onPlatformStockSubjectChanged() {
-  if (platformStockSubject.value === 'HQ') platformStoreId.value = 0
-  platformStockOrganizationId.value = null
-  stockPage.value = 1
-  stockExecutedQuery.value = {}
-  stockUnifiedQuery.reset()
-  stockUnifiedQuery.load()
-  loadCurrentList()
+  loadPlatformOrganizationScope('stock')
+  onPlatformLocationChanged()
+}
+
+/** 组织和单店是互斥查询范围，组织下的门店由后端解析。 */
+function onPlatformStockScopeChanged(selection) {
+  const [type, id] = selection.split(':')
+  platformStoreId.value = type === 'STORE' ? Number(id) : 0
+  platformStockOrganizationId.value = type === 'ORG' ? Number(id) : null
+  onPlatformLocationChanged()
 }
 
 function onPlatformHqLocationChanged() {
@@ -2456,33 +2547,41 @@ onBeforeUnmount(() => {
               :current-page-count="remoteRows.length"
               :data-as-of="stockQueryCapability.dataAsOf"
               :query-capability="stockQueryCapability"
-              :executed-query="stockExecutedQuery"
               :is-query-loading="listLoading"
-              :state-context-key="mode === 'platform' ? `inventory-platform-batch-stock-${platformStockSubject}-${platformStockSubject === 'HQ' ? platformHqLocationId || 'all' : platformStoreId || 'all'}` : 'inventory-store-batch-stock'"
+              :state-context-key="mode === 'platform' ? `inventory-platform-batch-stock-${platformStockSubject}-${platformStockSubject === 'HQ' ? platformHqLocationId || 'all' : platformStockScopeSelection}` : 'inventory-store-batch-stock'"
               default-sort-field="到期日"
               :settings="stockQuerySettings"
               @query="queryBatchStock"
+              @settings-applied="stockSelectedProducts = []"
               :on-save-settings="saveStockQuerySettings"
               :on-save-field-aliases="stockUnifiedQuery.saveFieldAliases"
               :on-save-custom-field="stockUnifiedQuery.saveCustomField"
               :on-change-custom-field-status="stockUnifiedQuery.changeCustomFieldStatus"
               :on-archive-custom-field="stockUnifiedQuery.archiveCustomField"
               :on-upgrade-saved-query-field-reference="stockUnifiedQuery.upgradeSavedQueryFieldReference"
-              :on-create-export="stockUnifiedQuery.createExport"
-              :on-query-export-task="stockUnifiedQuery.queryExportTask"
             >
               <template #context-actions>
-                <div v-if="mode === 'platform'" class="inventory-query-subject">
-                  <label>库存仓
+                <div class="inventory-query-subject">
+                  <label v-if="mode === 'platform'">库存仓
                     <select v-model="platformStockSubject" @change="onPlatformStockSubjectChanged"><option value="HQ">总部仓</option><option value="STORE">门店</option></select>
                   </label>
-                  <label v-if="platformStockSubject === 'HQ'">总部仓<select v-model.number="platformHqLocationId" @change="onPlatformLocationChanged"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label><label v-if="platformStockSubject === 'STORE'">库存仓
-                    <InventoryStoreSelector v-model="platformStoreSelection" :options="platformStoreSelectorOptions" placeholder="选择门店" />
-                  </label>
-                  <span v-if="platformStockSubject === 'STORE' && platformStockOrganizationId !== null" role="status">当前按首页所选组织查询</span>
+                  <label v-if="mode === 'platform' && platformStockSubject === 'HQ'">总部仓<select v-model.number="platformHqLocationId" @change="onPlatformLocationChanged"><option :value="0">全部授权总部仓</option><option v-for="location in platformHqLocations" :key="location.id" :value="Number(location.id)">{{ location.location_name }}</option></select></label>
+                  <InventoryOrganizationStorePicker v-if="mode === 'platform' && platformStockSubject === 'STORE'"
+                    :model-value="platformStockScopeSelection" :tree="platformOrganizationTree" :loading="platformOrganizationLoading"
+                    show-scope-default :show-hq-default="false" @update:model-value="onPlatformStockScopeChanged" />
+                  <div class="inventory-stock-product-filter" role="group" aria-label="商品筛选">
+                    <span>商品</span>
+                    <button type="button" class="button button--secondary" :title="stockSelectedProducts.map(row => row.product_name).join('、')"
+                      @click="stockProductPickerOpen = true"><Search :size="15" />{{ stockSelectedProducts.length ? `已选 ${stockSelectedProducts.length} 件商品` : '选择商品' }}</button>
+                    <button v-if="stockSelectedProducts.length" type="button" class="button button--secondary" aria-label="清空已选商品" @click="stockSelectedProducts = []"><X :size="14" /></button>
+                  </div>
+                  <button type="button" class="button button--secondary" :disabled="listExportDisabled" :aria-busy="listExportBusy" title="导出当前查询的全部结果" @click="exportInventoryList"><FileSpreadsheet :size="16" />{{ listExportBusy ? '导出中' : '导出' }}</button>
                 </div>
               </template>
             </UnifiedQueryToolbar>
+            <InventoryProductSelector :visible="stockProductPickerOpen" :selected-rows="stockSelectedProducts"
+              :catalog-api="stockProductCatalog" allow-empty product-only
+              @close="stockProductPickerOpen = false" @confirm="confirmStockProducts" />
             <p v-if="stockQueryLoadError" class="inventory-load-error">{{ stockQueryLoadError }}</p>
           </section>
           <section v-if="operationalQueryPage && mode === 'store'" class="filter-card filter-card--store-list">
@@ -2490,10 +2589,12 @@ onBeforeUnmount(() => {
             <label v-if="active === 'outbound'">出库类型<select v-model="outboundTypeFilter" aria-label="出库类型"><option value="">全部</option><option v-for="type in outboundFilterTypes" :key="type" :value="type">{{ type }}</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
             <button v-if="active === 'transfer'" class="secondary-button" :class="{ 'secondary-button--active': storeTransferUnreceivedOnly }" type="button" :aria-pressed="storeTransferUnreceivedOnly" :disabled="listLoading" @click="showStoreUnreceivedTransfers">未到货</button>
+            <select v-if="documentCreatorPages.has(active)" v-model="documentCreatorScope" aria-label="录入人范围" @change="changeDocumentCreatorScope"><option value="mine">本人</option><option value="all">全部</option></select>
             <div v-if="filtersBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>
             <InventoryOutboundExport v-if="active === 'outbound'" :query="outboundExecutedQuery" :count="remoteTotal" :disabled="listLoading || Boolean(listError)" :request-action="inventoryUnifiedQueryRequestAction" :download="inventoryApi.downloadOutboundExport" />
+            <button v-else-if="documentCreatorPages.has(active)" type="button" class="secondary-button" :disabled="listExportDisabled" :aria-busy="listExportBusy" title="导出当前查询的全部结果" @click="exportInventoryList"><FileSpreadsheet :size="16" />{{ listExportBusy ? '导出中' : '导出' }}</button>
             <div v-if="currentPage.action || ['inbound', 'outbound'].includes(active)" class="inventory-list-query-actions">
               <button v-if="['inbound', 'outbound', 'transfer'].includes(active)" type="button" class="secondary-button" @click="openEditor(active === 'transfer' ? 'transfer-import' : 'import')"><FileSpreadsheet :size="17" />导入</button>
               <button v-if="currentPage.action" type="button" class="primary-button" @click="openEditor()"><Plus :size="17" />{{ currentPage.action }}</button>
@@ -2514,9 +2615,11 @@ onBeforeUnmount(() => {
             <label v-else-if="active === 'warehouse'">仓库状态<select v-model="warehouseSettingsStatus" @change="queryWarehouseSettings"><option value="">全部</option><option value="ACTIVE">启用</option><option value="INACTIVE">停用</option></select></label>
             <label v-else-if="mode === 'platform' && !platformReadScopeMode">库存仓<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="platformOrganizationPages.has(active) ? platformHqListWarehouseOptions : platformListWarehouseOptions" placeholder="选择库存仓" :presentation="['inbound', 'outbound', 'count', 'usage'].includes(active) ? 'dropdown' : 'modal'" /></label>
             <label v-if="!(['inbound', 'outbound', 'warehouse'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label>
+            <select v-if="documentCreatorPages.has(active)" v-model="documentCreatorScope" aria-label="录入人范围" @change="changeDocumentCreatorScope"><option value="mine">本人</option><option value="all">全部</option></select>
             <div v-if="filtersBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (!platformReadScopeMode && ((platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length)))" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
+            <button v-if="documentCreatorPages.has(active)" type="button" class="secondary-button" :disabled="listExportDisabled" :aria-busy="listExportBusy" title="导出当前查询的全部结果" @click="exportInventoryList"><FileSpreadsheet :size="16" />{{ listExportBusy ? '导出中' : '导出' }}</button>
             <div v-if="mode === 'platform' && (currentPage.action || ['inbound', 'outbound'].includes(active))" class="inventory-list-query-actions">
               <button v-if="!platformReadScopeMode && ['inbound', 'outbound', 'transfer'].includes(active)" class="secondary-button" :disabled="active === 'transfer' ? !platformCanCreateCurrent || !platformTransferCanCreate || !platformHqLocationId : !platformCanManageInventory" @click="openEditor(active === 'transfer' ? 'transfer-import' : 'import')"><FileSpreadsheet :size="17" />导入</button>
               <button v-if="currentPage.action" class="primary-button" :disabled="platformReadScopeMode || (platformActionRequiresHqLocation && active !== 'count' && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length) || !platformCanCreateCurrent || (active === 'transfer' && !platformTransferCanCreate)" @click="openEditor()"><Plus :size="17" />{{ currentPage.action }}</button>
@@ -2536,8 +2639,9 @@ onBeforeUnmount(() => {
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
             <div :inert="transferListRefreshFailed ? true : null" :class="{ 'inventory-list-result': inventoryListPage }">
+              <p v-if="listExportError" class="inventory-load-error" role="alert">{{ listExportError }}</p>
               <p v-if="copyError" class="inventory-load-error" role="alert">{{ copyError }}</p>
-<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active), 'table-card--inventory-list-page': inventoryListPage }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else ref="storeListTableScroll" class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button v-if="canCopyDocument(sourceRows[index])" class="text-button" @click="copyDocument(sourceRows[index])">复制</button><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
+<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active), 'table-card--inventory-list-page': inventoryListPage }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><span v-if="!documentCreatorPages.has(active) && active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else ref="storeListTableScroll" class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button v-if="canCopyDocument(sourceRows[index])" class="text-button" @click="copyDocument(sourceRows[index])">复制</button><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->
             <table v-else class="inventory-grouped-table" :class="`inventory-grouped-table--${active}`" :aria-label="`${currentPage.title}明细列表`">

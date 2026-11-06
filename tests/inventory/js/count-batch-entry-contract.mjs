@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-// 只改变盘点入口：重复选择仅新增本次商品，入库/请货等其他选择逻辑不扩散。
 const modal = readFileSync(new URL('../../../前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue', import.meta.url), 'utf8')
-assert.match(modal, /selectedSkuIds\.has\(Number\(row.sku_id\)\) && props.pageKey !== 'count'/)
+// 普通单据重新选中已有 SKU 时只回填本次明确输入的数量，保留原明细。
+const row = { sku_id: 12, quantity: '3', detail_remark: '原备注' }
+const selectedRows = { value: [row] }
+const acceptRows = new Function('props', 'selectedRows', 'catalogError', 'productSelectorVisible',
+  `${modal.slice(modal.indexOf('async function acceptCatalogRows('), modal.indexOf('/** 只下载当前表格行的 Excel'))}\nreturn acceptCatalogRows`
+)({ pageKey: 'request' }, selectedRows, { value: '' }, { value: true })
+await acceptRows([{ sku_id: 12 }])
+assert.equal(row.quantity, '3')
+await acceptRows([{ sku_id: 12 }], new Map([[12, '5']]))
+assert.deepEqual(selectedRows.value, [{ sku_id: 12, quantity: '5', detail_remark: '原备注' }])
 assert.match(modal, /:selected-rows="pageKey === 'count' \? \[\] : selectedRows"/)
 assert.match(modal, /@click="importCurrentInventory">导入库存/)
 assert.match(modal, /@click="clearCountRows">清空/)

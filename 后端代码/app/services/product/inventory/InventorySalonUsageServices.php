@@ -100,18 +100,19 @@ final class InventorySalonUsageServices
     }
 
     /** 平台院装只查当前授权的单仓；按单据分页并返回完整总数供查询栏与底部分页共用。 */
-    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to, int $hqLocationId = 0, int $page = 1, int $limit = 100): array
+    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to, int $hqLocationId = 0, int $page = 1, int $limit = 100, bool $mineOnly = false): array
     {
         // 只读院装菜单不要求领用写权限，门店范围仍由同一个后端策略决定。
         [$scope] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId, false);
-        $result = $this->listForScope($scope, 0, $keyword, $from, $to, $page, $limit);
+        $actor = $mineOnly ? InventoryDocumentCreatorScope::platform((int)$scope['operatorId']) : null;
+        $result = $this->listForScope($scope, 0, $keyword, $from, $to, $page, $limit, $actor);
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
         foreach ($result['items'] as &$item) $item['can_void'] = !empty($item['can_void']) && in_array('inventory.location.manage', $access['features'], true);
         unset($item);
         return $result;
     }
 
-    private function listForScope(array $scope, int $projectId, string $keyword, string $from, string $to, int $page = 0, int $limit = 0): array
+    private function listForScope(array $scope, int $projectId, string $keyword, string $from, string $to, int $page = 0, int $limit = 0, ?array $actor = null): array
     {
         $from = $this->date($from); $to = $this->date($to); if ($from > $to) throw new \InvalidArgumentException('inventory_salon_usage_date_range_invalid');
         $query = Db::name('inventory_salon_usage_document')->alias('d')
@@ -120,6 +121,7 @@ final class InventorySalonUsageServices
             ->where('d.tenant_id', $scope['tenantId'])->where('d.store_id', $scope['storeId'])->whereBetween('d.business_date', [$from, $to]);
         // HQ 单据的 store_id 恒为 0，必须再按实际仓库 ID 隔离每一个总部仓。
         if (!empty($scope['locationId'])) $query->where('d.location_id', (int)$scope['locationId']);
+        if ($actor !== null) InventoryDocumentCreatorScope::applyUsage($query, $actor);
         if ($projectId > 0) $query->where('project_id', $projectId);
         $keyword = trim($keyword);
         if ($keyword !== '') {

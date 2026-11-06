@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\product\inventory\query;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\product\inventory\InventoryDocumentCreatorScope;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\organization\OrganizationScopeService;
 use app\services\query\UnifiedQueryContextFactory;
@@ -135,6 +136,10 @@ final class InventoryPlatformUnifiedQueryContextFactory
             'scope_dimensions' => ['location_id' => array_keys($locationIds)] + ($pageCode === 'inventory_outbound' ? ['inventory_actor_type' => ['platform']] : []),
             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate), 'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);
+        // 查门店仓也保留平台认证身份，不能冒充同编号门店员工。
+        if (in_array($pageCode, InventoryDocumentCreatorScope::PAGES, true)) {
+            $context['inventory_document_creator'] = InventoryDocumentCreatorScope::platform($adminId);
+        }
         // 总部草稿仅归当前平台创建人；门店查询不得借平台身份读到门店人员草稿。
         if ($pageCode === 'inventory_count' && $subject === 'HQ'
             && in_array('inventory.location.manage', $features, true)) {
