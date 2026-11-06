@@ -197,14 +197,8 @@ class SystemMenusServices extends BaseServices
 			$rulesStr = array_values(array_filter(array_map('intval', Arr::unique($rules)), static function ($id) {
 				return $id > 0;
 			}));
-			// 用户列表对所有平台账号开放，只加入这个叶子菜单；其他角色规则仍照旧。
-			// 空角色不可传空 route，否则 DAO 会按全量菜单查询。
-			if ($type === 1 && $adminType === 0) {
-				$memberMenuId = (int)\think\facade\Db::name('system_menus')
-					->where('unique_auth', 'admin-user-user-index')->where('type', 1)
-					->where('is_show', 1)->where('is_del', 0)->value('id');
-				if ($memberMenuId > 0) $rulesStr[] = $memberMenuId;
-			}
+			// 会员与其他入口统一按岗位投影返回，不再给普通账号补发用户列表权限。
+			// 无菜单规则必须保持空权限；不能让空值触发全量权限查询。
 			if (!$rulesStr) return [[], []];
 		}
         $menusList = $this->dao->getMenusRoule(['auth_type' => 1, 'is_show' => 1, 'is_del' => 0, 'type' => $type, 'route' => $rulesStr]);

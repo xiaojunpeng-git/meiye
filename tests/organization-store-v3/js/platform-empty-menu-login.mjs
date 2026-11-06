@@ -142,5 +142,6 @@ assert.ok(menusStore.includes("if (Array.isArray(res.data.unique))"));
 assert.ok(menusStore.includes("localStorage.setItem('unique_auth', access)"));
 assert.ok(menusStore.includes("await dispatch('admin/user/set'"));
 assert.ok(guard.includes("const refreshed = await store.dispatch('admin/menus/getMenusNavList')"));
-assert.ok(guard.includes('isPermission = includeArray(meta.auth, freshAccess)'));
+// Current server refresh retains the existing real root exception.
+assert.ok(guard.includes('isPermission = isPlatformRootAdmin(userInfo) || includeArray(meta.auth, freshAccess)'));
 console.log('PASS first-category landing, legacy-home redirect bypass, business deep-link retention, empty menus + empty permissions, granted permissions + empty menus, current job-permission refresh, stale-state clearing, 403 session retention, three login methods');

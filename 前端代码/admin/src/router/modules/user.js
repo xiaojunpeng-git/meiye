@@ -78,6 +78,8 @@ export default {
       name: `${pre}list`,
       meta: {
         auth: ['admin-user-user-index'],
+        // 撤销岗位后不能继续信任登录时的会员授权快照。
+        refreshMemberAccess: true,
         title: '用户列表'
       },
       component: () => import('@/pages/user/list/index')

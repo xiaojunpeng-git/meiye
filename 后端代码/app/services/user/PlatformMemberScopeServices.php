@@ -10,7 +10,7 @@ use app\services\organization\EmployeeDataScopeServices;
 use think\facade\Db;
 use think\exception\ValidateException;
 
-/** 平台会员管理对所有有效总后台账号开放；仍只接受真实平台登录态，不消费门店 token。 */
+/** 平台会员管理先验证当前岗位入口资格，再签发既有会员范围；不消费门店 token。 */
 class PlatformMemberScopeServices
 {
     /**
@@ -41,7 +41,8 @@ class PlatformMemberScopeServices
     {
         $admin = Db::name('system_admin')->where('id', $adminId)->where('status', 1)->where('is_del', 0)->where('admin_type', 0)->find();
         if (!$admin) throw new ValidateException('平台登录已失效');
-        // 产品口径：总后台会员列表不按角色或员工门店范围裁剪。这个全店范围只在
+        (new PlatformMemberAccessPolicy())->assertAllowed($admin);
+        // 有会员管理授权的账号保留既有全店范围，不在本轮改变数据范围。这个范围只在
         // member-center 白名单中签发，账号有效性、客户实例和具体命令校验仍由服务端负责。
         $grants = ['read' => true, 'create' => true, 'edit' => true, 'deactivate' => true];
         if (!isset($grants[$operation])) throw new ValidateException('平台会员操作不支持');
