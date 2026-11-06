@@ -51,6 +51,8 @@ const route = useRoute()
 const router = useRouter()
 const catalog = ref([])
 const activeReport = ref('partner_item_summary')
+// 六维下钻绑定成功加载的查询条件，未点查询的日期/组织草稿不能改变当前数值的明细。
+const sixDimensionAppliedParams = ref(null)
 const result = ref({})
 const loading = ref(false)
 let reportRequestId = 0
@@ -864,8 +866,12 @@ async function loadReport() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const data = await queryStoreBusinessReport(reportParams(), reportRuntime.value)
-    if (requestId === reportRequestId) result.value = data
+    const requested = reportParams()
+    const data = await queryStoreBusinessReport(requested, reportRuntime.value)
+    if (requestId === reportRequestId) {
+      result.value = data
+      if (requested.report === 'six_dimension_analysis') sixDimensionAppliedParams.value = { ...requested }
+    }
   } catch (error) {
     if (requestId !== reportRequestId) return
     result.value = {}
@@ -1262,6 +1268,7 @@ function drilldownConfig(row, column) {
 function canDrilldown(row, column) {
   if (loading.value) return false
   const config = drilldownConfig(row, column)
+  if (config?.report === 'six_dimension_analysis' && (row?.[column.key] === '-' || row?.[column.key] == null)) return false
   const target = String(config?.report || config?.report_code || '')
   // A cell is a link only when the same target has a popup or a reachable route.
   if (!detailPopupOpeners[target] && !drilldownRequest(row, column)) return false
@@ -1283,6 +1290,7 @@ function canDrilldown(row, column) {
 function canSummaryReceiptDrilldown(row, column) {
   if (loading.value) return false
   const target = String(drilldownConfig(row, column)?.report || '')
+  if (target === 'six_dimension_analysis') return canDrilldown(row, column)
   // This item report repeats the same monthly total on every product row;
   // its summed footer is not one distinct set of receipt documents.
   if (activeReport.value === 'marketing_beauty_new_item' && column.key === 'month_total_performance') return false
@@ -1365,6 +1373,12 @@ function closeBdeghDetail() {
 
 /** Preserve the server-declared drilldown key and parent report for both list and XLSX. */
 function bdeghDetailParams(pageNumber = 1) {
+  if (bdeghDetail.value.detailReport === 'six_dimension_analysis') {
+    return { ...bdeghDetail.value.appliedParams, report: 'six_dimension_analysis',
+      detail_store_key: bdeghDetail.value.storeKey, metric_code: bdeghDetail.value.metric,
+      detail_member: detailMemberFilter.value, detail_order_no: detailOrderFilter.value,
+      page: pageNumber, limit: DEFAULT_LIMIT }
+  }
   return reportParams({
     report: bdeghDetail.value.detailReport,
     // 大单明细只传后端签发的稳定行键和所点金额列；后端重算权限与原单集合。
@@ -1397,7 +1411,7 @@ function bdeghDetailParams(pageNumber = 1) {
 
 async function loadBdeghDetail(pageNumber) {
   const requestId = ++bdeghDetailRequestId
-  bdeghDetail.value = { ...bdeghDetail.value, loading: true, error: '', page: pageNumber }
+  bdeghDetail.value = { ...bdeghDetail.value, loading: true, error: '', detailFooter: '', page: pageNumber }
   try {
     // The server re-applies report permissions and derives fact filters from
     // its own metric whitelist; the browser supplies only the clicked key.
@@ -1409,6 +1423,8 @@ async function loadBdeghDetail(pageNumber) {
       records: Array.isArray(data?.records) ? data.records : [],
       columns: Array.isArray(data?.columns) ? data.columns : [],
       total: Number(data?.total || 0),
+      page: Number(data?.page || pageNumber),
+      detailFooter: String(data?.detail_footer || ''),
       memberCount: Number(data?.member_count || 0),
       actualStart: String(data?.scope?.date_range?.start || ''),
       actualEnd: String(data?.scope?.date_range?.end || ''),
@@ -1522,9 +1538,24 @@ function openLargeOrderDetail(row, column) {
   loadBdeghDetail(1)
 }
 
+/** 同一报表接口重放母表筛选；行键限定所点分组，all 表示完整筛选结果的合计。 */
+function openSixDimensionDetail(row, column) {
+  detailMemberFilter.value = ''
+  detailOrderFilter.value = ''
+  bdeghDetail.value = {
+    open: true, loading: false, detailReport: 'six_dimension_analysis',
+    storeKey: String(row?.detail_store_key || 'all'),
+    appliedParams: { ...sixDimensionAppliedParams.value },
+    metric: String(column.key), label: [...new Set(column.header_path || [column.label])].join(' · '),
+    month: '', page: 1, total: 0, records: [], columns: [], amount: '-', detailFooter: '', error: ''
+  }
+  loadBdeghDetail(1)
+}
+
 // One target table drives both link visibility and click dispatch. Query scopes
 // remain in the report-specific adapters and are revalidated by the backend.
 const detailPopupOpeners = {
+  six_dimension_analysis: openSixDimensionDetail,
   salesperson_large_order_statistics: openLargeOrderDetail,
   operations_pre_sale_bdegh_detail: openBdeghDetail,
   operations_referral_beautician_pre_sale_detail: openBdeghDetail,
@@ -1539,6 +1570,10 @@ const detailPopupOpeners = {
 }
 
 function receiptDetailPeriod() {
+  if (bdeghDetail.value.detailReport === 'six_dimension_analysis') {
+    const params = bdeghDetail.value.appliedParams || {}
+    return bdeghDetail.value.metric === 'debt' ? '截至当前' : `${params.start_date} 至 ${params.end_date}`
+  }
   if (bdeghDetail.value.detailReport === 'store_item_analysis_detail' && bdeghDetail.value.actualStart) {
     return bdeghDetail.value.actualStart === bdeghDetail.value.actualEnd
       ? bdeghDetail.value.actualStart
@@ -1644,7 +1679,8 @@ const detailDialog = computed(() => {
       : `${receiptDetailPeriod()} · ${detail.label}明细`,
     columns,
     records: detail.records,
-    footer: `${filtered ? '筛选后' : ''}${SOURCE_PRE_SALE_DETAIL_REPORTS.includes(detail.detailReport)
+    footer: detail.detailReport === 'six_dimension_analysis' ? `${filtered ? '筛选后 · ' : ''}${detail.detailFooter || ''}`
+      : `${filtered ? '筛选后' : ''}${SOURCE_PRE_SALE_DETAIL_REPORTS.includes(detail.detailReport)
       ? `共 ${detail.total} 笔 · ${detail.memberCount} 个计数对象（会员按人、游客按单） · 收款合计 ${detailValueText(detail.amount)}`
       : `共 ${detail.total} ${receiptDetailUnit()} · ${receiptAmountLabel()}合计 ${detailValueText(detail.amount)}`}`,
     emptyText: filtered ? '没有匹配的明细' : '暂无明细', loading: detail.loading, error: detail.error, filterActive: filtered,
@@ -1655,6 +1691,10 @@ const detailDialog = computed(() => {
 function detailDialogCell(record, column) {
   const value = record?.[column.key]
   if (value === null || value === undefined || value === '') return '-'
+  // 六维派生指标明细可同时包含金额和人数，按后端逐行声明的单位展示。
+  if (bdeghDetail.value.detailReport === 'six_dimension_analysis' && column.key === 'detail_value') {
+    return record.value_unit === '元' ? formatWholeYuan(value) : String(value)
+  }
   if (memberVisitDetail.value.open && column.key === 'amount') return memberVisitAmountText(value)
   if (['receipt_amount', 'origin_amount', 'detail_value', 'performance_amount'].includes(column.key)) return detailValueText(value)
   if (column.value_type === 'integer') return String(Number(value) || 0)
