@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import HumanEfficiencyRanking from '../components/human-efficiency/HumanEfficiencyRanking.vue'
+import HumanEfficiencyStoreCohorts from '../components/human-efficiency/HumanEfficiencyStoreCohorts.vue'
 import OrganizationStoreScopePicker from '../components/OrganizationStoreScopePicker.vue'
 import { queryHumanEfficiency, queryHumanEfficiencyScope } from '../services/humanEfficiencyApi'
 import { formatMoney } from '../services/cashierV3Bridge'
@@ -48,6 +49,15 @@ async function exportAll(){
   const result=await queryHumanEfficiency({...applied.value,action:'export'})
   // 各榜单使用后端完整查询计算的分类契约，导出不因当前页的零值改变列。
   const rows=[]
+  // 新分级表导出使用后端的同一列与合计；不在浏览器按排名或已加载人员反推整店业绩。
+  const cohorts=result.store_cohorts
+  if(cohorts?.available){
+   rows.push(['店长/顾问院店分级','统计月份数',cohorts.months])
+   rows.push(['有在职店长院店数',cohorts.summary.with_leader,'无在职店长院店数',cohorts.summary.without_leader,'在职顾问人数',cohorts.summary.advisors])
+   rows.push(cohorts.layout.columns.map(c=>c.label))
+   for(const row of [cohorts.total,...cohorts.rows])rows.push(cohorts.layout.columns.map(c=>c.path.reduce((v,key)=>v?.[key],row)??'—'))
+   rows.push(['列名取值来源'],...cohorts.source_explanations.map(text=>[text]),[])
+  }
   for(const [section,categories] of Object.entries(result.section_categories)){
    const members=result.rows.filter(r=>r.section===section)
    if(!members.length)continue
@@ -86,8 +96,7 @@ onMounted(async()=>{try{const s=await queryHumanEfficiencyScope();scopeTree.valu
      <section class="panel"><header><h2>不同工龄的人效对比</h2></header><div class="cohorts"><article v-for="(g,i) in data.cohorts" :key="g.id" :class="'cohort tone-'+i"><header><h3>{{g.name}}</h3><span>{{g.count}}人</span></header><table><thead><tr><th>指标</th><th>数据</th><th>占比</th><th>人均</th></tr></thead><tbody><tr v-for="m in metrics" :key="m.key"><td>{{m.label}}</td><td><button class="number" @click="summaryDetail('cohort:'+g.id,m.key)">{{m.money?money(g[m.key]):fmt(g[m.key])}}</button></td><td>{{g.contribution?.[m.key]==null?"—":fmt(g.contribution[m.key]*100)+"%"}}</td><td>{{m.money?money(g.average[m.key]):fmt(g.average[m.key])}}</td></tr></tbody></table></article></div><footer>活客及成交顾客占比按全部去重顾客数计算，同一顾客跨组时，各组占比之和可能超过100%。</footer></section>
     </section>
     <section class="role-section" aria-label="店长 / 顾问人效"><h2 class="role-title">店长 / 顾问人效</h2>
-     <div class="cards"><article v-for="c in [['期末在职店长',data.leader_summary.count,'人'],['期末在职顾问',data.advisor_summary.count,'人'],['成交顾客人数',data.personal_summary.buyers,'人'],['个人现金业绩合计',data.personal_summary.cash,'元'],['人均现金业绩',data.personal_summary.average.cash,'元']]" :key="c[0]" class="card"><span>{{c[0]}}</span><strong class="card-value">{{c[2]==='元'?money(c[1]):fmt(c[1])}}</strong></article></div>
-     <section class="panel"><header><h2>岗位汇总</h2></header><div class="wide"><table><thead><tr><th>岗位</th><th>期末在职人数</th><th v-for="m in metrics" :key="m.key">{{m.label}}</th><th>人均现金业绩</th></tr></thead><tbody><tr v-for="pair in [['店长',data.leader_summary],['顾问',data.advisor_summary]]" :key="pair[0]"><td>{{pair[0]}}</td><td>{{pair[1].count}}</td><td v-for="m in metrics" :key="m.key">{{m.money?money(pair[1][m.key]):fmt(pair[1][m.key])}}</td><td>{{money(pair[1].average.cash)}}</td></tr></tbody></table></div></section>
+     <HumanEfficiencyStoreCohorts v-if="data.store_cohorts" :result="data.store_cohorts" />
      <HumanEfficiencyRanking v-for="kind in ['advisor','leader']" :key="kind" :kind="kind" :categories="data.categories" :result="data.tables[kind]" :layout="data.ranking_layouts[kind]" :loading="loading" @page="turn(kind,$event)" @detail="detail" />
     </section>
     <section class="role-section" aria-label="城市经理人效"><h2 class="role-title">城市经理人效</h2><p class="context">经理按当前管辖门店汇总所选期间业绩和目标；组织调整后历史期间的归集结果会随当前归属变化。</p>
@@ -96,7 +105,7 @@ onMounted(async()=>{try{const s=await queryHumanEfficiencyScope();scopeTree.valu
     </section>
    </template>
   </div>
-  <div v-if="sources" class="overlay" @click.self="sources=false"><section role="dialog" aria-modal="true" aria-label="列名取值来源" class="dialog"><header><h2>列名取值来源</h2><button @click="sources=false">关闭</button></header><div class="dialog-body"><p v-for="(text,key) in data?.source_explanations||{}" :key="key">{{text}}</p><p>活客在当前统计范围内按顾客身份去重；分类人头不能直接相加。服务人次与人员分摊沿用统一服务事实。经理使用当前管辖归属；经理汇总及榜单仅统计已配置当前经理的门店。</p></div></section></div>
+  <div v-if="sources" class="overlay" @click.self="sources=false"><section role="dialog" aria-modal="true" aria-label="列名取值来源" class="dialog"><header><h2>列名取值来源</h2><button @click="sources=false">关闭</button></header><div class="dialog-body"><p v-for="(text,key) in data?.source_explanations||{}" :key="key">{{text}}</p><p v-for="text in data?.store_cohorts?.source_explanations||[]" :key="text">{{text}}</p><p>活客在当前统计范围内按顾客身份去重；分类人头不能直接相加。服务人次与人员分摊沿用统一服务事实。经理使用当前管辖归属；经理汇总及榜单仅统计已配置当前经理的门店。</p></div></section></div>
   <div v-if="modal" class="overlay" @click.self="closeDetail" @keydown.esc="closeDetail"><section role="dialog" aria-modal="true" :aria-label="modal.row.name+'明细'" class="dialog"><header><div><h2>{{modal.row.name}} · 明细</h2><p>{{applied.label}} · {{applied.start_date}} 至 {{applied.end_date}}</p></div><button @click="closeDetail">关闭</button></header><div class="dialog-body"><p v-if="detailLoading">正在查询…</p><p v-if="modal.error" role="alert">{{modal.error}}</p><template v-if="modal.result"><div class="wide"><table><thead><tr><th>业务日期</th><th>门店</th><th v-if="modal.metric!=='stores'">{{modal.metric==='people'?'姓名':'顾客'}}</th><th v-if="!['stores','people'].includes(modal.metric)">人员</th><th v-if="modal.metric!=='stores'">来源单据</th><th v-if="modal.metric!=='stores'">项目</th><th v-if="modal.metric==='cash'">现金业绩</th><th v-if="modal.metric==='consume'">消耗业绩</th><th v-if="modal.metric==='items'">项目数</th><th v-if="modal.metric==='visits'">人次</th></tr></thead><tbody><tr v-for="(r,i) in modal.result.rows" :key="i"><td>{{r.business_date||'—'}}</td><td>{{r.store_name}}</td><template v-if="modal.metric!=='stores'"><td>{{modal.metric==='people'?r.employee_name:r.member_name}}</td><td v-if="modal.metric!=='people'">{{r.employee_name}}</td><td>{{r.document_no}}</td><td>{{r.item_name}}</td><td v-if="modal.metric==='cash'">{{money(r.cash_cents/100)}}</td><td v-if="modal.metric==='consume'">{{money(r.consume_cents/100)}}</td><td v-if="modal.metric==='items'">{{fmt(r.items)}}</td><td v-if="modal.metric==='visits'">{{fmt(r.visits)}}</td></template></tr><tr v-if="!modal.result.rows.length"><td colspan="6">暂无对应明细</td></tr></tbody></table></div><p v-if="modal.metric==='cash'">全部明细合计：{{money(modal.result.cash_cents/100)}}</p><p v-else-if="modal.metric==='consume'">全部明细合计：{{money(modal.result.consume_cents/100)}}</p><p v-else-if="['items','visits'].includes(modal.metric)">全部明细合计：{{fmt(modal.result[modal.metric])}}</p></template></div><footer v-if="modal.result"><span>共 {{modal.result.total}} 条 · 第 {{modal.result.page}} / {{modal.result.pages}} 页</span><button :disabled="detailLoading||modal.result.page===1" @click="detail(modal.row,modal.category,modal.metric,modal.result.page-1)">上一页</button><button :disabled="detailLoading||modal.result.page===modal.result.pages" @click="detail(modal.row,modal.category,modal.metric,modal.result.page+1)">下一页</button></footer></section></div>
  </main>
 </template>
