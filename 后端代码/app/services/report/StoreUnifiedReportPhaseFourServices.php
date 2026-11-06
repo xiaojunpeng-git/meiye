@@ -269,8 +269,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->pathColumn('new_visit_people', '新客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内还没有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('old_visit_people', '老客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内已有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('total_visit_people', '合计见诊人数', '本店新客见诊人数加老客见诊人数。同一会员如果在所选期间先后符合两种身份，会分别计入两列。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_people', '新客人数', '原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。主归属品项为六维且首次六维购买在本期的会员按达标日累计，退款不改变人数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('old_deal_people', '老客人数', '与新客人数使用相同的原单首次达标事件；首次六维购买早于本期的会员归老客，游客不计，退款不改变人数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('new_deal_people', '新客人数', '同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。主归属品项为六维且首次六维购买在本期的会员按达标日累计，退款不改变人数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('old_deal_people', '老客人数', '与新客人数使用相同的共用首次达标事件；首次六维购买早于本期的会员归老客，游客不计，退款不改变人数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
             $this->pathColumn('total_deal_people', '合计成交人数', '所选六维分类的新客与老客首次达标会员日数之和；同一会员多天分别累计，同日跨单跨店只计1。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
             $this->pathColumn('new_deal_performance', '新客业绩', '合计本期新客达标日所选六维分类的净收款；同日多笔合并、退款抵减，不只取首次购买金额。未达标日收款仍进入实收业绩。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
             $this->pathColumn('old_deal_performance', '老客业绩', '合计本期老客达标日所选六维分类的净收款；退款抵减，未达标日收款仍进入实收业绩。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
@@ -735,7 +735,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             }
         }
         unset($allCash);
-        // 购买事件只用于年度复购次数；成交人头另取原单首达标事件。
+        // 购买事件只用于年度复购次数；成交人头另取共用达标资格。
         $actualByMonth = [];
         foreach ($this->actualCategoryRows($stores, $expandedRange, $ids, true) as $fact) {
             $month = substr((string)$fact['business_date'], 0, 7);
@@ -889,12 +889,12 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->column('item_performance', '品项业绩', '该分类下同名品项当月登记实际业绩；成功现金退款按退款日冲减。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'item_performance')),
             $this->column('item_share', '品项业绩占比', '品项业绩除以月度总业绩；分母为零显示“-”。'),
             $this->column('experience_people', '体验人数', '当月完成该分类下同名项目且带体验标记的不同会员数。', true, false, 120, $this->serviceDetailDrill('marketing_beauty_new_item', 'experience_people')),
-            $this->column('deal_people', '成交人头', '原销售单累计有效现金首度达到来源门槛的会员日数；同日跨单跨店只计1，跨店补交归原店，本表只计主归属为该分类下同名品项的事件。退款不改变人数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'deal_people')),
+            $this->column('deal_people', '成交人头', '当天新消费跨单达标或未计过原单补交累计首次达标的会员日数；同日跨单跨店只计1，跨店补交归原店，本表只计主归属为该分类下同名品项的事件。退款不改变人数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'deal_people')),
             $this->column('deal_rate', '成交率', '成交人头除以体验人数；分母为零显示“-”。'),
             $this->column('deal_unit_output', '成交单产', '品项业绩除以成交人头；分母为零显示“-”。'),
             $this->column('annual_repeat_people', '年度购买≥2次人数', '截至当前月，本年度购买该分类下同名品项不少于两次的不同会员数；旧导入数据或旧卡录入原单的欠款补交不算购买次数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_repeat_people')),
             $this->column('annual_repeat_rate', '年度复购率', '年度购买≥2次人数除以年度成交人头；分母为零显示“-”。'),
-            $this->column('annual_deal_people', '年度成交人头', '截至当前月，本年度该分类下同名品项原单首度达标的会员日累计；同一会员不同达标日分别计入。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_deal_people')),
+            $this->column('annual_deal_people', '年度成交人头', '截至当前月，本年度该分类下同名主品项首次达标的会员日累计；同一会员不同达标日分别计入。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_deal_people')),
             $this->column('annual_active_penetration', '年度活客普及率', '年度成交人头除以当月活客数；分母为零显示“-”。'),
         ];
         foreach ($columns as $index => &$column) {
@@ -944,7 +944,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $actualFacts = $categoryIds === [] ? [] : $this->currentCategoryRows(
             $this->actualCategoryRows($stores, $range, $categoryIds, true, $allActualFacts), $categoryIds);
         $rows = [];
-        // 人头只取原单首次达标的主分类/主品项，不能按整月同名商品重新凑门槛。
+        // 人头只取共用达标资格的主分类/主品项，不能按整月同名商品重新凑门槛。
         foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $range, $input,
             '', $this->participantEmployeeId) as $fact) {
             if (!isset($allowed[(int)($fact['category_id'] ?? 0)])) continue;
@@ -987,7 +987,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $columns = [
             $this->column('item_name', '商品名称', '只显示当前生美分类下的产品、项目；按成交时保存的同名商品合并，卡项购买按卡内项目展开。', false, true, 180),
             $this->column('cash_performance', '实际业绩', '该商品在筛选期间的登记实际业绩，成功现金收款减成功现金退款。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'cash_performance')),
-            $this->column('deal_people', '成交人头', '原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。跨分类原单只归首次达标时现金分摊最多的分类和主品项；退款不改变人数，金额另按实际业绩统计。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'deal_people')),
+            $this->column('deal_people', '成交人头', '同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。跨分类原单只归首次达标时现金分摊最多的分类和主品项；退款不改变人数，金额另按实际业绩统计。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'deal_people')),
             $this->column('deal_unit_output', '成交单产', '该商品实际业绩除以成交人头；分母为零显示“-”。'),
             $this->column('people_share', '人头占比', '成交人头除以本月完成有效服务的不同会员数；分母为零显示“-”。'),
             $this->column('performance_share', '业绩占比', '该商品实际业绩除以当前门店范围当月全部商品实际业绩；分母为零显示“-”。'),
@@ -2268,7 +2268,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $columns = [
             $this->column('member_name', '会员', '原销售单保存的会员姓名快照。', false, true, 130),
             $this->column('member_phone', '手机号', '会员当前登记的手机号；查询与导出使用同一授权行集。', false, false, 145),
-            $this->column('business_date', '业务日期', '原销售单累计现金首度达标的收款业务日。', false, false, 112),
+            $this->column('business_date', '业务日期', '当天新消费跨单达标或未计过原单补交首次达标的业务日。', false, false, 112),
             $this->column('store_name', '门店', '原销售单门店；跨店补交不改变人数归属。', false, false, 140),
             $this->column('order_no', '单据号', '首次达标的原销售单据号。', false, false, 180),
             $this->column('receipt_amount', '成交人头', '一张原销售单只达标一次，会员同日跨单跨店仅展示一条。', true, false, 120),
@@ -2553,14 +2553,14 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->column('month', '月份', '按所选日期范围内的自然月分组。', false, true, 100),
             $this->column('team_name', $category . '团队', $category . '及下级平台商品当前分类路径含“合作”的归合作，其余归自营；按所选门店汇总。', false, true, 120),
             $this->column('visit_count', '见诊人数', '当月已完成且收银项目带体验标签的' . $category . '服务，按团队和会员去重计人数；未完成服务不计入。', true, false, 120, $this->serviceDetailDrill($report, 'visit_count'), '总成交数据'),
-            $this->column('deal_people', '成交人数', '原销售单独立累计有效现金收款，首度达到来源门槛时按达标日计1；同一会员同日跨单跨店只计1，跨店补交归原店，按达标主分类归自营或合作。', true, false, 110, $this->cashDetailDrill($report, 'deal_people'), '总成交数据'),
+            $this->column('deal_people', '成交人数', '同一会员当天新消费跨单累计有效现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首度达到来源门槛时按达标日计1；同一会员同日跨单跨店只计1，跨店补交归原店，按达标主分类归自营或合作。', true, false, 110, $this->cashDetailDrill($report, 'deal_people'), '总成交数据'),
             $this->column('deal_rate', '成交率', '成交人数除以体验见诊人数；当月无人见诊显示“-”。', false, false, 110, [], '总成交数据'),
             $this->column('deal_amount', '成交金额', $registeredActual
                 ? '当月' . $category . '及下级商品的实际业绩，成功现金退款按退款日冲减。'
                 : '当月' . $category . '及下级商品的净现金业绩。', true, false, 120, $this->cashDetailDrill($report, 'deal_amount'), '总成交数据'),
             $this->column('unit_output', '成交单产', '成交金额除以成交人数；分母为零显示“-”。', false, false, 110, [], '总成交数据'),
             $this->column('new_visit_count', '见诊人数', '当月已完成且带体验标签的' . $category . '服务中，截至体验业务日仍无' . $category . '正金额收款的会员，按团队和会员去重；旧导入数据或旧卡录入原单的欠款补交不算购买。', true, false, 120, $this->serviceDetailDrill($report, 'new_visit_count'), '新客成交数据'),
-            $this->column('new_deal_people', '成交人数', '使用同一原单首度达标会员日；首次购买本分类发生在当月的会员归新客，退款不改变人数资格。', true, false, 110, $this->cashDetailDrill($report, 'new_deal_people'), '新客成交数据'),
+            $this->column('new_deal_people', '成交人数', '使用同一共用达标会员日；首次购买本分类发生在当月的会员归新客，退款不改变人数资格。', true, false, 110, $this->cashDetailDrill($report, 'new_deal_people'), '新客成交数据'),
             $this->column('new_deal_rate', '成交率', '首次' . $category . '收款会员数除以当月新客体验见诊人数；两者分别取收款与服务事实，未见诊也可成交，比例可能超过100%；分母为零显示“-”。', false, false, 110, [], '新客成交数据'),
             $this->column('new_deal_amount', '成交金额', $registeredActual
                 ? '当月首次购买' . $category . '商品会员的实际业绩；其成功现金退款按退款日冲减。'
@@ -2614,7 +2614,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 : '本年度首次成为本表来源会员的会员，自首次成交起至所选月份末本表来源的累计已登记实际业绩；合计取年末累计值。', false, ['首年业绩']),
         ] : [
             $this->monthlySpec('experience_people', '体验人数', '手动输入当月体验人数，保存为独立报表补充记录。', true, ['体验人数']),
-            $this->monthlySpec('deal_people', '成交人数', "{$sourceCodes} 来源每张原销售单独立累计成功现金收款，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，同一会员同日跨单跨店只计1、多日可累计。游客与退款不参与人数资格，旧导入和旧卡录入原单补交不推动门槛。", false, ['成交人数']),
+            $this->monthlySpec('deal_people', '成交人数', "{$sourceCodes} 来源同一会员当天新消费跨单累计成功现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，同一会员同日跨单跨店只计1、多日可累计。游客与退款不参与人数资格，旧导入和旧卡录入原单补交不推动门槛。", false, ['成交人数']),
             $this->monthlySpec('deal_amount', '成交金额', "{$sourceCodes} 来源会员或游客首次业务日净现金业绩，不设500元门槛；会员同日多单合并，游客按单据区分。", false, ['成交金额']),
             $this->monthlySpec('deal_rate', '成交率', '成交人数除以体验人数；分母为零或未填写显示“-”。', false, ['成交率']),
             $this->monthlySpec('deal_unit_output', '成交单产', '成交金额除以成交人数；分母为零显示“-”。', false, ['成交单产']),
