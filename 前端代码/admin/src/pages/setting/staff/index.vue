@@ -1,6 +1,7 @@
 <template>
   <div class="staff-page">
-    <Card :bordered="false" dis-hover :padding="16" class="staff-card">
+    <EmployeeDashboardPeople v-if="$route.query.employee_drill" />
+    <Card v-else :bordered="false" dis-hover :padding="16" class="staff-card">
       <div class="staff-mgmt">
         <div class="staff-list-panel">
           <div class="filter-bar">
@@ -30,7 +31,8 @@
             <Button type="primary" class="ml14" @click="openForm(0)">新建店员</Button>
             <Button class="ml14" @click="showColumnSetting = true">列设置</Button>
             <Button
-              v-auth="['export-userCommission']"
+              :loading="exporting"
+              :disabled="loading || !submittedListParams"
               class="ml14"
               @click="exports"
             >导出</Button>
@@ -223,13 +225,13 @@ import { resolveStaffAvatar, onStaffAvatarError } from '@/utils/staffAvatar';
 import {
   merchantStaffList,
   merchantStaffCustomer,
-  exportStaffListExport,
 } from '@/api/setting';
 import { getOrganizationTree, getOrganizationResourceSelector } from '@/api/store';
 import { getStaffColumnSetting, saveStaffColumnSetting } from '@/api/staff';
 import exportExcel from '@/utils/newToExcel.js';
 import timeOptions from '@/utils/timeOptions';
 import FormModal from './add';
+import EmployeeDashboardPeople from './EmployeeDashboardPeople.vue';
 import ColumnSetting from './components/ColumnSetting';
 import TransferModal from './components/TransferModal';
 import TransferLogModal from './components/TransferLogModal';
@@ -303,6 +305,7 @@ function isLegacyDefaultColumnConfig(columns) {
 export default {
   name: 'setting_staff_index',
   components: {
+    EmployeeDashboardPeople,
     FormModal,
     ColumnSetting,
     TransferModal,
@@ -340,6 +343,8 @@ export default {
       },
       loading: false,
       listRequestSeq: 0,
+      exporting: false,
+      submittedListParams: null,
       data: [],
       scopeStoreIds: [],
       rootOrganizationId: 0,
@@ -392,7 +397,14 @@ export default {
       return this.tableColumns.reduce((sum, col) => sum + (col.minWidth || 100), 0);
     },
   },
+  watch: {
+    '$route.query.employee_drill'(value, previous) {
+      // 缓存的人员页面从下钻返回普通模式时再初始化普通列表，不把历史离职条件混入当前列表。
+      if (!value && previous) { this.loadColumnSetting(); this.loadRootOrganization(); }
+    },
+  },
   created() {
+    if (this.$route.query.employee_drill) return;
     this.loadColumnSetting();
     this.loadRootOrganization();
   },
@@ -402,7 +414,7 @@ export default {
   },
   activated() {
     // 首次进入由组织根节点加载完成后发起查询；缓存页再次激活才主动刷新，避免首屏重复全范围请求。
-    if (this.rootOrganizationLoaded) this.getList();
+    if (!this.$route.query.employee_drill && this.rootOrganizationLoaded) this.getList();
     this.$nextTick(this.updateTableHeight);
   },
   beforeDestroy() {
@@ -570,6 +582,7 @@ export default {
       this.getList();
     },
     getList() {
+      if (this.$route.query.employee_drill) return;
       const requestSeq = ++this.listRequestSeq;
       this.loading = true;
       // 每次只请求当前页，门店筛选和后端数据权限仍由统一列表接口处理。
@@ -580,6 +593,7 @@ export default {
         .then((res) => {
           // 快速翻页时旧请求可能晚返回；只允许最后一次请求更新清单。
           if (requestSeq !== this.listRequestSeq) return;
+          this.submittedListParams = { ...params };
           this.data = res.data.list || [];
           this.total = res.data.count || 0;
           this.updateTableHeight();
@@ -607,29 +621,26 @@ export default {
         this.$Message.error(err.msg || '读取专属会员失败');
       }).finally(() => { if (sequence === this.memberRequestSequence) this.memberLoading = false; });
     },
-    getExcelData(excelData) {
-      return new Promise((resolve) => {
-        exportStaffListExport(excelData).then((res) => resolve(res.data));
-      });
-    },
+    /** 导出冻结已成功查询的条件，从第一页开始取全量，翻页和未提交输入不改变范围。 */
     async exports() {
-      let [th, filekey, data, fileName] = [[], [], [], ''];
-      const excelData = JSON.parse(JSON.stringify(this.formData));
-      if (!excelData.store_id) delete excelData.store_id;
-      if (excelData.status === '') delete excelData.status;
-      for (let i = 0; i < excelData.page + 1; i++) {
-        const lebData = await this.getExcelData(excelData);
-        if (!fileName) fileName = lebData.filename;
-        if (!filekey.length) filekey = lebData.filekey;
-        if (!th.length) th = lebData.header;
-        if (lebData.export.length) {
-          data = data.concat(lebData.export);
-          excelData.page++;
-        } else {
-          exportExcel(th, filekey, fileName, data);
-          return;
-        }
-      }
+      if (this.exporting || !this.submittedListParams) return;
+      this.exporting = true;
+      const fixed = { ...this.submittedListParams, export_fields: 1, limit: 50 };
+      try {
+        const rows = []; let page = 1; let metadata;
+        do {
+          const { data } = await merchantStaffList({ ...fixed, page });
+          metadata = data; rows.push(...(data.export || []));
+          if (!data.export || !data.export.length) {
+            if (rows.length < data.count) throw new Error('人员数据已变化，请重新查询后导出');
+            break;
+          }
+          page++;
+        } while (rows.length < metadata.count);
+        exportExcel(metadata.header, metadata.filekey, metadata.filename, rows);
+      } catch (error) {
+        this.$Message.error(error.msg || error.message || '导出失败，请重试');
+      } finally { this.exporting = false; }
     },
     handleClick1(id) {
       this.onModal1Cancel();

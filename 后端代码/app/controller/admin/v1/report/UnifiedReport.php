@@ -327,10 +327,33 @@ class UnifiedReport extends AuthController
             $range = $this->employeeDashboardRange($input);
             $stores = $this->scopedStoreIds($input);
             if (!$stores) throw new \InvalidArgumentException('无权限或当前范围无门店');
-            return app('json')->success($services->dashboard($stores, $range, $input));
+            // 个人数据权限只允许本人员工档案，不能因拥有人员管理入口扩大到同店所有人。
+            $authorization = $this->reportAuthorization();
+            $input['_employee_id'] = $authorization['mode'] === 'self_participant' ? (int)$authorization['employee_id'] : 0;
+            $data = $services->dashboard($stores, $range, $input);
+            // 看板可读不等于人员档案可读；仅控制下钻展示，明细端仍独立强制验证。
+            $data['can_view_people'] = false;
+            try { (new \app\services\organization\PlatformStaffAccessServices())->assertAllowed((int)$this->adminId); $data['can_view_people'] = true; }
+            catch (\mohe\exceptions\AdminException $e) {}
+            return app('json')->success($data);
         } catch (\InvalidArgumentException $e) {
             return app('json')->fail($e->getMessage());
         }
+    }
+
+    /** 人员明细同时满足看板范围和人员管理资格，客户端不能扩大原查询的授权门店。 */
+    public function employeeDashboardPeople(Request $request, EmployeeDashboardServices $services)
+    {
+        (new \app\services\organization\PlatformStaffAccessServices())->assertAllowed((int)$this->adminId);
+        if (!$this->hasMenuPermission('admin-report-employee-dashboard') && !$this->hasMenuPermission('admin-staff')) return app('json')->fail('当前账号未配置员工看板权限');
+        try {
+            $input=$request->getMore([['start_date',''],['end_date',''],['store_ids',''],['org_id',0],['store_id',0],['role',''],['kind',''],['bucket',''],['keyword',''],['page',1],['limit',20]]);
+            $range=$this->employeeDashboardRange($input);$stores=$this->scopedStoreIds($input);
+            if(!$stores)throw new \InvalidArgumentException('无权限或当前范围无门店');
+            $authorization = $this->reportAuthorization();
+            $input['_employee_id'] = $authorization['mode'] === 'self_participant' ? (int)$authorization['employee_id'] : 0;
+            return app('json')->success($services->people($stores,$range,$input));
+        } catch (\InvalidArgumentException $e) {return app('json')->fail($e->getMessage());}
     }
 
     /**

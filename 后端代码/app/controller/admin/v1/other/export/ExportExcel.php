@@ -892,14 +892,8 @@ class ExportExcel extends AuthController
     {
         // 导出与人员列表共用入口资格，不能利用独立导出控制器绕过撤权。
         (new \app\services\organization\PlatformStaffAccessServices())->assertAllowed((int)$this->adminId);
-        $where = $this->request->getMore([
-            ['store_id', 0],
-            ['keyword', ''],
-        ]);
-        $where['status'] = 1;
-        $where['is_del'] = 0;
-        $data = $staffServices->getStoreStaffListData($where, ['store']);
-        return $this->success($this->service->staffList($data['list'] ?? [], '店员列表导出'));
+        // 旧导出地址也委托同一人员查询，避免硬编码在职或丢失组织筛选。
+        return app()->make(\app\controller\admin\v1\merchant\SystemStoreStaff::class)->exportList();
     }
 
     /**

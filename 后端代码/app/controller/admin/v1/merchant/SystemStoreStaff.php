@@ -123,6 +123,7 @@ class SystemStoreStaff extends AuthController
 	 */
     public function index()
     {
+        if ((int)$this->request->get('export_fields', 0) === 1) return $this->exportList();
         $where = $this->buildStaffListWhere();
         if ($where === null) {
             return $this->success(['list' => [], 'count' => 0]);
@@ -134,8 +135,19 @@ class SystemStoreStaff extends AuthController
 	 * 获取店员列表
 	 * @return mixed
 	 */
+    /** 完整字段导出复用原列表的权限、组织、关键字、在职状态和分页，不另算人群。 */
+    public function exportList()
+    {
+        (new \app\services\organization\PlatformStaffAccessServices())->assertAllowed((int)$this->adminId);
+        $where = $this->buildStaffListWhere();
+        $data = $where === null ? ['list'=>[], 'count'=>0] : $this->services->getStoreStaffList($where, ['store', 'user']);
+        $canReadType = app()->make(\app\services\employee\EmployeeTypeAuthorityServices::class)->canManagePermission((array)$this->adminInfo);
+        return $this->success((new \app\services\employee\EmployeeProfileExportServices())->page($data, $canReadType));
+    }
+
     public function getStoreStaffList()
     {
+        if ((int)$this->request->get('export_fields', 0) === 1) return $this->exportList();
         $where = $this->buildStaffListWhere();
         if ($where === null) {
             return $this->success(['list' => [], 'count' => 0]);

@@ -1808,6 +1808,7 @@ Route::group('adminapi', function () {
         Route::get('human-efficiency', 'v1.report.UnifiedReport/humanEfficiency')->option(['real_name' => '人效看板']);
         Route::get('human-efficiency/metadata', 'v1.report.UnifiedReport/humanEfficiencyMetadata')->option(['real_name' => '人效看板列元数据']);
         Route::get('employee-dashboard', 'v1.report.UnifiedReport/employeeDashboard')->option(['real_name' => '员工看板查询']);
+        Route::get('employee-dashboard/people', 'v1.report.UnifiedReport/employeeDashboardPeople')->option(['real_name' => '员工看板人员明细']);
         Route::get('staffing-quota', 'v1.report.UnifiedReport/staffingQuota')->option(['real_name' => '岗位编制列表']);
         Route::post('staffing-quota', 'v1.report.UnifiedReport/saveStaffingQuota')->option(['real_name' => '保存岗位编制']);
         Route::get('engineering-ledger/catalog', 'v1.report.UnifiedReport/ledgerCatalog')->option(['real_name' => '工程管理台账目录']);

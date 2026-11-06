@@ -14,7 +14,7 @@ use think\facade\Db;
 final class EmployeeDashboardServices
 {
     public const CONTRACT_VERSION = 'employee-dashboard-v1';
-    public const METRIC_VERSION = 'employee-dashboard-facts-v1';
+    public const METRIC_VERSION = 'employee-dashboard-actual-position-v2';
 
     /** @param int[] $stores */
     public function dashboard(array $stores, array $range, array $input = []): array
@@ -23,13 +23,15 @@ final class EmployeeDashboardServices
         if ($stores === []) throw new \InvalidArgumentException('当前账号没有可查看的门店范围');
         $range = $this->range($range);
         $role = trim((string)($input['role'] ?? ''));
-        $staff = $this->staffRows($stores, $role);
-        $overview = $this->overview($staff, $range['end'], $this->departureCount($stores, $range, $role));
-        $roles = $this->roles($staff, $stores);
+        $population = new EmployeeDashboardPopulationServices();
+        $allStaff = $this->authorizedPeople($population->active($stores, '', $range['end']), $input);
+        $staff = $role === '' || $role === '全部岗位' ? $allStaff : array_values(array_filter($allStaff, fn($r)=>in_array($role,$r['positions'],true)));
+        $overview = $this->overview($staff, $range['end'], count($this->authorizedPeople($population->departures($stores, $range, $role), $input)));
+        $roles = $this->roles($staff, $stores, $role);
         $performance = $this->performance($stores, $range);
         $target = $this->target($stores, $range, $performance);
         $scopeData = $this->scopeSummary($stores, $performance);
-        return [
+        $result = [
             'contract_version' => self::CONTRACT_VERSION,
             'metric_version' => self::METRIC_VERSION,
             'data_as_of' => date('Y-m-d H:i:s'),
@@ -43,11 +45,25 @@ final class EmployeeDashboardServices
             'scopes' => $scopeData,
             'source_explanations' => [
                 'overview' => '在职且启用的员工档案及有效门店任职关系；年龄和工龄按查询截止日计算。',
-                'roles' => '当前有效岗位任职和员工美容师能力开关；编制读取集团看板已保存的门店月度目标外的员工编制配置。',
+                'roles' => '当前有效实际岗位任职；兼岗人员分别计入各岗位；编制读取集团看板已保存的门店月度目标外的员工编制配置。',
                 'performance' => '成功销售分配、完成服务和消耗业绩事实；退款/作废按反向事实净额处理。',
                 'target' => '门店目标报表当前引用的有效方案；目标与完成值同为全店实际业绩，未配置显示“-”。',
             ],
         ];
+        // 每个下钻描述均冻结本次已执行条件；参数在明细入口重新经过后端权限裁剪。
+        $filters=['store_ids'=>implode(',',$stores),'start_date'=>$range['start'],'end_date'=>$range['end'],'role'=>$role];
+        foreach($result['overview']['cards']as&$card)if(in_array($card['key'],['total','active_staff','beautician_count','departures'],true))$card['drilldown']=$filters+['kind'=>$card['key']];unset($card);
+        foreach(['education'=>'education','ages'=>'age','tenure'=>'tenure']as$key=>$kind)foreach($result['overview'][$key]as$i=>&$row)$row['drilldown']=$filters+['kind'=>$kind,'bucket'=>(string)$i];unset($row);
+        foreach($result['roles']as&$row)$row['drilldown']=$filters+['kind'=>'position','bucket'=>(string)$row['position_id']];unset($row);
+        $roleNames=[];foreach($allStaff as$row)foreach($row['positions']as$name)$roleNames[$name]=$name;sort($roleNames,SORT_STRING);$result['role_options']=array_values($roleNames);
+        return $result;
+    }
+
+    /** 仅使用控制器注入的认证员工ID；个人权限与汇总、分页、导出共用同一限制。 */
+    private function authorizedPeople(array $people, array $input): array
+    {
+        $employeeId = (int)($input['_employee_id'] ?? 0);
+        return $employeeId > 0 ? array_values(array_filter($people, fn($row) => (int)$row['employee_id'] === $employeeId)) : $people;
     }
 
     private function range(array $range): array
@@ -60,71 +76,40 @@ final class EmployeeDashboardServices
         return ['start' => $start, 'end' => $end];
     }
 
-    /** @return array<int,array<string,mixed>> */
-    private function staffRows(array $stores, string $role): array
+    /** 汇总与明细共用人口分组，不从手艺人资格推断岗位。 */
+    private function overview(array $staff,string $end,int $departureCount=0):array
     {
-        $q = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
-            ->leftJoin('staff_job_position jp', 'jp.staff_id=ss.id AND jp.is_del=0 AND jp.status=1 AND jp.end_time=0')
-            ->leftJoin('position p', 'p.id=jp.position_id AND p.status=1')
-            ->whereIn('ss.store_id', $stores)->where('ss.status', 1)->where('ss.is_del', 0)
-            ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('ss.id staff_id,MAX(ss.store_id) store_id,MAX(ss.employee_id) employee_id,MAX(ss.cashier_craftsman_enabled) cashier_craftsman_enabled,MAX(e.name) name,MAX(e.education) education,MAX(ss.age) age,MAX(ss.birthday_date) birthday,MAX(ss.join_date) entry_time,MAX(p.name) position_name')
-            ->group('ss.id')->order('ss.id', 'asc');
-        if ($role !== '' && $role !== '全部岗位') $q->whereLike('p.name', '%' . $role . '%');
-        return $q->select()->toArray();
+        $population=new EmployeeDashboardPopulationServices();$edu=array_fill_keys(EmployeeDashboardPopulationServices::EDUCATION,0);$ages=array_fill_keys(EmployeeDashboardPopulationServices::AGES,0);$tenure=array_fill_keys(EmployeeDashboardPopulationServices::TENURE,0);
+        $ageSum=0;$ageCount=0;$tenureSum=0;$tenureCount=0;
+        foreach($staff as$row){$p=$row['profile'];$edu[EmployeeDashboardPopulationServices::EDUCATION[$p['education_bucket']]]++;if($p['age']!==null){$ages[EmployeeDashboardPopulationServices::AGES[$p['age_bucket']]]++;$ageSum+=$p['age'];$ageCount++;}if($p['years']!==null){$tenure[EmployeeDashboardPopulationServices::TENURE[$p['tenure_bucket']]]++;$tenureSum+=$p['years'];$tenureCount++;}}
+        $total=count($staff);
+        return ['cards'=>[
+            $this->card('total','员工总人数',$total,'人','当前在职且启用员工，跨店任职按员工去重','blue'),
+            $this->card('average_age','平均年龄',$ageCount?round($ageSum/$ageCount,1):null,'岁','仅按已填写年龄或生日的员工计算','green'),
+            $this->card('average_tenure','平均工龄',$tenureCount?round($tenureSum/$tenureCount,1):null,'年','仅按已填写入职日期的员工计算','teal'),
+            $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效任职，按员工去重','purple'),
+            $this->card('beautician_count','美容师人数',count($population->select($staff,'beautician_count')),'人','当前有效岗位名称为美容师的员工，不按手艺人资格统计','amber'),
+            $this->card('departures','期间流失人数',$departureCount,'人','期间发生离职的员工，调店和停职不计入','red')],
+            'education'=>$this->rows($edu),'ages'=>$this->rows($ages),'tenure'=>$this->rows($tenure)];
     }
 
-    private function overview(array $staff, string $end, int $departureCount = 0): array
+    /** 每个实际岗位内按员工去重；兼任多个岗位可分别列入各岗位，不伪造“美容师”岗位。 */
+    private function roles(array $staff,array $stores,string $role):array
     {
-        $unique = [];
-        foreach ($staff as $row) {
-            $id = (int)($row['employee_id'] ?? 0);
-            if ($id > 0 && !isset($unique[$id])) $unique[$id] = $row;
-        }
-        $staff = array_values($unique ?: $staff);
-        $now = strtotime($end . ' 23:59:59') ?: time();
-        // 学历与员工编辑页共用六档；历史未填写归入“其他”，保证分布合计等于当前员工数。
-        $total = count($staff); $ages = ['18-25岁'=>0,'26-35岁'=>0,'36-45岁'=>0,'46-55岁'=>0,'56岁以上'=>0]; $tenure = ['1年以内'=>0,'1-3年'=>0,'3-5年'=>0,'5-10年'=>0,'10年以上'=>0]; $edu = ['本科以上'=>0,'本科'=>0,'大专'=>0,'高中'=>0,'高中以下'=>0,'其他'=>0];
-        $ageSum = 0; $ageCount = 0; $tenureSum = 0; $tenureCount = 0;
-        foreach ($staff as $row) {
-            $birthday = $this->timestamp($row['birthday'] ?? 0); $storedAge = (int)($row['age'] ?? 0); if ($storedAge > 0) { $age = $storedAge; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; } elseif ($birthday > 0) { $age = max(0, (int)date('Y',$now)-(int)date('Y',$birthday) - (date('md',$now)<date('md',$birthday)?1:0)); if ($age < 18) $age = 18; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; }
-            $entry = $this->timestamp($row['entry_time'] ?? 0); if ($entry > 0) { $years = max(0, ($now-$entry)/31557600); $bucket = $years<1?'1年以内':($years<3?'1-3年':($years<5?'3-5年':($years<10?'5-10年':'10年以上'))); $tenure[$bucket]++; $tenureSum += $years; $tenureCount++; }
-            $education = trim((string)($row['education'] ?? '')); $edu[isset($edu[$education]) ? $education : '其他']++;
-        }
-        return ['cards' => [
-            $this->card('total','员工总人数',$total,'人','在职且启用员工档案统计','blue'), $this->card('average_age','平均年龄',$ageCount?round($ageSum/$ageCount,1):null,'岁','仅按已填写年龄或生日的员工计算','green'), $this->card('average_tenure','平均工龄',$tenureCount?round($tenureSum/$tenureCount,1):null,'年','仅按已填写入职日期的员工计算','teal'), $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效门店任职统计','purple'), $this->card('beautician_count', '美容师人数', count(array_filter($staff, fn($r)=>(int)($r['cashier_craftsman_enabled']??0)===1)), '人','启用美容师能力的有效任职统计','amber'), $this->card('departures','期间流失人数',$departureCount,'人','按离职记录的离职时间及门店统计','red')], 'education'=>$this->rows($edu), 'ages'=>$this->rows($ages), 'tenure'=>$this->rows($tenure)];
+        $groups=[];foreach($staff as$row){$positions=$row['positions']?:[0=>'未设置岗位'];foreach($positions as$id=>$name){if($role!==''&&$role!=='全部岗位'&&$name!==$role)continue;if(!isset($groups[$id]))$groups[$id]=['position_id'=>$id,'label'=>$name,'value'=>0];$groups[$id]['value']++;}}
+        $quotas=[];foreach(Db::name('staffing_quota')->where('tenant_id','0')->where('scope_type','store')->whereIn('scope_id',$stores)->select()->toArray()as$row)$quotas[(int)$row['position_id']]=($quotas[(int)$row['position_id']]??0)+(int)$row['quota_count'];
+        ksort($groups);$colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57'];$out=[];foreach($groups as$id=>$row)$out[]=$row+['quota'=>$quotas[$id]??$row['value'],'color'=>$colors[count($out)%count($colors)]];return $out;
     }
 
-    /**
-     * 期间流失只读取 action=leave 的任职结束事实，按员工去重；调店、停职和删除均不冒充离职。
-     * 岗位筛选使用离职同时结束的岗位历史，前端传入范围不能扩大后端门店权限。
-     */
-    private function departureCount(array $stores, array $range, string $role): int
+    /** 人员管理的报表明细模式；只查询当前页，完整命中总数与导出使用同一人群选择器。 */
+    public function people(array $stores,array $range,array $input):array
     {
-        $start = strtotime($range['start'] . ' 00:00:00') ?: 0;
-        $end = strtotime($range['end'] . ' 23:59:59') ?: 0;
-        $query = Db::name('staff_tenure_period')->alias('tp')
-            ->whereIn('tp.store_id', $stores)
-            ->where('tp.is_del', 0)
-            ->where('tp.status', 0)
-            ->where('tp.action', 'leave')
-            ->whereBetween('tp.end_time', [$start, $end]);
-        if ($role !== '' && $role !== '全部岗位') {
-            $query->join('staff_job_position jp', 'jp.staff_id=tp.staff_id AND jp.end_time=tp.end_time')
-                ->join('position p', 'p.id=jp.position_id')
-                ->whereLike('p.name', '%' . $role . '%');
-        }
-        return (int)$query->distinct(true)->count('tp.employee_id');
-    }
-
-    private function roles(array $staff, array $stores): array
-    {
-        $counts=[]; foreach($staff as $row){$name=trim((string)($row['position_name']??'')); if($name==='')$name=((int)($row['cashier_craftsman_enabled']??0)===1?'美容师':'未设置岗位'); $counts[$name]=($counts[$name]??0)+1;}
-        $positionIds = Db::name('position')->whereIn('name', array_keys($counts))->column('id', 'name');
-        $quotaRows = Db::name('staffing_quota')->where('tenant_id', '0')->where('scope_type', 'store')->whereIn('scope_id', $stores)->select()->toArray();
-        $quotas = [];
-        foreach ($quotaRows as $row) $quotas[(int)$row['position_id']] = ($quotas[(int)$row['position_id']] ?? 0) + (int)$row['quota_count'];
-        $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57']; $i=0; $out=[]; foreach($counts as $label=>$value){$pid=(int)($positionIds[$label]??0); $quota=array_key_exists($pid,$quotas)?$quotas[$pid]:$value; $out[]=['label'=>$label,'value'=>$value,'quota'=>$quota,'color'=>$colors[$i++%count($colors)]];} return $out;
+        $range=$this->range($range);$role=trim((string)($input['role']??''));$kind=(string)($input['kind']??'');$bucket=(string)($input['bucket']??'');$population=new EmployeeDashboardPopulationServices();
+        $people=$kind==='departures'?$population->departures($stores,$range,$role):$population->active($stores,$role,$range['end']);
+        $people=$population->select($this->authorizedPeople($people,$input),$kind,$bucket);$keyword=trim((string)($input['keyword']??''));if($keyword!=='')$people=array_values(array_filter($people,fn($r)=>mb_stripos((string)$r['name'],$keyword)!==false||(string)$r['employee_id']===$keyword));
+        usort($people,fn($a,$b)=>(int)$a['employee_id']<=>(int)$b['employee_id']);$count=count($people);$limit=max(1,min(200,(int)($input['limit']??20)));$pages=max(1,(int)ceil($count/$limit));$page=max(1,min($pages,(int)($input['page']??1)));
+        $rows=[];foreach(array_slice($people,($page-1)*$limit,$limit)as$r)$rows[]=['id'=>(int)$r['staff_id'],'employee_id'=>(int)$r['employee_id'],'name'=>$r['name']?:'历史人员档案缺失','store_names'=>implode('、',$r['stores']),'position_names'=>implode('、',array_unique($r['positions']))?:'未设置岗位','age'=>$r['profile']['age'],'education'=>EmployeeDashboardPopulationServices::EDUCATION[$r['profile']['education_bucket']],'entry_time'=>(string)$r['entry_time'],'tenure_years'=>$r['profile']['years']===null?null:round($r['profile']['years'],1),'departed_at'=>isset($r['end_time'])?date('Y-m-d H:i:s',(int)$r['end_time']):''];
+        return ['list'=>$rows,'count'=>$count,'page'=>$page,'limit'=>$limit,'date_range'=>$range,'kind'=>$kind,'role'=>$role,'columns'=>[['key'=>'employee_id','title'=>'员工ID'],['key'=>'name','title'=>'姓名'],['key'=>'store_names','title'=>'统计门店'],['key'=>'position_names','title'=>$kind==='departures'?'期间离职岗位':'当前实际岗位'],['key'=>'age','title'=>'年龄'],['key'=>'education','title'=>'学历'],['key'=>'entry_time','title'=>'入职日期'],['key'=>'tenure_years','title'=>'工龄（年）'],['key'=>'departed_at','title'=>'期间离职时间']]];
     }
 
     private function performance(array $stores, array $range): array
@@ -198,5 +183,4 @@ final class EmployeeDashboardServices
     private function registeredCard(string $key,string $metricCode,$value,string $unit,string $tone,string $contextLabel='',?int $valueCents=null): array { $definition=(new \app\services\metric\MetricDictionaryServices())->getTooltip($metricCode);if(($definition['user_ready']??false)!==true)throw new \RuntimeException('EMPLOYEE_METRIC_DICTIONARY_NOT_READY');$card=$this->card($key,$contextLabel!==''?$contextLabel:(string)$definition['name'],$value,$unit,(string)$definition['summary'],$tone);if($valueCents!==null)$card['value_cents']=$valueCents;return $card; }
     private function rows(array $values): array { $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57','#6283a1'];$i=0;$out=[];foreach($values as $label=>$value)$out[]=['label'=>$label,'value'=>(int)$value,'color'=>$colors[$i++%count($colors)]];return $out; }
     private function months(array $range): array { $out=[];$cursor=date('Y-m-01',strtotime($range['start']));$end=date('Y-m-01',strtotime($range['end']));while($cursor<=$end){$out[]=$cursor;$cursor=date('Y-m-01',strtotime($cursor.' +1 month'));}return $out; }
-    private function timestamp($value): int { if(is_numeric($value)){ $v=(int)$value; return $v>1000000000?$v:0; } return strtotime((string)$value)?:0; }
 }

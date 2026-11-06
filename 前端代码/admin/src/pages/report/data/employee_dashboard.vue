@@ -1,6 +1,6 @@
 <template>
   <section class="employee-dashboard-frame">
-    <iframe
+    <iframe ref="dashboardFrame"
       :key="dashboardUrl"
       class="employee-dashboard-frame__content"
       :src="dashboardUrl"
@@ -12,6 +12,18 @@
 <script>
 export default {
   name: 'EmployeeDashboardFrame',
+  mounted () { window.addEventListener('message', this.openPeople) },
+  beforeDestroy () { window.removeEventListener('message', this.openPeople) },
+  methods: {
+    /** 只接收当前受信员工看板 iframe；目标路由固定，不能借消息打开任意地址。 */
+    openPeople (event) {
+      const frame = this.$refs.dashboardFrame
+      if (!frame || event.source !== frame.contentWindow || event.origin !== new URL(this.dashboardUrl).origin) return
+      const message = event.data
+      if (!message || message.type !== 'mohe:employee-dashboard-people' || !message.filters) return
+      this.$router.push({ path: '/admin/setting/staff/index', query: { employee_drill: JSON.stringify(message) } })
+    }
+  },
   computed: {
     dashboardUrl () {
       const query = new URLSearchParams()
