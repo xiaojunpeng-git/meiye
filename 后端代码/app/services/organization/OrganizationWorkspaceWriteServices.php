@@ -5,7 +5,7 @@ use think\facade\Db;
 
 /**
  * O4 组织工作台 HTTP 写编排（唯一门禁入口）
- * 顺序：写门禁 → 超管 → request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
+ * 顺序：写门禁 → 操作授权（门店归属沿用门店编辑，组织编辑按功能，其余保留超管）→ request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
  */
 class OrganizationWorkspaceWriteServices
 {
@@ -172,7 +172,7 @@ class OrganizationWorkspaceWriteServices
 
     /**
      * 门店表单调整归属：资料与组织绑定必须同事务；旧区域ID不能参与新组织写入。
-     * 仅调整归属时调用，沿用组织写权限、结构锁、审计及请求重放保护。
+     * 仅调整归属时调用，沿用门店编辑授权、选择器数据范围、结构锁、审计及请求重放保护。
      */
     public function saveStoreWithOrganization(int $storeId, int $orgId, int $expectedOrgId, array $data, array $staffData, array $adminInfo, array $requestCtx): array
     {
@@ -528,9 +528,18 @@ class OrganizationWorkspaceWriteServices
         callable $business
     ): array {
         $this->gate->assertCanWrite();
-        $super = $this->gate->assertSuperAdmin($adminInfo);
-        if (!$super['ok']) {
-            throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
+        // 门店表单已通过原保存接口的编辑授权，不再额外要求超管；
+        // 只开放这一内部动作，独立绑定、删除、人员授权等操作保持原门禁。
+        $storeProfileOrg = $action === 'store_profile_org';
+        $editOrgId = $action === 'org_save' && preg_match('/^org:([1-9][0-9]*)$/', $scopeKey, $match) ? (int)$match[1] : 0;
+        if ($storeProfileOrg) {
+            app()->make(StoreOrganizationEditAccessServices::class)->assertStoreOrganizationSelection(
+                (int)$payload['storeId'], (int)$payload['orgId'], $adminInfo);
+        } elseif ($editOrgId > 0) {
+            app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
+        } else {
+            $super = $this->gate->assertSuperAdmin($adminInfo);
+            if (!$super['ok']) throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
         }
 
         $token = $this->resolveRequestToken($requestCtx);
@@ -554,10 +563,19 @@ class OrganizationWorkspaceWriteServices
             $requestHash,
             $requestId,
             $operatorIp,
-            $business
+            $business,
+            $editOrgId,
+            $storeProfileOrg,
+            $payload,
+            $adminInfo
         ) {
             Db::startTrans();
             try {
+                // 结构锁内再次复核权限与父组织，禁止等待锁期间撤权后继续保存或回放。
+                if ($editOrgId > 0) app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
+                // 等待结构锁期间范围可能已被收紧；重放也必须通过当前范围检查。
+                if ($storeProfileOrg) app()->make(StoreOrganizationEditAccessServices::class)->assertStoreOrganizationSelection(
+                    (int)$payload['storeId'], (int)$payload['orgId'], $adminInfo);
                 if (!$this->idempotencyTableReady()) {
                     throw new \Exception('组织写幂等表未就绪，请先执行数据库升级');
                 }
