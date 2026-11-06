@@ -70,13 +70,14 @@ final class StoreLargeOrderInstallmentServices
             'beauty_category' => (string)$root['cate_name'] . ((int)$effective['id'] === (int)$root['id'] ? '' : '/' . (string)$effective['cate_name'])];
     }
 
-    /** Actual qualifying amount is not capped. All truncation remainders go into the last month. */
-    public static function schedule(int $amount, string $rule): array
+    /** Card-only beauty awards below 50,000 use two equal months; other tiers retain their schedule. The last month absorbs any cent remainder. */
+    public static function schedule(int $amount, string $rule, string $productType = ''): array
     {
         $minimum = $rule === 'partner' ? 5000000 : 3000000;
         $high = $rule === 'partner' ? 10000000 : 5000000;
         if ($amount < $minimum) return [];
-        $rates = $amount >= $high ? [40, 12, 12, 12, 12, 12] : [40, 30, 30];
+        $rates = $amount >= $high ? [40, 12, 12, 12, 12, 12]
+            : ($rule === 'beauty' && $productType === 'card' ? [50, 50] : [40, 30, 30]);
         $values = []; $allocated = 0;
         foreach ($rates as $i => $rate) {
             $value = $i === count($rates) - 1 ? $amount - $allocated : (int)bcdiv(bcmul((string)$amount, (string)$rate, 0), '100', 0);
@@ -95,7 +96,8 @@ final class StoreLargeOrderInstallmentServices
             $row = $facts[$index];
             $origin = substr((string)$row['business_date'], 0, 7);
             $offset = $target - ((int)substr($origin, 0, 4) * 12 + (int)substr($origin, 5, 2));
-            $schedule = self::schedule((int)$award['amount_cents'], (string)($row['rule_type'] ?? 'beauty'));
+            $schedule = self::schedule((int)$award['amount_cents'], (string)($row['rule_type'] ?? 'beauty'),
+                (string)($award['large_order_product_type'] ?? ''));
             if ($offset < 0 || !isset($schedule[$offset])) continue;
             $row['award_month'] = $origin;
             $row['accrual_month'] = $month;

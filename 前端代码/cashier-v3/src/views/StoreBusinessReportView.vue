@@ -53,6 +53,7 @@ const catalog = ref([])
 const activeReport = ref('partner_item_summary')
 const result = ref({})
 const loading = ref(false)
+let reportRequestId = 0
 const exporting = ref(false)
 const errorMessage = ref('')
 const bdeghDetail = ref({ open: false, loading: false, detailReport: 'operations_pre_sale_bdegh_detail', parentReport: '', itemId: '', itemGroupKey: '', categoryPath: '', memberId: '', storeId: '', sourceCode: '', companyId: '', teamKey: '', metric: '', label: '', month: '', actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], amount: '-', error: '' })
@@ -848,21 +849,29 @@ function reportParams(overrides = {}) {
 }
 
 async function loadReport() {
+  // 较早筛选或门店的慢响应不能覆盖用户最后一次查询的可见结果。
+  const requestId = ++reportRequestId
   if (blocksDirectPlatformOnlyReport.value) {
     result.value = {}
+    loading.value = false
     errorMessage.value = '该报表仅支持平台端访问'
     return
   }
-  if (!activeReport.value) return
+  if (!activeReport.value) {
+    loading.value = false
+    return
+  }
   loading.value = true
   errorMessage.value = ''
   try {
-    result.value = await queryStoreBusinessReport(reportParams(), reportRuntime.value)
+    const data = await queryStoreBusinessReport(reportParams(), reportRuntime.value)
+    if (requestId === reportRequestId) result.value = data
   } catch (error) {
+    if (requestId !== reportRequestId) return
     result.value = {}
     errorMessage.value = error?.message || '经营报表读取失败，请稍后重试。'
   } finally {
-    loading.value = false
+    if (requestId === reportRequestId) loading.value = false
   }
 }
 
@@ -1117,6 +1126,8 @@ function chooseAllScope() {
 }
 
 function rowKey(row) {
+  // 大单行按人员、会员、月份与分类聚合；原单明细号只是追溯来源，不能作为表格行身份。
+  if (isLargeOrderReport.value && row?.row_key) return String(row.row_key)
   return String(row?._market_group_key || row?.annotation_subject_key || row?.source_line_id || row?.order_line_id || row?.order_id || row?.order_no_snapshot || '')
 }
 
