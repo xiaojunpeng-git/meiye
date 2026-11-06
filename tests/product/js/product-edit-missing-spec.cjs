@@ -21,7 +21,7 @@ function fixture(spec = 0) {
 }
 function context(attrValue = []) {
   return { attrValue, levelList: [{ id: 1, discount: 100 }], formData: { id: 0, store_name: '', unit_name: '', is_del: 0, product_type: 0,
-      type: 0, spec_type: 0, slider_image: [], attr: {}, coupons: [], brand_id: [], delivery_type: [], store_delivery_type: [], limit_type: 0, is_limit: false },
+      type: 0, spec_type: 0, single_spec_name: '规格', slider_image: [], attr: {}, coupons: [], brand_id: [], delivery_type: [], store_delivery_type: [], limit_type: 0, is_limit: false },
     $route: { params: { id: '290295' }, query: {} }, $refs: {}, oneFormBatch: [{}],
     $set: (object, key, value) => { object[key] = value; }, generateHeader() {},
     $computes: { Mul: (a, b) => a * b, Div: (a, b) => a / b },
@@ -50,6 +50,17 @@ async function main() {
   assert.equal(normal.formData.attr.price, 3980);
   assert.equal(normal.formData.attr.cost, 2000);
   assert.equal(normal.formData.attr.vip_price, 3980);
+  // 单规格的items按原契约为空，名称从详情显式字段回显，不能再被页面默认值覆盖。
+  const named = context([{ suk: '默认', vip_price: 0, level_price: [] }]);
+  const namedData = fixture(); namedData.single_spec_name = '瓶装规格';
+  infoData.call(named, namedData);
+  assert.equal(named.formData.single_spec_name, '瓶装规格', '打开编辑页显示已保存的规格名称');
+  assert.deepEqual(named.attrs, [], '不伪造多规格选项');
+  named.clearSkuStockFields = method('clearSkuStockFields');
+  named.$route.query.copy = '1'; infoData.call(named, namedData);
+  assert.equal(named.formData.single_spec_name, '瓶装规格', '复制商品保留名称');
+  const legacyName = context(); infoData.call(legacyName, fixture());
+  assert.equal(legacyName.formData.single_spec_name, '规格', '旧接口缺名称时保留新表单默认值');
   // 使用反馈商品的真实形态：有正常SKU但轮播图为null，验证子组件所需数组及既有封面均保留。
   const legacyImage = context([{ suk: '默认', vip_price: 0, level_price: [] }]);
   const legacyData = fixture();

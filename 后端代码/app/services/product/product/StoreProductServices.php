@@ -664,6 +664,13 @@ class StoreProductServices extends BaseServices
             // 历史数据可能只有商品主表而没有规格结果。不要在 GET
             // 请求中补写数据库，降级为单规格编辑模型即可。
             $productInfo['spec_type'] = 0;
+            // 单规格名称保存在规格主表，须显式回传给编辑表单；items为空不代表名称是“规格”。
+            // 仅补齐读取契约，避免刷新后默认值覆盖已保存名称；缺失旧资料时仍在内存中使用默认名。
+            if ((int)$productInfo['product_type'] === 0) {
+                $singleSpecName = trim((string)app()->make(StoreProductAttrServices::class)
+                    ->value(['product_id' => $id, 'type' => 0], 'attr_name'));
+                $productInfo['single_spec_name'] = $singleSpecName === '' ? '规格' : $singleSpecName;
+            }
             /** @var StoreProductVirtualServices $virtualService */
             $virtualService = app()->make(StoreProductVirtualServices::class);
             /** @var StoreProductReservationTimeServices $reservationTimeServices */
