@@ -724,7 +724,9 @@ export default {
       name: `${pre}staff_index`,
       meta: {
         auth: ['setting-staff-index'],
-        title: '店员列表'
+        // 每次进入复核当前授权，防止撤权后的旧菜单快照继续放行。
+        refreshStaffAccess: true,
+        title: '人员管理'
       },
       component: () => import('@/pages/setting/staff/index')
     },

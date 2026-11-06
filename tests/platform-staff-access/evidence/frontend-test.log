@@ -1,0 +1,2 @@
+PASS actual personnel route: revoked cached grant denied, grant accepted, failed refresh denied, root retained
+PASS canonical personnel label; no supplier masquerade; supplier settings preserved; no implicit grant

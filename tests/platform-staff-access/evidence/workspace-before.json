@@ -1,0 +1,8 @@
+{
+  "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php": "859479c355b477d0f097d29b169880380258bd463ec60743e43f424fe12e869c",
+  "后端代码/app/controller/admin/v1/merchant/SystemStoreStaff.php": "f2ac1aa01663838f09ea574b11b977cbd04941f177b2881f0fc09b85824876a2",
+  "后端代码/app/controller/admin/v1/other/export/ExportExcel.php": "7386000e2b2690bf94c312b698bb3763d61c7148fd58ff4209981143412087ab",
+  "前端代码/admin/src/libs/organizationWorkspaceMenu.js": "74ae1f62cab23fdb548c77e85da70d70e47162a08a5e964fc2c101fa6aebaf70",
+  "前端代码/admin/src/router/modules/setting.js": "c5cbaa148e4e9751e31b8a82b90f7d49488bc52dea106cccb1dd31ea71d6b2b8",
+  "前端代码/admin/src/router/index.js": "a1c3936a4d90cfc605f4061465f7f738b1f94583cb4b7878250a12df48cf4577"
+}

@@ -1,0 +1,36 @@
+PASS native menu exists
+PASS empty role denies access
+PASS no implicit personnel navigation for empty role
+PASS explicit role exposes native personnel navigation
+PASS disabled role immediately denied
+PASS supplier grant cannot grant personnel access
+PASS employee cannot inherit stale granting role
+PASS current job grants personnel access
+PASS current job revocation overrides stale role
+PASS real root allowed
+PASS account name does not confer root
+PASS native permission renamed and moved
+PASS permission identity preserved
+PASS job grants unchanged
+PASS migration idempotent
+PASS authorized leaf builds visible navigation
+PASS navigation parent is organization management
+PASS job policy tree uses same personnel label
+PASS controller rejects index
+PASS controller rejects read
+PASS controller rejects saveStaff
+PASS controller rejects getWorkMemberList
+PASS export rejects revoked job before reading data
+PASS controller accepts current job grant
+PASS guard index
+PASS guard getStoreStaffList
+PASS guard read
+PASS guard personComplete
+PASS guard saveStaff
+PASS guard delete
+PASS guard transfer
+PASS guard featurePermissionSave
+PASS guard newAction
+PASS preserve shared selector getStaffSelect
+PASS preserve shared selector store_list
+PASS synthetic transaction rolled back

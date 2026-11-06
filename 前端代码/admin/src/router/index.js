@@ -162,9 +162,9 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     meta.isAgentRoute ? agent_access : access
   );
 
-  // 会员入口每次进入都复核当前岗位，撤权后旧菜单不得继续放行。
+  // 会员和人员入口每次进入都复核当前岗位，撤权后旧菜单不得继续放行。
   // 其他页面保留原有仅在本地拒绝时刷新的行为。
-  if ((!isPermission || meta.refreshMemberAccess) && !meta.isAgentRoute) {
+  if ((!isPermission || meta.refreshMemberAccess || meta.refreshStaffAccess) && !meta.isAgentRoute) {
     try {
       const refreshed = await store.dispatch('admin/menus/getMenusNavList');
       const freshAccess = refreshed && refreshed.data && Array.isArray(refreshed.data.unique)

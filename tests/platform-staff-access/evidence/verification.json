@@ -1,0 +1,37 @@
+{
+  "status": "Development and self-tests complete; pending product manager acceptance. No commit or production changes.",
+  "fingerprint": "0f0159cf13a7a18d5837980fafc0e785e83148f1427d8b16a217fde8e52cc62c",
+  "tests": {
+    "databaseRollback": 36,
+    "organizationRegression": 25,
+    "routeGuardAndMenu": "PASS",
+    "PHP5Files": "PASS",
+    "fixedFrontendBuild": "PASS"
+  },
+  "limits": [
+    "No live browser interaction acceptance performed.",
+    "Before release reconcile deployed dependencies; R35 existing organization edit gate preserved, not new R4 scope."
+  ],
+  "groups": {
+    "frontend": [
+      "前端代码/admin/src/libs/organizationWorkspaceMenu.js",
+      "前端代码/admin/src/router/modules/setting.js",
+      "前端代码/admin/src/router/index.js"
+    ],
+    "backend": [
+      "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php",
+      "后端代码/app/controller/admin/v1/merchant/SystemStoreStaff.php",
+      "后端代码/app/controller/admin/v1/other/export/ExportExcel.php",
+      "后端代码/app/services/organization/PlatformStaffAccessServices.php"
+    ],
+    "migration": [
+      "后端代码/database/upgrades/20261106_platform_staff_management_menu.php"
+    ],
+    "tests": [
+      "tests/platform-staff-access/php/local-rollback.php",
+      "tests/platform-staff-access/js/route-access.mjs"
+    ],
+    "generatedBuild": "/var/folders/tc/ggn2svzs1nncyp9bsrqfs5vr0000gn/T/r4-fixed-build-bu4_rs8h/compiled"
+  },
+  "comments": "Changed business code documents authorization boundaries, stable menu identity, current job authority and supplier redirect removal."
+}

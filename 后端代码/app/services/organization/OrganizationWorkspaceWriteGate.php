@@ -223,7 +223,7 @@ class OrganizationWorkspaceWriteGate
             return [
                 'ok' => false,
                 'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
-                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+                'reason_text' => '当前岗位未配置“人员管理”权限，请联系总部管理员授权。',
             ];
         }
 
@@ -246,7 +246,7 @@ class OrganizationWorkspaceWriteGate
             return [
                 'ok' => false,
                 'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
-                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+                'reason_text' => '当前岗位未配置“人员管理”权限，请联系总部管理员授权。',
             ];
         }
 
@@ -256,25 +256,26 @@ class OrganizationWorkspaceWriteGate
             return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];
         }
 
-        $roleIds = array_values(array_filter(array_map('intval', explode(',', (string)($row['roles'] ?? '')))));
-        if (!$roleIds) {
-            return [
-                'ok' => false,
-                'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
-                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
-            ];
+        // 员工账号只读取当前有效岗位，不能沿用撤权前的角色投影或登录缓存。
+        $employeeId = (int)($row['employee_id'] ?? 0);
+        if ($employeeId > 0) {
+            $ruleIds = app()->make(StaffJobPositionServices::class)
+                ->computeEmployeeChannelRulesUnion($employeeId, JobPositionPolicyServices::CHANNEL_PLATFORM);
+        } else {
+            // 未绑定员工的历史后台账号仍按有效角色授权，不从人员姓名或菜单父级推定资格。
+            $roleIds = array_filter(array_map('intval', explode(',', (string)($row['roles'] ?? ''))));
+            $ruleIds = [];
+            if ($roleIds) foreach (Db::name('system_role')->whereIn('id', $roleIds)->where('status', 1)->column('rules') as $rules) {
+                $ruleIds = array_merge($ruleIds, array_filter(array_map('intval', explode(',', (string)$rules))));
+            }
         }
-
-        /** @var \app\services\system\SystemMenusServices $menusSvc */
-        $menusSvc = app()->make(\app\services\system\SystemMenusServices::class);
-        [, $uniqueAuth] = $menusSvc->getMenusList($roleIds, $level, 1, (int)($row['admin_type'] ?? 0));
-        $uniqueAuth = is_array($uniqueAuth) ? $uniqueAuth : [];
-        $ok = in_array(self::AUTH_STAFF_MAINTAIN, $uniqueAuth, true);
+        $ok = $ruleIds && Db::name('system_menus')->whereIn('id', array_unique($ruleIds))->where('type', 1)
+            ->where('is_del', 0)->where('unique_auth', self::AUTH_STAFF_MAINTAIN)->count() > 0;
         if (!$ok) {
             return [
                 'ok' => false,
                 'reason_code' => self::REASON_NO_STAFF_MAINTAIN,
-                'reason_text' => '当前岗位未配置“人员维护”权限，请联系总部管理员授权。',
+                'reason_text' => '当前岗位未配置“人员管理”权限，请联系总部管理员授权。',
             ];
         }
         return ['ok' => true, 'reason_code' => self::REASON_OK, 'reason_text' => ''];

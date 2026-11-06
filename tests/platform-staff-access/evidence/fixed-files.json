@@ -1,0 +1,20 @@
+{
+  "scope": "R4 personnel permission development candidate; not deployment package",
+  "HEAD": "d0d98b382f3b3f5250fe58cdef67ff551376e973",
+  "frontendBase": "20319c5d7c14b38564bec85ad37aeabe672e134b",
+  "developmentTree": "6013c27e8b3bb426e767ea5aacad79fc540ad077",
+  "files": {
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php": "f3c43e6b72c8ffcfdb9fc7cab1540f5991196a4c6d89f593b738c6f19451f825",
+    "后端代码/app/controller/admin/v1/merchant/SystemStoreStaff.php": "cfd9730a7b655cea97ecd363412c9f962144713640bf38d653f4fbc10fdd7525",
+    "后端代码/app/controller/admin/v1/other/export/ExportExcel.php": "b66049a4fddd36c813b98a05324a6ecef308f0f6b24c39eeb7f58df47375e2d5",
+    "前端代码/admin/src/libs/organizationWorkspaceMenu.js": "882a60a1815426ae4578a9b015ca456386dd3bceb23e9762bfea9308393685e6",
+    "前端代码/admin/src/router/modules/setting.js": "7963fb7917676991265bf9e2c6e697e8af16ad884d2db32c45a29c4a027dcef9",
+    "前端代码/admin/src/router/index.js": "180e5dcd6baa502183c733292115206a1feb3b03e58ec473ee3d74b9641b1d3f",
+    "后端代码/app/services/organization/PlatformStaffAccessServices.php": "83dd7d6eac358f922e76218737f10bb74969f219adfcdce8606158873e400a3e",
+    "后端代码/database/upgrades/20261106_platform_staff_management_menu.php": "086ebf5a4567ecba8691e3990d2552b170b8dbaba5a3df627295423ba0f8d50c",
+    "tests/platform-staff-access/php/local-rollback.php": "4c3d0793230a7a05a72693b1ee0d6e488e8772545d0756b9b9acbe8e4cc579d3",
+    "tests/platform-staff-access/js/route-access.mjs": "3c8ec37524e28458069d5d7444c8e0acc3d14b194268ffc3c8ab0913875f560a"
+  },
+  "preservedGateBaseline": "57749b35a0ec79938b693bb3162790f3f9842100 (accepted deployed R35); release must retain its dependencies",
+  "fingerprint": "0f0159cf13a7a18d5837980fafc0e785e83148f1427d8b16a217fde8e52cc62c"
+}

@@ -42,6 +42,11 @@ class SystemStoreStaff extends AuthController
     {
         parent::__construct($app);
         $this->services = $services;
+        // 人员管理所有详情/列表/写入入口统一校验；共享人员选择器仍由其调用业务授权。
+        $access = new \app\services\organization\PlatformStaffAccessServices();
+        if ($access->requiresManagement((string)$this->request->action())) {
+            $access->assertAllowed((int)$this->adminId);
+        }
     }
 
     /**

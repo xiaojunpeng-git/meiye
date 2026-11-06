@@ -890,6 +890,8 @@ class ExportExcel extends AuthController
      */
     public function staffListExport(SystemStoreStaffServices $staffServices)
     {
+        // 导出与人员列表共用入口资格，不能利用独立导出控制器绕过撤权。
+        (new \app\services\organization\PlatformStaffAccessServices())->assertAllowed((int)$this->adminId);
         $where = $this->request->getMore([
             ['store_id', 0],
             ['keyword', ''],
