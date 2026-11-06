@@ -1,0 +1,36 @@
+PASS read authority total/principal/bonus
+PASS both amounts persisted and reload authority agrees
+PASS real wallet version advances once
+PASS unified immutable fact has exact principal and bonus deltas
+PASS legacy ledger type and optional note preserved
+PASS receipt preserves platform actor and before/after audit
+PASS same request replays without changing balance or version
+PASS same request key cannot carry different amounts
+PASS stale balance cannot overwrite concurrent amount
+PASS decrease supports both components and empty note
+PASS member detail reads unified adjustment facts with business labels
+PASS store command gateway does not expose platform adjustment
+PASS reject invalid/insufficient/forged input {"type":3}
+PASS reject invalid/insufficient/forged input {"ben_money":"-1"}
+PASS reject invalid/insufficient/forged input {"give_money":"0.1"}
+PASS reject invalid/insufficient/forged input {"ben_money":"10000000"}
+PASS reject invalid/insufficient/forged input {"ben_money":"0","give_money":"0"}
+PASS reject invalid/insufficient/forged input {"ben_money":"9999999"}
+PASS reject invalid/insufficient/forged input {"give_money":"9999999"}
+PASS reject invalid/insufficient/forged input {"operatorId":9999}
+PASS reject invalid/insufficient/forged input overlong remark
+PASS invalid platform identity rejected
+PASS forged organization range rejected
+PASS member list reload reads same saved balance
+PASS each successful adjustment emits one business event
+PASS manual adjustment creates no cash/sale performance facts
+PASS late persistence failure aborts full adjustment
+PASS late failure restores wallet and removes failed receipt
+PASS historical primary store fallback preserves wallet access
+PASS existing member editor fallback does not rewrite historical ownership
+PASS ungranted account cannot read member balance
+PASS granted platform account retains existing operations
+PASS granted platform account adjusts balance with its own identity
+PASS ordinary platform identity cannot cross selected organization scope
+PASS synthetic data and audit test changes rolled back
+R5_MEMBER_BALANCE_PASS 35 checks

@@ -1,0 +1,22 @@
+PASS leaf-only grant restores full navigation ancestry
+PASS ancestor permission identifiers are not granted
+PASS ungranted siblings and roots remain absent
+PASS navigation assembly does not mutate stored grants
+PASS shared ancestors are deduplicated across granted leaves
+PASS API grants remain exactly the original rule union
+PASS API-only grant does not invent a navigation page
+PASS truly empty grants remain an empty workspace
+PASS reported grant shape restores the product navigation root
+PASS reported authorized product and inventory pages are reachable
+PASS reported grant does not expose product list, salon usage or other sections
+PASS reported original 20 permission identifiers are unchanged
+PASS real password login returns reachable authorized navigation
+PASS real login does not mint ancestor or sibling permissions
+PASS invalid ancestor is not bypassed: is_show
+PASS invalid ancestor is not bypassed: is_del
+PASS invalid ancestor is not bypassed: type
+PASS invalid ancestor is not bypassed: auth_type
+PASS cyclic ancestry terminates without fabricating a root
+PASS missing ancestor remains fail-closed
+PASS super-admin menu behavior remains unchanged
+PASS synthetic fixture rolled back

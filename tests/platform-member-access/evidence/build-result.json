@@ -1,0 +1,6 @@
+{
+  "sourceTree": "7f2bb908c593e67f1d2a9233c5b86e8c8e8466af",
+  "result": "PASS",
+  "buildLogSHA256": "e3cd52d8721869204107b8f410d0a13446e0dc33605c1509be6aa1bb61a6e755",
+  "purpose": "local fixed-tree compilation, not a deployed 8080 package"
+}

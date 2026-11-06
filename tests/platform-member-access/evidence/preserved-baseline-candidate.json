@@ -1,0 +1,23 @@
+{
+  "sourceTree": "7f2bb908c593e67f1d2a9233c5b86e8c8e8466af",
+  "baselineTree": "5c9509621a7bd11f4ca6cf924e35eb1780f4837b",
+  "baselineSources": [
+    "4b4160fb71ce78524c2965f1cdc6f3b4d9edbef5",
+    "4c4a70f17"
+  ],
+  "previousAcceptedCandidate": "d09a4dd298ad5543f660715ad9c42c09a8a7d692aaed663f2232b515b48423e3",
+  "changedFromAccepted": [
+    "SystemMenusServices retains deployed basic-report route compatibility and permission-config ancestor logic"
+  ],
+  "files": {
+    "后端代码/app/services/user/PlatformMemberAccessPolicy.php": "deb063a4114016407eba01f6ad334d21915f2743c32d53828e7b2f088057ff04",
+    "后端代码/app/services/user/PlatformMemberScopeServices.php": "861b5e3adee9101e849e46b49d0975de17e1c54d7869c53b5e9ea2c14de72ad0",
+    "后端代码/app/services/system/SystemMenusServices.php": "4592517add1641bad5dd2a678f4055f959fd8464fface60d6a696a725ebf67e1",
+    "前端代码/admin/src/router/index.js": "a1c3936a4d90cfc605f4061465f7f738b1f94583cb4b7878250a12df48cf4577",
+    "前端代码/admin/src/router/modules/user.js": "fc1b545c153078e9e8c260477f13282210b780260a4a609191847b67f499ba4e",
+    "tests/platform-member-access/php/local-rollback.php": "39a02fe7cd4c273e57055bff7b7aa5c1659e1a940b912d63ed2d959a3217c495",
+    "tests/platform-member-access/js/route-access.mjs": "da54dca50ba6139f271a7a24a0135517634d290c3207036005866122759832f0",
+    "tests/platform-member-balance/php/local-rollback.php": "1f1ba8cf195cf64d9797ae0cc57a51776b93507ae7e6870d937fe9728f080e89",
+    "tests/organization-store-v3/js/platform-empty-menu-login.mjs": "3b4bc9aadf360acd412989a652ee3aca261788af6b7d874cf4f3d6f9089b1041"
+  }
+}

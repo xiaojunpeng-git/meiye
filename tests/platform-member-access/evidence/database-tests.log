@@ -1,0 +1,17 @@
+PASS native menu exists
+PASS empty role denies access
+PASS no implicit member navigation for empty role
+PASS bootstrap denies access
+PASS query denies access
+PASS explicit role exposes native member navigation
+PASS grant retains operations and full store scope
+PASS disabled role immediately denied
+PASS employee cannot inherit stale granting role
+PASS current job grants member access
+PASS job revocation denies read
+PASS job revocation denies create
+PASS job revocation denies edit
+PASS job revocation denies deactivate
+PASS real root remains authorized
+PASS account name does not confer root
+PASS synthetic transaction rolled back
